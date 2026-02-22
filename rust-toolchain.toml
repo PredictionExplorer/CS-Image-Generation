@@ -3,9 +3,9 @@
 # to avoid "works on my machine" issues.
 
 [toolchain]
-# Using Rust 1.90.0 to match the project's minimum requirements
+# Using Rust 1.93.1 to match the project's minimum requirements
 # This version supports edition 2024 and provides stability for our requirements
-channel = "1.90.0"
+channel = "1.93.1"
 components = [
     "rustfmt",    # Code formatting
     "clippy",     # Linting
