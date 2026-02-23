@@ -85,13 +85,56 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
 /// Convert an SPD sample (per-bin energy) to linear-sRGB premultiplied RGBA.
 /// Alpha equals total energy (capped at 1.0) so downstream blending treats it
 /// similarly to our old pipeline.
-/// 
-/// Uses a deterministic scalar path so output remains stable across
-/// architectures for the same seed.
 ///
-/// For architecture-specific speed experiments, call
-/// `spectrum_simd::spd_to_rgba_simd` directly.
+/// Automatically selects the best SIMD path for the current platform:
+/// - x86_64 AVX2: 4 bins/iter via 256-bit FMA
+/// - aarch64 NEON: 2 bins/iter via 128-bit FMA
+/// - Scalar fallback for all other targets
 #[inline]
 pub fn spd_to_rgba(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
-    spectrum_simd::spd_to_rgba_scalar(spd)
+    spectrum_simd::spd_to_rgba_simd(spd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_tuple_bits_eq(
+        lhs: (f64, f64, f64, f64),
+        rhs: (f64, f64, f64, f64),
+        label: &str,
+    ) {
+        assert_eq!(lhs.0.to_bits(), rhs.0.to_bits(), "{label}: R differs");
+        assert_eq!(lhs.1.to_bits(), rhs.1.to_bits(), "{label}: G differs");
+        assert_eq!(lhs.2.to_bits(), rhs.2.to_bits(), "{label}: B differs");
+        assert_eq!(lhs.3.to_bits(), rhs.3.to_bits(), "{label}: A differs");
+    }
+
+    #[test]
+    fn test_public_spd_to_rgba_is_deterministic() {
+        let spd = [0.0, 0.1, 0.2, 0.8, 1.2, 0.6, 0.3, 0.1, 0.0, 0.4, 0.9, 0.7, 0.2, 0.1, 0.0, 0.0];
+        let reference = spd_to_rgba(&spd);
+        for _ in 0..256 {
+            let value = spd_to_rgba(&spd);
+            assert_tuple_bits_eq(value, reference, "public_api_determinism");
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+    #[test]
+    fn test_public_spd_to_rgba_uses_simd_on_x86_avx2() {
+        let spd = [0.0, 0.3, 0.6, 0.9, 1.1, 0.8, 0.4, 0.2, 0.1, 0.5, 0.7, 0.6, 0.3, 0.1, 0.0, 0.0];
+        let via_public = spd_to_rgba(&spd);
+        let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
+        assert_tuple_bits_eq(via_public, via_simd, "x86_avx2_dispatch");
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2", not(miri))))]
+    #[test]
+    fn test_public_spd_to_rgba_uses_simd_dispatch() {
+        let spd = [0.0, 0.2, 0.5, 0.7, 1.0, 0.9, 0.4, 0.1, 0.0, 0.3, 0.6, 0.8, 0.5, 0.2, 0.0, 0.0];
+        let via_public = spd_to_rgba(&spd);
+        let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
+        assert_tuple_bits_eq(via_public, via_simd, "simd_dispatch");
+    }
 }

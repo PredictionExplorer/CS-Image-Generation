@@ -58,6 +58,7 @@ impl EffectBufferPool {
     
     /// Get the alternate buffer (for writing during effect processing)
     #[inline]
+    #[allow(dead_code)] // Reserved for advanced effect-chain integration.
     pub fn alternate_mut(&mut self) -> &mut PixelBuffer {
         &mut self.buffers[1 - self.current]
     }
@@ -82,12 +83,14 @@ impl EffectBufferPool {
     }
     
     /// Take ownership of current buffer (consumes the pool temporarily)
+    #[allow(dead_code)] // Reserved for zero-copy handoff use cases.
     pub fn take_current(self) -> PixelBuffer {
         let mut buffers = self.buffers;
         std::mem::take(&mut buffers[self.current])
     }
     
     /// Clear current buffer for reuse
+    #[allow(dead_code)] // Reserved for future incremental frame pipelines.
     pub fn clear_current(&mut self) {
         for pixel in self.buffers[self.current].iter_mut() {
             *pixel = (0.0, 0.0, 0.0, 0.0);
@@ -210,4 +213,3 @@ mod tests {
         assert_eq!(pool.current().len(), 20);
     }
 }
-

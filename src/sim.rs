@@ -459,3 +459,63 @@ pub fn select_best_trajectory(
     info!("\n   => Chosen orbit idx {bi} with weighted score {:.3}", bt.total_score_weighted);
     Ok((many[bi].clone(), bt))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rng_determinism_same_seed() {
+        let seed = [0x10, 0x00, 0x33];
+        let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+
+        for i in 0..500 {
+            let a = rng1.next_f64();
+            let b = rng2.next_f64();
+            assert_eq!(a.to_bits(), b.to_bits(),
+                "RNG diverged at step {i}: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn test_rng_different_seeds_diverge() {
+        let mut rng1 = Sha3RandomByteStream::new(&[1, 2, 3], 100.0, 300.0, 300.0, 1.0);
+        let mut rng2 = Sha3RandomByteStream::new(&[4, 5, 6], 100.0, 300.0, 300.0, 1.0);
+
+        let mut same_count = 0;
+        for _ in 0..100 {
+            if rng1.next_f64().to_bits() == rng2.next_f64().to_bits() {
+                same_count += 1;
+            }
+        }
+        assert!(same_count < 5, "different seeds should produce different sequences");
+    }
+
+    #[test]
+    fn test_simulation_determinism() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let steps = 5000;
+
+        let run1 = get_positions(bodies.clone(), steps);
+        let run2 = get_positions(bodies, steps);
+
+        assert_eq!(run1.positions.len(), run2.positions.len());
+        for body in 0..run1.positions.len() {
+            for step in 0..run1.positions[body].len() {
+                let p1 = run1.positions[body][step];
+                let p2 = run2.positions[body][step];
+                assert_eq!(p1[0].to_bits(), p2[0].to_bits(),
+                    "body {body} step {step} X diverged");
+                assert_eq!(p1[1].to_bits(), p2[1].to_bits(),
+                    "body {body} step {step} Y diverged");
+                assert_eq!(p1[2].to_bits(), p2[2].to_bits(),
+                    "body {body} step {step} Z diverged");
+            }
+        }
+    }
+}

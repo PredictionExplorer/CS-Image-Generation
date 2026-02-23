@@ -174,4 +174,31 @@ mod tests {
         let unique: std::collections::HashSet<u64> = alphas.iter().map(|a| a.to_bits()).collect();
         assert!(unique.len() > 1, "alpha_variation should produce different per-body alphas");
     }
+
+    #[test]
+    fn test_color_generation_determinism() {
+        let seed = [0x10, 0x00, 0x33];
+        let steps = 200;
+
+        let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let (colors1, alphas1) = generate_body_color_sequences(&mut rng1, steps, 15_000_000, true, true);
+
+        let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let (colors2, alphas2) = generate_body_color_sequences(&mut rng2, steps, 15_000_000, true, true);
+
+        for body in 0..3 {
+            assert_eq!(alphas1[body].to_bits(), alphas2[body].to_bits(),
+                "alpha for body {body} diverged");
+            for step in 0..steps {
+                let (l1, a1, b1) = colors1[body][step];
+                let (l2, a2, b2) = colors2[body][step];
+                assert_eq!(l1.to_bits(), l2.to_bits(),
+                    "body {body} step {step} L diverged");
+                assert_eq!(a1.to_bits(), a2.to_bits(),
+                    "body {body} step {step} a diverged");
+                assert_eq!(b1.to_bits(), b2.to_bits(),
+                    "body {body} step {step} b diverged");
+            }
+        }
+    }
 }

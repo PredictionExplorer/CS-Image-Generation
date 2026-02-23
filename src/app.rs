@@ -654,5 +654,103 @@ mod tests {
         assert_eq!(alphas[0], alphas[1]);
         assert_eq!(alphas[1], alphas[2]);
     }
+
+    /// Run the full seed-to-pixels pipeline at minimal scale and return the
+    /// raw 16-bit pixel buffer.  Two calls with the same seed MUST return
+    /// bitwise-identical buffers on the same architecture.
+    fn run_full_pipeline(seed: &[u8]) -> Vec<u16> {
+        use crate::sim::Sha3RandomByteStream;
+
+        let width = 64u32;
+        let height = 36u32;
+        let num_sims = 20;
+        let num_steps = 5_000;
+
+        let noise_seed = derive_noise_seed(seed);
+        let mut rng = Sha3RandomByteStream::new(seed, 100.0, 300.0, 300.0, 1.0);
+
+        let config = render::randomizable_config::RandomizableEffectConfig {
+            enable_bloom: Some(false),
+            enable_glow: Some(false),
+            enable_chromatic_bloom: Some(false),
+            enable_perceptual_blur: Some(false),
+            enable_micro_contrast: Some(false),
+            enable_gradient_map: Some(false),
+            enable_color_grade: Some(false),
+            enable_champleve: Some(false),
+            enable_aether: Some(false),
+            enable_opalescence: Some(false),
+            enable_edge_luminance: Some(false),
+            enable_atmospheric_depth: Some(false),
+            enable_fine_texture: Some(false),
+            nebula_strength: Some(0.0),
+            ..Default::default()
+        };
+        let (resolved, _) = config.resolve(&mut rng, width, height);
+
+        let (best_bodies, _) = crate::sim::select_best_trajectory(
+            &mut rng, num_sims, num_steps, 0.75, 11.0, -0.3,
+        )
+        .expect("Borda search should find at least one valid orbit");
+
+        let mut positions = simulate_best_orbit(best_bodies, num_steps);
+
+        apply_drift_transformation(
+            &mut positions, "elliptical", None, None, None, &mut rng,
+        );
+
+        let enhancements = Enhancements {
+            chroma_boost: false,
+            sat_boost: false,
+            aces_tweak: false,
+            alpha_variation: false,
+            aspect_correction: false,
+            dispersion_boost: false,
+        };
+        let (colors, body_alphas) =
+            generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
+
+        let render_config = render::RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+        };
+        let levels = build_histogram_and_levels(
+            &positions, &colors, &body_alphas, &resolved,
+            noise_seed, &render_config, false,
+        )
+        .expect("histogram/levels should succeed");
+
+        let image = render::render_single_frame_spectral(
+            &positions, &colors, &body_alphas, &resolved,
+            levels.black[0], levels.range[0] + levels.black[0],
+            levels.black[1], levels.range[1] + levels.black[1],
+            levels.black[2], levels.range[2] + levels.black[2],
+            noise_seed, &render_config, false,
+        )
+        .expect("render should succeed");
+
+        image.into_raw()
+    }
+
+    #[test]
+    fn test_end_to_end_pipeline_determinism() {
+        let seed = [0xCA, 0xFE];
+
+        let pixels_a = run_full_pipeline(&seed);
+        let pixels_b = run_full_pipeline(&seed);
+
+        assert_eq!(pixels_a.len(), pixels_b.len(), "pixel buffer lengths differ");
+
+        if pixels_a != pixels_b {
+            let diff_count = pixels_a.iter().zip(&pixels_b)
+                .filter(|(a, b)| a != b).count();
+            let first = pixels_a.iter().zip(&pixels_b)
+                .position(|(a, b)| a != b).unwrap();
+            panic!(
+                "pixel buffers differ: {diff_count} of {} values, \
+                 first at index {first} ({} vs {})",
+                pixels_a.len(), pixels_a[first], pixels_b[first],
+            );
+        }
+    }
 }
 
