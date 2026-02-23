@@ -86,10 +86,12 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
 /// Alpha equals total energy (capped at 1.0) so downstream blending treats it
 /// similarly to our old pipeline.
 /// 
-/// Optimized with combined LUT for better cache locality (3-5% faster).
-/// For SIMD-accelerated version, use `spectrum_simd::spd_to_rgba_simd` (3-4x faster).
+/// Uses a deterministic scalar path so output remains stable across
+/// architectures for the same seed.
+///
+/// For architecture-specific speed experiments, call
+/// `spectrum_simd::spd_to_rgba_simd` directly.
 #[inline]
 pub fn spd_to_rgba(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
-    // Use SIMD version when available for 3-4x speedup
-    spectrum_simd::spd_to_rgba_simd(spd)
+    spectrum_simd::spd_to_rgba_scalar(spd)
 }

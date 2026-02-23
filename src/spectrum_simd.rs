@@ -24,6 +24,7 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 /// # Accuracy
 /// Results are bit-identical to scalar implementation (no precision loss)
 #[inline]
+#[allow(dead_code)] // Optional fast path; main pipeline uses scalar for cross-platform determinism.
 pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     {
@@ -49,8 +50,7 @@ pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 /// Uses index-based iteration for better auto-vectorization potential with
 /// `-C target-cpu=native` on platforms without explicit SIMD paths.
 #[inline]
-#[allow(dead_code)]
-fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
+pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let mut r = 0.0;
     let mut g = 0.0;
     let mut b = 0.0;
@@ -116,6 +116,7 @@ fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 /// AVX2 SIMD implementation (3-4x faster)
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
 #[inline]
+#[allow(dead_code)] // Optional architecture-specific fast path.
 unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     use std::arch::x86_64::*;
 
@@ -226,6 +227,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 /// scalar (no hardware transcendental on NEON), but accumulation is fully vectorized.
 #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
 #[inline]
+#[allow(dead_code)] // Optional architecture-specific fast path.
 unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     use std::arch::aarch64::*;
 
@@ -610,4 +612,3 @@ mod tests {
         }
     }
 }
-
