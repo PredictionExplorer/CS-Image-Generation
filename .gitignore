@@ -1,0 +1,14 @@
+# Environment config (contains deployment secrets)
+.env
+
+# Generated assets
+pics/
+vids/
+
+# Log files
+imgcheck.log
+imgcheck.log.*
+run.log
+
+# Rust build artifacts
+target/

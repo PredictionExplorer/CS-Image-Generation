@@ -1,0 +1,31 @@
+[Unit]
+Description=CosmicSignature NFT asset sync (generate + upload missing images/videos)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# --- Adjust these to match your deployment ---
+# User to run as (must have SSH key access to the remote server)
+User=ubuntu
+# Directory containing run.py, the generator binary, and the .env file
+WorkingDirectory=/home/ubuntu/CS-Image-Generation
+
+# Load deployment config (.env must exist alongside run.py)
+EnvironmentFile=%h/CS-Image-Generation/.env
+
+ExecStart=/usr/bin/python3 run.py
+
+# 24-hour hard ceiling: systemd kills the process if it runs longer than this
+RuntimeMaxSec=86400
+
+# On stop/timeout, give 60s for the script to finish its current seed
+TimeoutStopSec=60
+
+# Capture stdout/stderr into journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

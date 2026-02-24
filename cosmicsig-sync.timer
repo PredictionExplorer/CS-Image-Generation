@@ -1,0 +1,15 @@
+[Unit]
+Description=Run CosmicSignature asset sync every 5 minutes
+
+[Timer]
+# First run 2 minutes after boot
+OnBootSec=2min
+
+# Subsequent runs every 5 minutes after the last run finished
+OnUnitActiveSec=5min
+
+# Allow up to 10s scheduling jitter
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
