@@ -63,10 +63,10 @@ server. It periodically queries a token API for all minted CosmicSignature NFTs,
 checks which images and videos are missing on a remote asset server, generates
 them locally, and uploads them via SCP.
 
-You need two pieces of information before starting:
+Before starting, gather these two pieces of information:
 
-1. **The API endpoint** that serves the CosmicSignature token list.
-2. **The address of the remote server** where generated assets are stored, along with SSH credentials to write to it.
+1. **The API endpoint** that serves the CosmicSignature token list (e.g. `http://161.129.67.42:8353`).
+2. **The remote asset server** -- its hostname/IP, the SSH username, and the directory where PNG/MP4 files should be stored.
 
 ### Step 1: Install System Dependencies
 
@@ -79,7 +79,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-### Step 2: Clone and Build
+### Step 2: Clone and Build the Rust Binary
+
+The image/video generator is a Rust program that must be compiled before the
+sync script can use it.
 
 ```bash
 git clone <repo-url> ~/CS-Image-Generation
@@ -87,9 +90,9 @@ cd ~/CS-Image-Generation
 cargo build --release
 ```
 
-This compiles the Rust renderer in release mode with full optimizations (LTO,
-single codegen unit). The build may take several minutes on the first run but
-only needs to be repeated when the source code changes.
+This compiles the renderer in release mode with full optimizations (LTO, single
+codegen unit). The build may take several minutes on the first run but only
+needs to be repeated when the source code changes.
 
 Verify the binary was built:
 
@@ -97,50 +100,56 @@ Verify the binary was built:
 ./target/release/three_body_problem --help
 ```
 
-### Step 3: Configure the Environment
-
-Copy the example environment file and fill in your deployment values:
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-The `.env` file contains four required settings:
-
-```bash
-# Remote server to upload generated assets to
-COSMICSIG_SSH_HOST=your.server.com
-COSMICSIG_SSH_USER=frontend
-
-# CosmicGame API base URL (no trailing slash)
-COSMICSIG_API_URL=http://your-api-host:8353
-
-# Remote directory where PNG/MP4 assets are stored
-COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
-```
-
-The `.env` file is excluded from version control via `.gitignore`. Configuration
-can also be set via environment variables or CLI arguments (in increasing
-priority).
-
-### Step 4: Set Up SSH Key Authentication
+### Step 3: Set Up SSH Key Authentication
 
 The sync script uploads files via SCP, which requires passwordless SSH access
-to the remote server. If you haven't already:
+to the remote asset server. If you haven't already:
 
 ```bash
 # Generate a key pair (if you don't have one)
 ssh-keygen -t ed25519
 
-# Copy the public key to the remote server
+# Copy the public key to the remote server (replace user/host with your values)
 ssh-copy-id -i ~/.ssh/id_ed25519.pub frontend@your.server.com
 ```
 
+Verify you can log in without a password:
+
+```bash
+ssh frontend@your.server.com "echo ok"
+```
+
+### Step 4: Create the .env Configuration File
+
+**This step is required.** The sync script reads all deployment-specific settings
+from a `.env` file. Without it, every command will fail with
+"Missing required configuration."
+
+```bash
+cp .env.example .env
+nano .env          # or use any text editor
+```
+
+Replace every placeholder value with your real deployment details:
+
+```bash
+# The remote server where assets are uploaded
+COSMICSIG_SSH_HOST=your.server.com
+COSMICSIG_SSH_USER=frontend
+
+# The CosmicGame API base URL (no trailing slash)
+COSMICSIG_API_URL=http://your-api-host:8353
+
+# The directory on the remote server that holds the PNG/MP4 files
+COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
+```
+
+All four values must be set. The `.env` file is excluded from version control
+via `.gitignore`, so your credentials stay local to the machine.
+
 ### Step 5: Run Preflight Check
 
-Before committing to lengthy generation runs, verify that everything is wired
-up correctly:
+Now verify that the `.env` configuration actually works end-to-end:
 
 ```bash
 python3 run.py --preflight
@@ -149,7 +158,7 @@ python3 run.py --preflight
 This tests four things in a few seconds:
 
 1. **SSH connectivity** -- can we log in to the remote host?
-2. **Write permissions** -- can we write to the remote asset directory?
+2. **Write permissions** -- can we create a file in the remote asset directory?
 3. **API reachability** -- is the token API responding?
 4. **Generator binary** -- is the compiled Rust binary present?
 
@@ -159,6 +168,9 @@ until you see:
 ```
 [preflight] All checks passed.
 ```
+
+> If you see "Missing required configuration" instead, go back to Step 4 and
+> make sure you created the `.env` file (not `.env.example`) with real values.
 
 ### Step 6: Dry Run
 
