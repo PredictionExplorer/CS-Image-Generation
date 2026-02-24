@@ -4,7 +4,7 @@ Batch runner for Three Body Problem image generation.
 
 A/B comparison mode: each seed is rendered twice — once with museum-quality
 enhancements enabled ("enhanced") and once with them disabled ("classic").
-Output filenames: enhanced_{seed}.png/mp4  vs  classic_{seed}.png/mp4
+Output filenames: {seed}_enhanced.png/mp4  vs  {seed}_classic.png/mp4
 
 Uses a rolling pool to keep exactly CONCURRENT_SIMS slots busy at all times.
 Runs forever until Ctrl+C.
@@ -86,7 +86,7 @@ def fmt_duration(seconds: float) -> str:
 def run_one(seed: str, enhanced: bool, run_id: int) -> tuple:
     """Returns (success, filename, elapsed_secs)."""
     variant = "enhanced" if enhanced else "classic"
-    filename = f"{variant}_{seed[2:]}"
+    filename = f"{seed[2:]}_{variant}"
 
     cmd = [BINARY, "--seed", seed, "--file-name", filename]
     if not enhanced:

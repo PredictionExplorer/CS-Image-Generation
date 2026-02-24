@@ -42,7 +42,7 @@ impl Default for Enhancements {
             sat_boost: true,
             aces_tweak: true,
             alpha_variation: true,
-            aspect_correction: true,
+            aspect_correction: false,
             dispersion_boost: true,
         }
     }

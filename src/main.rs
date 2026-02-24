@@ -669,7 +669,7 @@ fn main() -> Result<()> {
         sat_boost: !args.no_enhancements && !args.no_sat_boost,
         aces_tweak: !args.no_enhancements && !args.no_aces_tweak,
         alpha_variation: !args.no_enhancements && !args.no_alpha_variation,
-        aspect_correction: !args.no_enhancements && !args.no_aspect_correction,
+        aspect_correction: false,
         dispersion_boost: !args.no_enhancements && !args.no_dispersion_boost,
     };
 
