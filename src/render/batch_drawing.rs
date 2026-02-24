@@ -13,19 +13,12 @@ use nalgebra::Vector3;
 pub struct TriangleVertex {
     pub x: f32,
     pub y: f32,
+    pub z: f32,
     pub color: OklabColor,
     pub alpha: f64,
 }
 
 /// Draw a complete triangle (3 line segments) in a batch for better performance
-///
-/// This function draws all three edges of the triangle in sequence, improving
-/// cache locality and reducing function call overhead compared to three separate calls.
-///
-/// # Performance
-/// - 10-20% faster than three individual draw calls
-/// - Better instruction pipelining
-/// - Improved cache utilization
 #[inline]
 #[allow(clippy::too_many_arguments)] // Batched drawing primitive requires all parameters
 pub fn draw_triangle_batch_spectral(
@@ -42,29 +35,27 @@ pub fn draw_triangle_batch_spectral(
 ) {
     draw_line_segment_aa_spectral_with_dispersion(
         accum, width, height,
-        v0.x, v0.y, v1.x, v1.y,
+        v0.x, v0.y, v0.z, v1.x, v1.y, v1.z,
         v0.color, v1.color, v0.alpha, v1.alpha,
         hdr_scale * hdr_mult_01, true,
     );
     
     draw_line_segment_aa_spectral_with_dispersion(
         accum, width, height,
-        v1.x, v1.y, v2.x, v2.y,
+        v1.x, v1.y, v1.z, v2.x, v2.y, v2.z,
         v1.color, v2.color, v1.alpha, v2.alpha,
         hdr_scale * hdr_mult_12, true,
     );
     
     draw_line_segment_aa_spectral_with_dispersion(
         accum, width, height,
-        v2.x, v2.y, v0.x, v0.y,
+        v2.x, v2.y, v2.z, v0.x, v0.y, v0.z,
         v2.color, v0.color, v2.alpha, v0.alpha,
         hdr_scale * hdr_mult_20, true,
     );
 }
 
 /// Prepare triangle vertices from position data for batched drawing
-///
-/// This helper function packages the vertex data into a cache-friendly structure.
 #[inline]
 pub fn prepare_triangle_vertices(
     positions: &[Vec<Vector3<f64>>],
@@ -85,18 +76,21 @@ pub fn prepare_triangle_vertices(
         TriangleVertex {
             x: x0,
             y: y0,
+            z: p0[2] as f32,
             color: colors[0][step],
             alpha: body_alphas[0],
         },
         TriangleVertex {
             x: x1,
             y: y1,
+            z: p1[2] as f32,
             color: colors[1][step],
             alpha: body_alphas[1],
         },
         TriangleVertex {
             x: x2,
             y: y2,
+            z: p2[2] as f32,
             color: colors[2][step],
             alpha: body_alphas[2],
         },
@@ -112,6 +106,7 @@ mod tests {
         let vertex = TriangleVertex {
             x: 100.0,
             y: 200.0,
+            z: 0.0,
             color: (0.5, 0.1, 0.1),
             alpha: 0.5,
         };

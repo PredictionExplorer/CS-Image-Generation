@@ -182,9 +182,6 @@ fn tonemap_batch_avx2(
 /// Tone map a single pixel (full path including level adjustment)
 #[inline]
 fn tonemap_single_pixel(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [u8; 3] {
-    // Import ACES LUT from parent module
-    use super::ACES_LUT;
-    
     let alpha = fa.clamp(0.0, 1.0);
     if alpha <= 0.0 {
         return [0, 0, 0];
@@ -201,47 +198,63 @@ fn tonemap_single_pixel(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLeve
         leveled[i] = ((premult[i] - levels.black[i]).max(0.0)) / levels.range[i];
     }
 
-    let mut channel_curves = [0.0; 3];
-    for i in 0..3 {
-        channel_curves[i] = ACES_LUT.apply(leveled[i]);
-    }
+    // 0. Matrix Inset (AgX color space)
+    let r = leveled[0];
+    let g = leveled[1];
+    let b = leveled[2];
 
-    let target_luma =
-        0.2126 * channel_curves[0] + 0.7152 * channel_curves[1] + 0.0722 * channel_curves[2];
+    let r_in = 0.842479062253094 * r + 0.0784335999999992 * g + 0.0792237451477643 * b;
+    let g_in = 0.0423282422610123 * r + 0.878468636469772 * g + 0.0791661274605434 * b;
+    let b_in = 0.0423756549057051 * r + 0.0784336000000000 * g + 0.877456439033405 * b;
 
-    if target_luma <= 0.0 {
-        return [0, 0, 0];
-    }
+    // 1. Log2 Allocation
+    let min_ev = -10.0;
+    let max_ev = 2.5;
+    let range = max_ev - min_ev;
+    
+    let allocate = |v: f64| -> f64 {
+        let val = v.max(1e-10).log2();
+        ((val - min_ev) / range).clamp(0.0, 1.0)
+    };
 
-    let straight_luma = 0.2126 * source[0] + 0.7152 * source[1] + 0.0722 * source[2];
-    let chroma_preserve = (alpha / (alpha + 0.1)).clamp(0.0, 1.0);
+    let r_alloc = allocate(r_in);
+    let g_alloc = allocate(g_in);
+    let b_alloc = allocate(b_in);
 
-    let mut final_channels = [0.0; 3];
-    if straight_luma > 0.0 {
-        for i in 0..3 {
-            final_channels[i] = channel_curves[i] * (1.0 - chroma_preserve)
-                + (source[i] / straight_luma) * target_luma * chroma_preserve;
-        }
+    // 2. Spline (approximated with a sigmoid polynomial)
+    let spline = |x: f64| -> f64 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        let x5 = x4 * x;
+        let x6 = x5 * x;
+        12.0625 * x6 - 36.3262 * x5 + 39.5298 * x4 - 17.6534 * x3 + 3.0135 * x2 + 0.3707 * x
+    };
+
+    let r_spline = spline(r_alloc);
+    let g_spline = spline(g_alloc);
+    let b_spline = spline(b_alloc);
+
+    // 3. Matrix Outset (AgX Punchy if ACES_TWEAK_ENABLED, else Default)
+    let is_punchy = crate::render::ACES_TWEAK_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+    
+    let (r_out, g_out, b_out) = if is_punchy {
+        // AgX Punchy Outset
+        (
+            1.133276 * r_spline - 0.117109 * g_spline - 0.016167 * b_spline,
+            -0.097008 * r_spline + 1.148151 * g_spline - 0.051143 * b_spline,
+            -0.008107 * r_spline - 0.031776 * g_spline + 1.039883 * b_spline
+        )
     } else {
-        final_channels = channel_curves;
-    }
+        // AgX Default Outset
+        (
+            1.0987524 * r_spline - 0.0880758 * g_spline - 0.0106766 * b_spline,
+            -0.0729567 * r_spline + 1.1114562 * g_spline - 0.0384995 * b_spline,
+            -0.0060957 * r_spline - 0.0238959 * g_spline + 1.0299916 * b_spline
+        )
+    };
 
-    let neutral_mix = ((0.05 - alpha).max(0.0) / 0.05).clamp(0.0, 1.0) * 0.2;
-    if neutral_mix > 0.0 {
-        for c in &mut final_channels {
-            *c = (*c * (1.0 - neutral_mix) + target_luma * neutral_mix).max(0.0);
-        }
-    }
-
-    let final_luma =
-        0.2126 * final_channels[0] + 0.7152 * final_channels[1] + 0.0722 * final_channels[2];
-
-    if final_luma > 0.0 {
-        let scale = target_luma / final_luma;
-        for c in &mut final_channels {
-            *c *= scale;
-        }
-    }
+    let final_channels = [r_out.clamp(0.0, 1.0), g_out.clamp(0.0, 1.0), b_out.clamp(0.0, 1.0)];
 
     [
         (final_channels[0] * 255.0).round().clamp(0.0, 255.0) as u8,
@@ -282,8 +295,6 @@ fn tonemap_batch_neon(
     all(target_arch = "aarch64", target_feature = "neon", not(miri))
 ))]
 fn tonemap_single_pixel_normalized(r: f64, g: f64, b: f64, alpha: f64) -> [u8; 3] {
-    use super::ACES_LUT;
-    
     let alpha = alpha.clamp(0.0, 1.0);
     if alpha <= 0.0 {
         return [0, 0, 0];
@@ -293,10 +304,57 @@ fn tonemap_single_pixel_normalized(r: f64, g: f64, b: f64, alpha: f64) -> [u8; 3
     let g = g.max(0.0).clamp(0.0, 10.0);
     let b = b.max(0.0).clamp(0.0, 10.0);
     
-    // Apply ACES tone curve
-    let r_mapped = ACES_LUT.apply(r);
-    let g_mapped = ACES_LUT.apply(g);
-    let b_mapped = ACES_LUT.apply(b);
+    // 0. Matrix Inset (AgX color space)
+    let r_in = 0.842479062253094 * r + 0.0784335999999992 * g + 0.0792237451477643 * b;
+    let g_in = 0.0423282422610123 * r + 0.878468636469772 * g + 0.0791661274605434 * b;
+    let b_in = 0.0423756549057051 * r + 0.0784336000000000 * g + 0.877456439033405 * b;
+
+    // 1. Log2 Allocation
+    let min_ev = -10.0;
+    let max_ev = 2.5;
+    let range = max_ev - min_ev;
+    
+    let allocate = |v: f64| -> f64 {
+        let val = v.max(1e-10).log2();
+        ((val - min_ev) / range).clamp(0.0, 1.0)
+    };
+
+    let r_alloc = allocate(r_in);
+    let g_alloc = allocate(g_in);
+    let b_alloc = allocate(b_in);
+
+    // 2. Spline (approximated with a sigmoid polynomial)
+    let spline = |x: f64| -> f64 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        let x5 = x4 * x;
+        let x6 = x5 * x;
+        12.0625 * x6 - 36.3262 * x5 + 39.5298 * x4 - 17.6534 * x3 + 3.0135 * x2 + 0.3707 * x
+    };
+
+    let r_spline = spline(r_alloc);
+    let g_spline = spline(g_alloc);
+    let b_spline = spline(b_alloc);
+
+    // 3. Matrix Outset (AgX Punchy if ACES_TWEAK_ENABLED, else Default)
+    let is_punchy = crate::render::ACES_TWEAK_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+    
+    let (r_mapped, g_mapped, b_mapped) = if is_punchy {
+        // AgX Punchy Outset
+        (
+            1.133276 * r_spline - 0.117109 * g_spline - 0.016167 * b_spline,
+            -0.097008 * r_spline + 1.148151 * g_spline - 0.051143 * b_spline,
+            -0.008107 * r_spline - 0.031776 * g_spline + 1.039883 * b_spline
+        )
+    } else {
+        // AgX Default Outset
+        (
+            1.0987524 * r_spline - 0.0880758 * g_spline - 0.0106766 * b_spline,
+            -0.0729567 * r_spline + 1.1114562 * g_spline - 0.0384995 * b_spline,
+            -0.0060957 * r_spline - 0.0238959 * g_spline + 1.0299916 * b_spline
+        )
+    };
     
     // Simple alpha blend
     let r_final = r_mapped * alpha;

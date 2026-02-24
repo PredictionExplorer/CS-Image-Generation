@@ -482,15 +482,60 @@ pub fn apply_dog_bloom(
     dog_result
 }
 
-/// Convert SPD buffer to RGBA
+/// Convert SPD buffer to RGBA, with post-process radial dispersion (chromatic aberration)
 pub(crate) fn convert_spd_buffer_to_rgba(
     src: &[[f64; NUM_BINS]],
     dest: &mut [(f64, f64, f64, f64)],
+    width: usize,
+    height: usize,
 ) {
     assert_eq!(src.len(), dest.len());
 
-    dest.par_iter_mut().zip(src.par_iter()).for_each(|(dest_pixel, src_pixel)| {
-        let rgba = spd_to_rgba(src_pixel);
+    use crate::render::drawing::DISPERSION_BOOST_ENABLED;
+    use std::sync::atomic::Ordering;
+
+    let dispersion_strength = if DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed) {
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0
+    } else {
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH * 3.0
+    };
+
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+    let max_r = (cx * cx + cy * cy).sqrt();
+
+    dest.par_iter_mut().enumerate().for_each(|(idx, dest_pixel)| {
+        let x = (idx % width) as f64;
+        let y = (idx / width) as f64;
+        
+        let dx = x - cx;
+        let dy = y - cy;
+        let r = (dx * dx + dy * dy).sqrt();
+        let dir_x = if r > 0.0 { dx / r } else { 0.0 };
+        let dir_y = if r > 0.0 { dy / r } else { 0.0 };
+        
+        let r_norm = r / max_r;
+        
+        let mut local_spd = [0.0f64; NUM_BINS];
+        
+        if dispersion_strength > 0.0 {
+            for bin in 0..NUM_BINS {
+                let bin_offset = (bin as f64 - (NUM_BINS as f64 - 1.0) / 2.0) / ((NUM_BINS as f64 - 1.0) / 2.0);
+                let shift = bin_offset * dispersion_strength * r_norm * 50.0; 
+                
+                let sx = (x - dir_x * shift).round() as isize;
+                let sy = (y - dir_y * shift).round() as isize;
+                
+                if sx >= 0 && sx < width as isize && sy >= 0 && sy < height as isize {
+                    let s_idx = sy as usize * width + sx as usize;
+                    local_spd[bin] = src[s_idx][bin];
+                }
+            }
+        } else {
+            local_spd = src[idx];
+        }
+
+        let rgba = spd_to_rgba(&local_spd);
         *dest_pixel = rgba;
     });
 }

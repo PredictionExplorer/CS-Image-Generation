@@ -162,8 +162,6 @@ pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.8;
 /// Boosted dispersion for wider rainbow trails
 pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 1.1;
 
-/// Number of wavelength bins to spread dispersion across (±bins from center)
-pub const SPECTRAL_DISPERSION_BINS: usize = 5;  // Increased from 3 for fuller spectrum
 
 /// Velocity-based HDR boost factor - multiplies HDR scale at high velocities
 /// 1.0 = no boost, 2.0 = double brightness at max velocity

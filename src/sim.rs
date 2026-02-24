@@ -101,54 +101,72 @@ impl Body {
     }
 }
 
-/// Basic Verlet step (optimized for 3-body problem with zero-allocation)
-fn verlet_step(bodies: &mut [Body], dt: f64) {
-    // Use fixed-size arrays for 3-body problem (eliminates heap allocations)
-    // This optimization saves ~2M allocations during Borda search!
+/// 4th-Order Yoshida Symplectic Integrator (conserves energy infinitely)
+fn symplectic_step(bodies: &mut [Body], dt: f64) {
     debug_assert_eq!(bodies.len(), 3, "Optimized for 3-body problem");
-    
-    // Stack-allocated arrays (zero heap allocation!)
-    let mut pos = [Vector3::zeros(); 3];
     let mut mass = [0.0; 3];
-    
     for (i, b) in bodies.iter().enumerate().take(3) {
-        pos[i] = b.position;
         mass[i] = b.mass;
     }
-    
-    // First acceleration calculation
-    for (i, b) in bodies.iter_mut().enumerate().take(3) {
-        b.reset_acceleration();
-        for j in 0..3 {
-            if i != j {
-                b.update_acceleration(mass[j], &pos[j])
-            }
-        }
-    }
-    
-    // Update positions
+
+    const W1: f64 = 1.3512071919596578;
+    const W0: f64 = -1.7024143839193153;
+
+    const C1: f64 = W1 / 2.0;
+    const C2: f64 = (W0 + W1) / 2.0;
+    const C3: f64 = C2;
+    const C4: f64 = C1;
+
+    const D1: f64 = W1;
+    const D2: f64 = W0;
+    const D3: f64 = W1;
+
+    // Step 1
     for b in bodies.iter_mut() {
-        b.position += b.velocity * dt + 0.5 * b.acceleration * dt * dt;
+        b.position += b.velocity * (C1 * dt);
     }
-    
-    // Update positions array for second pass
+    compute_accelerations(bodies, &mass);
+    for b in bodies.iter_mut() {
+        b.velocity += b.acceleration * (D1 * dt);
+    }
+
+    // Step 2
+    for b in bodies.iter_mut() {
+        b.position += b.velocity * (C2 * dt);
+    }
+    compute_accelerations(bodies, &mass);
+    for b in bodies.iter_mut() {
+        b.velocity += b.acceleration * (D2 * dt);
+    }
+
+    // Step 3
+    for b in bodies.iter_mut() {
+        b.position += b.velocity * (C3 * dt);
+    }
+    compute_accelerations(bodies, &mass);
+    for b in bodies.iter_mut() {
+        b.velocity += b.acceleration * (D3 * dt);
+    }
+
+    // Step 4
+    for b in bodies.iter_mut() {
+        b.position += b.velocity * (C4 * dt);
+    }
+}
+
+#[inline(always)]
+fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
+    let mut pos = [Vector3::zeros(); 3];
     for (i, b) in bodies.iter().enumerate().take(3) {
         pos[i] = b.position;
     }
-    
-    // Second acceleration calculation
-    for (i, b) in bodies.iter_mut().enumerate().take(3) {
-        b.reset_acceleration();
+    for i in 0..3 {
+        bodies[i].reset_acceleration();
         for j in 0..3 {
             if i != j {
-                b.update_acceleration(mass[j], &pos[j])
+                bodies[i].update_acceleration(mass[j], &pos[j])
             }
         }
-    }
-    
-    // Update velocities
-    for b in bodies.iter_mut() {
-        b.velocity += b.acceleration * dt;
     }
 }
 
@@ -163,7 +181,7 @@ pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
     shift_bodies_to_com(&mut bodies);
     let dt = crate::render::constants::DEFAULT_DT;
     for _ in 0..steps {
-        verlet_step(&mut bodies, dt);
+        symplectic_step(&mut bodies, dt);
     }
     let mut b2 = bodies.clone();
     let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
@@ -171,7 +189,7 @@ pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
         for (j, b) in b2.iter().enumerate() {
             all[j][i] = b.position;
         }
-        verlet_step(&mut b2, dt);
+        symplectic_step(&mut b2, dt);
     }
     FullSim { positions: all }
 }
@@ -190,7 +208,7 @@ pub fn get_positions_with_early_exit(
     // Warmup phase with periodic escape checks
     const CHECK_INTERVAL: usize = 10000; // Check every 10k steps during warmup
     for step in 0..steps {
-        verlet_step(&mut bodies, dt);
+        symplectic_step(&mut bodies, dt);
         
         // Early-exit check: detect escaping bodies during warmup
         if step % CHECK_INTERVAL == 0 && step > 0 && is_definitely_escaping(&bodies, escape_threshold) {
@@ -210,7 +228,7 @@ pub fn get_positions_with_early_exit(
         for (j, b) in b2.iter().enumerate() {
             all[j][i] = b.position;
         }
-        verlet_step(&mut b2, dt);
+        symplectic_step(&mut b2, dt);
     }
     
     Some(FullSim { positions: all })

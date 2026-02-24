@@ -10,7 +10,6 @@ use crate::post_effects::{
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 use rayon::prelude::*;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info};
 
@@ -74,6 +73,7 @@ impl Default for RenderConfig {
 
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit)
 /// Returns final RGB channels in 0.0-1.0 range
+/// Upgraded to AgX for superior color rendition without hue-skewing in extreme highlights
 #[inline]
 fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [f64; 3] {
     let alpha = fa.clamp(0.0, 1.0);
@@ -92,50 +92,64 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
         leveled[i] = ((premult[i] - levels.black[i]).max(0.0)) / levels.range[i];
     }
 
-    let lut = if ACES_TWEAK_ENABLED.load(Ordering::Relaxed) { &*ACES_LUT_TWEAKED } else { &*ACES_LUT };
-    let mut channel_curves = [0.0; 3];
-    for i in 0..3 {
-        channel_curves[i] = lut.apply(leveled[i]);
-    }
+    // 0. Matrix Inset (AgX color space)
+    let r = leveled[0];
+    let g = leveled[1];
+    let b = leveled[2];
 
-    let target_luma =
-        0.2126 * channel_curves[0] + 0.7152 * channel_curves[1] + 0.0722 * channel_curves[2];
+    let r_in = 0.842479062253094 * r + 0.0784335999999992 * g + 0.0792237451477643 * b;
+    let g_in = 0.0423282422610123 * r + 0.878468636469772 * g + 0.0791661274605434 * b;
+    let b_in = 0.0423756549057051 * r + 0.0784336000000000 * g + 0.877456439033405 * b;
 
-    if target_luma <= 0.0 {
-        return [0.0, 0.0, 0.0];
-    }
+    // 1. Log2 Allocation
+    let min_ev = -10.0;
+    let max_ev = 2.5;
+    let range = max_ev - min_ev;
+    
+    let allocate = |v: f64| -> f64 {
+        let val = v.max(1e-10).log2();
+        ((val - min_ev) / range).clamp(0.0, 1.0)
+    };
 
-    let straight_luma = 0.2126 * source[0] + 0.7152 * source[1] + 0.0722 * source[2];
-    let chroma_preserve = (alpha / (alpha + 0.1)).clamp(0.0, 1.0);
+    let r_alloc = allocate(r_in);
+    let g_alloc = allocate(g_in);
+    let b_alloc = allocate(b_in);
 
-    let mut final_channels = [0.0; 3];
-    if straight_luma > 0.0 {
-        for i in 0..3 {
-            final_channels[i] = channel_curves[i] * (1.0 - chroma_preserve)
-                + (source[i] / straight_luma) * target_luma * chroma_preserve;
-        }
+    // 2. Spline (approximated with a sigmoid polynomial)
+    let spline = |x: f64| -> f64 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        let x5 = x4 * x;
+        let x6 = x5 * x;
+        // High quality fit for AgX base curve
+        12.0625 * x6 - 36.3262 * x5 + 39.5298 * x4 - 17.6534 * x3 + 3.0135 * x2 + 0.3707 * x
+    };
+
+    let r_spline = spline(r_alloc);
+    let g_spline = spline(g_alloc);
+    let b_spline = spline(b_alloc);
+
+    // 3. Matrix Outset (AgX Punchy if ACES_TWEAK_ENABLED, else Default)
+    let is_punchy = ACES_TWEAK_ENABLED.load(Ordering::Relaxed);
+    
+    let (r_out, g_out, b_out) = if is_punchy {
+        // AgX Punchy Outset (more contrast, better for generative art)
+        (
+            1.133276 * r_spline - 0.117109 * g_spline - 0.016167 * b_spline,
+            -0.097008 * r_spline + 1.148151 * g_spline - 0.051143 * b_spline,
+            -0.008107 * r_spline - 0.031776 * g_spline + 1.039883 * b_spline
+        )
     } else {
-        final_channels = channel_curves;
-    }
+        // AgX Default Outset
+        (
+            1.0987524 * r_spline - 0.0880758 * g_spline - 0.0106766 * b_spline,
+            -0.0729567 * r_spline + 1.1114562 * g_spline - 0.0384995 * b_spline,
+            -0.0060957 * r_spline - 0.0238959 * g_spline + 1.0299916 * b_spline
+        )
+    };
 
-    let neutral_mix = ((0.05 - alpha).max(0.0) / 0.05).clamp(0.0, 1.0) * 0.2;
-    if neutral_mix > 0.0 {
-        for c in &mut final_channels {
-            *c = (*c * (1.0 - neutral_mix) + target_luma * neutral_mix).max(0.0);
-        }
-    }
-
-    let final_luma =
-        0.2126 * final_channels[0] + 0.7152 * final_channels[1] + 0.0722 * final_channels[2];
-
-    if final_luma > 0.0 {
-        let scale = target_luma / final_luma;
-        for c in &mut final_channels {
-            *c *= scale;
-        }
-    }
-
-    final_channels
+    [r_out.clamp(0.0, 1.0), g_out.clamp(0.0, 1.0), b_out.clamp(0.0, 1.0)]
 }
 
 /// Tonemap to 8-bit (for legacy support, not currently used)
@@ -172,76 +186,6 @@ pub fn save_image_as_png_16bit(rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>, path: 
     info!("   Saved 16-bit PNG (sRGB assumed) => {path}");
     Ok(())
 }
-
-/// Pass 1: gather global histogram for final color leveling
-// ACES Filmic Tonemapping Curve constants (original)
-// Source: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
-const A: f64 = 2.51;
-const B: f64 = 0.03;
-const C: f64 = 2.43;
-const D: f64 = 0.59;
-const E: f64 = 0.14;
-
-// Tweaked constants: brighter midtones, deeper blacks, smoother rolloff
-const A_TWEAKED: f64 = 2.55;
-const B_TWEAKED: f64 = 0.04;
-const C_TWEAKED: f64 = 2.43;
-const D_TWEAKED: f64 = 0.55;
-const E_TWEAKED: f64 = 0.12;
-
-/// Optimized ACES tonemapping using lookup table
-struct AcesLut {
-    table: Vec<f64>,
-    scale: f64,
-    max_input: f64,
-    a: f64,
-    b: f64,
-    c: f64,
-    d: f64,
-    e: f64,
-}
-
-impl AcesLut {
-    fn with_params(a: f64, b: f64, c: f64, d: f64, e: f64) -> Self {
-        const LUT_SIZE: usize = 2048;
-        const MAX_INPUT: f64 = 16.0;
-
-        let mut table = Vec::with_capacity(LUT_SIZE);
-        let scale = (LUT_SIZE - 1) as f64 / MAX_INPUT;
-
-        for i in 0..LUT_SIZE {
-            let x = (i as f64) / scale;
-            let y = (x * (a * x + b)) / (x * (c * x + d) + e);
-            table.push(y);
-        }
-
-        Self { table, scale, max_input: MAX_INPUT, a, b, c, d, e }
-    }
-
-    #[inline]
-    fn apply(&self, x: f64) -> f64 {
-        if x <= 0.0 {
-            return 0.0;
-        }
-
-        if x >= self.max_input {
-            return (x * (self.a * x + self.b)) / (x * (self.c * x + self.d) + self.e);
-        }
-
-        let pos = x * self.scale;
-        let idx = pos as usize;
-        let frac = pos - idx as f64;
-
-        if idx >= self.table.len() - 1 {
-            return self.table[self.table.len() - 1];
-        }
-
-        self.table[idx] * (1.0 - frac) + self.table[idx + 1] * frac
-    }
-}
-
-static ACES_LUT: LazyLock<AcesLut> = LazyLock::new(|| AcesLut::with_params(A, B, C, D, E));
-static ACES_LUT_TWEAKED: LazyLock<AcesLut> = LazyLock::new(|| AcesLut::with_params(A_TWEAKED, B_TWEAKED, C_TWEAKED, D_TWEAKED, E_TWEAKED));
 
 // ====================== HELPER FUNCTIONS ===========================
 
@@ -650,7 +594,7 @@ pub fn pass_1_build_histogram_spectral(
         let is_final = step == total_steps - 1;
         if (step > 0 && step % frame_interval == 0) || is_final {
             apply_energy_density_shift(&mut accum_spd);
-            convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba);
+            convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
             // Process with persistent effect chain
             let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
@@ -806,7 +750,7 @@ pub fn pass_2_write_frames_spectral(
         let is_final = step == total_steps - 1;
         if (step > 0 && step % frame_interval == 0) || is_final {
             apply_energy_density_shift(&mut accum_spd);
-            convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba);
+            convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
             // Process with persistent effect chain
             let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
@@ -951,28 +895,32 @@ pub fn render_single_frame_spectral(
         let (x1, y1) = ctx.to_pixel(p1[0], p1[1]);
         let (x2, y2) = ctx.to_pixel(p2[0], p2[1]);
 
+        let z0 = p0[2] as f32;
+        let z1 = p1[2] as f32;
+        let z2 = p2[2] as f32;
+
         // Compute velocity-based HDR multipliers using the calculator
         let hdr_mult_01 = velocity_calc.compute_segment_multiplier(step, 0, 1);
         let hdr_mult_12 = velocity_calc.compute_segment_multiplier(step, 1, 2);
         let hdr_mult_20 = velocity_calc.compute_segment_multiplier(step, 2, 0);
 
         draw_line_segment_aa_spectral_with_dispersion(
-            &mut accum_spd, width, height, x0, y0, x1, y1, c0, c1, a0, a1,
+            &mut accum_spd, width, height, x0, y0, z0, x1, y1, z1, c0, c1, a0, a1,
             render_config.hdr_scale * hdr_mult_01, true,
         );
         draw_line_segment_aa_spectral_with_dispersion(
-            &mut accum_spd, width, height, x1, y1, x2, y2, c1, c2, a1, a2,
+            &mut accum_spd, width, height, x1, y1, z1, x2, y2, z2, c1, c2, a1, a2,
             render_config.hdr_scale * hdr_mult_12, true,
         );
         draw_line_segment_aa_spectral_with_dispersion(
-            &mut accum_spd, width, height, x2, y2, x0, y0, c2, c0, a2, a0,
+            &mut accum_spd, width, height, x2, y2, z2, x0, y0, z0, c2, c0, a2, a0,
             render_config.hdr_scale * hdr_mult_20, true,
         );
     }
 
     // Process the accumulated frame
     apply_energy_density_shift(&mut accum_spd);
-    convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba);
+    convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { _frame_number: 0, _density: None };
     let trajectory_pixels = effect_chain
@@ -1034,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn test_aces_tweak_changes_output() {
+    fn test_agx_tweak_changes_output() {
         let levels = default_levels();
 
         ACES_TWEAK_ENABLED.store(true, Ordering::Relaxed);
@@ -1048,31 +996,7 @@ mod tests {
         let diff = (tweaked[0] - original[0]).abs()
             + (tweaked[1] - original[1]).abs()
             + (tweaked[2] - original[2]).abs();
-        assert!(diff > 1e-6, "ACES tweak should produce different tonemapping");
-    }
-
-    #[test]
-    fn test_aces_lut_monotonic() {
-        let lut = &*ACES_LUT;
-        let mut prev = 0.0;
-        for i in 1..100 {
-            let x = i as f64 * 0.05;
-            let y = lut.apply(x);
-            assert!(y >= prev, "ACES LUT should be monotonic: f({x}) = {y} < {prev}");
-            prev = y;
-        }
-    }
-
-    #[test]
-    fn test_aces_lut_tweaked_monotonic() {
-        let lut = &*ACES_LUT_TWEAKED;
-        let mut prev = 0.0;
-        for i in 1..100 {
-            let x = i as f64 * 0.05;
-            let y = lut.apply(x);
-            assert!(y >= prev, "tweaked ACES LUT should be monotonic: f({x}) = {y} < {prev}");
-            prev = y;
-        }
+        assert!(diff > 1e-6, "AgX punchy tweak should produce different tonemapping");
     }
 
     #[test]
