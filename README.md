@@ -31,7 +31,7 @@ Output lands in `pics/` (PNG) and `vids/` (MP4).
 
 | Dependency | Notes |
 |---|---|
-| **Rust 1.90.0+** | Auto-managed via `rust-toolchain.toml` -- just have [rustup](https://rustup.rs) installed |
+| **Rust 1.93.1+** | Auto-managed via `rust-toolchain.toml` -- just have [rustup](https://rustup.rs) installed |
 | **FFmpeg** | Required for video encoding. `brew install ffmpeg` / `apt install ffmpeg` |
 | **Python 3.10+** | Required only for the automated asset sync script (`run.py`) |
 
