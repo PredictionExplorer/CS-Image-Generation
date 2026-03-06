@@ -104,12 +104,7 @@ impl GlowEnhancement {
     }
 
     /// Apply tight radial blur for glow (simpler than full Gaussian)
-    fn apply_radial_glow(
-        &self,
-        input: &PixelBuffer,
-        width: usize,
-        height: usize,
-    ) -> PixelBuffer {
+    fn apply_radial_glow(&self, input: &PixelBuffer, width: usize, height: usize) -> PixelBuffer {
         let radius = self.config.radius;
         if radius == 0 {
             return input.clone();
@@ -213,10 +208,7 @@ mod tests {
 
     #[test]
     fn test_glow_disabled() {
-        let config = GlowEnhancementConfig {
-            strength: 0.0,
-            ..GlowEnhancementConfig::default()
-        };
+        let config = GlowEnhancementConfig { strength: 0.0, ..GlowEnhancementConfig::default() };
         let glow = GlowEnhancement::new(config);
         assert!(!glow.is_enabled());
     }
@@ -284,4 +276,3 @@ mod tests {
         assert_eq!(result.len(), buffer.len());
     }
 }
-

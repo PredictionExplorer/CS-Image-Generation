@@ -5,19 +5,21 @@
 //! maintainability.
 
 use crate::drift::parse_drift_mode;
-use crate::drift_config::{resolve_drift_config, ResolvedDriftConfig};
+use crate::drift_config::{ResolvedDriftConfig, resolve_drift_config};
 use crate::error::{ConfigError, Result};
-use crate::generation_log::{GenerationLogger, GenerationRecord, LoggedRenderConfig, DriftConfig, SimulationConfig, OrbitInfo};
+use crate::generation_log::{
+    DriftConfig, GenerationLogger, GenerationRecord, LoggedRenderConfig, OrbitInfo,
+    SimulationConfig,
+};
 use crate::oklab;
 use crate::post_effects;
 use crate::render::{
-    self, constants, generate_body_color_sequences,
-    save_image_as_png_16bit, ChannelLevels, DogBloomConfig, RenderConfig,
-    VideoEncodingOptions, compute_black_white_gamma,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    render_single_frame_spectral, create_video_from_frames_singlepass,
+    self, ChannelLevels, DogBloomConfig, RenderConfig, VideoEncodingOptions,
+    compute_black_white_gamma, constants, create_video_from_frames_singlepass,
+    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
+    render_final_frame_spectral, save_image_as_png_16bit,
 };
-use crate::sim::{self, Sha3RandomByteStream, Body, TrajectoryResult};
+use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
 use nalgebra::Vector3;
 use std::fs;
@@ -93,35 +95,28 @@ pub fn setup_directories() -> Result<()> {
         path: "pics".to_string(),
         error: e,
     })?;
-    
+
     fs::create_dir_all("vids").map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
         path: "vids".to_string(),
         error: e,
     })?;
-    
+
     Ok(())
 }
 
 /// Parse and validate hex seed
 pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
     let hex_seed = seed.strip_prefix("0x").unwrap_or(seed);
-    
-    hex::decode(hex_seed).map_err(|e| ConfigError::InvalidSeed {
-        seed: seed.to_string(),
-        error: e,
-    }.into())
+
+    hex::decode(hex_seed)
+        .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
 }
 
 /// Derive noise seed from simulation seed for nebula generation
 pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
     let get_or_zero = |idx| seed_bytes.get(idx).copied().unwrap_or(0);
-    i32::from_le_bytes([
-        get_or_zero(0),
-        get_or_zero(1),
-        get_or_zero(2),
-        get_or_zero(3),
-    ])
+    i32::from_le_bytes([get_or_zero(0), get_or_zero(1), get_or_zero(2), get_or_zero(3)])
 }
 
 /// Run Borda selection to find the best orbit
@@ -134,7 +129,7 @@ pub fn run_borda_selection(
     escape_threshold: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
     info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
-    
+
     sim::select_best_trajectory(
         rng,
         num_sims,
@@ -146,10 +141,7 @@ pub fn run_borda_selection(
 }
 
 /// Re-run the best orbit to get full trajectory
-pub fn simulate_best_orbit(
-    best_bodies: Vec<Body>,
-    num_steps_sim: usize,
-) -> Vec<Vec<Vector3<f64>>> {
+pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<Vec<Vector3<f64>>> {
     info!("STAGE 2/7: Re-running best orbit for {} steps...", num_steps_sim);
     let sim_result = sim::get_positions(best_bodies, num_steps_sim);
     info!("   => Done.");
@@ -166,27 +158,23 @@ pub fn apply_drift_transformation(
     rng: &mut Sha3RandomByteStream,
 ) -> Option<ResolvedDriftConfig> {
     info!("STAGE 2.5/7: Resolving drift configuration...");
-    
-    let resolved = resolve_drift_config(
-        drift_scale,
-        drift_arc_fraction,
-        drift_orbit_eccentricity,
-        rng,
-    );
-    
+
+    let resolved =
+        resolve_drift_config(drift_scale, drift_arc_fraction, drift_orbit_eccentricity, rng);
+
     info!("Applying {} drift...", drift_mode);
     let num_steps = positions[0].len();
     let drift_params = resolved.to_drift_parameters();
-    
-    if crate::utils::is_zero(drift_params.arc_fraction) 
-        && drift_mode.to_lowercase().starts_with("ell") 
+
+    if crate::utils::is_zero(drift_params.arc_fraction)
+        && drift_mode.to_lowercase().starts_with("ell")
     {
         warn!("Elliptical drift requested with zero arc fraction; skipping motion");
     }
-    
+
     let mut drift_transform = parse_drift_mode(drift_mode, rng, drift_params, num_steps);
     drift_transform.apply(positions, constants::DEFAULT_DT);
-    
+
     info!("   => Drift applied successfully");
     Some(resolved)
 }
@@ -212,17 +200,9 @@ pub fn generate_colors(
 #[allow(dead_code)] // Legacy helper - kept for backward compatibility
 pub fn create_blur_config(special: bool, width: u32, height: u32) -> (usize, f64, f64) {
     if special {
-        (
-            (0.032 * std::cmp::min(width, height) as f64).round() as usize,
-            12.0,
-            12.0,
-        )
+        ((0.032 * std::cmp::min(width, height) as f64).round() as usize, 12.0, 12.0)
     } else {
-        (
-            (0.014 * std::cmp::min(width, height) as f64).round() as usize,
-            7.0,
-            7.0,
-        )
+        ((0.014 * std::cmp::min(width, height) as f64).round() as usize, 7.0, 7.0)
     }
 }
 
@@ -235,10 +215,8 @@ pub fn create_dog_config(
     dog_ratio: f64,
     dog_strength: f64,
 ) -> DogBloomConfig {
-    let sigma = dog_sigma.unwrap_or_else(|| {
-        0.0065 * std::cmp::min(width, height) as f64
-    });
-    
+    let sigma = dog_sigma.unwrap_or_else(|| 0.0065 * std::cmp::min(width, height) as f64);
+
     DogBloomConfig {
         inner_sigma: sigma,
         outer_ratio: dog_ratio,
@@ -259,9 +237,9 @@ pub fn create_perceptual_blur_config(
     if !enabled {
         return None;
     }
-    
+
     use oklab::GamutMapMode;
-    
+
     Some(post_effects::PerceptualBlurConfig {
         radius: perceptual_blur_radius.unwrap_or(blur_radius_px),
         strength: perceptual_blur_strength,
@@ -284,14 +262,14 @@ pub fn build_histogram_and_levels(
     aspect_correction: bool,
 ) -> Result<ChannelLevels> {
     info!("STAGE 5/7: PASS 1 => building global histogram...");
-    
-    let target_frames = constants::DEFAULT_TARGET_FRAMES;
+
+    let target_frames = constants::DEFAULT_HISTOGRAM_SAMPLE_FRAMES;
     let frame_interval = (positions[0].len() / target_frames as usize).max(1);
-    
+
     let mut all_r = Vec::new();
     let mut all_g = Vec::new();
     let mut all_b = Vec::new();
-    
+
     pass_1_build_histogram_spectral(
         positions,
         colors,
@@ -305,7 +283,7 @@ pub fn build_histogram_and_levels(
         render_config,
         aspect_correction,
     );
-    
+
     info!("STAGE 6/7: Determine global black/white/gamma...");
     let (black_r, white_r, black_g, white_g, black_b, white_b) = compute_black_white_gamma(
         &mut all_r,
@@ -314,12 +292,12 @@ pub fn build_histogram_and_levels(
         resolved_config.clip_black,
         resolved_config.clip_white,
     );
-    
+
     info!(
         "   => R:[{:.3e},{:.3e}] G:[{:.3e},{:.3e}] B:[{:.3e},{:.3e}]",
         black_r, white_r, black_g, white_g, black_b, white_b
     );
-    
+
     Ok(ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b))
 }
 
@@ -332,7 +310,7 @@ pub fn generate_filename(base_name: &str, profile_tag: &str) -> String {
     }
 }
 
-/// Render test frame (first frame only)
+/// Render the final accumulated preview frame and save it as a PNG.
 #[allow(clippy::too_many_arguments)] // Core rendering function requires all parameters
 pub fn render_test_frame(
     positions: &[Vec<Vector3<f64>>],
@@ -346,9 +324,9 @@ pub fn render_test_frame(
     best_info: &TrajectoryResult,
     aspect_correction: bool,
 ) -> Result<()> {
-    info!("STAGE 7/7: TEST FRAME MODE => rendering first frame only...");
-    
-    let test_frame = render_single_frame_spectral(
+    info!("STAGE 7/7: TEST FRAME MODE => rendering final accumulated frame only...");
+
+    let test_frame = render_final_frame_spectral(
         positions,
         colors,
         body_alphas,
@@ -363,16 +341,13 @@ pub fn render_test_frame(
         render_config,
         aspect_correction,
     )?;
-    
+
     info!("Saving test frame to: {}", output_png);
     save_image_as_png_16bit(&test_frame, output_png)?;
-    
+
     info!("✓ Test frame saved successfully (16-bit PNG)!");
-    info!(
-        "Best orbit => Weighted Borda = {:.3}\nTest complete!",
-        best_info.total_score_weighted
-    );
-    
+    info!("Best orbit => Weighted Borda = {:.3}\nTest complete!", best_info.total_score_weighted);
+
     Ok(())
 }
 
@@ -397,18 +372,18 @@ pub fn render_video(
     } else {
         info!("STAGE 7/7: PASS 2 => final frames => video (HIGH QUALITY MODE)...");
     }
-    
+
     let frame_rate = constants::DEFAULT_VIDEO_FPS;
     let target_frames = constants::DEFAULT_TARGET_FRAMES;
     let frame_interval = (positions[0].len() / target_frames as usize).max(1);
-    
+
     let mut last_frame_png: Option<ImageBuffer<Rgb<u16>, Vec<u16>>> = None;
     let video_options = if fast_encode {
         VideoEncodingOptions::fast_encode()
     } else {
         VideoEncodingOptions::default()
     };
-    
+
     create_video_from_frames_singlepass(
         resolved_config.width,
         resolved_config.height,
@@ -441,7 +416,7 @@ pub fn render_video(
         output_vid,
         &video_options,
     )?;
-    
+
     // Save final frame
     if let Some(last_frame) = last_frame_png {
         info!("Attempting to save 16-bit PNG to: {}", output_png);
@@ -449,7 +424,7 @@ pub fn render_video(
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
-    
+
     Ok(())
 }
 
@@ -464,12 +439,9 @@ pub fn log_generation(
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
 ) {
     let logger = GenerationLogger::new();
-    
-    let mut record = GenerationRecord::new(
-        file_name.to_string(),
-        format!("0x{}", seed),
-    );
-    
+
+    let mut record = GenerationRecord::new(file_name.to_string(), format!("0x{}", seed));
+
     record.render_config = LoggedRenderConfig {
         width: config.width,
         height: config.height,
@@ -488,7 +460,7 @@ pub fn log_generation(
         perceptual_blur_strength: config.perceptual_blur_strength,
         perceptual_gamut_mode: config.perceptual_gamut_mode.clone(),
     };
-    
+
     record.drift_config = if let Some(drift) = drift_config {
         DriftConfig {
             enabled: true,
@@ -508,7 +480,7 @@ pub fn log_generation(
             randomized: false,
         }
     };
-    
+
     record.simulation_config = SimulationConfig {
         num_sims,
         num_steps_sim: config.num_steps_sim,
@@ -520,17 +492,17 @@ pub fn log_generation(
         equil_weight: config.equil_weight,
         escape_threshold: config.escape_threshold,
     };
-    
+
     record.orbit_info = OrbitInfo {
         selected_index: best_info.selected_index,
         weighted_score: best_info.total_score_weighted,
         total_candidates: num_sims,
         discarded_count: best_info.discarded_count,
     };
-    
+
     // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
-    
+
     logger.log_generation(record);
 }
 
@@ -542,7 +514,7 @@ mod tests {
     fn test_parse_seed_valid() {
         let result = parse_seed("0x100033");
         assert!(result.is_ok());
-        
+
         let bytes = result.unwrap();
         assert_eq!(bytes, vec![0x10, 0x00, 0x33]);
     }
@@ -595,13 +567,13 @@ mod tests {
     }
 
     #[test]
-    fn test_enhancements_default_all_enabled() {
+    fn test_enhancements_default_quality_profile() {
         let e = Enhancements::default();
         assert!(e.chroma_boost);
         assert!(e.sat_boost);
         assert!(e.aces_tweak);
         assert!(e.alpha_variation);
-        assert!(e.aspect_correction);
+        assert!(!e.aspect_correction);
         assert!(e.dispersion_boost);
     }
 
@@ -629,7 +601,7 @@ mod tests {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
         let enhancements = Enhancements::default();
         let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
-        
+
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas.len(), 3);
         for body_colors in &colors {
@@ -643,13 +615,10 @@ mod tests {
     fn test_generate_colors_no_enhancements() {
         use crate::sim::Sha3RandomByteStream;
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
-        let enhancements = Enhancements {
-            alpha_variation: false,
-            chroma_boost: false,
-            ..Enhancements::default()
-        };
+        let enhancements =
+            Enhancements { alpha_variation: false, chroma_boost: false, ..Enhancements::default() };
         let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
-        
+
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas[0], alphas[1]);
         assert_eq!(alphas[1], alphas[2]);
@@ -688,16 +657,13 @@ mod tests {
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);
 
-        let (best_bodies, _) = crate::sim::select_best_trajectory(
-            &mut rng, num_sims, num_steps, 0.75, 11.0, -0.3,
-        )
-        .expect("Borda search should find at least one valid orbit");
+        let (best_bodies, _) =
+            crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, 0.75, 11.0, -0.3)
+                .expect("Borda search should find at least one valid orbit");
 
         let mut positions = simulate_best_orbit(best_bodies, num_steps);
 
-        apply_drift_transformation(
-            &mut positions, "elliptical", None, None, None, &mut rng,
-        );
+        apply_drift_transformation(&mut positions, "elliptical", None, None, None, &mut rng);
 
         let enhancements = Enhancements {
             chroma_boost: false,
@@ -707,24 +673,35 @@ mod tests {
             aspect_correction: false,
             dispersion_boost: false,
         };
-        let (colors, body_alphas) =
-            generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
+        let (colors, body_alphas) = generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
 
-        let render_config = render::RenderConfig {
-            hdr_scale: resolved.hdr_scale,
-        };
+        let render_config =
+            render::RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };
         let levels = build_histogram_and_levels(
-            &positions, &colors, &body_alphas, &resolved,
-            noise_seed, &render_config, false,
+            &positions,
+            &colors,
+            &body_alphas,
+            &resolved,
+            noise_seed,
+            &render_config,
+            false,
         )
         .expect("histogram/levels should succeed");
 
         let image = render::render_single_frame_spectral(
-            &positions, &colors, &body_alphas, &resolved,
-            levels.black[0], levels.range[0] + levels.black[0],
-            levels.black[1], levels.range[1] + levels.black[1],
-            levels.black[2], levels.range[2] + levels.black[2],
-            noise_seed, &render_config, false,
+            &positions,
+            &colors,
+            &body_alphas,
+            &resolved,
+            levels.black[0],
+            levels.range[0] + levels.black[0],
+            levels.black[1],
+            levels.range[1] + levels.black[1],
+            levels.black[2],
+            levels.range[2] + levels.black[2],
+            noise_seed,
+            &render_config,
+            false,
         )
         .expect("render should succeed");
 
@@ -741,16 +718,15 @@ mod tests {
         assert_eq!(pixels_a.len(), pixels_b.len(), "pixel buffer lengths differ");
 
         if pixels_a != pixels_b {
-            let diff_count = pixels_a.iter().zip(&pixels_b)
-                .filter(|(a, b)| a != b).count();
-            let first = pixels_a.iter().zip(&pixels_b)
-                .position(|(a, b)| a != b).unwrap();
+            let diff_count = pixels_a.iter().zip(&pixels_b).filter(|(a, b)| a != b).count();
+            let first = pixels_a.iter().zip(&pixels_b).position(|(a, b)| a != b).unwrap();
             panic!(
                 "pixel buffers differ: {diff_count} of {} values, \
                  first at index {first} ({} vs {})",
-                pixels_a.len(), pixels_a[first], pixels_b[first],
+                pixels_a.len(),
+                pixels_a[first],
+                pixels_b[first],
             );
         }
     }
 }
-

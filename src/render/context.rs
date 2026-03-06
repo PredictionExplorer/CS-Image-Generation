@@ -19,19 +19,18 @@ pub struct RenderContext {
 
 impl RenderContext {
     /// Creates a new render context from position data
-    pub fn new(width: u32, height: u32, positions: &[Vec<Vector3<f64>>], aspect_correction: bool) -> Self {
+    pub fn new(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+    ) -> Self {
         let mut bounds = BoundingBox::from_positions(positions);
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
 
-        Self {
-            width,
-            height,
-            width_usize: width as usize,
-            height_usize: height as usize,
-            bounds,
-        }
+        Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
     }
 
     /// Convert world coordinates to pixel coordinates
@@ -45,13 +44,12 @@ impl RenderContext {
     pub fn pixel_count(&self) -> usize {
         self.width_usize * self.height_usize
     }
-    
+
     /// Get the bounding box used for coordinate transformations
     #[inline]
     pub fn bounds(&self) -> &BoundingBox {
         &self.bounds
     }
-
 }
 
 /// Bounding box for coordinate transformations
@@ -127,9 +125,7 @@ mod tests {
     use super::*;
 
     fn make_positions(points: &[(f64, f64)]) -> Vec<Vec<Vector3<f64>>> {
-        (0..3).map(|_| {
-            points.iter().map(|&(x, y)| Vector3::new(x, y, 0.0)).collect()
-        }).collect()
+        (0..3).map(|_| points.iter().map(|&(x, y)| Vector3::new(x, y, 0.0)).collect()).collect()
     }
 
     #[test]
@@ -165,14 +161,22 @@ mod tests {
     #[test]
     fn test_aspect_correction_wide_orbit() {
         let mut bbox = BoundingBox {
-            min_x: 0.0, max_x: 100.0, min_y: 0.0, max_y: 50.0,
-            width: 100.0, height: 50.0,
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 0.0,
+            max_y: 50.0,
+            width: 100.0,
+            height: 50.0,
         };
         bbox.apply_aspect_correction(1920, 1080);
         let ar = bbox.width / bbox.height;
         let target_ar = 1920.0 / 1080.0;
-        assert!((ar - target_ar).abs() < 0.01,
-            "corrected AR {:.3} should match target {:.3}", ar, target_ar);
+        assert!(
+            (ar - target_ar).abs() < 0.01,
+            "corrected AR {:.3} should match target {:.3}",
+            ar,
+            target_ar
+        );
         assert!((bbox.width - 100.0).abs() < 0.01);
         assert!(bbox.height > 50.0);
     }
@@ -180,14 +184,22 @@ mod tests {
     #[test]
     fn test_aspect_correction_tall_orbit() {
         let mut bbox = BoundingBox {
-            min_x: 0.0, max_x: 50.0, min_y: 0.0, max_y: 100.0,
-            width: 50.0, height: 100.0,
+            min_x: 0.0,
+            max_x: 50.0,
+            min_y: 0.0,
+            max_y: 100.0,
+            width: 50.0,
+            height: 100.0,
         };
         bbox.apply_aspect_correction(1920, 1080);
         let ar = bbox.width / bbox.height;
         let target_ar = 1920.0 / 1080.0;
-        assert!((ar - target_ar).abs() < 0.01,
-            "corrected AR {:.3} should match target {:.3}", ar, target_ar);
+        assert!(
+            (ar - target_ar).abs() < 0.01,
+            "corrected AR {:.3} should match target {:.3}",
+            ar,
+            target_ar
+        );
         assert!((bbox.height - 100.0).abs() < 0.01);
         assert!(bbox.width > 50.0);
     }
@@ -195,8 +207,12 @@ mod tests {
     #[test]
     fn test_aspect_correction_already_matching() {
         let mut bbox = BoundingBox {
-            min_x: 0.0, max_x: 160.0, min_y: 0.0, max_y: 90.0,
-            width: 160.0, height: 90.0,
+            min_x: 0.0,
+            max_x: 160.0,
+            min_y: 0.0,
+            max_y: 90.0,
+            width: 160.0,
+            height: 90.0,
         };
         let orig_width = bbox.width;
         let orig_height = bbox.height;
@@ -208,8 +224,12 @@ mod tests {
     #[test]
     fn test_aspect_correction_centers_padding() {
         let mut bbox = BoundingBox {
-            min_x: 10.0, max_x: 110.0, min_y: 20.0, max_y: 70.0,
-            width: 100.0, height: 50.0,
+            min_x: 10.0,
+            max_x: 110.0,
+            min_y: 20.0,
+            max_y: 70.0,
+            width: 100.0,
+            height: 50.0,
         };
         let cy_before = (bbox.min_y + bbox.max_y) / 2.0;
         bbox.apply_aspect_correction(1920, 1080);
@@ -220,8 +240,12 @@ mod tests {
     #[test]
     fn test_aspect_correction_zero_height() {
         let mut bbox = BoundingBox {
-            min_x: 0.0, max_x: 100.0, min_y: 50.0, max_y: 50.0,
-            width: 100.0, height: 0.0,
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 50.0,
+            max_y: 50.0,
+            width: 100.0,
+            height: 0.0,
         };
         bbox.apply_aspect_correction(1920, 1080);
         assert!(bbox.width.is_finite());
@@ -234,8 +258,12 @@ mod tests {
         let ctx = RenderContext::new(1920, 1080, &positions, true);
         let ar = ctx.bounds().width / ctx.bounds().height;
         let target_ar = 1920.0 / 1080.0;
-        assert!((ar - target_ar).abs() < 0.05,
-            "aspect-corrected context AR {:.3} should be near {:.3}", ar, target_ar);
+        assert!(
+            (ar - target_ar).abs() < 0.05,
+            "aspect-corrected context AR {:.3} should be near {:.3}",
+            ar,
+            target_ar
+        );
     }
 
     #[test]

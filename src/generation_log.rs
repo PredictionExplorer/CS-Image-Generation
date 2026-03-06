@@ -18,25 +18,25 @@ const LOCK_FILE_PATH: &str = "generation_log.json.lock";
 pub struct GenerationRecord {
     /// Timestamp of generation
     pub timestamp: String,
-    
+
     /// Output file name (without extension)
     pub file_name: String,
-    
+
     /// Hex seed used for generation
     pub seed: String,
-    
+
     /// Rendering configuration
     pub render_config: LoggedRenderConfig,
-    
+
     /// Drift configuration
     pub drift_config: DriftConfig,
-    
+
     /// Simulation parameters
     pub simulation_config: SimulationConfig,
-    
+
     /// Selected orbit information from Borda selection
     pub orbit_info: OrbitInfo,
-    
+
     /// Randomization log (if any parameters were randomized)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub randomization_log: Option<crate::render::effect_randomizer::RandomizationLog>,
@@ -98,7 +98,7 @@ impl GenerationRecord {
     /// Create a new generation record with the current timestamp
     pub fn new(file_name: String, seed: String) -> Self {
         let timestamp = Local::now().to_rfc3339();
-        
+
         Self {
             timestamp,
             file_name,
@@ -166,12 +166,7 @@ impl Default for SimulationConfig {
 
 impl Default for OrbitInfo {
     fn default() -> Self {
-        Self {
-            selected_index: 0,
-            weighted_score: 0.0,
-            total_candidates: 0,
-            discarded_count: 0,
-        }
+        Self { selected_index: 0, weighted_score: 0.0, total_candidates: 0, discarded_count: 0 }
     }
 }
 
@@ -237,11 +232,8 @@ impl GenerationLogger {
         let mut records = self.load_records();
         records.push(record.clone());
 
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&self.log_file_path)?;
+        let file =
+            OpenOptions::new().write(true).create(true).truncate(true).open(&self.log_file_path)?;
 
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, &records)
@@ -286,7 +278,8 @@ impl GenerationLogger {
 
     /// If the log file is corrupt, save a backup so data isn't silently lost.
     fn backup_corrupt_log(&self, contents: &str) {
-        let backup_path = format!("{}.corrupt.{}", self.log_file_path, chrono::Utc::now().timestamp());
+        let backup_path =
+            format!("{}.corrupt.{}", self.log_file_path, chrono::Utc::now().timestamp());
         if let Ok(mut f) = File::create(&backup_path) {
             let _ = f.write_all(contents.as_bytes());
             warn!("Corrupt log backed up to {}", backup_path);
@@ -308,10 +301,8 @@ mod tests {
 
     fn temp_paths(tag: &str) -> (String, String) {
         let dir = std::env::temp_dir();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let ts =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let log = dir.join(format!("test_gen_log_{tag}_{ts}.json")).to_string_lossy().to_string();
         let lock = format!("{log}.lock");
         (log, lock)

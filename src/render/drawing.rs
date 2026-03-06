@@ -2,17 +2,18 @@
 
 use super::color::OklabColor;
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
-use spectral_constants::{LAMBDA_START, LAMBDA_END};
 use rayon::prelude::*;
 use smallvec::SmallVec;
+use spectral_constants::{LAMBDA_END, LAMBDA_START};
 
-pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 /// Convert OkLab hue to wavelength with perceptually uniform distribution.
-/// 
+///
 /// This mapping ensures that the full visible spectrum (380-700nm) is utilized,
 /// providing rich color diversity across blues, greens, yellows, oranges, and reds.
-/// 
+///
 /// The mapping is designed to align with perceptual color relationships:
 /// - Red hues (around 0°) map to long wavelengths (650-700nm)
 /// - Yellow hues (around 60°) map to yellow wavelengths (570-590nm)
@@ -24,13 +25,13 @@ pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool = std::sync::
 pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
     // Calculate hue angle in radians (-π to +π)
     let hue_rad = b.atan2(a);
-    
+
     // Convert to degrees (0 to 360)
     let mut hue_deg = hue_rad.to_degrees();
     if hue_deg < 0.0 {
         hue_deg += 360.0;
     }
-    
+
     // Map hue to wavelength using a perceptually uniform distribution
     // This mapping is designed to maximize color variety and align with
     // the natural color spectrum while accounting for OkLab's hue distribution
@@ -60,7 +61,7 @@ pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
         // Create smooth transition back to red
         380.0 + ((hue_deg - 330.0) / 30.0) * 320.0
     };
-    
+
     // Ensure wavelength is within valid bounds
     wavelength.clamp(LAMBDA_START, LAMBDA_END)
 }
@@ -78,13 +79,9 @@ impl GaussianBlurContext {
         let kernel_len = kernel.len();
         let mut small_kernel = SmallVec::with_capacity(kernel_len);
         small_kernel.extend_from_slice(&kernel);
-        Self { 
-            kernel: small_kernel, 
-            radius,
-            temp_buffer: vec![(0.0, 0.0, 0.0, 0.0); buffer_size],
-        }
+        Self { kernel: small_kernel, radius, temp_buffer: vec![(0.0, 0.0, 0.0, 0.0); buffer_size] }
     }
-    
+
     /// Ensure temp buffer has correct capacity
     fn ensure_capacity(&mut self, size: usize) {
         if self.temp_buffer.len() != size {
@@ -148,7 +145,6 @@ pub fn parallel_blur_2d_rgba(
     });
 }
 
-
 /// Draw anti-aliased line segment for spectral rendering
 /// (Dispersion has been moved to a post-process for massive performance gains and continuous radial aberration)
 #[allow(clippy::too_many_arguments)] // Low-level drawing primitive requires all parameters
@@ -174,7 +170,6 @@ pub fn draw_line_segment_aa_spectral_with_dispersion(
     );
 }
 
-
 /// Internal implementation of spectral line drawing using Z-depth aware SDF Splatting
 #[allow(clippy::too_many_arguments)]
 fn draw_line_segment_aa_spectral_internal(
@@ -196,25 +191,25 @@ fn draw_line_segment_aa_spectral_internal(
     let dx = x1 - x0;
     let dy = y1 - y0;
     let dz = z1 - z0;
-    
+
     let len_sq = dx * dx + dy * dy;
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
-    
+
     // Dynamic line width: faster -> thinner, slower -> thicker
     let base_thickness = 1.2;
     let thickness = (base_thickness / (0.1 + len_3d * 0.5)).clamp(0.2, 4.0);
-    
+
     // Z-depth calculation (center of segment)
     let avg_z = (z0 + z1) * 0.5;
-    
+
     // Depth of field (Circle of Confusion)
     // Assuming focal plane is at Z = 0
     let coc = (avg_z * 0.05).abs();
     let effective_thickness = thickness + coc;
-    
+
     // Maximum extent of the SDF bounding box
     let pad = (effective_thickness * 2.5).ceil() as i32;
-    
+
     let min_x = (x0.min(x1) as i32 - pad).max(0);
     let max_x = (x0.max(x1) as i32 + pad).min(width as i32 - 1);
     let min_y = (y0.min(y1) as i32 - pad).max(0);
@@ -228,13 +223,13 @@ fn draw_line_segment_aa_spectral_internal(
     let (_l1, a1, b1) = col1;
     let wavelength0 = oklab_hue_to_wavelength(a0, b0);
     let wavelength1 = oklab_hue_to_wavelength(a1, b1);
-    
+
     let bin0_f = spectral_constants::wavelength_to_bin(wavelength0);
     let bin1_f = spectral_constants::wavelength_to_bin(wavelength1);
 
     // Energy conservation: wider lines due to DOF should distribute same total energy
     let energy_conservation = thickness / effective_thickness;
-    
+
     // Atmospheric attenuation (fog)
     let depth_fade = (-avg_z.abs() * 0.002).exp().clamp(0.05, 1.0);
     let base_energy_mult = hdr_scale * depth_fade as f64 * energy_conservation as f64;
@@ -243,33 +238,30 @@ fn draw_line_segment_aa_spectral_internal(
         for px in min_x..=max_x {
             let pax = px as f32 - x0;
             let pay = py as f32 - y0;
-            
-            let h = if len_sq > 1e-6 {
-                ((pax * dx + pay * dy) / len_sq).clamp(0.0, 1.0)
-            } else {
-                0.5
-            };
-            
+
+            let h =
+                if len_sq > 1e-6 { ((pax * dx + pay * dy) / len_sq).clamp(0.0, 1.0) } else { 0.5 };
+
             let proj_x = pax - dx * h;
             let proj_y = pay - dy * h;
             let dist_sq = proj_x * proj_x + proj_y * proj_y;
-            
+
             // Gaussian SDF falloff
             let energy = (-dist_sq / (effective_thickness * effective_thickness)).exp();
             if energy < 0.01 {
                 continue;
             }
-            
+
             let alpha = alpha0 * (1.0 - h as f64) + alpha1 * h as f64;
             let final_energy = energy as f64 * alpha * base_energy_mult;
-            
+
             let bin_f = bin0_f * (1.0 - h as f64) + bin1_f * h as f64;
             let bin_left = (bin_f.floor() as usize).min(NUM_BINS - 1);
             let bin_right = (bin_left + 1).min(NUM_BINS - 1);
             let w_right = bin_f.fract();
-            
+
             let idx = py as usize * width as usize + px as usize;
-            
+
             if bin_right == bin_left {
                 accum[idx][bin_left] += final_energy;
             } else {
@@ -283,11 +275,29 @@ fn draw_line_segment_aa_spectral_internal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oklab::linear_srgb_to_oklab;
+    use crate::spectrum::BIN_COMBINED_LUT;
+    use std::sync::atomic::Ordering;
+
+    fn wavelength_to_oklab(wavelength_nm: f64, intensity: f64) -> (f64, f64, f64) {
+        let bin_f = spectral_constants::wavelength_to_bin(wavelength_nm);
+        let left = bin_f.floor() as usize;
+        let right = (left + 1).min(NUM_BINS - 1);
+        let mix = bin_f.fract();
+        let (lr, lg, lb, _) = BIN_COMBINED_LUT[left];
+        let (rr, rg, rb, _) = BIN_COMBINED_LUT[right];
+        let r = (lr * (1.0 - mix) + rr * mix) * intensity;
+        let g = (lg * (1.0 - mix) + rg * mix) * intensity;
+        let b = (lb * (1.0 - mix) + rb * mix) * intensity;
+        linear_srgb_to_oklab(r, g, b)
+    }
 
     #[test]
     fn test_dispersion_boost_default_enabled() {
-        assert!(DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed),
-            "dispersion boost should be enabled by default");
+        assert!(
+            DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed),
+            "dispersion boost should be enabled by default"
+        );
     }
 
     #[test]
@@ -297,8 +307,10 @@ mod tests {
             let a = 0.15 * rad.cos();
             let b = 0.15 * rad.sin();
             let wl = oklab_hue_to_wavelength(a, b);
-            assert!(wl >= 380.0 && wl <= 700.0,
-                "hue {deg}\u{00b0} -> wavelength {wl} out of visible range");
+            assert!(
+                wl >= 380.0 && wl <= 700.0,
+                "hue {deg}\u{00b0} -> wavelength {wl} out of visible range"
+            );
         }
     }
 

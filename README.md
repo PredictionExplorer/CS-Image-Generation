@@ -41,7 +41,7 @@ Output lands in `pics/` (PNG) and `vids/` (MP4).
 # Custom resolution and seed
 ./target/release/three_body_problem --seed 0x46205528 --width 2560 --height 1440
 
-# Render a single PNG frame (skip video)
+# Render the final accumulated PNG preview (skip video)
 ./target/release/three_body_problem --seed 0x123 --test-frame
 
 # Fast encode with hardware acceleration (macOS VideoToolbox)

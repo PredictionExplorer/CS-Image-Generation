@@ -61,7 +61,7 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
     for i in 0..NUM_BINS {
         let (r, g, b) = wavelength_to_rgb(wavelength_nm_for_bin(i));
         let lambda = wavelength_nm_for_bin(i);
-        
+
         // Compute tone-mapping strength inline
         let k = if lambda < 450.0 {
             2.2 + 0.3 * (450.0 - lambda) / 70.0
@@ -76,7 +76,7 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
         } else {
             1.2 - 0.2 * (lambda - 650.0) / 50.0
         };
-        
+
         arr[i] = (r, g, b, k);
     }
     arr
@@ -99,11 +99,7 @@ pub fn spd_to_rgba(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 mod tests {
     use super::*;
 
-    fn assert_tuple_bits_eq(
-        lhs: (f64, f64, f64, f64),
-        rhs: (f64, f64, f64, f64),
-        label: &str,
-    ) {
+    fn assert_tuple_bits_eq(lhs: (f64, f64, f64, f64), rhs: (f64, f64, f64, f64), label: &str) {
         assert_eq!(lhs.0.to_bits(), rhs.0.to_bits(), "{label}: R differs");
         assert_eq!(lhs.1.to_bits(), rhs.1.to_bits(), "{label}: G differs");
         assert_eq!(lhs.2.to_bits(), rhs.2.to_bits(), "{label}: B differs");

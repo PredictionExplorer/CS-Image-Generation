@@ -162,22 +162,21 @@ pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.8;
 /// Boosted dispersion for wider rainbow trails
 pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 1.1;
 
-
 /// Velocity-based HDR boost factor - multiplies HDR scale at high velocities
 /// 1.0 = no boost, 2.0 = double brightness at max velocity
-pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 8.0;  // Increased from 2.5 for dramatic flares
+pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 8.0; // Increased from 2.5 for dramatic flares
 
 /// Velocity threshold for HDR boost (normalized units per timestep)
 /// Velocities above this get maximum boost
-pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15;  // Lowered from 0.3 to activate earlier
+pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15; // Lowered from 0.3 to activate earlier
 
 /// Energy density threshold for wavelength shift (normalized energy)
 /// Pixels above this threshold shift toward red (heat)
-pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.08;  // Lowered from 0.25 to affect more pixels
+pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.08; // Lowered from 0.25 to affect more pixels
 
 /// Wavelength shift strength (fraction of bin to shift per density unit)
 /// Higher values create stronger red-shift in high-energy regions
-pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.75;  // Increased from 0.35 for stronger heat effect
+pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.75; // Increased from 0.35 for stronger heat effect
 
 // ========== Video Encoding Constants ==========
 
@@ -190,6 +189,12 @@ pub const DEFAULT_VIDEO_FPS: u32 = 60;
 
 /// Default target duration in frames (~30 seconds at 60 FPS)
 pub const DEFAULT_TARGET_FRAMES: u32 = 1800;
+
+/// Histogram sampling budget for still/image exposure analysis.
+///
+/// This is intentionally much lower than `DEFAULT_TARGET_FRAMES` because pass 1
+/// only needs representative luminance coverage, not full video temporal density.
+pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
 
 /// Default video codec (legacy, no longer used - now using H.265)
 #[allow(dead_code)]
@@ -216,4 +221,3 @@ pub const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
 
 /// Percentage conversion factor
 pub const PERCENT_FACTOR: f64 = 100.0;
-

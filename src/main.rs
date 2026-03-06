@@ -77,7 +77,7 @@ struct Args {
     #[arg(long, default_value_t = 0.990)]
     clip_white: f64,
 
-    /// Test mode: render only the first frame as PNG and exit (skips video generation)
+    /// Test mode: render the final accumulated PNG preview and exit (skips video generation)
     #[arg(long, default_value_t = false)]
     test_frame: bool,
 
@@ -174,7 +174,6 @@ struct Args {
     log_level: String,
 
     // ==== Effect Control Flags (All effects enabled by default) ====
-    
     /// Disable ALL post-processing effects (show pure spectral rendering + basic bloom)
     #[arg(long, default_value_t = false)]
     disable_all_effects: bool,
@@ -236,7 +235,6 @@ struct Args {
     disable_temporal_smoothing: bool,
 
     // ==== Museum Quality Enhancements (all enabled by default) ====
-
     /// Disable ALL museum-quality enhancements at once (classic rendering)
     #[arg(long, default_value_t = false)]
     no_enhancements: bool,
@@ -266,7 +264,6 @@ struct Args {
     no_dispersion_boost: bool,
 
     // ==== Bloom & Glow Parameters ====
-    
     /// Gaussian blur strength (if not specified, randomized in range 4.0-18.0)
     #[arg(long)]
     param_blur_strength: Option<f64>,
@@ -312,7 +309,6 @@ struct Args {
     param_glow_saturation_boost: Option<f64>,
 
     // ==== Chromatic Bloom Parameters ====
-    
     /// Chromatic bloom strength (if not specified, randomized in range 0.35-0.85)
     #[arg(long)]
     param_chromatic_bloom_strength: Option<f64>,
@@ -330,13 +326,11 @@ struct Args {
     param_chromatic_bloom_threshold: Option<f64>,
 
     // ==== Perceptual Blur Parameters ====
-    
     /// Perceptual blur strength (if not specified, randomized in range 0.35-0.85)
     #[arg(long)]
     param_perceptual_blur_strength: Option<f64>,
 
     // ==== Color Grading Parameters ====
-    
     /// Color grading strength (if not specified, randomized in range 0.0-0.75)
     #[arg(long)]
     param_color_grade_strength: Option<f64>,
@@ -362,7 +356,6 @@ struct Args {
     param_tone_curve_strength: Option<f64>,
 
     // ==== Gradient Mapping Parameters ====
-    
     /// Gradient map strength (if not specified, randomized in range 0.40-1.0)
     #[arg(long)]
     param_gradient_map_strength: Option<f64>,
@@ -376,7 +369,6 @@ struct Args {
     param_gradient_map_palette: Option<usize>,
 
     // ==== Opalescence Parameters ====
-    
     /// Opalescence strength (if not specified, randomized in range 0.0-0.35)
     #[arg(long)]
     param_opalescence_strength: Option<f64>,
@@ -390,7 +382,6 @@ struct Args {
     param_opalescence_layers: Option<usize>,
 
     // ==== Champlevé Parameters ====
-    
     /// Champlevé flow alignment (if not specified, randomized in range 0.20-0.85)
     #[arg(long)]
     param_champleve_flow_alignment: Option<f64>,
@@ -412,7 +403,6 @@ struct Args {
     param_champleve_interior_lift: Option<f64>,
 
     // ==== Aether Parameters ====
-    
     /// Aether flow alignment (if not specified, randomized in range 0.30-0.95)
     #[arg(long)]
     param_aether_flow_alignment: Option<f64>,
@@ -430,7 +420,6 @@ struct Args {
     param_aether_caustic_strength: Option<f64>,
 
     // ==== Micro-Contrast Parameters ====
-    
     /// Micro-contrast strength (if not specified, randomized in range 0.10-0.45)
     #[arg(long)]
     param_micro_contrast_strength: Option<f64>,
@@ -440,7 +429,6 @@ struct Args {
     param_micro_contrast_radius: Option<usize>,
 
     // ==== Edge Luminance Parameters ====
-    
     /// Edge luminance strength (if not specified, randomized in range 0.08-0.40)
     #[arg(long)]
     param_edge_luminance_strength: Option<f64>,
@@ -454,7 +442,6 @@ struct Args {
     param_edge_luminance_brightness_boost: Option<f64>,
 
     // ==== Atmospheric Depth Parameters ====
-    
     /// Atmospheric depth strength (if not specified, randomized in range 0.0-0.45)
     #[arg(long)]
     param_atmospheric_depth_strength: Option<f64>,
@@ -480,7 +467,6 @@ struct Args {
     param_atmospheric_fog_color_b: Option<f64>,
 
     // ==== Fine Texture Parameters ====
-    
     /// Fine texture strength (if not specified, randomized in range 0.02-0.25)
     #[arg(long)]
     param_fine_texture_strength: Option<f64>,
@@ -494,13 +480,11 @@ struct Args {
     param_fine_texture_contrast: Option<f64>,
 
     // ==== HDR Parameters ====
-    
     /// HDR scale (if not specified, randomized in range 0.06-0.25)
     #[arg(long)]
     param_hdr_scale: Option<f64>,
 
     // ==== Clipping Parameters ====
-    
     /// Black point clipping (if not specified, randomized in range 0.005-0.025, constrained < clip_white)
     #[arg(long)]
     param_clip_black: Option<f64>,
@@ -510,7 +494,6 @@ struct Args {
     param_clip_white: Option<f64>,
 
     // ==== Nebula Parameters ====
-    
     /// Nebula strength (if not specified, randomized in range 0.0-0.30)
     #[arg(long)]
     param_nebula_strength: Option<f64>,
@@ -551,21 +534,68 @@ fn build_randomizable_config(args: &Args) -> render::randomizable_config::Random
     use render::randomizable_config::RandomizableEffectConfig;
 
     RandomizableEffectConfig {
-
         // Effect enables (convert disable flags to enable options)
-        enable_bloom: if args.disable_all_effects || args.disable_bloom { Some(false) } else { None },
+        enable_bloom: if args.disable_all_effects || args.disable_bloom {
+            Some(false)
+        } else {
+            None
+        },
         enable_glow: if args.disable_all_effects || args.disable_glow { Some(false) } else { None },
-        enable_chromatic_bloom: if args.disable_all_effects || args.disable_chromatic_bloom { Some(false) } else { None },
-        enable_perceptual_blur: if args.disable_all_effects || args.disable_perceptual_blur { Some(false) } else { None },
-        enable_micro_contrast: if args.disable_all_effects || args.disable_micro_contrast { Some(false) } else { None },
-        enable_gradient_map: if args.disable_all_effects || args.disable_gradient_map { Some(false) } else { None },
-        enable_color_grade: if args.disable_all_effects || args.disable_color_grade { Some(false) } else { None },
-        enable_champleve: if args.disable_all_effects || args.disable_champleve { Some(false) } else { None },
-        enable_aether: if args.disable_all_effects || args.disable_aether { Some(false) } else { None },
-        enable_opalescence: if args.disable_all_effects || args.disable_opalescence { Some(false) } else { None },
-        enable_edge_luminance: if args.disable_all_effects || args.disable_edge_luminance { Some(false) } else { None },
-        enable_atmospheric_depth: if args.disable_all_effects || args.disable_atmospheric_depth { Some(false) } else { None },
-        enable_fine_texture: if args.disable_all_effects || args.disable_fine_texture { Some(false) } else { None },
+        enable_chromatic_bloom: if args.disable_all_effects || args.disable_chromatic_bloom {
+            Some(false)
+        } else {
+            None
+        },
+        enable_perceptual_blur: if args.disable_all_effects || args.disable_perceptual_blur {
+            Some(false)
+        } else {
+            None
+        },
+        enable_micro_contrast: if args.disable_all_effects || args.disable_micro_contrast {
+            Some(false)
+        } else {
+            None
+        },
+        enable_gradient_map: if args.disable_all_effects || args.disable_gradient_map {
+            Some(false)
+        } else {
+            None
+        },
+        enable_color_grade: if args.disable_all_effects || args.disable_color_grade {
+            Some(false)
+        } else {
+            None
+        },
+        enable_champleve: if args.disable_all_effects || args.disable_champleve {
+            Some(false)
+        } else {
+            None
+        },
+        enable_aether: if args.disable_all_effects || args.disable_aether {
+            Some(false)
+        } else {
+            None
+        },
+        enable_opalescence: if args.disable_all_effects || args.disable_opalescence {
+            Some(false)
+        } else {
+            None
+        },
+        enable_edge_luminance: if args.disable_all_effects || args.disable_edge_luminance {
+            Some(false)
+        } else {
+            None
+        },
+        enable_atmospheric_depth: if args.disable_all_effects || args.disable_atmospheric_depth {
+            Some(false)
+        } else {
+            None
+        },
+        enable_fine_texture: if args.disable_all_effects || args.disable_fine_texture {
+            Some(false)
+        } else {
+            None
+        },
 
         // Bloom & Glow parameters
         blur_strength: args.param_blur_strength,
@@ -656,6 +686,14 @@ fn build_randomizable_config(args: &Args) -> render::randomizable_config::Random
     }
 }
 
+fn resolve_bloom_mode(args: &Args) -> render::BloomMode {
+    if args.disable_all_effects || args.disable_bloom {
+        render::BloomMode::None
+    } else {
+        render::BloomMode::from_arg(&args.bloom_mode)
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -673,18 +711,21 @@ fn main() -> Result<()> {
         dispersion_boost: !args.no_enhancements && !args.no_dispersion_boost,
     };
 
-    crate::spectrum_simd::SAT_BOOST_ENABLED.store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
-    crate::render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
-    crate::render::drawing::DISPERSION_BOOST_ENABLED.store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
+    crate::spectrum_simd::SAT_BOOST_ENABLED
+        .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
+    crate::render::ACES_TWEAK_ENABLED
+        .store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
+    crate::render::drawing::DISPERSION_BOOST_ENABLED
+        .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
     // Setup
     app::setup_directories()?;
     error::validation::validate_dimensions(args.width, args.height)?;
-    
+
     let seed_bytes = app::parse_seed(&args.seed)?;
     let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
     let noise_seed = app::derive_noise_seed(&seed_bytes);
-    
+
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
         args.min_mass,
@@ -696,25 +737,23 @@ fn main() -> Result<()> {
     // Resolve effect configuration (randomize unspecified parameters)
     info!("Resolving effect configuration...");
     let randomizable_config = build_randomizable_config(&args);
-    let (resolved_effect_config, randomization_log) = randomizable_config.resolve(
-        &mut rng,
-        args.width,
-        args.height,
-    );
-    
-    let num_randomized = randomization_log.effects.iter()
+    let (resolved_effect_config, randomization_log) =
+        randomizable_config.resolve(&mut rng, args.width, args.height);
+
+    let num_randomized = randomization_log
+        .effects
+        .iter()
         .map(|e| e.parameters.iter().filter(|p| p.was_randomized).count())
         .sum::<usize>();
-    
+
     info!(
         "   => Resolved {} effects ({} parameters randomized, {} explicit)",
         randomization_log.effects.len(),
         num_randomized,
-        randomization_log.effects.iter()
-            .map(|e| e.parameters.len())
-            .sum::<usize>() - num_randomized
+        randomization_log.effects.iter().map(|e| e.parameters.len()).sum::<usize>()
+            - num_randomized
     );
-    
+
     // Stage 1: Borda selection
     let (best_bodies, best_info) = app::run_borda_selection(
         &mut rng,
@@ -744,25 +783,30 @@ fn main() -> Result<()> {
     };
 
     // Stage 3: Generate colors
-    let (colors, body_alphas) = app::generate_colors(
-        &mut rng,
-        args.num_steps_sim,
-        args.alpha_denom,
-        &enhancements,
-    );
+    let (colors, body_alphas) =
+        app::generate_colors(&mut rng, args.num_steps_sim, args.alpha_denom, &enhancements);
 
     // Using OKLab color space
     info!("   => Using OKLab color space for accumulation");
 
     // Stage 4: Bounding box
     info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new(args.width, args.height, &positions, enhancements.aspect_correction);
+    let render_ctx = render::context::RenderContext::new(
+        args.width,
+        args.height,
+        &positions,
+        enhancements.aspect_correction,
+    );
     let bbox = render_ctx.bounds();
-    info!("   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]", bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y);
+    info!(
+        "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",
+        bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y
+    );
 
     // Configure rendering from resolved parameters
     let render_config = RenderConfig {
         hdr_scale: if args.hdr_mode == "auto" { resolved_effect_config.hdr_scale } else { 1.0 },
+        bloom_mode: resolve_bloom_mode(&args),
     };
 
     // Stage 5-6: Build histogram and compute levels
@@ -798,7 +842,7 @@ fn main() -> Result<()> {
 
     // Normal mode: Render full video
     let output_vid = format!("vids/{}.mp4", base_filename);
-    
+
     app::render_video(
         &positions,
         &colors,
@@ -818,7 +862,7 @@ fn main() -> Result<()> {
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",
         best_info.total_score_weighted
     );
-    
+
     // Log generation parameters for reproducibility
     let app_config = app::AppConfig {
         seed: args.seed.clone(),
@@ -855,7 +899,7 @@ fn main() -> Result<()> {
         chaos_weight: args.chaos_weight,
         equil_weight: args.equil_weight,
     };
-    
+
     app::log_generation(
         &app_config,
         &base_filename,
@@ -865,6 +909,6 @@ fn main() -> Result<()> {
         &best_info,
         Some(&randomization_log),
     );
-    
+
     Ok(())
 }

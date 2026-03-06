@@ -47,12 +47,8 @@ impl<'a> EffectRandomizer<'a> {
     ) -> (f64, f64) {
         let val_a = self.randomize_float(desc_a);
         let val_b = self.randomize_float(desc_b);
-        
-        if val_a < val_b {
-            (val_a, val_b)
-        } else {
-            (val_b, val_a)
-        }
+
+        if val_a < val_b { (val_a, val_b) } else { (val_b, val_a) }
     }
 
     /// Generate a random float in [min, max] using the RNG.
@@ -99,12 +95,7 @@ pub struct RandomizedParameter {
 
 impl RandomizationRecord {
     pub fn new(effect_name: String, enabled: bool, was_randomized: bool) -> Self {
-        Self {
-            effect_name,
-            enabled,
-            was_randomized,
-            parameters: Vec::new(),
-        }
+        Self { effect_name, enabled, was_randomized, parameters: Vec::new() }
     }
 
     pub fn add_float(&mut self, name: String, value: f64, was_randomized: bool, range: (f64, f64)) {
@@ -116,7 +107,13 @@ impl RandomizationRecord {
         });
     }
 
-    pub fn add_int(&mut self, name: String, value: usize, was_randomized: bool, range: (usize, usize)) {
+    pub fn add_int(
+        &mut self,
+        name: String,
+        value: usize,
+        was_randomized: bool,
+        range: (usize, usize),
+    ) {
         self.parameters.push(RandomizedParameter {
             name,
             value: value.to_string(),
@@ -155,48 +152,57 @@ mod tests {
     fn test_randomize_enable_half() {
         let mut rng = make_test_rng();
         let mut randomizer = EffectRandomizer::new(&mut rng);
-        
+
         let mut count_true = 0;
         for _ in 0..1000 {
             if randomizer.randomize_enable(0.5) {
                 count_true += 1;
             }
         }
-        
-        assert!(count_true > 400 && count_true < 600,
-            "50% probability produced {} / 1000", count_true);
+
+        assert!(
+            count_true > 400 && count_true < 600,
+            "50% probability produced {} / 1000",
+            count_true
+        );
     }
 
     #[test]
     fn test_randomize_enable_high_probability() {
         let mut rng = make_test_rng();
         let mut randomizer = EffectRandomizer::new(&mut rng);
-        
+
         let mut count_true = 0;
         for _ in 0..1000 {
             if randomizer.randomize_enable(0.80) {
                 count_true += 1;
             }
         }
-        
-        assert!(count_true > 700 && count_true < 900,
-            "80% probability produced {} / 1000", count_true);
+
+        assert!(
+            count_true > 700 && count_true < 900,
+            "80% probability produced {} / 1000",
+            count_true
+        );
     }
 
     #[test]
     fn test_randomize_enable_low_probability() {
         let mut rng = make_test_rng();
         let mut randomizer = EffectRandomizer::new(&mut rng);
-        
+
         let mut count_true = 0;
         for _ in 0..1000 {
             if randomizer.randomize_enable(0.20) {
                 count_true += 1;
             }
         }
-        
-        assert!(count_true > 100 && count_true < 300,
-            "20% probability produced {} / 1000", count_true);
+
+        assert!(
+            count_true > 100 && count_true < 300,
+            "20% probability produced {} / 1000",
+            count_true
+        );
     }
 
     #[test]
@@ -217,14 +223,14 @@ mod tests {
     fn test_randomize_float_range() {
         let mut rng = make_test_rng();
         let mut randomizer = EffectRandomizer::new(&mut rng);
-        
+
         let descriptor = FloatParamDescriptor {
             name: "test",
             min: 10.0,
             max: 20.0,
             description: "Test parameter",
         };
-        
+
         for _ in 0..100 {
             let value = randomizer.randomize_float(&descriptor);
             assert!((10.0..=20.0).contains(&value));
@@ -235,14 +241,14 @@ mod tests {
     fn test_randomize_ordered_pair() {
         let mut rng = make_test_rng();
         let mut randomizer = EffectRandomizer::new(&mut rng);
-        
+
         let desc = FloatParamDescriptor {
             name: "test",
             min: 0.0,
             max: 1.0,
             description: "Test parameter",
         };
-        
+
         for _ in 0..100 {
             let (a, b) = randomizer.randomize_ordered_pair(&desc, &desc);
             assert!(a < b, "First value must be less than second: {} < {}", a, b);

@@ -204,23 +204,26 @@ pub fn get_positions_with_early_exit(
     // Ensure the initial state is expressed in the centre-of-mass (COM) frame
     shift_bodies_to_com(&mut bodies);
     let dt = crate::render::constants::DEFAULT_DT;
-    
+
     // Warmup phase with periodic escape checks
     const CHECK_INTERVAL: usize = 10000; // Check every 10k steps during warmup
     for step in 0..steps {
         symplectic_step(&mut bodies, dt);
-        
+
         // Early-exit check: detect escaping bodies during warmup
-        if step % CHECK_INTERVAL == 0 && step > 0 && is_definitely_escaping(&bodies, escape_threshold) {
+        if step % CHECK_INTERVAL == 0
+            && step > 0
+            && is_definitely_escaping(&bodies, escape_threshold)
+        {
             return None; // Body escaping, skip this candidate
         }
     }
-    
+
     // Final escape check after warmup
     if is_definitely_escaping(&bodies, escape_threshold) {
         return None;
     }
-    
+
     // Record phase - body configuration is good, record the full trajectory
     let mut b2 = bodies.clone();
     let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
@@ -230,7 +233,7 @@ pub fn get_positions_with_early_exit(
         }
         symplectic_step(&mut b2, dt);
     }
-    
+
     Some(FullSim { positions: all })
 }
 
@@ -378,7 +381,7 @@ pub fn select_best_trajectory(
                 dc.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
-            
+
             // Run simulation with early-exit checks for escaping bodies
             let simr = match get_positions_with_early_exit(b.clone(), steps, th) {
                 Some(result) => result,
@@ -388,26 +391,26 @@ pub fn select_best_trajectory(
                     return None;
                 }
             };
-            
+
             let pos = simr.positions;
             let m1 = b[0].mass;
             let m2 = b[1].mass;
             let m3 = b[2].mass;
-            
+
             // Compute quality metrics
             let c = non_chaoticness(m1, m2, m3, &pos);
             let eq = equilateralness_score(&pos);
-            
+
             // Early rejection: if both metrics are terrible, skip
             // This saves time on Borda ranking for clearly unsuitable candidates
-            const MIN_VIABLE_CHAOS: f64 = 0.1;     // Below this, too chaotic
+            const MIN_VIABLE_CHAOS: f64 = 0.1; // Below this, too chaotic
             const MIN_VIABLE_EQUILATERAL: f64 = 0.01; // Below this, too linear
-            
+
             if c < MIN_VIABLE_CHAOS && eq < MIN_VIABLE_EQUILATERAL {
                 dc.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
-            
+
             Some((
                 TrajectoryResult {
                     chaos: c,
@@ -491,8 +494,7 @@ mod tests {
         for i in 0..500 {
             let a = rng1.next_f64();
             let b = rng2.next_f64();
-            assert_eq!(a.to_bits(), b.to_bits(),
-                "RNG diverged at step {i}: {a} vs {b}");
+            assert_eq!(a.to_bits(), b.to_bits(), "RNG diverged at step {i}: {a} vs {b}");
         }
     }
 
@@ -527,12 +529,9 @@ mod tests {
             for step in 0..run1.positions[body].len() {
                 let p1 = run1.positions[body][step];
                 let p2 = run2.positions[body][step];
-                assert_eq!(p1[0].to_bits(), p2[0].to_bits(),
-                    "body {body} step {step} X diverged");
-                assert_eq!(p1[1].to_bits(), p2[1].to_bits(),
-                    "body {body} step {step} Y diverged");
-                assert_eq!(p1[2].to_bits(), p2[2].to_bits(),
-                    "body {body} step {step} Z diverged");
+                assert_eq!(p1[0].to_bits(), p2[0].to_bits(), "body {body} step {step} X diverged");
+                assert_eq!(p1[1].to_bits(), p2[1].to_bits(), "body {body} step {step} Y diverged");
+                assert_eq!(p1[2].to_bits(), p2[2].to_bits(), "body {body} step {step} Z diverged");
             }
         }
     }

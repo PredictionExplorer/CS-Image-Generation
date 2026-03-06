@@ -74,7 +74,7 @@ mod tests {
             vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)],
             vec![Vector3::new(0.0, 1.0, 0.0), Vector3::new(1.0, 1.0, 0.0)],
         ];
-        
+
         let calc = VelocityHdrCalculator::new(&positions, 0.001);
         let mult = calc.compute_segment_multiplier(0, 0, 1);
         assert!(mult > 1.0, "Fast movement should boost HDR");

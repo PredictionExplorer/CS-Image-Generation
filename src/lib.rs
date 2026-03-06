@@ -19,4 +19,4 @@ pub mod spectrum_simd;
 pub mod utils;
 
 // Re-export common types for convenience
-pub use error::{AppError, ConfigError, RenderError, SimulationError, Result};
+pub use error::{AppError, ConfigError, RenderError, Result, SimulationError};

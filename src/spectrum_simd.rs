@@ -6,7 +6,7 @@
 //! - aarch64 NEON: ~2x speedup using 128-bit FMA (Apple Silicon, ARM servers)
 //! - Scalar fallback: portable implementation for all other platforms
 
-use crate::spectrum::{NUM_BINS, BIN_COMBINED_LUT};
+use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -33,10 +33,7 @@ pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 }
 
 #[inline]
-fn spd_to_rgba_simd_with_sat_boost(
-    spd: &[f64; NUM_BINS],
-    boosted: bool,
-) -> (f64, f64, f64, f64) {
+fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     {
         unsafe { spd_to_rgba_avx2(spd, boosted) }
@@ -68,10 +65,7 @@ pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) 
 }
 
 #[inline]
-fn spd_to_rgba_scalar_with_sat_boost(
-    spd: &[f64; NUM_BINS],
-    boosted: bool,
-) -> (f64, f64, f64, f64) {
+fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     let mut r = 0.0;
     let mut g = 0.0;
     let mut b = 0.0;
@@ -164,9 +158,9 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let zero = _mm256_setzero_pd();
         let neg_x = _mm256_sub_pd(zero, x_safe);
 
-        let log2_e  = _mm256_set1_pd(1.442_695_040_888_963_4);
-        let ln2_hi  = _mm256_set1_pd(6.931_471_803_691_238e-1);
-        let ln2_lo  = _mm256_set1_pd(1.908_214_929_270_585e-10);
+        let log2_e = _mm256_set1_pd(1.442_695_040_888_963_4);
+        let ln2_hi = _mm256_set1_pd(6.931_471_803_691_238e-1);
+        let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
 
         let t = _mm256_mul_pd(neg_x, log2_e);
         // 0x08 = _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC
@@ -193,9 +187,10 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
 
         let n_i32 = _mm256_cvtpd_epi32(n);
         let n_i64 = _mm256_cvtepi32_epi64(n_i32);
-        let pow2n = _mm256_castsi256_pd(
-            _mm256_slli_epi64(_mm256_add_epi64(n_i64, _mm256_set1_epi64x(1023)), 52),
-        );
+        let pow2n = _mm256_castsi256_pd(_mm256_slli_epi64(
+            _mm256_add_epi64(n_i64, _mm256_set1_epi64x(1023)),
+            52,
+        ));
 
         let exp_neg = _mm256_mul_pd(exp_r, pow2n);
         _mm256_sub_pd(one, exp_neg)
@@ -330,14 +325,30 @@ mod tests {
     fn assert_simd_scalar_close(spd: &[f64; NUM_BINS], tol: f64, label: &str) {
         let scalar = spd_to_rgba_scalar(spd);
         let simd = spd_to_rgba_simd(spd);
-        assert!((scalar.0 - simd.0).abs() < tol,
-            "{label}: R mismatch scalar={} simd={} (tol={tol})", scalar.0, simd.0);
-        assert!((scalar.1 - simd.1).abs() < tol,
-            "{label}: G mismatch scalar={} simd={} (tol={tol})", scalar.1, simd.1);
-        assert!((scalar.2 - simd.2).abs() < tol,
-            "{label}: B mismatch scalar={} simd={} (tol={tol})", scalar.2, simd.2);
-        assert!((scalar.3 - simd.3).abs() < tol,
-            "{label}: A mismatch scalar={} simd={} (tol={tol})", scalar.3, simd.3);
+        assert!(
+            (scalar.0 - simd.0).abs() < tol,
+            "{label}: R mismatch scalar={} simd={} (tol={tol})",
+            scalar.0,
+            simd.0
+        );
+        assert!(
+            (scalar.1 - simd.1).abs() < tol,
+            "{label}: G mismatch scalar={} simd={} (tol={tol})",
+            scalar.1,
+            simd.1
+        );
+        assert!(
+            (scalar.2 - simd.2).abs() < tol,
+            "{label}: B mismatch scalar={} simd={} (tol={tol})",
+            scalar.2,
+            simd.2
+        );
+        assert!(
+            (scalar.3 - simd.3).abs() < tol,
+            "{label}: A mismatch scalar={} simd={} (tol={tol})",
+            scalar.3,
+            simd.3
+        );
     }
 
     fn assert_in_unit_range(val: f64, name: &str) {
@@ -419,31 +430,58 @@ mod tests {
             [0.001; NUM_BINS],
             [100.0; NUM_BINS],
             // single-bin patterns at first, middle, last
-            {let mut s=[0.0;16]; s[0]=1.0; s},
-            {let mut s=[0.0;16]; s[7]=1.0; s},
-            {let mut s=[0.0;16]; s[15]=1.0; s},
+            {
+                let mut s = [0.0; 16];
+                s[0] = 1.0;
+                s
+            },
+            {
+                let mut s = [0.0; 16];
+                s[7] = 1.0;
+                s
+            },
+            {
+                let mut s = [0.0; 16];
+                s[15] = 1.0;
+                s
+            },
             // two isolated peaks (red + blue)
-            {let mut s=[0.0;16]; s[0]=0.8; s[14]=0.8; s},
+            {
+                let mut s = [0.0; 16];
+                s[0] = 0.8;
+                s[14] = 0.8;
+                s
+            },
             // descending ramp
             {
                 let mut s = [0.0; 16];
-                for i in 0..16 { s[i] = (16 - i) as f64 / 16.0; }
+                for i in 0..16 {
+                    s[i] = (16 - i) as f64 / 16.0;
+                }
                 s
             },
             // ascending ramp
             {
                 let mut s = [0.0; 16];
-                for i in 0..16 { s[i] = (i + 1) as f64 / 16.0; }
+                for i in 0..16 {
+                    s[i] = (i + 1) as f64 / 16.0;
+                }
                 s
             },
             // alternating zero / nonzero
             {
                 let mut s = [0.0; 16];
-                for i in (0..16).step_by(2) { s[i] = 0.5; }
+                for i in (0..16).step_by(2) {
+                    s[i] = 0.5;
+                }
                 s
             },
             // one very large, rest small
-            {let mut s=[0.01;16]; s[5]=500.0; s},
+            {
+                let mut s = [0.01; 16];
+                s[5] = 500.0;
+                s
+            },
             // realistic multi-peak spectrum
             [0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1, 0.0, 0.0],
         ];
@@ -470,8 +508,7 @@ mod tests {
 
     #[test]
     fn test_simd_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2,
-                    0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
         let reference = spd_to_rgba_simd_with_sat_boost(&spd, true);
         for _ in 0..200 {
             let r = spd_to_rgba_simd_with_sat_boost(&spd, true);
@@ -485,8 +522,7 @@ mod tests {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     #[test]
     fn test_avx2_kernel_is_bitwise_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2,
-                    0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
         let reference = unsafe { spd_to_rgba_avx2(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_avx2(&spd, true) };
@@ -502,8 +538,8 @@ mod tests {
     fn test_avx2_vectorized_exp_accuracy() {
         use std::arch::x86_64::*;
         let test_inputs: &[f64] = &[
-            0.0, 1e-15, 1e-10, 1e-5, 0.001, 0.01, 0.1, 0.5,
-            1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 700.0,
+            0.0, 1e-15, 1e-10, 1e-5, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+            500.0, 700.0,
         ];
         for &x in test_inputs {
             let expected = 1.0 - (-x).exp();
@@ -516,16 +552,17 @@ mod tests {
             };
             let abs_err = (result - expected).abs();
             let rel_err = if expected.abs() > 1e-15 { abs_err / expected.abs() } else { abs_err };
-            assert!(rel_err < 1e-10 || abs_err < 1e-15,
-                "vectorized exp error for x={x}: got={result} expected={expected} rel={rel_err:.2e}");
+            assert!(
+                rel_err < 1e-10 || abs_err < 1e-15,
+                "vectorized exp error for x={x}: got={result} expected={expected} rel={rel_err:.2e}"
+            );
         }
     }
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
     #[test]
     fn test_neon_kernel_is_bitwise_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2,
-                    0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
         let reference = unsafe { spd_to_rgba_neon(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_neon(&spd, true) };
@@ -582,42 +619,45 @@ mod tests {
 
         // The spectral sensitivity curves and saturation boost mean uniform
         // energy isn't perfectly neutral, but it should not be highly saturated.
-        assert!(chroma < 0.65,
-            "uniform SPD should be relatively neutral, got chroma={chroma:.4}");
+        assert!(chroma < 0.65, "uniform SPD should be relatively neutral, got chroma={chroma:.4}");
     }
 
     #[test]
     fn test_energy_scaling_preserves_hue() {
         let mut spd_low = [0.0; NUM_BINS];
         let mut spd_high = [0.0; NUM_BINS];
-        spd_low[3] = 0.5;  spd_low[4] = 1.0;
-        spd_high[3] = 2.5; spd_high[4] = 5.0;
+        spd_low[3] = 0.5;
+        spd_low[4] = 1.0;
+        spd_high[3] = 2.5;
+        spd_high[4] = 5.0;
 
         let lo = spd_to_rgba_simd(&spd_low);
         let hi = spd_to_rgba_simd(&spd_high);
 
         let hue = |r: f64, g: f64, b: f64| -> f64 {
             let mx = r.max(g).max(b);
-            if mx < 1e-12 { return 0.0; }
+            if mx < 1e-12 {
+                return 0.0;
+            }
             (r / mx, g / mx, b / mx).0
         };
 
         let hue_lo = hue(lo.0, lo.1, lo.2);
         let hue_hi = hue(hi.0, hi.1, hi.2);
-        assert!((hue_lo - hue_hi).abs() < 0.15,
-            "scaling energy should roughly preserve hue: lo={hue_lo:.4} hi={hue_hi:.4}");
+        assert!(
+            (hue_lo - hue_hi).abs() < 0.15,
+            "scaling energy should roughly preserve hue: lo={hue_lo:.4} hi={hue_hi:.4}"
+        );
     }
 
     #[test]
     fn test_sat_boost_affects_output() {
-        let spd = [0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0,
-                    0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2, 0.0];
+        let spd = [0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2, 0.0];
 
         let boosted = spd_to_rgba_simd_with_sat_boost(&spd, true);
         let unboosted = spd_to_rgba_simd_with_sat_boost(&spd, false);
 
-        assert!(boosted != unboosted,
-            "sat_boost toggle should produce different output");
+        assert!(boosted != unboosted, "sat_boost toggle should produce different output");
         assert_in_unit_range(boosted.0, "boosted.R");
         assert_in_unit_range(unboosted.0, "unboosted.R");
     }
@@ -630,8 +670,11 @@ mod tests {
             let mut spd = [0.0; NUM_BINS];
             spd[8] = e;
             let result = spd_to_rgba_simd(&spd);
-            assert!(result.3 >= prev_alpha,
-                "brightness should be monotonic: e={e} alpha={} prev={prev_alpha}", result.3);
+            assert!(
+                result.3 >= prev_alpha,
+                "brightness should be monotonic: e={e} alpha={} prev={prev_alpha}",
+                result.3
+            );
             prev_alpha = result.3;
         }
     }

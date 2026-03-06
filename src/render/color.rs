@@ -25,7 +25,11 @@ pub fn generate_color_gradient_oklab(
 ) -> Vec<OklabColor> {
     let chroma_base = if chroma_boost { OKLAB_CHROMA_BASE_BOOSTED } else { OKLAB_CHROMA_BASE };
     let chroma_range = if chroma_boost { OKLAB_CHROMA_RANGE_BOOSTED } else { OKLAB_CHROMA_RANGE };
-    let chroma_wave = if chroma_boost { OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED } else { OKLAB_CHROMA_WAVE_AMPLITUDE };
+    let chroma_wave = if chroma_boost {
+        OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED
+    } else {
+        OKLAB_CHROMA_WAVE_AMPLITUDE
+    };
 
     let mut colors = Vec::with_capacity(length);
 
@@ -98,9 +102,12 @@ pub fn generate_body_color_sequences(
     // #14: randomize hue wave frequency per seed for unique color rhythm
     let hue_wave_freq = 1.8 + rng.next_f64() * 2.2; // [1.8, 4.0]
 
-    let b1 = generate_color_gradient_oklab(rng, length, 0, base_hue_offset, chroma_boost, hue_wave_freq);
-    let b2 = generate_color_gradient_oklab(rng, length, 1, base_hue_offset, chroma_boost, hue_wave_freq);
-    let b3 = generate_color_gradient_oklab(rng, length, 2, base_hue_offset, chroma_boost, hue_wave_freq);
+    let b1 =
+        generate_color_gradient_oklab(rng, length, 0, base_hue_offset, chroma_boost, hue_wave_freq);
+    let b2 =
+        generate_color_gradient_oklab(rng, length, 1, base_hue_offset, chroma_boost, hue_wave_freq);
+    let b3 =
+        generate_color_gradient_oklab(rng, length, 2, base_hue_offset, chroma_boost, hue_wave_freq);
 
     let body_alphas = if alpha_variation {
         // Shuffle [13M, 15M, 17M] using the RNG for per-body depth hierarchy
@@ -110,7 +117,10 @@ pub fn generate_body_color_sequences(
             denoms.swap(i, j);
         }
         let alphas = vec![1.0 / denoms[0], 1.0 / denoms[1], 1.0 / denoms[2]];
-        info!("   => Per-body alpha variation: {:.3e}, {:.3e}, {:.3e}", alphas[0], alphas[1], alphas[2]);
+        info!(
+            "   => Per-body alpha variation: {:.3e}, {:.3e}, {:.3e}",
+            alphas[0], alphas[1], alphas[2]
+        );
         alphas
     } else {
         let alpha_value = 1.0 / alpha_denom as f64;
@@ -130,7 +140,14 @@ mod tests {
     fn test_color_gradient_generation() {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 1.0, 1.0, 1.0, 1.0);
         let length = 100;
-        let colors = generate_color_gradient_oklab(&mut rng, length, 0, BASE_HUE_DRIFT, false, HUE_WAVE_FREQUENCY);
+        let colors = generate_color_gradient_oklab(
+            &mut rng,
+            length,
+            0,
+            BASE_HUE_DRIFT,
+            false,
+            HUE_WAVE_FREQUENCY,
+        );
 
         assert_eq!(colors.len(), length);
         for (l, a, b) in &colors {
@@ -151,18 +168,23 @@ mod tests {
         let avg_chroma = |cols: &[(f64, f64, f64)]| {
             cols.iter().map(|(_, a, b)| (a * a + b * b).sqrt()).sum::<f64>() / cols.len() as f64
         };
-        assert!(avg_chroma(&boosted) > avg_chroma(&normal),
-            "Boosted chroma should produce higher average saturation");
+        assert!(
+            avg_chroma(&boosted) > avg_chroma(&normal),
+            "Boosted chroma should produce higher average saturation"
+        );
     }
 
     #[test]
     fn test_body_color_sequences_uniform_alpha() {
         let mut rng = Sha3RandomByteStream::new(&[5, 6, 7, 8], 1.0, 1.0, 1.0, 1.0);
-        let (colors, alphas) = generate_body_color_sequences(&mut rng, 50, 15_000_000, false, false);
+        let (colors, alphas) =
+            generate_body_color_sequences(&mut rng, 50, 15_000_000, false, false);
 
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas.len(), 3);
-        for &a in &alphas { assert_eq!(a, 1.0 / 15_000_000.0); }
+        for &a in &alphas {
+            assert_eq!(a, 1.0 / 15_000_000.0);
+        }
     }
 
     #[test]
@@ -181,23 +203,25 @@ mod tests {
         let steps = 200;
 
         let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
-        let (colors1, alphas1) = generate_body_color_sequences(&mut rng1, steps, 15_000_000, true, true);
+        let (colors1, alphas1) =
+            generate_body_color_sequences(&mut rng1, steps, 15_000_000, true, true);
 
         let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
-        let (colors2, alphas2) = generate_body_color_sequences(&mut rng2, steps, 15_000_000, true, true);
+        let (colors2, alphas2) =
+            generate_body_color_sequences(&mut rng2, steps, 15_000_000, true, true);
 
         for body in 0..3 {
-            assert_eq!(alphas1[body].to_bits(), alphas2[body].to_bits(),
-                "alpha for body {body} diverged");
+            assert_eq!(
+                alphas1[body].to_bits(),
+                alphas2[body].to_bits(),
+                "alpha for body {body} diverged"
+            );
             for step in 0..steps {
                 let (l1, a1, b1) = colors1[body][step];
                 let (l2, a2, b2) = colors2[body][step];
-                assert_eq!(l1.to_bits(), l2.to_bits(),
-                    "body {body} step {step} L diverged");
-                assert_eq!(a1.to_bits(), a2.to_bits(),
-                    "body {body} step {step} a diverged");
-                assert_eq!(b1.to_bits(), b2.to_bits(),
-                    "body {body} step {step} b diverged");
+                assert_eq!(l1.to_bits(), l2.to_bits(), "body {body} step {step} L diverged");
+                assert_eq!(a1.to_bits(), a2.to_bits(), "body {body} step {step} a diverged");
+                assert_eq!(b1.to_bits(), b2.to_bits(), "body {body} step {step} b diverged");
             }
         }
     }

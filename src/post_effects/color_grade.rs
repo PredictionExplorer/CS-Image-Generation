@@ -10,8 +10,6 @@ use rayon::prelude::*;
 use std::error::Error;
 use std::f64::consts::TAU;
 
-
-
 fn luminance(r: f64, g: f64, b: f64) -> f64 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
@@ -142,7 +140,8 @@ impl CinematicColorGrade {
         }
 
         // Shadow and highlight tinting
-        #[allow(clippy::needless_range_loop)] // Direct indexing clearer for color channel manipulation
+        #[allow(clippy::needless_range_loop)]
+        // Direct indexing clearer for color channel manipulation
         for i in 0..3 {
             vibrant[i] += self.params.shadow_tint[i];
             vibrant[i] += self.params.highlight_tint[i];
