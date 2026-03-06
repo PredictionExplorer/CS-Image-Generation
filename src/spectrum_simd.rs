@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn assert_in_unit_range(val: f64, name: &str) {
-        assert!(val >= 0.0 && val <= 1.0, "{name} out of [0,1]: {val}");
+        assert!((0.0..=1.0).contains(&val), "{name} out of [0,1]: {val}");
     }
 
     // ── original tests (preserved) ──────────────────────────────────
@@ -455,16 +455,16 @@ mod tests {
             // descending ramp
             {
                 let mut s = [0.0; 16];
-                for i in 0..16 {
-                    s[i] = (16 - i) as f64 / 16.0;
+                for (i, value) in s.iter_mut().enumerate() {
+                    *value = (16 - i) as f64 / 16.0;
                 }
                 s
             },
             // ascending ramp
             {
                 let mut s = [0.0; 16];
-                for i in 0..16 {
-                    s[i] = (i + 1) as f64 / 16.0;
+                for (i, value) in s.iter_mut().enumerate() {
+                    *value = (i + 1) as f64 / 16.0;
                 }
                 s
             },

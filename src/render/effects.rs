@@ -140,8 +140,9 @@ impl EffectChainBuilder {
         // Perceptual processing for smooth, natural appearance
 
         // 2a. Perceptual blur (OKLab space smoothing)
-        if config.perceptual_blur_enabled && config.perceptual_blur_config.is_some() {
-            let blur_config = config.perceptual_blur_config.as_ref().unwrap();
+        if config.perceptual_blur_enabled
+            && let Some(blur_config) = &config.perceptual_blur_config
+        {
             chain.add(Box::new(PerceptualBlur::new(blur_config.clone())));
         }
 

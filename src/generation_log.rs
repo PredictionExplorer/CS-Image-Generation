@@ -236,8 +236,7 @@ impl GenerationLogger {
             OpenOptions::new().write(true).create(true).truncate(true).open(&self.log_file_path)?;
 
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &records)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        serde_json::to_writer_pretty(writer, &records).map_err(std::io::Error::other)
     }
 
     fn load_records(&self) -> Vec<GenerationRecord> {
@@ -270,7 +269,7 @@ impl GenerationLogger {
             Ok(records) => records,
             Err(e) => {
                 warn!("Failed to parse generation log, starting fresh: {}", e);
-                self.backup_corrupt_log(&contents);
+                self.backup_corrupt_log(contents);
                 Vec::new()
             }
         }

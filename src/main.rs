@@ -268,35 +268,35 @@ struct Args {
     #[arg(long)]
     param_blur_strength: Option<f64>,
 
-    /// Blur radius scale relative to resolution (if not specified, randomized in range 0.008-0.045)
+    /// Blur radius scale relative to resolution (if not specified, randomized in range 0.004-0.010)
     #[arg(long)]
     param_blur_radius_scale: Option<f64>,
 
-    /// Blur core brightness preservation (if not specified, randomized in range 4.0-18.0)
+    /// Blur core brightness preservation (if not specified, randomized in range 9.0-14.0)
     #[arg(long)]
     param_blur_core_brightness: Option<f64>,
 
-    /// DoG bloom strength (if not specified, randomized in range 0.15-0.60)
+    /// DoG bloom strength (if not specified, randomized in range 0.20-0.36)
     #[arg(long)]
     param_dog_strength: Option<f64>,
 
-    /// DoG inner sigma scale (if not specified, randomized in range 0.004-0.012)
+    /// DoG inner sigma scale (if not specified, randomized in range 0.0038-0.0070)
     #[arg(long)]
     param_dog_sigma_scale: Option<f64>,
 
-    /// DoG outer/inner ratio (if not specified, randomized in range 2.0-4.0)
+    /// DoG outer/inner ratio (if not specified, randomized in range 2.2-3.0)
     #[arg(long)]
     param_dog_ratio: Option<f64>,
 
-    /// Glow enhancement strength (if not specified, randomized in range 0.15-0.70)
+    /// Glow enhancement strength (if not specified, randomized in range 0.18-0.40)
     #[arg(long)]
     param_glow_strength: Option<f64>,
 
-    /// Glow luminance threshold (if not specified, randomized in range 0.50-0.85)
+    /// Glow luminance threshold (if not specified, randomized in range 0.62-0.78)
     #[arg(long)]
     param_glow_threshold: Option<f64>,
 
-    /// Glow radius scale (if not specified, randomized in range 0.004-0.012)
+    /// Glow radius scale (if not specified, randomized in range 0.0025-0.0045)
     #[arg(long)]
     param_glow_radius_scale: Option<f64>,
 
@@ -309,24 +309,24 @@ struct Args {
     param_glow_saturation_boost: Option<f64>,
 
     // ==== Chromatic Bloom Parameters ====
-    /// Chromatic bloom strength (if not specified, randomized in range 0.35-0.85)
+    /// Chromatic bloom strength (if not specified, randomized in range 0.30-0.55)
     #[arg(long)]
     param_chromatic_bloom_strength: Option<f64>,
 
-    /// Chromatic bloom radius scale (if not specified, randomized in range 0.007-0.018)
+    /// Chromatic bloom radius scale (if not specified, randomized in range 0.0035-0.0065)
     #[arg(long)]
     param_chromatic_bloom_radius_scale: Option<f64>,
 
-    /// Chromatic bloom RGB separation scale (if not specified, randomized in range 0.0015-0.0035)
+    /// Chromatic bloom RGB separation scale (if not specified, randomized in range 0.0008-0.0016)
     #[arg(long)]
     param_chromatic_bloom_separation_scale: Option<f64>,
 
-    /// Chromatic bloom threshold (if not specified, randomized in range 0.08-0.30)
+    /// Chromatic bloom threshold (if not specified, randomized in range 0.18-0.28)
     #[arg(long)]
     param_chromatic_bloom_threshold: Option<f64>,
 
     // ==== Perceptual Blur Parameters ====
-    /// Perceptual blur strength (if not specified, randomized in range 0.35-0.85)
+    /// Perceptual blur strength (if not specified, randomized in range 0.40-0.60)
     #[arg(long)]
     param_perceptual_blur_strength: Option<f64>,
 

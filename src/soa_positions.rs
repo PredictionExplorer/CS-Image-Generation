@@ -51,11 +51,10 @@ impl SoAPositions {
         let mut z = Vec::with_capacity(total_elements);
 
         // Interleave by time step for sequential access patterns
-        for step in 0..num_steps {
-            #[allow(clippy::needless_range_loop)]
-            // Direct indexing clearer for coordinate extraction
-            for body in 0..num_bodies {
-                let pos = positions[body][step];
+        for bodies_at_step in
+            (0..num_steps).map(|step| positions.iter().map(move |body| body[step]))
+        {
+            for pos in bodies_at_step {
                 x.push(pos[0]);
                 y.push(pos[1]);
                 z.push(pos[2]);
@@ -129,12 +128,17 @@ impl From<SoAPositions> for Vec<Vec<Vector3<f64>>> {
     fn from(soa: SoAPositions) -> Self {
         let mut result = vec![vec![Vector3::zeros(); soa.num_steps]; soa.num_bodies];
 
-        for step in 0..soa.num_steps {
-            #[allow(clippy::needless_range_loop)]
-            // Direct indexing clearer for coordinate reconstruction
-            for body in 0..soa.num_bodies {
-                let idx = step * soa.num_bodies + body;
-                result[body][step] = Vector3::new(soa.x[idx], soa.y[idx], soa.z[idx]);
+        for (step, ((x_chunk, y_chunk), z_chunk)) in soa
+            .x
+            .chunks_exact(soa.num_bodies)
+            .zip(soa.y.chunks_exact(soa.num_bodies))
+            .zip(soa.z.chunks_exact(soa.num_bodies))
+            .enumerate()
+        {
+            for (body, ((&x, &y), &z)) in
+                x_chunk.iter().zip(y_chunk.iter()).zip(z_chunk.iter()).enumerate()
+            {
+                result[body][step] = Vector3::new(x, y, z);
             }
         }
 

@@ -160,11 +160,11 @@ fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
     for (i, b) in bodies.iter().enumerate().take(3) {
         pos[i] = b.position;
     }
-    for i in 0..3 {
-        bodies[i].reset_acceleration();
+    for (i, body) in bodies.iter_mut().enumerate().take(3) {
+        body.reset_acceleration();
         for j in 0..3 {
             if i != j {
-                bodies[i].update_acceleration(mass[j], &pos[j])
+                body.update_acceleration(mass[j], &pos[j])
             }
         }
     }
@@ -185,11 +185,17 @@ pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
     }
     let mut b2 = bodies.clone();
     let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for i in 0..steps {
-        for (j, b) in b2.iter().enumerate() {
-            all[j][i] = b.position;
-        }
+    for (step, snapshot) in std::iter::repeat_with(|| {
+        let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
         symplectic_step(&mut b2, dt);
+        positions
+    })
+    .take(steps)
+    .enumerate()
+    {
+        for (body_positions, position) in all.iter_mut().zip(snapshot) {
+            body_positions[step] = position;
+        }
     }
     FullSim { positions: all }
 }
@@ -227,11 +233,17 @@ pub fn get_positions_with_early_exit(
     // Record phase - body configuration is good, record the full trajectory
     let mut b2 = bodies.clone();
     let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for i in 0..steps {
-        for (j, b) in b2.iter().enumerate() {
-            all[j][i] = b.position;
-        }
+    for (step, snapshot) in std::iter::repeat_with(|| {
+        let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
         symplectic_step(&mut b2, dt);
+        positions
+    })
+    .take(steps)
+    .enumerate()
+    {
+        for (body_positions, position) in all.iter_mut().zip(snapshot) {
+            body_positions[step] = position;
+        }
     }
 
     Some(FullSim { positions: all })

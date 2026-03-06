@@ -333,6 +333,11 @@ fn build_effect_config_from_resolved(
     let use_gaussian_bloom =
         resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Gaussian);
     let use_dog_bloom = resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Dog);
+    let softness_stack_score = if resolved.enable_bloom { 1.0 } else { 0.0 }
+        + if resolved.enable_chromatic_bloom { 0.95 } else { 0.0 }
+        + if resolved.enable_perceptual_blur { 0.85 } else { 0.0 }
+        + if resolved.enable_glow { 0.55 } else { 0.0 }
+        + if resolved.enable_atmospheric_depth { 0.35 } else { 0.0 };
 
     let blur_radius_px = if use_gaussian_bloom {
         (resolved.blur_radius_scale * min_dim as f64).round() as usize
@@ -346,18 +351,25 @@ fn build_effect_config_from_resolved(
     let chromatic_bloom_separation = resolved.chromatic_bloom_separation_scale * min_dim as f64;
     let opalescence_scale_abs = resolved.opalescence_scale * ((width * height) as f64).sqrt();
     let fine_texture_scale_abs = resolved.fine_texture_scale * ((width * height) as f64).sqrt();
+    let dog_threshold = (0.012_f64
+        + if resolved.enable_glow { 0.003_f64 } else { 0.0 }
+        + if resolved.enable_chromatic_bloom { 0.004_f64 } else { 0.0 }
+        + if resolved.enable_perceptual_blur { 0.004_f64 } else { 0.0 })
+    .min(0.028_f64);
 
     // Build DoG config from resolved parameters
     let dog_config = DogBloomConfig {
         inner_sigma: dog_inner_sigma,
         outer_ratio: resolved.dog_ratio,
         strength: resolved.dog_strength,
-        threshold: 0.01, // Fixed threshold
+        threshold: dog_threshold,
     };
 
     // Build perceptual blur config if enabled
     let perceptual_blur_config = if resolved.enable_perceptual_blur {
-        let perceptual_radius = (0.004 * min_dim as f64).round().max(2.0) as usize;
+        let perceptual_radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
+        let perceptual_radius =
+            (perceptual_radius_scale * min_dim as f64).round().max(1.0) as usize;
         Some(PerceptualBlurConfig {
             radius: perceptual_radius,
             strength: resolved.perceptual_blur_strength,
@@ -1313,6 +1325,32 @@ mod tests {
 
         assert_eq!(effect_config.bloom_mode, "gaussian");
         assert!(effect_config.blur_radius_px > 0);
+    }
+
+    #[test]
+    fn test_build_effect_config_tightens_softness_stack_settings() {
+        let resolved = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_perceptual_blur: true,
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config =
+            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+
+        let effect_config = build_effect_config_from_resolved(&resolved, &render_config);
+        let perceptual =
+            effect_config.perceptual_blur_config.expect("perceptual blur should remain configured");
+
+        assert!(
+            effect_config.dog_config.threshold > 0.012,
+            "softness stacks should raise the DoG threshold"
+        );
+        assert!(
+            perceptual.radius < (0.0036_f64 * 1080.0).round() as usize,
+            "softness stacks should tighten perceptual blur radius"
+        );
     }
 
     #[test]

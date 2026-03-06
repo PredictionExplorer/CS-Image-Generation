@@ -308,7 +308,7 @@ mod tests {
             let b = 0.15 * rad.sin();
             let wl = oklab_hue_to_wavelength(a, b);
             assert!(
-                wl >= 380.0 && wl <= 700.0,
+                (380.0..=700.0).contains(&wl),
                 "hue {deg}\u{00b0} -> wavelength {wl} out of visible range"
             );
         }

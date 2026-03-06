@@ -430,13 +430,13 @@ mod tests {
             .position(|s| s == "-x265-params")
             .map(|idx| &options.extra_args[idx + 1]);
 
-        if let Some(params) = x265_params {
-            if has_422 {
-                assert!(
-                    params.contains("main422-10"),
-                    "4:2:2 pixel format requires main422-10 profile"
-                );
-            }
+        if let Some(params) = x265_params
+            && has_422
+        {
+            assert!(
+                params.contains("main422-10"),
+                "4:2:2 pixel format requires main422-10 profile"
+            );
         }
     }
 }

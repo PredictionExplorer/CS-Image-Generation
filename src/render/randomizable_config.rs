@@ -612,25 +612,19 @@ impl RandomizableEffectConfig {
         };
 
         // Resolve clip_black and clip_white as ordered pair
-        let (clip_black, clip_white) = if self.clip_black.is_some() && self.clip_white.is_some() {
-            // Both specified - ensure ordering
-            let black = self.clip_black.unwrap();
-            let white = self.clip_white.unwrap();
-            if black < white { (black, white) } else { (white, black) }
-        } else if self.clip_black.is_some() {
-            // Only black specified, randomize white
-            let black = self.clip_black.unwrap();
-            let white = randomizer.randomize_float(&pd::CLIP_WHITE);
-            if black < white { (black, white) } else { (white, black) }
-        } else if self.clip_white.is_some() {
-            // Only white specified, randomize black
-            let white = self.clip_white.unwrap();
-            let black = randomizer.randomize_float(&pd::CLIP_BLACK);
-            if black < white { (black, white) } else { (white, black) }
-        } else {
-            // Both random - use ordered pair
-            randomizer.randomize_ordered_pair(&pd::CLIP_BLACK, &pd::CLIP_WHITE)
-        };
+        let (clip_black, clip_white) =
+            if let (Some(black), Some(white)) = (self.clip_black, self.clip_white) {
+                if black < white { (black, white) } else { (white, black) }
+            } else if let Some(black) = self.clip_black {
+                let white = randomizer.randomize_float(&pd::CLIP_WHITE);
+                if black < white { (black, white) } else { (white, black) }
+            } else if let Some(white) = self.clip_white {
+                let black = randomizer.randomize_float(&pd::CLIP_BLACK);
+                if black < white { (black, white) } else { (white, black) }
+            } else {
+                // Both random - use ordered pair
+                randomizer.randomize_ordered_pair(&pd::CLIP_BLACK, &pd::CLIP_WHITE)
+            };
 
         // Store resolved clip values
         let resolved = ResolvedEffectConfig { clip_black, clip_white, ..resolved };
@@ -829,6 +823,26 @@ fn apply_conflict_detection(
     mut config: ResolvedEffectConfig,
     log: &mut RandomizationLog,
 ) -> ResolvedEffectConfig {
+    fn softness_stack_score(config: &ResolvedEffectConfig) -> f64 {
+        let mut score = 0.0;
+        if config.enable_bloom {
+            score += 1.0;
+        }
+        if config.enable_chromatic_bloom {
+            score += 0.95;
+        }
+        if config.enable_perceptual_blur {
+            score += 0.85;
+        }
+        if config.enable_glow {
+            score += 0.55;
+        }
+        if config.enable_atmospheric_depth {
+            score += 0.35;
+        }
+        score
+    }
+
     let mut adjustments = Vec::new();
 
     // ============================================================================
@@ -936,6 +950,82 @@ fn apply_conflict_detection(
                 config.gradient_map_hue_preservation
             ));
         }
+    }
+
+    // ============================================================================
+    // QUALITY GUARD 4: Limit softness stacks and turn on detail rescue
+    // ============================================================================
+    let softness_score = softness_stack_score(&config);
+    if softness_score >= 2.0 {
+        let original_micro_enabled = config.enable_micro_contrast;
+        let original_edge_enabled = config.enable_edge_luminance;
+        let original_dog_strength = config.dog_strength;
+        let original_dog_sigma_scale = config.dog_sigma_scale;
+        let original_glow_strength = config.glow_strength;
+        let original_glow_radius_scale = config.glow_radius_scale;
+        let original_chromatic_strength = config.chromatic_bloom_strength;
+        let original_chromatic_radius_scale = config.chromatic_bloom_radius_scale;
+        let original_chromatic_separation_scale = config.chromatic_bloom_separation_scale;
+        let original_perceptual_strength = config.perceptual_blur_strength;
+        let original_micro_strength = config.micro_contrast_strength;
+        let original_edge_strength = config.edge_luminance_strength;
+        let original_edge_threshold = config.edge_luminance_threshold;
+        let original_edge_brightness_boost = config.edge_luminance_brightness_boost;
+
+        config.enable_micro_contrast = true;
+        config.enable_edge_luminance = true;
+        config.dog_strength = config.dog_strength.min(0.28);
+        config.dog_sigma_scale = config.dog_sigma_scale.min(0.0054);
+        config.glow_strength = config.glow_strength.min(0.28);
+        config.glow_radius_scale = config.glow_radius_scale.min(0.0034);
+        config.chromatic_bloom_strength = config.chromatic_bloom_strength.min(0.36);
+        config.chromatic_bloom_radius_scale = config.chromatic_bloom_radius_scale.min(0.0046);
+        config.chromatic_bloom_separation_scale =
+            config.chromatic_bloom_separation_scale.min(0.0010);
+        config.perceptual_blur_strength = config.perceptual_blur_strength.min(0.44);
+        config.micro_contrast_strength = config.micro_contrast_strength.max(0.24);
+        config.edge_luminance_strength = config.edge_luminance_strength.max(0.18);
+        config.edge_luminance_threshold = config.edge_luminance_threshold.min(0.20);
+        config.edge_luminance_brightness_boost = config.edge_luminance_brightness_boost.max(0.28);
+
+        if config.enable_micro_contrast != original_micro_enabled
+            || config.enable_edge_luminance != original_edge_enabled
+            || (config.dog_strength - original_dog_strength).abs() > f64::EPSILON
+            || (config.dog_sigma_scale - original_dog_sigma_scale).abs() > f64::EPSILON
+            || (config.glow_strength - original_glow_strength).abs() > f64::EPSILON
+            || (config.glow_radius_scale - original_glow_radius_scale).abs() > f64::EPSILON
+            || (config.chromatic_bloom_strength - original_chromatic_strength).abs() > f64::EPSILON
+            || (config.chromatic_bloom_radius_scale - original_chromatic_radius_scale).abs()
+                > f64::EPSILON
+            || (config.chromatic_bloom_separation_scale - original_chromatic_separation_scale).abs()
+                > f64::EPSILON
+            || (config.perceptual_blur_strength - original_perceptual_strength).abs() > f64::EPSILON
+            || (config.micro_contrast_strength - original_micro_strength).abs() > f64::EPSILON
+            || (config.edge_luminance_strength - original_edge_strength).abs() > f64::EPSILON
+            || (config.edge_luminance_threshold - original_edge_threshold).abs() > f64::EPSILON
+            || (config.edge_luminance_brightness_boost - original_edge_brightness_boost).abs()
+                > f64::EPSILON
+        {
+            adjustments.push(format!(
+                "Quality guard: Tightened softness stack and enabled detail rescue (score: {:.2}, micro_contrast: {} -> {}, edge_luminance: {} -> {})",
+                softness_score,
+                original_micro_enabled,
+                config.enable_micro_contrast,
+                original_edge_enabled,
+                config.enable_edge_luminance
+            ));
+        }
+    }
+
+    // ============================================================================
+    // QUALITY GUARD 5: Remove redundant perceptual blur from extreme softness stacks
+    // ============================================================================
+    if softness_score >= 2.6 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
+        config.enable_perceptual_blur = false;
+        adjustments.push(format!(
+            "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {:.2})",
+            softness_score
+        ));
     }
 
     // Log adjustments if any were made
@@ -1497,8 +1587,9 @@ mod tests {
         assert!(resolved.blur_strength >= 3.0 && resolved.blur_strength <= 5.5);
         assert!(resolved.blur_radius_scale >= 0.004 && resolved.blur_radius_scale <= 0.010);
         assert!(resolved.glow_strength >= 0.18 && resolved.glow_strength <= 0.40);
+        assert!(resolved.dog_strength >= 0.20 && resolved.dog_strength <= 0.36);
         assert!(
-            resolved.chromatic_bloom_strength >= 0.30 && resolved.chromatic_bloom_strength <= 0.55
+            resolved.chromatic_bloom_strength >= 0.24 && resolved.chromatic_bloom_strength <= 0.55
         );
         assert!(
             resolved.vibrance >= 1.10 && resolved.vibrance <= 1.35,
@@ -1680,6 +1771,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_softness_stack_enables_detail_rescue_and_caps_softeners() {
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_perceptual_blur: true,
+            dog_strength: 0.30,
+            dog_sigma_scale: 0.0060,
+            glow_strength: 0.32,
+            glow_radius_scale: 0.0038,
+            chromatic_bloom_strength: 0.40,
+            chromatic_bloom_radius_scale: 0.0052,
+            chromatic_bloom_separation_scale: 0.0012,
+            perceptual_blur_strength: 0.48,
+            micro_contrast_strength: 0.15,
+            edge_luminance_strength: 0.12,
+            edge_luminance_threshold: 0.25,
+            edge_luminance_brightness_boost: 0.20,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_micro_contrast);
+        assert!(result.enable_edge_luminance);
+        assert!(result.dog_strength <= 0.28);
+        assert!(result.dog_sigma_scale <= 0.0054);
+        assert!(result.glow_strength <= 0.28);
+        assert!(result.glow_radius_scale <= 0.0034);
+        assert!(result.chromatic_bloom_strength <= 0.36);
+        assert!(result.chromatic_bloom_radius_scale <= 0.0046);
+        assert!(result.chromatic_bloom_separation_scale <= 0.0010);
+        assert!(result.perceptual_blur_strength <= 0.44);
+        assert!(result.micro_contrast_strength >= 0.24);
+        assert!(result.edge_luminance_strength >= 0.18);
+        assert!(result.edge_luminance_threshold <= 0.20);
+        assert!(result.edge_luminance_brightness_boost >= 0.28);
+        assert!(log.effects.iter().any(|record| {
+            record.effect_name == "render_constraints"
+                && record
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.value.contains("Tightened softness stack"))
+        }));
+    }
+
+    #[test]
+    fn test_extreme_softness_stack_disables_perceptual_blur() {
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_perceptual_blur: true,
+            enable_atmospheric_depth: true,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(
+            !result.enable_perceptual_blur,
+            "perceptual blur should be disabled in extreme softness stacks"
+        );
+        assert!(log.effects.iter().any(|record| {
+            record.effect_name == "render_constraints"
+                && record
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.value.contains("Disabled perceptual_blur"))
+        }));
+    }
+
     /// Test that vibrance always falls within the curated range [1.10, 1.35].
     #[test]
     fn test_vibrance_raised_floor() {
@@ -1711,17 +1877,11 @@ mod tests {
 
         // Test all valid indices
         for i in 0..=14 {
-            let palette = LuxuryPalette::from_index(i);
-            // Just verify it doesn't panic and returns a valid palette
-            // The actual mapping correctness is ensured by the match statement
-            drop(palette);
+            let _palette = LuxuryPalette::from_index(i);
         }
 
         // Test that modulo wrapping works (indices > 14)
-        let palette_15 = LuxuryPalette::from_index(15);
-        let palette_0 = LuxuryPalette::from_index(0);
-        // Both should be GoldPurple (though we can't easily test enum equality without PartialEq)
-        drop(palette_15);
-        drop(palette_0);
+        let _palette_15 = LuxuryPalette::from_index(15);
+        let _palette_0 = LuxuryPalette::from_index(0);
     }
 }

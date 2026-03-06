@@ -26,7 +26,7 @@ pub struct GlowEnhancementConfig {
 
 impl Default for GlowEnhancementConfig {
     fn default() -> Self {
-        let min_dim = 1920_usize.min(1080) as f64;
+        let min_dim = 1080_f64;
         Self {
             strength: 0.45,
             threshold: 0.65,
@@ -136,7 +136,8 @@ impl GlowEnhancement {
                         let dx = (nx as f64 - x as f64).abs();
                         let dy = (ny as f64 - y as f64).abs();
                         let dist = (dx * dx + dy * dy).sqrt();
-                        let weight = (1.0 - (dist / radius as f64)).max(0.0);
+                        let normalized_falloff = (1.0 - (dist / radius as f64)).max(0.0);
+                        let weight = normalized_falloff.powf(self.config.sharpness.max(1.0));
 
                         let (r, g, b, a) = input[sidx];
                         sum_r += r * weight;
@@ -274,5 +275,31 @@ mod tests {
 
         let result = glow.process(&buffer, 100, 100).unwrap();
         assert_eq!(result.len(), buffer.len());
+    }
+
+    #[test]
+    fn test_radial_glow_respects_sharpness() {
+        let base_config = GlowEnhancementConfig {
+            strength: 1.0,
+            threshold: 0.0,
+            radius: 2,
+            sharpness: 1.0,
+            saturation_boost: 0.0,
+        };
+        let soft_glow = GlowEnhancement::new(base_config.clone());
+        let sharp_glow =
+            GlowEnhancement::new(GlowEnhancementConfig { sharpness: 4.0, ..base_config });
+
+        let mut buffer = vec![(0.0, 0.0, 0.0, 1.0); 25];
+        buffer[12] = (1.0, 1.0, 1.0, 1.0);
+
+        let soft = soft_glow.apply_radial_glow(&buffer, 5, 5);
+        let sharp = sharp_glow.apply_radial_glow(&buffer, 5, 5);
+
+        assert!(sharp[7].0 < soft[7].0, "higher sharpness should reduce neighbor halo energy");
+        assert!(
+            sharp[12].0 > soft[12].0,
+            "higher sharpness should keep more energy concentrated at the center"
+        );
     }
 }

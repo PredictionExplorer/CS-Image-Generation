@@ -67,10 +67,9 @@ pub fn equilateralness_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
         return 0.0;
     }
     let mut sum = 0.0;
-    for step in 0..n {
-        let p0 = positions[0][step];
-        let p1 = positions[1][step];
-        let p2 = positions[2][step];
+    for ((&p0, &p1), &p2) in
+        positions[0].iter().zip(positions[1].iter()).zip(positions[2].iter()).take(n)
+    {
         let l01 = (p0 - p1).norm();
         let l12 = (p1 - p2).norm();
         let l20 = (p2 - p0).norm();
