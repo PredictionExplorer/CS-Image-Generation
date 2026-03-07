@@ -14,10 +14,10 @@ use crate::generation_log::{
 use crate::oklab;
 use crate::post_effects;
 use crate::render::{
-    self, ChannelLevels, DogBloomConfig, RenderConfig, VideoEncodingOptions,
-    compute_black_white_gamma, constants, create_video_from_frames_singlepass,
-    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    render_final_frame_spectral, save_image_as_png_16bit,
+    self, ChannelLevels, DogBloomConfig, RenderConfig, ToneMappingControls, VideoEncodingOptions,
+    constants, create_video_from_frames_singlepass, generate_body_color_sequences,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, render_final_frame_spectral,
+    save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
@@ -266,39 +266,49 @@ pub fn build_histogram_and_levels(
     let target_frames = constants::DEFAULT_HISTOGRAM_SAMPLE_FRAMES;
     let frame_interval = (positions[0].len() / target_frames as usize).max(1);
 
-    let mut all_r = Vec::new();
-    let mut all_g = Vec::new();
-    let mut all_b = Vec::new();
-
-    pass_1_build_histogram_spectral(
+    let histogram = pass_1_build_histogram_spectral(
         positions,
         colors,
         body_alphas,
         resolved_config,
         frame_interval,
-        &mut all_r,
-        &mut all_g,
-        &mut all_b,
         noise_seed,
         render_config,
         aspect_correction,
     );
 
     info!("STAGE 6/7: Determine global black/white/gamma...");
-    let (black_r, white_r, black_g, white_g, black_b, white_b) = compute_black_white_gamma(
-        &mut all_r,
-        &mut all_g,
-        &mut all_b,
+    let analysis = render::histogram::analyze_tonemapping(
+        histogram.data(),
         resolved_config.clip_black,
         resolved_config.clip_white,
     );
 
     info!(
-        "   => R:[{:.3e},{:.3e}] G:[{:.3e},{:.3e}] B:[{:.3e},{:.3e}]",
-        black_r, white_r, black_g, white_g, black_b, white_b
+        "   => R:[{:.3e},{:.3e}] G:[{:.3e},{:.3e}] B:[{:.3e},{:.3e}] exposure={:.3} near_clip={:.3}%",
+        analysis.black_r,
+        analysis.white_r,
+        analysis.black_g,
+        analysis.white_g,
+        analysis.black_b,
+        analysis.white_b,
+        analysis.exposure_scale,
+        analysis.near_clip_ratio * constants::PERCENT_FACTOR
     );
 
-    Ok(ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b))
+    Ok(ChannelLevels::with_tone_mapping(
+        analysis.black_r,
+        analysis.white_r,
+        analysis.black_g,
+        analysis.white_g,
+        analysis.black_b,
+        analysis.white_b,
+        ToneMappingControls {
+            exposure_scale: analysis.exposure_scale,
+            paper_white: constants::DEFAULT_TONEMAP_PAPER_WHITE,
+            highlight_rolloff: constants::DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF,
+        },
+    ))
 }
 
 /// Generate output filename with optional profile tag

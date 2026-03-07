@@ -45,12 +45,13 @@ pub use color::{OklabColor, generate_body_color_sequences};
 #[allow(unused_imports)]
 pub use drawing::{draw_line_segment_aa_spectral_with_dispersion, parallel_blur_2d_rgba};
 pub use effects::{DogBloomConfig, apply_dog_bloom};
+#[allow(unused_imports)] // Public API re-export for library consumers
 pub use histogram::compute_black_white_gamma;
 // Re-export all types as part of public library API (not used internally, but part of API contract)
 #[allow(unused_imports)] // Public API re-exports for library consumers
 pub use types::{
     BloomConfig, BlurConfig, ChannelLevels, HdrConfig, PerceptualBlurSettings, Resolution,
-    SceneData,
+    SceneData, ToneMappingControls,
 };
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 
@@ -103,6 +104,22 @@ enum FinishOutputMode {
     Video,
 }
 
+#[inline]
+fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) -> [f64; 3] {
+    let luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    if luminance <= paper_white || luminance <= 1e-10 {
+        return rgb;
+    }
+
+    let shoulder_span = (1.0 - paper_white).max(1e-6);
+    let excess = luminance - paper_white;
+    let compressed_luminance =
+        paper_white + shoulder_span * (1.0 - (-(excess * rolloff) / shoulder_span).exp());
+    let scale = compressed_luminance / luminance;
+
+    [rgb[0] * scale, rgb[1] * scale, rgb[2] * scale]
+}
+
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit)
 /// Returns final RGB channels in 0.0-1.0 range
 /// Upgraded to AgX for superior color rendition without hue-skewing in extreme highlights
@@ -121,7 +138,8 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
 
     let mut leveled = [0.0; 3];
     for i in 0..3 {
-        leveled[i] = ((premult[i] - levels.black[i]).max(0.0)) / levels.range[i];
+        leveled[i] =
+            (((premult[i] - levels.black[i]).max(0.0)) / levels.range[i]) * levels.exposure_scale;
     }
 
     // 0. Matrix Inset (AgX color space)
@@ -181,7 +199,13 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
         )
     };
 
-    [r_out.clamp(0.0, 1.0), g_out.clamp(0.0, 1.0), b_out.clamp(0.0, 1.0)]
+    let compressed = compress_display_highlights(
+        [r_out.max(0.0), g_out.max(0.0), b_out.max(0.0)],
+        levels.paper_white,
+        levels.highlight_rolloff,
+    );
+
+    [compressed[0].clamp(0.0, 1.0), compressed[1].clamp(0.0, 1.0), compressed[2].clamp(0.0, 1.0)]
 }
 
 /// Tonemap to 8-bit (for legacy support, not currently used)
@@ -535,19 +559,19 @@ pub fn pass_1_build_histogram_spectral(
     body_alphas: &[f64],
     resolved_config: &randomizable_config::ResolvedEffectConfig,
     frame_interval: usize,
-    all_r: &mut Vec<f64>,
-    all_g: &mut Vec<f64>,
-    all_b: &mut Vec<f64>,
     _noise_seed: i32,
     render_config: &RenderConfig,
     aspect_correction: bool,
-) {
+) -> HistogramData {
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
     let ctx = RenderContext::new(width, height, positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
+    let effect_config =
+        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     // Create histogram storage
     let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
@@ -603,21 +627,24 @@ pub fn pass_1_build_histogram_spectral(
                 height as usize,
             );
 
+            let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
+            let rgba_buffer = std::mem::take(&mut accum_rgba);
+            let trajectory_proxy = finish_pipeline
+                .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
+                .expect("Failed to process frame during spectral histogram pass");
+            accum_rgba.clear();
+            accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
+
             // Collect histogram data efficiently
             histogram.reserve(ctx.pixel_count());
-            for &(r, g, b, a) in &accum_rgba {
+            for &(r, g, b, a) in &trajectory_proxy {
                 histogram.push(r * a, g * a, b * a);
             }
         }
     }
 
-    // Extract channels efficiently without intermediate copying
-    let (extracted_r, extracted_g, extracted_b) = histogram.extract_channels();
-    *all_r = extracted_r;
-    *all_g = extracted_g;
-    *all_b = extracted_b;
-
     info!("   pass 1 (spectral histogram): 100% done");
+    histogram
 }
 
 // ====================== PASS 2 (SPECTRAL) ===========================
@@ -1192,6 +1219,66 @@ mod tests {
     }
 
     #[test]
+    fn test_tonemap_reserves_paper_white_headroom() {
+        let levels = ChannelLevels::with_tone_mapping(
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            crate::render::types::ToneMappingControls {
+                exposure_scale: 1.0,
+                paper_white: 0.9,
+                highlight_rolloff: 2.5,
+            },
+        );
+        let result = tonemap_core(8.0, 8.0, 8.0, 1.0, &levels);
+
+        assert!(result[0] < 1.0);
+        assert!(result[1] < 1.0);
+        assert!(result[2] < 1.0);
+        assert!(result[0] > 0.85, "should still look bright after compression");
+    }
+
+    #[test]
+    fn test_tonemap_exposure_scale_reduces_hot_input() {
+        let unity = ChannelLevels::with_tone_mapping(
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            crate::render::types::ToneMappingControls {
+                exposure_scale: 1.0,
+                paper_white: 0.92,
+                highlight_rolloff: 2.25,
+            },
+        );
+        let reduced = ChannelLevels::with_tone_mapping(
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            crate::render::types::ToneMappingControls {
+                exposure_scale: 0.6,
+                paper_white: 0.92,
+                highlight_rolloff: 2.25,
+            },
+        );
+
+        let unity_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &unity);
+        let reduced_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &reduced);
+
+        assert!(reduced_out[0] < unity_out[0]);
+        assert!(reduced_out[1] < unity_out[1]);
+        assert!(reduced_out[2] < unity_out[2]);
+    }
+
+    #[test]
     fn test_agx_tweak_changes_output() {
         let levels = default_levels();
 
@@ -1315,7 +1402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_histogram_pass_ignores_finish_effects_and_background() {
+    fn test_histogram_pass_is_finish_aware() {
         let positions = vec![
             vec![Vector3::new(0.1, 0.1, 0.0), Vector3::new(0.2, 0.2, 0.0)],
             vec![Vector3::new(0.9, 0.1, 0.0), Vector3::new(0.8, 0.2, 0.0)],
@@ -1348,43 +1435,29 @@ mod tests {
             ..baseline_resolved_config(48, 48)
         };
 
-        let mut clean_r = Vec::new();
-        let mut clean_g = Vec::new();
-        let mut clean_b = Vec::new();
-        pass_1_build_histogram_spectral(
+        let clean_hist = pass_1_build_histogram_spectral(
             &positions,
             &colors,
             &body_alphas,
             &clean,
             1,
-            &mut clean_r,
-            &mut clean_g,
-            &mut clean_b,
             17,
             &render_config,
             false,
         );
 
-        let mut styled_r = Vec::new();
-        let mut styled_g = Vec::new();
-        let mut styled_b = Vec::new();
-        pass_1_build_histogram_spectral(
+        let styled_hist = pass_1_build_histogram_spectral(
             &positions,
             &colors,
             &body_alphas,
             &stylized,
             1,
-            &mut styled_r,
-            &mut styled_g,
-            &mut styled_b,
             999,
             &render_config,
             false,
         );
 
-        assert_eq!(clean_r, styled_r);
-        assert_eq!(clean_g, styled_g);
-        assert_eq!(clean_b, styled_b);
+        assert_ne!(clean_hist.data(), styled_hist.data());
     }
 
     #[test]

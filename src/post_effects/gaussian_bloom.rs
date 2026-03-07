@@ -1,7 +1,7 @@
 //! Gaussian blur-based bloom effect implementation.
 
 use super::{PixelBuffer, PostEffect};
-use crate::render::parallel_blur_2d_rgba;
+use crate::render::{constants, parallel_blur_2d_rgba};
 use rayon::prelude::*;
 use std::error::Error;
 
@@ -28,6 +28,42 @@ impl GaussianBloom {
     pub fn new(radius: usize, strength: f64, core_brightness: f64) -> Self {
         Self { radius, strength, core_brightness, enabled: true }
     }
+
+    #[inline]
+    fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    #[inline]
+    fn highlight_extract_factor(luminance: f64) -> f64 {
+        let knee = constants::DEFAULT_HIGHLIGHT_EXTRACT_KNEE;
+        let threshold = constants::DEFAULT_HIGHLIGHT_EXTRACT_THRESHOLD;
+        Self::smoothstep(threshold - knee * 0.5, threshold + knee * 0.5, luminance)
+    }
+
+    fn extract_highlights(&self, input: &PixelBuffer) -> PixelBuffer {
+        input
+            .par_iter()
+            .map(|&(r, g, b, a)| {
+                if a <= 0.0 {
+                    return (0.0, 0.0, 0.0, 0.0);
+                }
+
+                let sr = r / a;
+                let sg = g / a;
+                let sb = b / a;
+                let luminance = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
+                let factor = Self::highlight_extract_factor(luminance);
+                (r * factor, g * factor, b * factor, a * factor)
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn core_gain(&self) -> f64 {
+        (1.0 - (-0.05 * self.core_brightness.max(0.0)).exp()).min(0.55)
+    }
 }
 
 impl PostEffect for GaussianBloom {
@@ -41,50 +77,65 @@ impl PostEffect for GaussianBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, Box<dyn Error>> {
+        let highlights = self.extract_highlights(input);
+        let core_gain = self.core_gain();
+
         if self.radius == 0 {
-            // No blur, just apply core brightness
             let mut output = Vec::with_capacity(input.len());
-            output.par_extend(input.par_iter().map(|&(r, g, b, a)| {
-                (
-                    r * self.core_brightness,
-                    g * self.core_brightness,
-                    b * self.core_brightness,
-                    a * self.core_brightness,
-                )
-            }));
+            let iter = input.par_iter().zip(highlights.par_iter()).map(
+                |(&(r, g, b, a), &(hr, hg, hb, _ha))| {
+                    (r + hr * core_gain, g + hg * core_gain, b + hb * core_gain, a)
+                },
+            );
+            output.par_extend(iter);
             return Ok(output);
         }
 
-        // Create blurred version
-        let mut blurred = input.clone();
+        // Create blurred highlight residual
+        let mut blurred = highlights.clone();
         parallel_blur_2d_rgba(&mut blurred, width, height, self.radius);
 
-        // Composite using screen blend: C = A + B - A*B
+        // Composite extracted highlight residuals over the untouched base image.
         let mut output = Vec::with_capacity(input.len());
-        output.par_extend(input.par_iter().zip(blurred.par_iter()).map(
-            |(&(cr, cg, cb, ca), &(br, bg, bb, ba))| {
-                // Base image with core brightness
-                let base_r = cr * self.core_brightness;
-                let base_g = cg * self.core_brightness;
-                let base_b = cb * self.core_brightness;
-                let base_a = ca * self.core_brightness;
-
-                // Bloom from blur pass
-                let bloom_r = br * self.strength;
-                let bloom_g = bg * self.strength;
-                let bloom_b = bb * self.strength;
-                let bloom_a = ba * self.strength;
-
-                // Screen blend approximation: C = A + B - A*B
-                let out_r = (base_r + bloom_r - base_r * bloom_r).max(0.0);
-                let out_g = (base_g + bloom_g - base_g * bloom_g).max(0.0);
-                let out_b = (base_b + bloom_b - base_b * bloom_b).max(0.0);
-                let out_a = base_a + bloom_a;
-
-                (out_r, out_g, out_b, out_a)
+        let iter = input.par_iter().zip(highlights.par_iter()).zip(blurred.par_iter()).map(
+            |((&(base_r, base_g, base_b, base_a), &(hr, hg, hb, _ha)), &(br, bg, bb, _ba))| {
+                (
+                    base_r + hr * core_gain + br * self.strength,
+                    base_g + hg * core_gain + bg * self.strength,
+                    base_b + hb * core_gain + bb * self.strength,
+                    base_a,
+                )
             },
-        ));
+        );
+        output.par_extend(iter);
 
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gaussian_bloom_preserves_dark_pixels() {
+        let bloom = GaussianBloom::new(0, 0.5, 12.0);
+        let input = vec![(0.08, 0.08, 0.08, 1.0)];
+        let output = bloom.process(&input, 1, 1).unwrap();
+
+        assert!((output[0].0 - input[0].0).abs() < 1e-3);
+        assert!((output[0].1 - input[0].1).abs() < 1e-3);
+        assert!((output[0].2 - input[0].2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_gaussian_bloom_lifts_highlights() {
+        let bloom = GaussianBloom::new(0, 0.5, 12.0);
+        let input = vec![(0.85, 0.85, 0.85, 1.0)];
+        let output = bloom.process(&input, 1, 1).unwrap();
+
+        assert!(output[0].0 > input[0].0);
+        assert!(output[0].1 > input[0].1);
+        assert!(output[0].2 > input[0].2);
     }
 }

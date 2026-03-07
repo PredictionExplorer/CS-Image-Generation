@@ -60,6 +60,28 @@ pub const OKLAB_LIGHTNESS_WAVE_AMPLITUDE: f64 = 0.28;
 /// Default HDR scale factor when HDR mode is disabled
 pub const DEFAULT_HDR_SCALE: f64 = 1.0;
 
+/// Pre-tonemap luminance target for the solved white percentile.
+/// Values above this still retain headroom for specular accents.
+pub const DEFAULT_PRETONEMAP_LUMA_TARGET: f64 = 0.88;
+
+/// Samples above this normalized luminance are considered near-clipped during proxy analysis.
+pub const DEFAULT_PRETONEMAP_NEAR_CLIP_THRESHOLD: f64 = 1.10;
+
+/// Maximum tolerated fraction of near-clipped proxy samples before the governor darkens exposure.
+pub const DEFAULT_PRETONEMAP_NEAR_CLIP_BUDGET: f64 = 0.0025;
+
+/// Response multiplier for the highlight budget governor.
+pub const DEFAULT_PRETONEMAP_BUDGET_RESPONSE: f64 = 1.5;
+
+/// Lower clamp for the global exposure scale derived from proxy analysis.
+pub const DEFAULT_MIN_EXPOSURE_SCALE: f64 = 0.35;
+
+/// Display-space luminance reserved for "paper white".
+pub const DEFAULT_TONEMAP_PAPER_WHITE: f64 = 0.92;
+
+/// Strength of the luminance-preserving shoulder above paper white.
+pub const DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF: f64 = 2.25;
+
 /// Bilinear interpolation averaging factor (1/4 for 4 samples)
 pub const BILINEAR_AVG_FACTOR: f64 = 0.25;
 
@@ -74,6 +96,12 @@ pub const GAUSSIAN_SIGMA_MIN: f64 = 1.0;
 
 /// Factor for two-sigma-squared calculation in Gaussian
 pub const GAUSSIAN_TWO_FACTOR: f64 = 2.0;
+
+/// Highlight threshold for bloom/glow residual extraction in linear space.
+pub const DEFAULT_HIGHLIGHT_EXTRACT_THRESHOLD: f64 = 0.58;
+
+/// Width of the soft-knee used for highlight residual extraction.
+pub const DEFAULT_HIGHLIGHT_EXTRACT_KNEE: f64 = 0.18;
 
 /// Default strength for the cinematic color grading effect (0-1)
 pub const DEFAULT_COLOR_GRADE_STRENGTH: f64 = 0.48;
