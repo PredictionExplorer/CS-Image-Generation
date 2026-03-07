@@ -2,18 +2,14 @@
 """
 Batch runner for Three Body Problem image generation.
 
-A/B comparison mode: each seed is rendered twice — once with museum-quality
-enhancements enabled ("enhanced") and once with them disabled ("classic").
-Output filenames: {seed}_enhanced.png/mp4  vs  {seed}_classic.png/mp4
-
-Uses a rolling pool to keep exactly CONCURRENT_SIMS slots busy at all times.
-Runs forever until Ctrl+C.
+Continuously generates images with random seeds using the production
+configuration. Uses a rolling pool to keep exactly CONCURRENT_SIMS
+slots busy at all times. Runs forever until Ctrl+C.
 
 Screen: compact progress line every few completions.
 File:   full subprocess output written to run.log for debugging.
 """
 
-import collections
 import concurrent.futures
 import logging
 import os
@@ -28,7 +24,7 @@ CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
-REPORT_EVERY = 6     # print a status line every N completions
+REPORT_EVERY = 3     # print a status line every N completions
 
 # ---------------------------------------------------------------------------
 # Logging setup: file gets everything, console gets one-liners
@@ -83,16 +79,12 @@ def fmt_duration(seconds: float) -> str:
 # Single simulation
 # ---------------------------------------------------------------------------
 
-def run_one(seed: str, enhanced: bool, run_id: int) -> tuple:
-    """Returns (success, filename, elapsed_secs)."""
-    variant = "enhanced" if enhanced else "classic"
-    filename = f"{seed[2:]}_{variant}"
-
+def run_one(seed: str, run_id: int) -> tuple:
+    """Returns (success, seed, elapsed_secs)."""
+    filename = seed[2:]
     cmd = [BINARY, "--seed", seed, "--file-name", filename]
-    if not enhanced:
-        cmd.append("--no-enhancements")
 
-    _log_to_file(logging.DEBUG, f"[{run_id}] START {filename}  cmd={' '.join(cmd)}")
+    _log_to_file(logging.DEBUG, f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()
 
     try:
@@ -105,29 +97,29 @@ def run_one(seed: str, enhanced: bool, run_id: int) -> tuple:
             _log_to_file(logging.DEBUG, f"[{run_id}] stderr:\n{proc.stderr.rstrip()}")
 
         if proc.returncode == 0:
-            _log_to_file(logging.INFO, f"[{run_id}] OK    {filename}  ({fmt_duration(elapsed)})")
-            return (True, filename, elapsed)
+            _log_to_file(logging.INFO, f"[{run_id}] OK    {seed}  ({fmt_duration(elapsed)})")
+            return (True, seed, elapsed)
 
         _log_to_file(
             logging.WARNING,
-            f"[{run_id}] FAIL  {filename}  exit={proc.returncode}  ({fmt_duration(elapsed)})",
+            f"[{run_id}] FAIL  {seed}  exit={proc.returncode}  ({fmt_duration(elapsed)})",
         )
-        return (False, filename, elapsed)
+        return (False, seed, elapsed)
 
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] TIMEOUT {filename}  ({fmt_duration(elapsed)})")
-        return (False, filename, elapsed)
+        _log_to_file(logging.ERROR, f"[{run_id}] TIMEOUT {seed}  ({fmt_duration(elapsed)})")
+        return (False, seed, elapsed)
 
     except OSError as exc:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] OS ERROR {filename}: {exc}")
-        return (False, filename, elapsed)
+        _log_to_file(logging.ERROR, f"[{run_id}] OS ERROR {seed}: {exc}")
+        return (False, seed, elapsed)
 
     except Exception as exc:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] UNEXPECTED {filename}: {exc}")
-        return (False, filename, elapsed)
+        _log_to_file(logging.ERROR, f"[{run_id}] UNEXPECTED {seed}: {exc}")
+        return (False, seed, elapsed)
 
 
 # ---------------------------------------------------------------------------
@@ -138,22 +130,19 @@ def main() -> None:
     check_prerequisites()
 
     _log_to_file(logging.INFO, f"{'=' * 60}")
-    _log_to_file(logging.INFO, f"Session started  concurrency={CONCURRENT_SIMS}  mode=A/B rolling")
+    _log_to_file(logging.INFO, f"Session started  concurrency={CONCURRENT_SIMS}")
     _log_to_file(logging.INFO, f"{'=' * 60}")
 
-    print(f"Three Body Problem A/B rolling runner  ({CONCURRENT_SIMS} concurrent)")
-    print(f"Each seed rendered twice: enhanced vs classic")
+    print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
     print(f"Detailed logs -> {LOG_FILE}")
     print("Ctrl+C to stop gracefully (twice to force)\n")
 
-    # ---- State ----
     run_id = 0
     ok_total = 0
     fail_total = 0
     completions_since_report = 0
     t_session = time.monotonic()
 
-    pending: collections.deque = collections.deque()
     in_flight: dict = {}
 
     shutdown = False
@@ -169,23 +158,15 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, on_sigint)
 
-    def enqueue_seed():
-        seed = random_seed()
-        pending.append((seed, True))
-        pending.append((seed, False))
-
     def submit_next(pool):
         nonlocal run_id
-        if not pending:
-            enqueue_seed()
-        seed, enhanced = pending.popleft()
+        seed = random_seed()
         run_id += 1
-        fut = pool.submit(run_one, seed, enhanced, run_id)
-        in_flight[fut] = (run_id, seed, enhanced)
+        fut = pool.submit(run_one, seed, run_id)
+        in_flight[fut] = (run_id, seed)
 
     def print_status():
         total = ok_total + fail_total
-        pct = ok_total / total * 100 if total else 0
         elapsed = fmt_duration(time.monotonic() - t_session)
         line = f"  completed {total}  (+{ok_total} ok"
         if fail_total:
@@ -205,7 +186,7 @@ def main() -> None:
                 )
 
                 for fut in done:
-                    success, _fname, _elapsed = fut.result()
+                    success, _seed, _elapsed = fut.result()
                     del in_flight[fut]
 
                     if success:

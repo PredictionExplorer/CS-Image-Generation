@@ -36,7 +36,7 @@ pub mod video;
 // Import from our submodules
 use self::batch_drawing::{draw_triangle_batch_spectral, prepare_triangle_vertices};
 use self::context::{PixelBuffer, RenderContext};
-use self::effects::{EffectChainBuilder, EffectConfig, FrameParams, convert_spd_buffer_to_rgba};
+use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
 use self::error::{RenderError, Result};
 use self::histogram::HistogramData;
 
@@ -94,6 +94,13 @@ impl Default for RenderConfig {
     fn default() -> Self {
         Self { hdr_scale: constants::DEFAULT_HDR_SCALE, bloom_mode: BloomMode::Dog }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FinishOutputMode {
+    #[default]
+    Still,
+    Video,
 }
 
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit)
@@ -215,6 +222,26 @@ pub fn save_image_as_png_16bit(
     Ok(())
 }
 
+fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> PixelBuffer {
+    pixels
+        .par_iter()
+        .map(|&(fr, fg, fb, fa)| {
+            let mapped = tonemap_core(fr, fg, fb, fa, levels);
+            (mapped[0], mapped[1], mapped[2], fa.clamp(0.0, 1.0))
+        })
+        .collect()
+}
+
+fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
+    let mut buf_16bit = vec![0u16; pixels.len() * 3];
+    buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
+        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    });
+    buf_16bit
+}
+
 // ====================== HELPER FUNCTIONS ===========================
 
 /// Generate nebula background buffer (separate from trajectories)
@@ -234,78 +261,27 @@ fn generate_nebula_background(
         .expect("Failed to generate nebula background")
 }
 
-/// Composite background and foreground buffers using enhanced "over" operator
+/// Composite background and foreground buffers using a standard premultiplied "over" operator.
 /// Background goes first (underneath), then foreground on top
-///
-/// This implementation uses a two-stage enhancement to maintain trajectory purity:
-/// 1. Alpha boost: Strengthens foreground coverage to reduce background bleed
-/// 2. Saturation boost: Restores color richness in trajectory regions
-///
 /// Note: Background is in straight alpha format (RGB + coverage alpha)
 ///       Foreground is in premultiplied alpha format (RGB * alpha + alpha)
 fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> PixelBuffer {
-    // Constants for enhancement
-    const ALPHA_BOOST_FACTOR: f64 = 1.20; // 20% stronger trajectory coverage
-    const SATURATION_BOOST_FACTOR: f64 = 1.20; // 20% more saturated colors
-    const SATURATION_THRESHOLD: f64 = 0.50; // Only boost high-alpha pixels
-
     background
         .par_iter()
         .zip(foreground.par_iter())
         .map(|(&(br, bg, bb, ba), &(fr, fg, fb, fa))| {
-            // Stage 1: Apply alpha boost to strengthen trajectory coverage
-            let boosted_fa = (fa * ALPHA_BOOST_FACTOR).min(1.0);
-
-            if boosted_fa >= 1.0 {
-                // Foreground is fully opaque - completely covers background
+            if fa >= 1.0 {
                 (fr, fg, fb, fa)
-            } else if boosted_fa <= 0.0 {
-                // No foreground - only background visible
-                // Convert background from straight to premultiplied for output consistency
+            } else if fa <= 0.0 {
                 (br * ba, bg * ba, bb * ba, ba)
             } else {
-                // Standard "over" compositing with enhanced alpha
-                // Result alpha: original fa + background * (1 - boosted_fa)
-                let alpha_out = fa + ba * (1.0 - boosted_fa);
-
-                if alpha_out <= 0.0 {
-                    (0.0, 0.0, 0.0, 0.0)
-                } else {
-                    // Composite colors with boosted foreground coverage
-                    // Output = premult_foreground + premult_background * (1 - boosted_alpha_foreground)
-                    let mut r_out = fr + (br * ba) * (1.0 - boosted_fa);
-                    let mut g_out = fg + (bg * ba) * (1.0 - boosted_fa);
-                    let mut b_out = fb + (bb * ba) * (1.0 - boosted_fa);
-
-                    // Stage 2: Saturation boost for trajectory-dominant regions
-                    // This restores gold richness that may be dulled by nebula bleed
-                    if alpha_out > SATURATION_THRESHOLD {
-                        // Unpremultiply to get straight RGB
-                        let sr = r_out / alpha_out;
-                        let sg = g_out / alpha_out;
-                        let sb = b_out / alpha_out;
-
-                        // Calculate mean luminance
-                        let mean = (sr + sg + sb) / 3.0;
-
-                        // Boost saturation: move colors away from mean
-                        let boosted_sr = mean + (sr - mean) * SATURATION_BOOST_FACTOR;
-                        let boosted_sg = mean + (sg - mean) * SATURATION_BOOST_FACTOR;
-                        let boosted_sb = mean + (sb - mean) * SATURATION_BOOST_FACTOR;
-
-                        // Clamp to valid range
-                        let clamped_sr = boosted_sr.clamp(0.0, 1.0);
-                        let clamped_sg = boosted_sg.clamp(0.0, 1.0);
-                        let clamped_sb = boosted_sb.clamp(0.0, 1.0);
-
-                        // Re-premultiply
-                        r_out = clamped_sr * alpha_out;
-                        g_out = clamped_sg * alpha_out;
-                        b_out = clamped_sb * alpha_out;
-                    }
-
-                    (r_out, g_out, b_out, alpha_out)
-                }
+                let alpha_out = fa + ba * (1.0 - fa);
+                (
+                    fr + (br * ba) * (1.0 - fa),
+                    fg + (bg * ba) * (1.0 - fa),
+                    fb + (bb * ba) * (1.0 - fa),
+                    alpha_out,
+                )
             }
         })
         .collect()
@@ -318,6 +294,7 @@ fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> Pixe
 fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
+    output_mode: FinishOutputMode,
 ) -> EffectConfig {
     use crate::oklab::GamutMapMode;
     use crate::post_effects::{
@@ -385,6 +362,9 @@ fn build_effect_config_from_resolved(
         strength: resolved.gradient_map_strength,
         hue_preservation: resolved.gradient_map_hue_preservation,
     };
+    let texture_min_dim = resolved.width.min(resolved.height);
+    let texture_enabled = resolved.enable_fine_texture && texture_min_dim >= 720;
+    let texture_strength_scale = if output_mode == FinishOutputMode::Video { 0.6 } else { 1.0 };
 
     EffectConfig {
         // Core bloom and blur
@@ -415,7 +395,7 @@ fn build_effect_config_from_resolved(
             tone_curve: resolved.tone_curve_strength,
             shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
             highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
-            palette_wave_strength: 1.0,
+            palette_wave_strength: 0.25,
         },
         gradient_map_enabled,
         gradient_map_config,
@@ -502,10 +482,10 @@ fn build_effect_config_from_resolved(
             darkening: resolved.atmospheric_darkening,
             density_radius: 3, // Fixed
         },
-        fine_texture_enabled: resolved.enable_fine_texture,
+        fine_texture_enabled: texture_enabled,
         fine_texture_config: FineTextureConfig {
             texture_type: TextureType::Canvas, // Fixed
-            strength: resolved.fine_texture_strength,
+            strength: resolved.fine_texture_strength * texture_strength_scale,
             scale: fine_texture_scale_abs,
             contrast: resolved.fine_texture_contrast,
             anisotropy: 0.3, // Fixed
@@ -558,7 +538,7 @@ pub fn pass_1_build_histogram_spectral(
     all_r: &mut Vec<f64>,
     all_g: &mut Vec<f64>,
     all_b: &mut Vec<f64>,
-    noise_seed: i32,
+    _noise_seed: i32,
     render_config: &RenderConfig,
     aspect_correction: bool,
 ) {
@@ -569,28 +549,6 @@ pub fn pass_1_build_histogram_spectral(
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    // Build effect configuration from resolved config
-    let effect_config = build_effect_config_from_resolved(resolved_config, render_config);
-    let effect_chain = EffectChainBuilder::new(effect_config);
-
-    // Create nebula configuration (rendered separately, not in effect chain)
-    let nebula_config = NebulaCloudConfig {
-        strength: resolved_config.nebula_strength,
-        octaves: resolved_config.nebula_octaves,
-        base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,  // Fixed
-        persistence: 0.5, // Fixed
-        noise_seed: noise_seed as i64,
-        colors: [
-            [0.08, 0.12, 0.22], // Deep blue
-            [0.15, 0.08, 0.25], // Purple
-            [0.25, 0.12, 0.18], // Magenta
-            [0.12, 0.15, 0.28], // Blue-violet
-        ],
-        time_scale: 1.0, // Fixed
-        edge_fade: 0.3,  // Fixed
-    };
-
     // Create histogram storage
     let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
 
@@ -600,9 +558,6 @@ pub fn pass_1_build_histogram_spectral(
 
     // Create velocity HDR calculator for efficient multiplier computation
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(positions, dt);
-
-    // Pre-allocate empty background buffer for reuse (optimization: saves 60× 2MB allocations)
-    let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     for step in 0..total_steps {
         if step % chunk_line == 0 {
@@ -648,36 +603,9 @@ pub fn pass_1_build_histogram_spectral(
                 height as usize,
             );
 
-            // Process with persistent effect chain
-            let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
-
-            // Take ownership of accum_rgba to avoid clone
-            let rgba_buffer = std::mem::take(&mut accum_rgba);
-            let trajectory_pixels = effect_chain
-                .process_frame(rgba_buffer, width as usize, height as usize, &frame_params)
-                .expect("Failed to process frame during spectral histogram pass");
-            // Reuse the buffer instead of reallocating - clear and resize to avoid allocation
-            accum_rgba.clear();
-            accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
-
-            // Generate nebula background separately (with zero-overhead check)
-            let nebula_background = if resolved_config.nebula_strength > 0.0 {
-                generate_nebula_background(
-                    width as usize,
-                    height as usize,
-                    step / frame_interval,
-                    &nebula_config,
-                )
-            } else {
-                empty_background.clone() // Reuse pre-allocated empty buffer (zero overhead)
-            };
-
-            // Composite nebula background UNDER trajectory foreground
-            let final_frame_pixels = composite_buffers(&nebula_background, &trajectory_pixels);
-
             // Collect histogram data efficiently
             histogram.reserve(ctx.pixel_count());
-            for &(r, g, b, a) in &final_frame_pixels {
+            for &(r, g, b, a) in &accum_rgba {
                 histogram.push(r * a, g * a, b * a);
             }
         }
@@ -722,8 +650,9 @@ pub fn pass_2_write_frames_spectral(
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     // Build effect configuration from resolved config
-    let effect_config = build_effect_config_from_resolved(resolved_config, render_config);
-    let effect_chain = EffectChainBuilder::new(effect_config);
+    let effect_config =
+        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
+    let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     // Create nebula configuration (rendered separately, not in effect chain)
     let nebula_config = NebulaCloudConfig {
@@ -809,13 +738,13 @@ pub fn pass_2_write_frames_spectral(
                 height as usize,
             );
 
-            // Process with persistent effect chain
+            // Process trajectory finish in linear space before tonemapping
             let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
 
             // Take ownership of accum_rgba to avoid clone
             let rgba_buffer = std::mem::take(&mut accum_rgba);
-            let trajectory_pixels = effect_chain
-                .process_frame(rgba_buffer, width as usize, height as usize, &frame_params)
+            let trajectory_pixels = finish_pipeline
+                .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
                 .expect("Failed to process frame during spectral render pass");
             // Reuse the buffer instead of reallocating - clear and resize to avoid allocation
             accum_rgba.clear();
@@ -836,22 +765,18 @@ pub fn pass_2_write_frames_spectral(
             // Composite nebula background UNDER trajectory foreground
             let composited = composite_buffers(&nebula_background, &trajectory_pixels);
 
-            // Apply temporal smoothing (blend with previous frame for fluid motion)
-            let final_frame_pixels = match &temporal_smoother {
-                Some(smoother) => smoother.process_frame(composited),
-                None => composited,
+            let display_buffer = tonemap_to_display_buffer(&composited, &levels);
+
+            // Apply temporal smoothing in display space before final image finish
+            let smoothed_display = match &temporal_smoother {
+                Some(smoother) => smoother.process_frame(display_buffer),
+                None => display_buffer,
             };
 
-            // levels + ACES tonemapping to 16-bit
-            let mut buf_16bit = vec![0u16; ctx.pixel_count() * 3];
-            buf_16bit.par_chunks_mut(3).zip(final_frame_pixels.par_iter()).for_each(
-                |(chunk, &(fr, fg, fb, fa))| {
-                    let mapped = tonemap_to_16bit(fr, fg, fb, fa, &levels);
-                    chunk[0] = mapped[0];
-                    chunk[1] = mapped[1];
-                    chunk[2] = mapped[2];
-                },
-            );
+            let final_display = finish_pipeline
+                .process_image(smoothed_display, width as usize, height as usize, &frame_params)
+                .expect("Failed to process final image finish during spectral render pass");
+            let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
             // Convert u16 buffer to bytes for FFmpeg (little-endian rgb48le format)
             let buf_bytes = unsafe {
@@ -896,8 +821,9 @@ pub fn render_final_frame_spectral(
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    let effect_config = build_effect_config_from_resolved(resolved_config, render_config);
-    let effect_chain = EffectChainBuilder::new(effect_config);
+    let effect_config =
+        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     let nebula_config = NebulaCloudConfig {
         strength: resolved_config.nebula_strength,
@@ -950,8 +876,8 @@ pub fn render_final_frame_spectral(
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { _frame_number: preview_frame_number, _density: None };
-    let trajectory_pixels = effect_chain
-        .process_frame(accum_rgba, width as usize, height as usize, &frame_params)
+    let trajectory_pixels = finish_pipeline
+        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .expect("Failed to process final preview frame");
 
     let nebula_background = if resolved_config.nebula_strength > 0.0 {
@@ -965,17 +891,12 @@ pub fn render_final_frame_spectral(
         empty_background
     };
 
-    let final_pixels = composite_buffers(&nebula_background, &trajectory_pixels);
-
-    let mut buf_16bit = vec![0u16; ctx.pixel_count() * 3];
-    buf_16bit.par_chunks_mut(3).zip(final_pixels.par_iter()).for_each(
-        |(chunk, &(fr, fg, fb, fa))| {
-            let mapped = tonemap_to_16bit(fr, fg, fb, fa, &levels);
-            chunk[0] = mapped[0];
-            chunk[1] = mapped[1];
-            chunk[2] = mapped[2];
-        },
-    );
+    let composited = composite_buffers(&nebula_background, &trajectory_pixels);
+    let display_buffer = tonemap_to_display_buffer(&composited, &levels);
+    let final_display = finish_pipeline
+        .process_image(display_buffer, width as usize, height as usize, &frame_params)
+        .expect("Failed to process final image finish for preview frame");
+    let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
         RenderError::ImageEncoding("Failed to create 16-bit image buffer".to_string())
@@ -1011,8 +932,9 @@ pub fn render_single_frame_spectral(
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     // Build effect configuration from resolved config
-    let effect_config = build_effect_config_from_resolved(resolved_config, render_config);
-    let effect_chain = EffectChainBuilder::new(effect_config);
+    let effect_config =
+        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     // Create nebula configuration
     let nebula_config = NebulaCloudConfig {
@@ -1131,8 +1053,8 @@ pub fn render_single_frame_spectral(
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { _frame_number: 0, _density: None };
-    let trajectory_pixels = effect_chain
-        .process_frame(accum_rgba, width as usize, height as usize, &frame_params)
+    let trajectory_pixels = finish_pipeline
+        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .expect("Failed to process test frame");
 
     // Generate nebula background for frame 0 (with zero-overhead check)
@@ -1143,18 +1065,14 @@ pub fn render_single_frame_spectral(
     };
 
     // Composite nebula under trajectories
-    let final_pixels = composite_buffers(&nebula_background, &trajectory_pixels);
+    let composited = composite_buffers(&nebula_background, &trajectory_pixels);
+    let display_buffer = tonemap_to_display_buffer(&composited, &levels);
+    let final_display = finish_pipeline
+        .process_image(display_buffer, width as usize, height as usize, &frame_params)
+        .expect("Failed to process final image finish");
 
-    // Tonemap to 16-bit
-    let mut buf_16bit = vec![0u16; ctx.pixel_count() * 3];
-    buf_16bit.par_chunks_mut(3).zip(final_pixels.par_iter()).for_each(
-        |(chunk, &(fr, fg, fb, fa))| {
-            let mapped = tonemap_to_16bit(fr, fg, fb, fa, &levels);
-            chunk[0] = mapped[0];
-            chunk[1] = mapped[1];
-            chunk[2] = mapped[2];
-        },
-    );
+    // Quantize display buffer to 16-bit
+    let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     // Create ImageBuffer and return
     let image = ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
@@ -1307,7 +1225,8 @@ mod tests {
         let render_config =
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
-        let effect_config = build_effect_config_from_resolved(&resolved, &render_config);
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
 
         assert_eq!(effect_config.bloom_mode, "dog");
         assert_eq!(effect_config.blur_radius_px, 0);
@@ -1321,10 +1240,51 @@ mod tests {
         let render_config =
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Gaussian };
 
-        let effect_config = build_effect_config_from_resolved(&resolved, &render_config);
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
 
         assert_eq!(effect_config.bloom_mode, "gaussian");
         assert!(effect_config.blur_radius_px > 0);
+    }
+
+    #[test]
+    fn test_build_effect_config_disables_texture_for_proxy_resolution() {
+        let resolved = ResolvedEffectConfig {
+            enable_fine_texture: true,
+            ..baseline_resolved_config(640, 360)
+        };
+        let render_config =
+            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+
+        assert!(!effect_config.fine_texture_enabled, "proxy-sized renders should skip texture");
+    }
+
+    #[test]
+    fn test_build_effect_config_scales_texture_for_video() {
+        let resolved = ResolvedEffectConfig {
+            enable_fine_texture: true,
+            fine_texture_strength: 0.2,
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config =
+            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+
+        let still_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let video_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video);
+
+        assert!(still_config.fine_texture_enabled);
+        assert!(video_config.fine_texture_enabled);
+        assert!(
+            (video_config.fine_texture_config.strength
+                - still_config.fine_texture_config.strength * 0.6)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -1339,7 +1299,8 @@ mod tests {
         let render_config =
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
-        let effect_config = build_effect_config_from_resolved(&resolved, &render_config);
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
         let perceptual =
             effect_config.perceptual_blur_config.expect("perceptual blur should remain configured");
 
@@ -1351,6 +1312,79 @@ mod tests {
             perceptual.radius < (0.0036_f64 * 1080.0).round() as usize,
             "softness stacks should tighten perceptual blur radius"
         );
+    }
+
+    #[test]
+    fn test_histogram_pass_ignores_finish_effects_and_background() {
+        let positions = vec![
+            vec![Vector3::new(0.1, 0.1, 0.0), Vector3::new(0.2, 0.2, 0.0)],
+            vec![Vector3::new(0.9, 0.1, 0.0), Vector3::new(0.8, 0.2, 0.0)],
+            vec![Vector3::new(0.5, 0.9, 0.0), Vector3::new(0.5, 0.8, 0.0)],
+        ];
+        let colors = vec![
+            vec![(0.7, 0.2, 0.1), (0.72, 0.18, 0.12)],
+            vec![(0.68, -0.15, 0.2), (0.70, -0.12, 0.18)],
+            vec![(0.65, 0.04, -0.18), (0.67, 0.05, -0.16)],
+        ];
+        let body_alphas = vec![0.8, 0.9, 1.0];
+        let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::Dog };
+
+        let clean = baseline_resolved_config(48, 48);
+        let stylized = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_perceptual_blur: true,
+            enable_micro_contrast: true,
+            enable_gradient_map: true,
+            enable_color_grade: true,
+            enable_champleve: true,
+            enable_aether: true,
+            enable_opalescence: true,
+            enable_edge_luminance: true,
+            enable_atmospheric_depth: true,
+            enable_fine_texture: true,
+            nebula_strength: 0.25,
+            ..baseline_resolved_config(48, 48)
+        };
+
+        let mut clean_r = Vec::new();
+        let mut clean_g = Vec::new();
+        let mut clean_b = Vec::new();
+        pass_1_build_histogram_spectral(
+            &positions,
+            &colors,
+            &body_alphas,
+            &clean,
+            1,
+            &mut clean_r,
+            &mut clean_g,
+            &mut clean_b,
+            17,
+            &render_config,
+            false,
+        );
+
+        let mut styled_r = Vec::new();
+        let mut styled_g = Vec::new();
+        let mut styled_b = Vec::new();
+        pass_1_build_histogram_spectral(
+            &positions,
+            &colors,
+            &body_alphas,
+            &stylized,
+            1,
+            &mut styled_r,
+            &mut styled_g,
+            &mut styled_b,
+            999,
+            &render_config,
+            false,
+        );
+
+        assert_eq!(clean_r, styled_r);
+        assert_eq!(clean_g, styled_g);
+        assert_eq!(clean_b, styled_b);
     }
 
     #[test]

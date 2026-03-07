@@ -8,7 +8,8 @@ use std::error::Error;
 use std::fmt;
 
 /// Type alias for pixel buffers used throughout the pipeline.
-/// Format: (R, G, B, A) in linear color space, premultiplied alpha.
+/// Format: (R, G, B, A) with premultiplied alpha.
+/// Color channels may be linear or display-space depending on the render stage.
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
 /// Error type for post-processing pipeline failures.

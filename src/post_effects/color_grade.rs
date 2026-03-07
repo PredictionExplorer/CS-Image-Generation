@@ -23,6 +23,14 @@ fn remap_tone_curve(lum: f64, strength: f64) -> f64 {
     (0.5 + (gain * centered).tanh() * 0.5).clamp(0.0, 1.0)
 }
 
+fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    if (edge1 - edge0).abs() < f64::EPSILON {
+        return if x >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[derive(Clone, Debug)]
 pub struct ColorGradeParams {
     pub strength: f64,
@@ -126,11 +134,17 @@ impl CinematicColorGrade {
         }
 
         // Palette sway introduces gentle complementary shifts for added drama
-        // This is disabled in standard mode (palette_wave_strength = 0.0) to prevent red bias
+        // The sway is now restricted to colorful midtones so it behaves as an accent,
+        // not a global cast.
         let palette_wave = (clarity_detail * 5.0 + vignette_factor * TAU).sin();
-        vibrant[0] += palette_wave * 0.06 * self.params.palette_wave_strength;
-        vibrant[1] += palette_wave * -0.02 * self.params.palette_wave_strength;
-        vibrant[2] += palette_wave * -0.07 * self.params.palette_wave_strength;
+        let chroma_gate = ((chroma_span - 0.03) / 0.12).clamp(0.0, 1.0);
+        let shadow_gate = smoothstep(0.18, 0.34, lum_clarity);
+        let highlight_gate = 1.0 - smoothstep(0.78, 0.94, lum_clarity);
+        let palette_gate = midtone_weight * chroma_gate * shadow_gate * highlight_gate;
+        let palette_strength = self.params.palette_wave_strength * palette_gate;
+        vibrant[0] += palette_wave * 0.030 * palette_strength;
+        vibrant[1] += palette_wave * -0.010 * palette_strength;
+        vibrant[2] += palette_wave * -0.035 * palette_strength;
 
         let tone = remap_tone_curve(lum_clarity, self.params.tone_curve);
         let current_tone = luminance(vibrant[0], vibrant[1], vibrant[2]).max(1e-6);
@@ -139,12 +153,14 @@ impl CinematicColorGrade {
             *channel *= tone_scale;
         }
 
-        // Shadow and highlight tinting
+        // Shadow and highlight tinting are now luma-gated instead of applied globally.
+        let shadow_weight = 1.0 - smoothstep(0.24, 0.46, lum_clarity);
+        let highlight_weight = smoothstep(0.58, 0.82, lum_clarity);
         #[allow(clippy::needless_range_loop)]
         // Direct indexing clearer for color channel manipulation
         for i in 0..3 {
-            vibrant[i] += self.params.shadow_tint[i];
-            vibrant[i] += self.params.highlight_tint[i];
+            vibrant[i] += self.params.shadow_tint[i] * shadow_weight;
+            vibrant[i] += self.params.highlight_tint[i] * highlight_weight;
         }
 
         let vignette_mix = 1.0 - self.params.vignette_strength * vignette_factor;
@@ -215,5 +231,59 @@ impl PostEffect for CinematicColorGrade {
         });
 
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_params() -> ColorGradeParams {
+        ColorGradeParams {
+            strength: 1.0,
+            vignette_strength: 0.0,
+            vignette_softness: 2.0,
+            vibrance: 0.0,
+            clarity_strength: 0.0,
+            clarity_radius: 0,
+            tone_curve: 0.0,
+            shadow_tint: [0.0, 0.0, 0.2],
+            highlight_tint: [0.2, 0.0, 0.0],
+            palette_wave_strength: 1.0,
+        }
+    }
+
+    #[test]
+    fn test_shadow_tint_is_luma_gated() {
+        let grade = CinematicColorGrade::new(test_params());
+        let dark = grade.grade_pixel((0.12, 0.12, 0.12, 1.0), None, 0.0);
+        let bright = grade.grade_pixel((0.90, 0.90, 0.90, 1.0), None, 0.0);
+
+        assert!(dark.2 > dark.0, "shadow tint should favor the blue channel in dark values");
+        assert!(bright.0 > bright.2, "highlight tint should dominate bright values");
+    }
+
+    #[test]
+    fn test_midtone_neutral_stays_near_neutral() {
+        let grade = CinematicColorGrade::new(test_params());
+        let mid = grade.grade_pixel((0.5, 0.5, 0.5, 1.0), None, 0.0);
+
+        assert!((mid.0 - mid.1).abs() < 0.02);
+        assert!((mid.1 - mid.2).abs() < 0.02);
+    }
+
+    #[test]
+    fn test_palette_sway_is_suppressed_for_low_chroma_pixels() {
+        let grade = CinematicColorGrade::new(test_params());
+        let neutral = grade.grade_pixel((0.55, 0.55, 0.55, 1.0), None, 0.25);
+        let colorful = grade.grade_pixel((0.70, 0.30, 0.20, 1.0), None, 0.25);
+
+        let neutral_spread = (neutral.0 - neutral.1).abs() + (neutral.1 - neutral.2).abs();
+        let colorful_spread = (colorful.0 - colorful.1).abs() + (colorful.1 - colorful.2).abs();
+
+        assert!(
+            colorful_spread > neutral_spread,
+            "palette sway should stay more restrained on low-chroma pixels"
+        );
     }
 }

@@ -4,6 +4,7 @@
 //! crafted gradient palettes to create stunning, professional color treatments.
 
 use super::{PixelBuffer, PostEffect};
+use crate::oklab::{self, GamutMapMode};
 use rayon::prelude::*;
 use std::error::Error;
 
@@ -349,56 +350,39 @@ impl GradientMap {
         let c0 = colors[idx];
         let c1 = colors[(idx + 1).min(n)];
 
-        (
-            c0.0 + (c1.0 - c0.0) * local_t,
-            c0.1 + (c1.1 - c0.1) * local_t,
-            c0.2 + (c1.2 - c0.2) * local_t,
-        )
-    }
-
-    /// Convert RGB to HSV
-    fn rgb_to_hsv(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
-        use crate::utils::{approx_eq, is_zero};
-
-        let max = r.max(g).max(b);
-        let min = r.min(g).min(b);
-        let delta = max - min;
-
-        let v = max;
-        let s = if max > 0.0 { delta / max } else { 0.0 };
-
-        let h = if is_zero(delta) {
-            0.0
-        } else if approx_eq(max, r) {
-            60.0 * (((g - b) / delta) % 6.0)
-        } else if approx_eq(max, g) {
-            60.0 * (((b - r) / delta) + 2.0)
+        let (l0, c0_chroma, h0) = Self::rgb_to_oklch(c0.0, c0.1, c0.2);
+        let (l1, c1_chroma, h1) = Self::rgb_to_oklch(c1.0, c1.1, c1.2);
+        let hue = if c0_chroma < 1e-6 {
+            h1
+        } else if c1_chroma < 1e-6 {
+            h0
         } else {
-            60.0 * (((r - g) / delta) + 4.0)
+            Self::interpolate_hue_shortest_arc(h0, h1, local_t)
         };
+        let lightness = l0 + (l1 - l0) * local_t;
+        let chroma = c0_chroma + (c1_chroma - c0_chroma) * local_t;
 
-        let h = if h < 0.0 { h + 360.0 } else { h };
-
-        (h, s, v)
+        Self::oklch_to_rgb(lightness, chroma, hue)
     }
 
-    /// Convert HSV to RGB
-    fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
-        let c = v * s;
-        let h_prime = h / 60.0;
-        let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
-        let m = v - c;
+    fn rgb_to_oklch(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+        let (l, a, b_ch) = oklab::linear_srgb_to_oklab(r, g, b);
+        let chroma = (a * a + b_ch * b_ch).sqrt();
+        let hue = if chroma < 1e-10 { 0.0 } else { b_ch.atan2(a).to_degrees().rem_euclid(360.0) };
+        (l, chroma, hue)
+    }
 
-        let (r, g, b) = match h_prime as i32 {
-            0 => (c, x, 0.0),
-            1 => (x, c, 0.0),
-            2 => (0.0, c, x),
-            3 => (0.0, x, c),
-            4 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
+    fn oklch_to_rgb(lightness: f64, chroma: f64, hue_deg: f64) -> (f64, f64, f64) {
+        let hue_rad = hue_deg.to_radians();
+        let a = chroma * hue_rad.cos();
+        let b = chroma * hue_rad.sin();
+        let (r, g, b_ch) = oklab::oklab_to_linear_srgb(lightness, a, b);
+        GamutMapMode::PreserveHue.map_to_gamut(r, g, b_ch)
+    }
 
-        (r + m, g + m, b + m)
+    fn interpolate_hue_shortest_arc(start: f64, end: f64, t: f64) -> f64 {
+        let delta = (end - start + 540.0).rem_euclid(360.0) - 180.0;
+        (start + delta * t).rem_euclid(360.0)
     }
 }
 
@@ -437,16 +421,20 @@ impl PostEffect for GradientMap {
 
                 // Apply hue preservation if requested
                 let (final_r, final_g, final_b) = if self.config.hue_preservation > 0.0 {
-                    let (orig_h, orig_s, _) = Self::rgb_to_hsv(sr, sg, sb);
-                    let (grad_h, grad_s, grad_v) = Self::rgb_to_hsv(gr, gg, gb);
+                    let (orig_l, orig_c, orig_h) = Self::rgb_to_oklch(sr, sg, sb);
+                    let (grad_l, grad_c, grad_h) = Self::rgb_to_oklch(gr, gg, gb);
+                    let preserve = self.config.hue_preservation.clamp(0.0, 1.0);
+                    let blended_h = if orig_c < 1e-6 {
+                        grad_h
+                    } else if grad_c < 1e-6 {
+                        orig_h
+                    } else {
+                        Self::interpolate_hue_shortest_arc(grad_h, orig_h, preserve)
+                    };
+                    let blended_c = grad_c * (1.0 - preserve) + orig_c * preserve;
+                    let blended_l = grad_l * (1.0 - preserve * 0.35) + orig_l * preserve * 0.35;
 
-                    // Blend hues
-                    let blended_h = orig_h * self.config.hue_preservation
-                        + grad_h * (1.0 - self.config.hue_preservation);
-                    let blended_s = orig_s * self.config.hue_preservation
-                        + grad_s * (1.0 - self.config.hue_preservation);
-
-                    Self::hsv_to_rgb(blended_h, blended_s, grad_v)
+                    Self::oklch_to_rgb(blended_l, blended_c, blended_h)
                 } else {
                     (gr, gg, gb)
                 };
@@ -463,5 +451,45 @@ impl PostEffect for GradientMap {
             .collect();
 
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interpolate_hue_shortest_arc_wraps_cleanly() {
+        let hue = GradientMap::interpolate_hue_shortest_arc(350.0, 10.0, 0.5);
+        assert!(hue.abs() < 1.0 || (hue - 360.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_palette_sampling_returns_in_gamut_rgb() {
+        let gradient = GradientMap::new(GradientMapConfig {
+            palette: LuxuryPalette::RoyalAmethyst,
+            strength: 1.0,
+            hue_preservation: 0.0,
+        });
+        let (r, g, b) = gradient.sample_palette(0.42);
+
+        assert!((0.0..=1.0).contains(&r));
+        assert!((0.0..=1.0).contains(&g));
+        assert!((0.0..=1.0).contains(&b));
+    }
+
+    #[test]
+    fn test_hue_preservation_keeps_neutral_input_stable() {
+        let gradient = GradientMap::new(GradientMapConfig {
+            palette: LuxuryPalette::AuroraBorealis,
+            strength: 1.0,
+            hue_preservation: 0.6,
+        });
+        let input = vec![(0.45, 0.45, 0.45, 1.0)];
+        let output = gradient.process(&input, 1, 1).unwrap();
+        let (r, g, b, _) = output[0];
+
+        assert!((r - g).abs() < 0.25);
+        assert!((g - b).abs() < 0.25);
     }
 }

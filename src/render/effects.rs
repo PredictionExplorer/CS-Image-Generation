@@ -8,7 +8,7 @@ use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use crate::post_effects::{
-    AtmosphericDepth, AtmosphericDepthConfig, AutoExposure, ChampleveConfig, ChromaticBloom,
+    AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
     ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
     EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
     GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
@@ -78,20 +78,22 @@ pub struct FrameParams {
     pub _density: Option<f64>,
 }
 
-/// Persistent effect chain builder
-pub struct EffectChainBuilder {
-    chain: PostEffectChain,
+/// Persistent finish pipeline with separate trajectory and image stages.
+pub struct FinishEffectPipeline {
+    trajectory_chain: PostEffectChain,
+    image_chain: PostEffectChain,
     _config: EffectConfig,
 }
 
-impl EffectChainBuilder {
-    /// Create a new effect chain builder with given configuration
+impl FinishEffectPipeline {
+    /// Create a new finish pipeline with given configuration
     pub fn new(config: EffectConfig) -> Self {
-        let chain = Self::build_chain(&config);
-        Self { chain, _config: config }
+        let trajectory_chain = Self::build_trajectory_chain(&config);
+        let image_chain = Self::build_image_chain(&config);
+        Self { trajectory_chain, image_chain, _config: config }
     }
 
-    /// Build the effect chain based on configuration
+    /// Build the trajectory finish chain based on configuration.
     ///
     /// Effects are applied in a carefully optimized order:
     /// 1. Bloom effects (diffuse and tight glow)
@@ -100,8 +102,8 @@ impl EffectChainBuilder {
     /// 4. Color manipulation (palettes, grading)
     /// 5. Material properties (iridescence layers)
     /// 6. Form refinement (edges)
-    /// 7. Atmospheric effects (depth, texture)
-    fn build_chain(config: &EffectConfig) -> PostEffectChain {
+    /// 7. Atmospheric effects (depth)
+    fn build_trajectory_chain(config: &EffectConfig) -> PostEffectChain {
         let mut chain = PostEffectChain::new();
 
         // ===== PHASE 1: BLOOM & GLOW =====
@@ -144,11 +146,6 @@ impl EffectChainBuilder {
             && let Some(blur_config) = &config.perceptual_blur_config
         {
             chain.add(Box::new(PerceptualBlur::new(blur_config.clone())));
-        }
-
-        // 2b. Auto-exposure (HDR tone mapping)
-        if config.hdr_mode == "auto" {
-            chain.add(Box::new(AutoExposure::default()));
         }
 
         // ===== PHASE 3: DETAIL ENHANCEMENT =====
@@ -206,7 +203,12 @@ impl EffectChainBuilder {
             chain.add(Box::new(AtmosphericDepth::new(config.atmospheric_depth_config.clone())));
         }
 
-        // 7b. Fine texture (surface quality: canvas, linen, etc. - preserves all prior work)
+        chain
+    }
+
+    fn build_image_chain(config: &EffectConfig) -> PostEffectChain {
+        let mut chain = PostEffectChain::new();
+
         if config.fine_texture_enabled {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
         }
@@ -214,17 +216,40 @@ impl EffectChainBuilder {
         chain
     }
 
-    /// Process a frame with the persistent effect chain
-    pub fn process_frame(
+    /// Process trajectory content through the persistent finish chain.
+    pub fn process_trajectory(
         &self,
         buffer: PixelBuffer,
         width: usize,
         height: usize,
         _params: &FrameParams,
     ) -> Result<PixelBuffer> {
-        self.chain
+        self.trajectory_chain
             .process(buffer, width, height)
             .map_err(|e| RenderError::EffectChain(e.to_string()))
+    }
+
+    /// Process the fully composited display image through the final image chain.
+    pub fn process_image(
+        &self,
+        buffer: PixelBuffer,
+        width: usize,
+        height: usize,
+        _params: &FrameParams,
+    ) -> Result<PixelBuffer> {
+        self.image_chain
+            .process(buffer, width, height)
+            .map_err(|e| RenderError::EffectChain(e.to_string()))
+    }
+
+    #[cfg(test)]
+    pub fn trajectory_len(&self) -> usize {
+        self.trajectory_chain.len()
+    }
+
+    #[cfg(test)]
+    pub fn image_len(&self) -> usize {
+        self.image_chain.len()
     }
 }
 
@@ -583,5 +608,68 @@ impl PostEffect for AetherFinish {
         let mut buffer = input.clone();
         apply_aether_weave(&mut buffer, width, height, &self.config);
         Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_effect_config() -> EffectConfig {
+        EffectConfig {
+            bloom_mode: "none".to_string(),
+            blur_radius_px: 0,
+            blur_strength: 0.0,
+            blur_core_brightness: 1.0,
+            dog_config: DogBloomConfig::default(),
+            hdr_mode: "off".to_string(),
+            perceptual_blur_enabled: false,
+            perceptual_blur_config: None,
+            color_grade_enabled: false,
+            color_grade_params: ColorGradeParams::default(),
+            gradient_map_enabled: false,
+            gradient_map_config: GradientMapConfig::default(),
+            champleve_enabled: false,
+            champleve_config: ChampleveConfig::default(),
+            aether_enabled: false,
+            aether_config: AetherConfig::default(),
+            chromatic_bloom_enabled: false,
+            chromatic_bloom_config: ChromaticBloomConfig::default(),
+            opalescence_enabled: false,
+            opalescence_config: OpalescenceConfig::default(),
+            edge_luminance_enabled: false,
+            edge_luminance_config: EdgeLuminanceConfig::default(),
+            micro_contrast_enabled: false,
+            micro_contrast_config: MicroContrastConfig::default(),
+            glow_enhancement_enabled: false,
+            glow_enhancement_config: GlowEnhancementConfig::default(),
+            atmospheric_depth_enabled: false,
+            atmospheric_depth_config: AtmosphericDepthConfig::default(),
+            fine_texture_enabled: false,
+            fine_texture_config: FineTextureConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_finish_pipeline_routes_texture_to_image_stage() {
+        let mut config = base_effect_config();
+        config.fine_texture_enabled = true;
+
+        let pipeline = FinishEffectPipeline::new(config);
+
+        assert_eq!(pipeline.trajectory_len(), 0);
+        assert_eq!(pipeline.image_len(), 1);
+    }
+
+    #[test]
+    fn test_finish_pipeline_keeps_trajectory_effects_out_of_image_stage() {
+        let mut config = base_effect_config();
+        config.color_grade_enabled = true;
+        config.fine_texture_enabled = true;
+
+        let pipeline = FinishEffectPipeline::new(config);
+
+        assert!(pipeline.trajectory_len() >= 1);
+        assert_eq!(pipeline.image_len(), 1);
     }
 }
