@@ -36,7 +36,6 @@ pub struct EffectConfig {
     pub blur_strength: f64,
     pub blur_core_brightness: f64,
     pub dog_config: DogBloomConfig,
-    pub hdr_mode: String,
     pub perceptual_blur_enabled: bool,
     pub perceptual_blur_config: Option<PerceptualBlurConfig>,
 
@@ -265,52 +264,6 @@ pub struct DogBloomConfig {
 impl Default for DogBloomConfig {
     fn default() -> Self {
         Self { inner_sigma: 6.0, outer_ratio: 2.5, strength: 0.35, threshold: 0.01 }
-    }
-}
-
-/// Auto-exposure calculator for HDR tone mapping
-pub struct ExposureCalculator {
-    target_percentile: f64,
-    min_exposure: f64,
-    max_exposure: f64,
-}
-
-impl Default for ExposureCalculator {
-    fn default() -> Self {
-        Self { target_percentile: 0.95, min_exposure: 0.1, max_exposure: 10.0 }
-    }
-}
-
-impl ExposureCalculator {
-    pub fn calculate_exposure(&self, pixels: &[(f64, f64, f64, f64)]) -> f64 {
-        // Compute luminance values
-        let luminances: Vec<f64> = pixels
-            .par_iter()
-            .map(|(r, g, b, a)| {
-                // Rec. 709 luminance weights
-                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                lum * a // Premultiplied
-            })
-            .filter(|&l| l > 0.0) // Ignore black pixels
-            .collect();
-
-        if luminances.is_empty() {
-            return 1.0;
-        }
-
-        // Find percentile using partial sort
-        let mut sorted = luminances;
-        let percentile_idx =
-            ((sorted.len() as f64 * self.target_percentile) as usize).min(sorted.len() - 1);
-
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let percentile_value = sorted[percentile_idx];
-
-        // Calculate exposure to map percentile to ~0.8
-        let exposure = 0.8 / percentile_value.max(1e-10);
-
-        // Clamp to reasonable range
-        exposure.clamp(self.min_exposure, self.max_exposure)
     }
 }
 
@@ -622,7 +575,6 @@ mod tests {
             blur_strength: 0.0,
             blur_core_brightness: 1.0,
             dog_config: DogBloomConfig::default(),
-            hdr_mode: "off".to_string(),
             perceptual_blur_enabled: false,
             perceptual_blur_config: None,
             color_grade_enabled: false,

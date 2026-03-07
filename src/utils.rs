@@ -14,6 +14,7 @@ pub fn is_zero(x: f64) -> bool {
 }
 
 /// Check if two floats are approximately equal
+#[cfg(test)]
 #[inline]
 pub fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() < FLOAT_EPSILON

@@ -44,7 +44,7 @@ use self::histogram::HistogramData;
 pub use color::{OklabColor, generate_body_color_sequences};
 #[allow(unused_imports)]
 pub use drawing::{draw_line_segment_aa_spectral_with_dispersion, parallel_blur_2d_rgba};
-pub use effects::{DogBloomConfig, ExposureCalculator, apply_dog_bloom};
+pub use effects::{DogBloomConfig, apply_dog_bloom};
 pub use histogram::compute_black_white_gamma;
 // Re-export all types as part of public library API (not used internally, but part of API contract)
 #[allow(unused_imports)] // Public API re-exports for library consumers
@@ -197,6 +197,7 @@ fn tonemap_to_8bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -
 }
 
 /// Tonemap to 16-bit (primary output format for maximum precision)
+#[cfg(test)]
 #[inline]
 fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [u16; 3] {
     let channels = tonemap_core(fr, fg, fb, fa, levels);
@@ -379,7 +380,6 @@ fn build_effect_config_from_resolved(
         blur_strength: resolved.blur_strength,
         blur_core_brightness: resolved.blur_core_brightness,
         dog_config,
-        hdr_mode: "auto".to_string(),
         perceptual_blur_enabled: resolved.enable_perceptual_blur,
         perceptual_blur_config,
 

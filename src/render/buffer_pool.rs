@@ -13,7 +13,9 @@
 //!
 //! This is experimental infrastructure for future effect chain refactoring.
 
-#![cfg_attr(not(feature = "advanced-optimizations"), allow(dead_code))]
+// This module is intentionally kept as dormant infrastructure for a future
+// zero-allocation effect executor. It is not wired into the current renderer.
+#![allow(dead_code)]
 
 use super::context::PixelBuffer;
 
