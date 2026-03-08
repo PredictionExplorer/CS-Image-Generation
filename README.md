@@ -12,13 +12,31 @@ Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 
 
 ## Requirements
 
-- Rust 1.94+ via `rustup`
-- FFmpeg
-- Python 3.10+ only if you use `run.py`
+- Rust 1.94+
+- FFmpeg (for video encoding)
+- Python 3.10+ (only needed for `run.py` and `run-test-images.py`)
+- Git
+
+### Installing on Ubuntu
+
+```bash
+sudo apt update
+sudo apt install -y build-essential ffmpeg python3 git curl
+
+# Install Rust via rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+The correct Rust toolchain version is pinned in `rust-toolchain.toml` and will be installed automatically on the first `cargo` command.
 
 ## Build
 
+Clone the repository and build:
+
 ```bash
+git clone <repo-url> CS-Image-Generation
+cd CS-Image-Generation
 cargo build --release
 ```
 
@@ -45,7 +63,7 @@ CLI reference:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--seed` | `0x100033` | Hex seed for the simulation (with or without `0x` prefix) |
+| `--seed` | `0x100033` | Hex seed (with or without `0x` prefix, must have an even number of hex digits) |
 | `-o, --output` | `output` | Base name for output files |
 | `--sims` | `100000` | Number of orbits evaluated in the Borda search |
 | `--steps` | `1000000` | Simulation steps per orbit |
@@ -62,78 +80,136 @@ CLI reference:
 
 ## Automation
 
-`run.py` is the deployment helper. It:
+`run.py` is the deployment helper that keeps a remote server in sync. Each run it:
 
-- fetches seeds from the CosmicSignature API,
-- checks which assets are missing remotely,
-- runs the Rust generator for missing seeds,
-- uploads PNG and MP4 files,
-- cleans up local artifacts.
+1. Fetches the current list of token seeds from the CosmicSignature API.
+2. Checks which `0x<seed>.png` / `0x<seed>.mp4` files already exist on the remote server (via SSH).
+3. Generates missing assets locally with the Rust binary.
+4. Uploads the new files to the remote server via SCP.
+5. Deletes the local copies after a successful upload.
 
-### Systemd Timer Setup (Linux)
+It also supports `--dry-run` (report what's missing without generating or uploading) and `--preflight` (test all external dependencies before committing to real runs).
 
-The repo ships two unit files that run `run.py` on a recurring schedule via systemd, similar to a cron job.
+### How the Two Machines Relate
 
-| File | Purpose |
-|------|---------|
-| `cosmicsig-sync.service` | One-shot service that executes `run.py` |
-| `cosmicsig-sync.timer` | Timer that triggers the service every 5 minutes |
+```text
+┌─────────────────────────┐         SSH / SCP         ┌──────────────────────────┐
+│    Generator Machine    │ ──────────────────────────▶│     Remote Server        │
+│  (Ubuntu, runs run.py)  │                            │  (any Linux with sshd)   │
+│                         │                            │                          │
+│  • Rust binary          │   uploads .png and .mp4    │  • Stores asset files    │
+│  • run.py + systemd     │   to COSMICSIG_REMOTE_DIR  │  • Web server (nginx)    │
+│  • All CPU-heavy work   │                            │    serves them to users  │
+└─────────────────────────┘                            └──────────────────────────┘
+```
 
-**1. Create the `.env` file**
+The generator machine does all the compute. The remote server only stores and serves the finished files. They can be the same machine, but in a typical deployment they are separate.
 
-Copy the example and fill in your deployment values:
+### Setting Up from Scratch (Ubuntu)
+
+The steps below assume you have a fresh Ubuntu generator machine and an existing remote server to upload assets to.
+
+**1. Install dependencies and build**
+
+Follow the [Requirements](#installing-on-ubuntu) and [Build](#build) sections above so that `./target/release/three_body_problem` exists.
+
+**2. Set up SSH key access to the remote server**
+
+The generator machine needs passwordless SSH access to the remote server. If you don't already have a key pair:
+
+```bash
+ssh-keygen -t ed25519 -C "cosmicsig-generator"
+ssh-copy-id frontend@203.0.113.42
+```
+
+Replace `frontend` and `203.0.113.42` with your actual remote user and host. Verify it works without a password prompt:
+
+```bash
+ssh -o BatchMode=yes frontend@203.0.113.42 echo ok
+```
+
+You should see `ok` printed with no password prompt. If it asks for a password, the key was not copied correctly.
+
+**3. Create the asset directory on the remote server**
+
+SSH into the remote server and create the directory where assets will be stored:
+
+```bash
+ssh frontend@203.0.113.42 "mkdir -p /home/frontend/nft-assets/new/cosmicsignature"
+```
+
+This must match the `COSMICSIG_REMOTE_DIR` value you'll configure next. Make sure your web server (e.g. nginx) is configured to serve files from this directory.
+
+**4. Create the `.env` file**
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit `.env` with your actual settings:
+Edit `.env` with your actual deployment values:
 
 ```dotenv
-COSMICSIG_SSH_HOST=203.0.113.42        # IP address or hostname of the remote server
-COSMICSIG_SSH_USER=frontend            # SSH user on the remote server
-COSMICSIG_API_URL=http://api.example.com:8353  # CosmicGame API base URL (no trailing slash)
-COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature  # Remote asset directory
+COSMICSIG_SSH_HOST=203.0.113.42
+COSMICSIG_SSH_USER=frontend
+COSMICSIG_API_URL=http://api.example.com:8353
+COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 ```
 
-The `User=` in the service file must have passwordless SSH key access to `COSMICSIG_SSH_HOST`. Test with:
+| Variable | What to put here |
+|----------|------------------|
+| `COSMICSIG_SSH_HOST` | IP address or hostname of the remote server |
+| `COSMICSIG_SSH_USER` | SSH user on the remote server (must accept your key) |
+| `COSMICSIG_API_URL` | CosmicGame API base URL, no trailing slash |
+| `COSMICSIG_REMOTE_DIR` | Absolute path on the remote server where PNG/MP4 files are stored |
 
-```bash
-ssh -o BatchMode=yes COSMICSIG_SSH_USER@COSMICSIG_SSH_HOST echo ok
-```
+**5. Run the preflight check**
 
-**2. Verify the environment**
-
-Make sure the release binary is built and FFmpeg is installed. Then run the preflight check, which tests SSH connectivity, remote write access, and API reachability:
+This tests SSH connectivity, remote write permissions, API reachability, and that the generator binary exists:
 
 ```bash
 python3 run.py --preflight
 ```
 
-**3. Review and adjust the service file**
+All four checks should print `OK`. Fix any failures before continuing.
 
-Open `cosmicsig-sync.service` and confirm these values match your deployment:
+**6. Do a dry run (optional)**
 
-- `User=` — the Linux user that will run the job (must have SSH key access for uploads).
-- `WorkingDirectory=` — absolute path to the project checkout.
-- `EnvironmentFile=` — path to the `.env` file with API keys and remote config.
+See what `run.py` would generate and upload without actually doing it:
 
-**4. Install the unit files**
+```bash
+python3 run.py --dry-run
+```
+
+**7. Edit the systemd service file**
+
+Open `cosmicsig-sync.service` and update the three values under `# --- Adjust these to match your deployment ---`:
+
+```ini
+User=ubuntu
+WorkingDirectory=/home/ubuntu/CS-Image-Generation
+EnvironmentFile=/home/ubuntu/CS-Image-Generation/.env
+```
+
+- `User=` — the Linux user on the generator machine that has the SSH key. This is the local user, not the remote one.
+- `WorkingDirectory=` — absolute path to this repository on the generator machine.
+- `EnvironmentFile=` — absolute path to the `.env` file you created in step 4. The default uses `%h` (systemd shorthand for the user's home directory), but you can use a full path instead.
+
+**8. Install the systemd units**
 
 ```bash
 sudo cp cosmicsig-sync.service cosmicsig-sync.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-**5. Enable and start the timer**
+**9. Enable and start the timer**
 
 ```bash
 sudo systemctl enable --now cosmicsig-sync.timer
 ```
 
-This starts the timer immediately and ensures it persists across reboots. The first run fires 2 minutes after boot; subsequent runs trigger every 5 minutes after the previous run finishes.
+This starts the timer immediately and ensures it survives reboots. The first run fires 2 minutes after boot; subsequent runs trigger every 5 minutes after the previous run finishes.
 
-**6. Check status**
+**10. Verify it's running**
 
 ```bash
 # Timer schedule and next trigger time
@@ -141,17 +217,18 @@ systemctl status cosmicsig-sync.timer
 
 # Logs from the most recent run
 journalctl -u cosmicsig-sync.service -e
+
+# Detailed run.py log (rotated, up to 5 x 10 MB)
+cat imgcheck.log
 ```
 
-**7. Run manually (optional)**
-
-To trigger a one-off run outside the timer schedule:
+**Trigger a manual run** outside the timer schedule:
 
 ```bash
 sudo systemctl start cosmicsig-sync.service
 ```
 
-**8. Disable the timer**
+**Disable the timer** when no longer needed:
 
 ```bash
 sudo systemctl disable --now cosmicsig-sync.timer
