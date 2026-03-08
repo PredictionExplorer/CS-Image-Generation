@@ -6,10 +6,8 @@
 //! These types form the public API for rendering configuration and are designed
 //! to be used by library consumers and the main application.
 //!
-//! Note: Some types are exported for library API completeness even if not used
-//! internally. This is intentional professional API design.
-
-#![allow(dead_code)] // Public API types for library consumers
+//! Note: Some types are exported for library consumers even if not used
+//! internally.
 
 use super::color::OklabColor;
 use super::effects::DogBloomConfig;

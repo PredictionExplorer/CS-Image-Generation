@@ -5,8 +5,6 @@
 //!
 //! Public API methods are provided for library consumers even if not used internally.
 
-#![allow(dead_code)] // Public API methods for library consumers
-
 use crate::render::constants;
 use rayon::prelude::*;
 

@@ -12,7 +12,6 @@ pub mod oklab;
 pub mod post_effects;
 pub mod render;
 pub mod sim;
-pub mod soa_positions;
 pub mod spectral_constants;
 pub mod spectrum;
 pub mod spectrum_simd;

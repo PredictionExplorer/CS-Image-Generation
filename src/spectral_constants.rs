@@ -36,8 +36,8 @@ pub fn wavelength_to_bin(wavelength: f64) -> f64 {
 ///
 /// # Returns
 /// Center wavelength of the bin in nanometers
+#[cfg(test)]
 #[inline]
-#[allow(dead_code)]
 pub fn bin_to_wavelength(bin: usize) -> f64 {
     LAMBDA_START + (bin as f64 + 0.5) * BIN_WIDTH
 }

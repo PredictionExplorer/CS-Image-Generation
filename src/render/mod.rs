@@ -17,7 +17,6 @@ pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
 pub mod batch_drawing;
-pub mod buffer_pool;
 pub mod color;
 pub mod constants;
 pub mod context;
@@ -28,7 +27,6 @@ pub mod error;
 pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
-pub mod simd_tonemap;
 pub mod types;
 pub mod velocity_hdr;
 pub mod video;
@@ -206,18 +204,6 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
     );
 
     [compressed[0].clamp(0.0, 1.0), compressed[1].clamp(0.0, 1.0), compressed[2].clamp(0.0, 1.0)]
-}
-
-/// Tonemap to 8-bit (for legacy support, not currently used)
-#[allow(dead_code)]
-#[inline]
-fn tonemap_to_8bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [u8; 3] {
-    let channels = tonemap_core(fr, fg, fb, fa, levels);
-    [
-        (channels[0] * 255.0).round().clamp(0.0, 255.0) as u8,
-        (channels[1] * 255.0).round().clamp(0.0, 255.0) as u8,
-        (channels[2] * 255.0).round().clamp(0.0, 255.0) as u8,
-    ]
 }
 
 /// Tonemap to 16-bit (primary output format for maximum precision)
@@ -931,10 +917,10 @@ pub fn render_final_frame_spectral(
 }
 
 // ====================== SINGLE FRAME RENDERING ===========================
-/// Render the first timeline slice only (legacy quick preview path).
-#[cfg_attr(not(test), allow(dead_code))]
+/// Render the first timeline slice only for tests.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)] // Low-level rendering primitive requires all parameters
-pub fn render_single_frame_spectral(
+pub(crate) fn render_single_frame_spectral(
     positions: &[Vec<Vector3<f64>>],
     colors: &[Vec<OklabColor>],
     body_alphas: &[f64],

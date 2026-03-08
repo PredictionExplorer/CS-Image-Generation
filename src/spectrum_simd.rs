@@ -26,7 +26,6 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 /// for maximum throughput.  Results may differ from the scalar path by a few
 /// ULPs but are deterministic within the same architecture.
 #[inline]
-#[allow(dead_code)] // Optional fast path selected by target-specific dispatch in spectrum.rs.
 pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
     spd_to_rgba_simd_with_sat_boost(spd, boosted)
@@ -57,13 +56,20 @@ fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64
 ///
 /// Uses index-based iteration for better auto-vectorization potential with
 /// `-C target-cpu=native` on platforms without explicit SIMD paths.
+#[cfg(test)]
 #[inline]
-#[allow(dead_code)] // Used on non-AVX2 targets and for deterministic fallback configurations.
 pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
     spd_to_rgba_scalar_with_sat_boost(spd, boosted)
 }
 
+#[cfg(any(
+    test,
+    not(any(
+        all(target_arch = "x86_64", target_feature = "avx2", not(miri)),
+        all(target_arch = "aarch64", target_feature = "neon", not(miri))
+    ))
+))]
 #[inline]
 fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     let mut r = 0.0;
@@ -200,7 +206,6 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
 /// AVX2 SIMD implementation — fully vectorized inner loop (no scalar exp).
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
 #[inline]
-#[allow(dead_code)] // Optional architecture-specific fast path.
 unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::x86_64::*;
 
@@ -260,7 +265,6 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
 /// scalar (no hardware transcendental on NEON), but accumulation is fully vectorized.
 #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
 #[inline]
-#[allow(dead_code)] // Optional architecture-specific fast path.
 unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::aarch64::*;
 

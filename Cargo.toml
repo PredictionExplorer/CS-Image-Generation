@@ -36,8 +36,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [features]
-# Advanced optimization infrastructure (experimental)
-advanced-optimizations = []
 default = []
 
 [dev-dependencies]

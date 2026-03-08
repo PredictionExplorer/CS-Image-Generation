@@ -6,22 +6,18 @@
 /// Descriptor for a floating-point parameter with bounded range.
 #[derive(Clone, Debug)]
 pub struct FloatParamDescriptor {
-    #[allow(dead_code)]
     pub name: &'static str,
     pub min: f64,
     pub max: f64,
-    #[allow(dead_code)]
     pub description: &'static str,
 }
 
 /// Descriptor for an integer parameter with bounded range.
 #[derive(Clone, Debug)]
 pub struct IntParamDescriptor {
-    #[allow(dead_code)]
     pub name: &'static str,
     pub min: usize,
     pub max: usize,
-    #[allow(dead_code)]
     pub description: &'static str,
 }
 

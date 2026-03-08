@@ -11,11 +11,9 @@ use crate::generation_log::{
     DriftConfig, GenerationLogger, GenerationRecord, LoggedRenderConfig, OrbitInfo,
     SimulationConfig,
 };
-use crate::oklab;
-use crate::post_effects;
 use crate::render::{
-    self, ChannelLevels, DogBloomConfig, RenderConfig, ToneMappingControls, VideoEncodingOptions,
-    constants, create_video_from_frames_singlepass, generate_body_color_sequences,
+    self, ChannelLevels, RenderConfig, ToneMappingControls, VideoEncodingOptions, constants,
+    create_video_from_frames_singlepass, generate_body_color_sequences,
     pass_1_build_histogram_spectral, pass_2_write_frames_spectral, render_final_frame_spectral,
     save_image_as_png_16bit,
 };
@@ -27,7 +25,6 @@ use tracing::{info, warn};
 
 /// Museum-quality enhancement flags (all default to true / enabled).
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Enhancements {
     pub chroma_boost: bool,
     pub sat_boost: bool,
@@ -51,25 +48,15 @@ impl Default for Enhancements {
 }
 
 /// Application configuration derived from command-line arguments
-#[allow(dead_code)] // Some fields used in logging, others reserved for future use
 pub struct AppConfig {
-    pub seed: String,
-    pub file_name: String,
-    pub num_sims: usize,
     pub num_steps_sim: usize,
     pub width: u32,
     pub height: u32,
-    pub test_frame: bool,
     pub clip_black: f64,
     pub clip_white: f64,
     pub alpha_denom: usize,
     pub escape_threshold: f64,
-    pub drift_enabled: bool,
     pub drift_mode: String,
-    pub drift_scale: Option<f64>,
-    pub drift_arc_fraction: Option<f64>,
-    pub drift_orbit_eccentricity: Option<f64>,
-    pub profile_tag: String,
     pub bloom_mode: String,
     pub dog_strength: f64,
     pub dog_sigma: Option<f64>,
@@ -194,61 +181,6 @@ pub fn generate_colors(
         enhancements.chroma_boost,
         enhancements.alpha_variation,
     )
-}
-
-/// Create blur configuration based on mode and resolution
-#[allow(dead_code)] // Legacy helper - kept for backward compatibility
-pub fn create_blur_config(special: bool, width: u32, height: u32) -> (usize, f64, f64) {
-    if special {
-        ((0.032 * std::cmp::min(width, height) as f64).round() as usize, 12.0, 12.0)
-    } else {
-        ((0.014 * std::cmp::min(width, height) as f64).round() as usize, 7.0, 7.0)
-    }
-}
-
-/// Create DoG bloom configuration with resolution-aware sigma
-#[allow(dead_code)] // Legacy helper - kept for backward compatibility
-pub fn create_dog_config(
-    width: u32,
-    height: u32,
-    dog_sigma: Option<f64>,
-    dog_ratio: f64,
-    dog_strength: f64,
-) -> DogBloomConfig {
-    let sigma = dog_sigma.unwrap_or_else(|| 0.0065 * std::cmp::min(width, height) as f64);
-
-    DogBloomConfig {
-        inner_sigma: sigma,
-        outer_ratio: dog_ratio,
-        strength: dog_strength,
-        threshold: 0.01,
-    }
-}
-
-/// Create perceptual blur configuration
-#[allow(dead_code)] // Legacy helper - kept for backward compatibility
-pub fn create_perceptual_blur_config(
-    enabled: bool,
-    blur_radius_px: usize,
-    perceptual_blur_radius: Option<usize>,
-    perceptual_blur_strength: f64,
-    perceptual_gamut_mode: &str,
-) -> Option<post_effects::PerceptualBlurConfig> {
-    if !enabled {
-        return None;
-    }
-
-    use oklab::GamutMapMode;
-
-    Some(post_effects::PerceptualBlurConfig {
-        radius: perceptual_blur_radius.unwrap_or(blur_radius_px),
-        strength: perceptual_blur_strength,
-        gamut_mode: match perceptual_gamut_mode {
-            "clamp" => GamutMapMode::Clamp,
-            "soft-clip" => GamutMapMode::SoftClip,
-            _ => GamutMapMode::PreserveHue,
-        },
-    })
 }
 
 /// Build histogram and determine color levels
@@ -558,22 +490,6 @@ mod tests {
     fn test_generate_filename_with_tag() {
         let name = generate_filename("test", "profile1");
         assert_eq!(name, "test_profile1");
-    }
-
-    #[test]
-    fn test_create_blur_config_standard() {
-        let (radius, strength, brightness) = create_blur_config(false, 1920, 1080);
-        assert_eq!(radius, (0.014_f64 * 1080.0).round() as usize);
-        assert_eq!(strength, 7.0);
-        assert_eq!(brightness, 7.0);
-    }
-
-    #[test]
-    fn test_create_blur_config_special() {
-        let (radius, strength, brightness) = create_blur_config(true, 1920, 1080);
-        assert_eq!(radius, (0.032_f64 * 1080.0).round() as usize);
-        assert_eq!(strength, 12.0);
-        assert_eq!(brightness, 12.0);
     }
 
     #[test]

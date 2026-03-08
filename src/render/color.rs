@@ -140,14 +140,7 @@ mod tests {
     fn test_color_gradient_generation() {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 1.0, 1.0, 1.0, 1.0);
         let length = 100;
-        let colors = generate_color_gradient_oklab(
-            &mut rng,
-            length,
-            0,
-            BASE_HUE_DRIFT,
-            false,
-            HUE_WAVE_FREQUENCY,
-        );
+        let colors = generate_color_gradient_oklab(&mut rng, length, 0, BASE_HUE_DRIFT, false, 2.6);
 
         assert_eq!(colors.len(), length);
         for (l, a, b) in &colors {

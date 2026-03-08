@@ -10,7 +10,6 @@ use std::error::Error;
 
 /// Predefined luxury color palettes
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum LuxuryPalette {
     /// Rich gold to deep purple gradient
     GoldPurple,
@@ -44,16 +43,6 @@ pub enum LuxuryPalette {
     AncientJade,
     /// Royal Amethyst: Deep purple, violet, lavender, silver
     RoyalAmethyst,
-    /// Desert Sunset: Burnt umber, terracotta, saffron, dusty rose
-    DesertSunset,
-    /// Polar Ice: Deep blue ice, cyan, pale turquoise, diamond white
-    PolarIce,
-    /// Peacock Feather: Deep teal, emerald, sapphire, gold
-    PeacockFeather,
-    /// Cherry Blossom: Deep burgundy, pink, pale pink, white
-    CherryBlossom,
-    /// Cosmic Nebula: Deep space purple, magenta, electric blue, star white
-    CosmicNebula,
 }
 
 impl LuxuryPalette {
@@ -279,61 +268,6 @@ impl GradientMap {
                     (0.55, 0.28, 0.65), // Amethyst violet
                     (0.75, 0.52, 0.82), // Light lavender
                     (0.85, 0.82, 0.88), // Silver
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::DesertSunset => {
-                // Warm, earthy, Southwestern aesthetics
-                let colors = [
-                    (0.15, 0.08, 0.05), // Burnt umber
-                    (0.42, 0.22, 0.15), // Deep terracotta
-                    (0.68, 0.38, 0.22), // Terracotta
-                    (0.88, 0.65, 0.25), // Saffron
-                    (0.85, 0.62, 0.55), // Dusty rose
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::PolarIce => {
-                // Crystalline, pristine, arctic beauty
-                let colors = [
-                    (0.05, 0.15, 0.25), // Deep blue ice
-                    (0.15, 0.38, 0.52), // Glacial blue
-                    (0.28, 0.58, 0.72), // Ice blue
-                    (0.52, 0.78, 0.88), // Pale turquoise
-                    (0.92, 0.98, 1.00), // Diamond white
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::PeacockFeather => {
-                // Iridescent, luxurious, nature's artistry
-                let colors = [
-                    (0.05, 0.15, 0.18), // Deep teal
-                    (0.12, 0.38, 0.42), // Teal
-                    (0.15, 0.52, 0.35), // Emerald
-                    (0.18, 0.35, 0.65), // Sapphire
-                    (0.75, 0.58, 0.25), // Golden eye
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::CherryBlossom => {
-                // Delicate, ephemeral, Japanese spring
-                let colors = [
-                    (0.22, 0.08, 0.12), // Deep burgundy branch
-                    (0.55, 0.18, 0.25), // Deep pink
-                    (0.82, 0.45, 0.52), // Cherry pink
-                    (0.92, 0.72, 0.78), // Pale pink
-                    (0.98, 0.95, 0.96), // White petals
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::CosmicNebula => {
-                // Deep space, stellar, cosmic wonder
-                let colors = [
-                    (0.05, 0.02, 0.12), // Deep space
-                    (0.22, 0.08, 0.38), // Deep space purple
-                    (0.55, 0.15, 0.65), // Nebula magenta
-                    (0.25, 0.45, 0.82), // Electric blue
-                    (0.95, 0.92, 0.98), // Star white
                 ];
                 Self::interpolate_gradient(&colors, t)
             }

@@ -4,10 +4,8 @@
 //! and create a more cinematic, fluid motion. Creates the perception of higher
 //! frame rate and more organic movement without actual interpolation.
 //!
-//! Note: This effect is stateful and requires special integration into the video
-//! rendering pipeline. It will be fully integrated in a future update.
-
-#![allow(dead_code)] // Awaiting video pipeline integration
+//! Note: This effect is stateful and is wired directly into the video renderer
+//! instead of going through the stateless `PostEffect` trait.
 
 use super::PixelBuffer;
 use std::sync::Mutex;
@@ -34,14 +32,6 @@ impl TemporalSmoothingConfig {
         Self {
             blend_factor: 0.25,    // 25% of previous frame
             alpha_threshold: 0.01, // Only smooth visible pixels
-        }
-    }
-
-    /// Create configuration for standard mode (subtle smoothing)
-    pub fn standard_mode() -> Self {
-        Self {
-            blend_factor: 0.15, // 15% of previous frame
-            alpha_threshold: 0.01,
         }
     }
 }

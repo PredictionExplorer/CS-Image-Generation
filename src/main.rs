@@ -1,26 +1,13 @@
 use clap::Parser;
+use three_body_problem::{
+    app,
+    error::{self, Result},
+    render::{self, RenderConfig},
+    sim::Sha3RandomByteStream,
+    spectrum_simd,
+};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-mod analysis;
-mod app;
-mod drift;
-mod drift_config;
-mod error;
-mod generation_log;
-mod oklab;
-mod post_effects;
-mod render;
-mod sim;
-mod soa_positions;
-mod spectral_constants;
-mod spectrum;
-mod spectrum_simd;
-mod utils;
-
-use error::Result;
-use render::RenderConfig;
-use sim::Sha3RandomByteStream;
 
 /// Command-line arguments
 #[derive(Parser, Debug)]
@@ -711,11 +698,10 @@ fn main() -> Result<()> {
         dispersion_boost: !args.no_enhancements && !args.no_dispersion_boost,
     };
 
-    crate::spectrum_simd::SAT_BOOST_ENABLED
+    spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
-    crate::render::ACES_TWEAK_ENABLED
-        .store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
-    crate::render::drawing::DISPERSION_BOOST_ENABLED
+    render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
+    render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
     // Setup
@@ -865,23 +851,14 @@ fn main() -> Result<()> {
 
     // Log generation parameters for reproducibility
     let app_config = app::AppConfig {
-        seed: args.seed.clone(),
-        file_name: args.file_name.clone(),
-        num_sims,
         num_steps_sim: args.num_steps_sim,
         width: args.width,
         height: args.height,
-        test_frame: args.test_frame,
         clip_black: args.clip_black,
         clip_white: args.clip_white,
         alpha_denom: args.alpha_denom,
         escape_threshold: args.escape_threshold,
-        drift_enabled: !args.no_drift,
         drift_mode: args.drift_mode.clone(),
-        drift_scale: args.drift_scale,
-        drift_arc_fraction: args.drift_arc_fraction,
-        drift_orbit_eccentricity: args.drift_orbit_eccentricity,
-        profile_tag: args.profile_tag.clone(),
         bloom_mode: args.bloom_mode.clone(),
         dog_strength: args.dog_strength,
         dog_sigma: args.dog_sigma,

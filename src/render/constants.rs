@@ -22,10 +22,6 @@ pub const BASE_HUE_DRIFT: f64 = 1.4;
 /// Amplitude, in degrees, applied by the palette sway wave
 pub const HUE_WAVE_AMPLITUDE: f64 = 52.0;
 
-/// Base frequency (cycles) of the palette sway wave (now randomized per-seed in [1.8, 4.0])
-#[allow(dead_code)]
-pub const HUE_WAVE_FREQUENCY: f64 = 2.6;
-
 /// Additional per-body phase offsets (degrees) to guarantee separation
 pub const BODY_HUE_PHASE: [f64; 3] = [0.0, 120.0, 240.0];
 
@@ -208,10 +204,6 @@ pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.75; // Increased from 0.35 for 
 
 // ========== Video Encoding Constants ==========
 
-/// Default video bitrate for high quality output (legacy, no longer used)
-#[allow(dead_code)]
-pub const DEFAULT_VIDEO_BITRATE: &str = "100M";
-
 /// Default video framerate
 pub const DEFAULT_VIDEO_FPS: u32 = 60;
 
@@ -223,14 +215,6 @@ pub const DEFAULT_TARGET_FRAMES: u32 = 1800;
 /// This is intentionally much lower than `DEFAULT_TARGET_FRAMES` because pass 1
 /// only needs representative luminance coverage, not full video temporal density.
 pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
-
-/// Default video codec (legacy, no longer used - now using H.265)
-#[allow(dead_code)]
-pub const DEFAULT_VIDEO_CODEC: &str = "libx264";
-
-/// Default pixel format for compatibility (legacy, no longer used - now using 10-bit formats)
-#[allow(dead_code)]
-pub const DEFAULT_PIXEL_FORMAT: &str = "yuv420p";
 
 // ========== Simulation Constants ==========
 
