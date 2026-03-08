@@ -9,6 +9,22 @@ use spectral_constants::{LAMBDA_END, LAMBDA_START};
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 
+#[derive(Clone, Copy, Debug)]
+pub struct LineVertex {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub color: OklabColor,
+    pub alpha: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpectralLineSegment {
+    pub start: LineVertex,
+    pub end: LineVertex,
+    pub hdr_scale: f64,
+}
+
 /// Convert OkLab hue to wavelength with perceptually uniform distribution.
 ///
 /// This mapping ensures that the full visible spectrum (380-700nm) is utilized,
@@ -106,8 +122,7 @@ pub fn parallel_blur_2d_rgba(
     // Horizontal pass (reuse pre-allocated temp buffer)
     blur_ctx.ensure_capacity(buffer.len());
     blur_ctx.temp_buffer.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-        #[allow(clippy::needless_range_loop)] // Direct indexing for performance
-        for x in 0..width {
+        for (x, pixel_out) in row.iter_mut().enumerate() {
             let mut sum = (0.0, 0.0, 0.0, 0.0);
 
             for (i, &k) in blur_ctx.kernel.iter().enumerate() {
@@ -120,14 +135,13 @@ pub fn parallel_blur_2d_rgba(
                 sum.3 += pixel.3 * k;
             }
 
-            row[x] = sum;
+            *pixel_out = sum;
         }
     });
 
     // Vertical pass
     buffer.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-        #[allow(clippy::needless_range_loop)] // Direct indexing for performance
-        for x in 0..width {
+        for (x, pixel_out) in row.iter_mut().enumerate() {
             let mut sum = (0.0, 0.0, 0.0, 0.0);
 
             for (i, &k) in blur_ctx.kernel.iter().enumerate() {
@@ -140,54 +154,32 @@ pub fn parallel_blur_2d_rgba(
                 sum.3 += pixel.3 * k;
             }
 
-            row[x] = sum;
+            *pixel_out = sum;
         }
     });
 }
 
 /// Draw anti-aliased line segment for spectral rendering
 /// (Dispersion has been moved to a post-process for massive performance gains and continuous radial aberration)
-#[allow(clippy::too_many_arguments)] // Low-level drawing primitive requires all parameters
 pub fn draw_line_segment_aa_spectral_with_dispersion(
     accum: &mut [[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    x0: f32,
-    y0: f32,
-    z0: f32,
-    x1: f32,
-    y1: f32,
-    z1: f32,
-    col0: OklabColor,
-    col1: OklabColor,
-    alpha0: f64,
-    alpha1: f64,
-    hdr_scale: f64,
-    _enable_dispersion: bool,
+    segment: SpectralLineSegment,
 ) {
-    draw_line_segment_aa_spectral_internal(
-        accum, width, height, x0, y0, z0, x1, y1, z1, col0, col1, alpha0, alpha1, hdr_scale,
-    );
+    draw_line_segment_aa_spectral_internal(accum, width, height, segment);
 }
 
 /// Internal implementation of spectral line drawing using Z-depth aware SDF Splatting
-#[allow(clippy::too_many_arguments)]
 fn draw_line_segment_aa_spectral_internal(
     accum: &mut [[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    x0: f32,
-    y0: f32,
-    z0: f32,
-    x1: f32,
-    y1: f32,
-    z1: f32,
-    col0: OklabColor,
-    col1: OklabColor,
-    alpha0: f64,
-    alpha1: f64,
-    hdr_scale: f64,
+    segment: SpectralLineSegment,
 ) {
+    let LineVertex { x: x0, y: y0, z: z0, color: col0, alpha: alpha0 } = segment.start;
+    let LineVertex { x: x1, y: y1, z: z1, color: col1, alpha: alpha1 } = segment.end;
+    let hdr_scale = segment.hdr_scale;
     let dx = x1 - x0;
     let dy = y1 - y0;
     let dz = z1 - z0;

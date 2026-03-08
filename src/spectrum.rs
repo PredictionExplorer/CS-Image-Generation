@@ -57,8 +57,7 @@ fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
 /// Stores (R, G, B, tone_k) in a single cache line for better performance
 pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(|| {
     let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
-    #[allow(clippy::needless_range_loop)] // Direct indexing is clearer here
-    for i in 0..NUM_BINS {
+    for (i, entry) in arr.iter_mut().enumerate() {
         let (r, g, b) = wavelength_to_rgb(wavelength_nm_for_bin(i));
         let lambda = wavelength_nm_for_bin(i);
 
@@ -77,7 +76,7 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
             1.2 - 0.2 * (lambda - 650.0) / 50.0
         };
 
-        arr[i] = (r, g, b, k);
+        *entry = (r, g, b, k);
     }
     arr
 });

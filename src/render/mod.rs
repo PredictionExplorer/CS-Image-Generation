@@ -40,7 +40,10 @@ use self::histogram::HistogramData;
 
 // Re-export core types and functions for public API compatibility
 pub use color::{OklabColor, generate_body_color_sequences};
-pub use drawing::{draw_line_segment_aa_spectral_with_dispersion, parallel_blur_2d_rgba};
+pub use drawing::{
+    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_with_dispersion,
+    parallel_blur_2d_rgba,
+};
 pub use effects::{DogBloomConfig, apply_dog_bloom};
 pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
@@ -92,6 +95,52 @@ enum FinishOutputMode {
     #[default]
     Still,
     Video,
+}
+
+#[derive(Clone, Copy)]
+pub struct SpectralScene<'a> {
+    pub positions: &'a [Vec<Vector3<f64>>],
+    pub colors: &'a [Vec<OklabColor>],
+    pub body_alphas: &'a [f64],
+}
+
+impl<'a> SpectralScene<'a> {
+    pub fn new(
+        positions: &'a [Vec<Vector3<f64>>],
+        colors: &'a [Vec<OklabColor>],
+        body_alphas: &'a [f64],
+    ) -> Self {
+        Self { positions, colors, body_alphas }
+    }
+
+    #[inline]
+    pub fn step_count(self) -> usize {
+        self.positions[0].len()
+    }
+
+    #[inline]
+    pub fn triangle_alphas(self) -> [f64; 3] {
+        [self.body_alphas[0], self.body_alphas[1], self.body_alphas[2]]
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct SpectralRenderSettings<'a> {
+    pub resolved_config: &'a randomizable_config::ResolvedEffectConfig,
+    pub render_config: &'a RenderConfig,
+    pub noise_seed: i32,
+    pub aspect_correction: bool,
+}
+
+impl<'a> SpectralRenderSettings<'a> {
+    pub fn new(
+        resolved_config: &'a randomizable_config::ResolvedEffectConfig,
+        render_config: &'a RenderConfig,
+        noise_seed: i32,
+        aspect_correction: bool,
+    ) -> Self {
+        Self { resolved_config, render_config, noise_seed, aspect_correction }
+    }
 }
 
 #[inline]
@@ -530,21 +579,16 @@ fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
 
 // ====================== PASS 1 (SPECTRAL) ===========================
 /// Pass 1: gather global histogram for final color leveling (spectral)
-#[allow(clippy::too_many_arguments)] // Low-level rendering primitive requires all parameters
 pub fn pass_1_build_histogram_spectral(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &randomizable_config::ResolvedEffectConfig,
+    scene: SpectralScene<'_>,
     frame_interval: usize,
-    _noise_seed: i32,
-    render_config: &RenderConfig,
-    aspect_correction: bool,
+    settings: SpectralRenderSettings<'_>,
 ) -> HistogramData {
+    let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
-    let ctx = RenderContext::new(width, height, positions, aspect_correction);
+    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
@@ -554,12 +598,12 @@ pub fn pass_1_build_histogram_spectral(
     // Create histogram storage
     let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
 
-    let total_steps = positions[0].len();
+    let total_steps = scene.step_count();
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
 
     // Create velocity HDR calculator for efficient multiplier computation
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(positions, dt);
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
     for step in 0..total_steps {
         if step % chunk_line == 0 {
@@ -569,9 +613,9 @@ pub fn pass_1_build_histogram_spectral(
 
         // Prepare triangle vertices with batched data access (better cache locality)
         let vertices = prepare_triangle_vertices(
-            positions,
-            colors,
-            &[body_alphas[0], body_alphas[1], body_alphas[2]],
+            scene.positions,
+            scene.colors,
+            &scene.triangle_alphas(),
             step,
             &ctx,
         );
@@ -586,12 +630,8 @@ pub fn pass_1_build_histogram_spectral(
             &mut accum_spd,
             width,
             height,
-            vertices[0],
-            vertices[1],
-            vertices[2],
-            hdr_mult_01,
-            hdr_mult_12,
-            hdr_mult_20,
+            vertices,
+            [hdr_mult_01, hdr_mult_12, hdr_mult_20],
             render_config.hdr_scale,
         );
 
@@ -627,69 +667,45 @@ pub fn pass_1_build_histogram_spectral(
 
 // ====================== PASS 2 (SPECTRAL) ===========================
 /// Pass 2: final frames => color mapping => write frames (spectral, 16-bit output)
-#[allow(clippy::too_many_arguments)] // Low-level rendering primitive requires all parameters
 pub fn pass_2_write_frames_spectral(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &randomizable_config::ResolvedEffectConfig,
+    scene: SpectralScene<'_>,
     frame_interval: usize,
-    black_r: f64,
-    white_r: f64,
-    black_g: f64,
-    white_g: f64,
-    black_b: f64,
-    white_b: f64,
-    noise_seed: i32,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    render_config: &RenderConfig,
-    aspect_correction: bool,
     enable_temporal_smoothing: bool,
 ) -> Result<()> {
+    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
+        settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    // Create render context
-    let ctx = RenderContext::new(width, height, positions, aspect_correction);
+    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    // Build effect configuration from resolved config
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    // Create nebula configuration (rendered separately, not in effect chain)
     let nebula_config = NebulaCloudConfig {
         strength: resolved_config.nebula_strength,
         octaves: resolved_config.nebula_octaves,
         base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,  // Fixed
-        persistence: 0.5, // Fixed
+        lacunarity: 2.0,
+        persistence: 0.5,
         noise_seed: noise_seed as i64,
-        colors: [
-            [0.08, 0.12, 0.22], // Deep blue
-            [0.15, 0.08, 0.25], // Purple
-            [0.25, 0.12, 0.18], // Magenta
-            [0.12, 0.15, 0.28], // Blue-violet
-        ],
-        time_scale: 1.0, // Fixed
-        edge_fade: 0.3,  // Fixed
+        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
+        time_scale: 1.0,
+        edge_fade: 0.3,
     };
 
-    let total_steps = positions[0].len();
+    let total_steps = scene.step_count();
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
-
-    // Create velocity HDR calculator for efficient multiplier computation
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(positions, dt);
-
-    // Pre-allocate empty background buffer for reuse (optimization: saves 60× 2MB allocations)
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
     let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    let levels = ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b);
-
-    // Temporal smoothing for video frame blending (stateful across frames)
     use crate::post_effects::{TemporalSmoothing, TemporalSmoothingConfig};
     let temporal_smoother = if enable_temporal_smoothing {
         Some(TemporalSmoothing::new(TemporalSmoothingConfig {
@@ -705,31 +721,25 @@ pub fn pass_2_write_frames_spectral(
             let pct = (step as f64 / total_steps as f64) * constants::PERCENT_FACTOR;
             debug!(progress = pct, pass = 2, mode = "spectral", "Render pass progress");
         }
-        // Prepare triangle vertices with batched data access (better cache locality)
+
         let vertices = prepare_triangle_vertices(
-            positions,
-            colors,
-            &[body_alphas[0], body_alphas[1], body_alphas[2]],
+            scene.positions,
+            scene.colors,
+            &scene.triangle_alphas(),
             step,
             &ctx,
         );
 
-        // Compute velocity-based HDR multipliers using the calculator
         let hdr_mult_01 = velocity_calc.compute_segment_multiplier(step, 0, 1);
         let hdr_mult_12 = velocity_calc.compute_segment_multiplier(step, 1, 2);
         let hdr_mult_20 = velocity_calc.compute_segment_multiplier(step, 2, 0);
 
-        // Draw entire triangle in batch (10-20% faster than individual calls)
         draw_triangle_batch_spectral(
             &mut accum_spd,
             width,
             height,
-            vertices[0],
-            vertices[1],
-            vertices[2],
-            hdr_mult_01,
-            hdr_mult_12,
-            hdr_mult_20,
+            vertices,
+            [hdr_mult_01, hdr_mult_12, hdr_mult_20],
             render_config.hdr_scale,
         );
 
@@ -743,19 +753,14 @@ pub fn pass_2_write_frames_spectral(
                 height as usize,
             );
 
-            // Process trajectory finish in linear space before tonemapping
             let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
-
-            // Take ownership of accum_rgba to avoid clone
             let rgba_buffer = std::mem::take(&mut accum_rgba);
             let trajectory_pixels = finish_pipeline
                 .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
                 .expect("Failed to process frame during spectral render pass");
-            // Reuse the buffer instead of reallocating - clear and resize to avoid allocation
             accum_rgba.clear();
             accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
-            // Generate nebula background separately (with zero-overhead check)
             let nebula_background = if resolved_config.nebula_strength > 0.0 {
                 generate_nebula_background(
                     width as usize,
@@ -764,15 +769,11 @@ pub fn pass_2_write_frames_spectral(
                     &nebula_config,
                 )
             } else {
-                empty_background.clone() // Reuse pre-allocated empty buffer (zero overhead)
+                empty_background.clone()
             };
 
-            // Composite nebula background UNDER trajectory foreground
             let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-
-            let display_buffer = tonemap_to_display_buffer(&composited, &levels);
-
-            // Apply temporal smoothing in display space before final image finish
+            let display_buffer = tonemap_to_display_buffer(&composited, levels);
             let smoothed_display = match &temporal_smoother {
                 Some(smoother) => smoother.process_frame(display_buffer),
                 None => display_buffer,
@@ -782,8 +783,6 @@ pub fn pass_2_write_frames_spectral(
                 .process_image(smoothed_display, width as usize, height as usize, &frame_params)
                 .expect("Failed to process final image finish during spectral render pass");
             let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
-
-            // Convert u16 buffer to bytes for FFmpeg (little-endian rgb48le format)
             let buf_bytes = unsafe {
                 std::slice::from_raw_parts(buf_16bit.as_ptr() as *const u8, buf_16bit.len() * 2)
             };
@@ -794,6 +793,7 @@ pub fn pass_2_write_frames_spectral(
             }
         }
     }
+
     info!("   pass 2 (spectral render): 100% done");
     Ok(())
 }
@@ -802,27 +802,18 @@ pub fn pass_2_write_frames_spectral(
 ///
 /// This is the correct preview path for still-image QA because it matches the final
 /// accumulated composition instead of an early timeline slice.
-#[allow(clippy::too_many_arguments)] // Low-level rendering primitive requires all parameters
 pub fn render_final_frame_spectral(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &randomizable_config::ResolvedEffectConfig,
-    black_r: f64,
-    white_r: f64,
-    black_g: f64,
-    white_g: f64,
-    black_b: f64,
-    white_b: f64,
-    noise_seed: i32,
-    render_config: &RenderConfig,
-    aspect_correction: bool,
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
+    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
+        settings;
     info!("   Rendering final accumulated frame (preview mode)...");
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, positions, aspect_correction);
+    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -842,17 +833,16 @@ pub fn render_final_frame_spectral(
         edge_fade: 0.3,
     };
 
-    let total_steps = positions[0].len();
+    let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(positions, dt);
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
     let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
-    let levels = ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b);
 
     for step in 0..total_steps {
         let vertices = prepare_triangle_vertices(
-            positions,
-            colors,
-            &[body_alphas[0], body_alphas[1], body_alphas[2]],
+            scene.positions,
+            scene.colors,
+            &scene.triangle_alphas(),
             step,
             &ctx,
         );
@@ -865,12 +855,8 @@ pub fn render_final_frame_spectral(
             &mut accum_spd,
             width,
             height,
-            vertices[0],
-            vertices[1],
-            vertices[2],
-            hdr_mult_01,
-            hdr_mult_12,
-            hdr_mult_20,
+            vertices,
+            [hdr_mult_01, hdr_mult_12, hdr_mult_20],
             render_config.hdr_scale,
         );
     }
@@ -897,7 +883,7 @@ pub fn render_final_frame_spectral(
     };
 
     let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-    let display_buffer = tonemap_to_display_buffer(&composited, &levels);
+    let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .expect("Failed to process final image finish for preview frame");
@@ -911,28 +897,19 @@ pub fn render_final_frame_spectral(
 // ====================== SINGLE FRAME RENDERING ===========================
 /// Render the first timeline slice only for tests.
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)] // Low-level rendering primitive requires all parameters
 pub(crate) fn render_single_frame_spectral(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &randomizable_config::ResolvedEffectConfig,
-    black_r: f64,
-    white_r: f64,
-    black_g: f64,
-    white_g: f64,
-    black_b: f64,
-    white_b: f64,
-    noise_seed: i32,
-    render_config: &RenderConfig,
-    aspect_correction: bool,
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
+    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
+        settings;
     info!("   Rendering first timeline slice only (legacy test mode)...");
 
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
-    let ctx = RenderContext::new(width, height, positions, aspect_correction);
+    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -959,33 +936,31 @@ pub(crate) fn render_single_frame_spectral(
         edge_fade: 0.3,  // Fixed
     };
 
-    let total_steps = positions[0].len();
+    let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
 
     // Create velocity HDR calculator for efficient multiplier computation
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(positions, dt);
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
     // Pre-allocate empty background buffer for reuse (optimization)
     let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
-
-    let levels = ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b);
 
     // Render all trajectory steps up to and including the first output frame interval
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let first_frame_step = frame_interval;
 
     for step in 0..=first_frame_step {
-        let p0 = positions[0][step];
-        let p1 = positions[1][step];
-        let p2 = positions[2][step];
+        let p0 = scene.positions[0][step];
+        let p1 = scene.positions[1][step];
+        let p2 = scene.positions[2][step];
 
-        let c0 = colors[0][step];
-        let c1 = colors[1][step];
-        let c2 = colors[2][step];
+        let c0 = scene.colors[0][step];
+        let c1 = scene.colors[1][step];
+        let c2 = scene.colors[2][step];
 
-        let a0 = body_alphas[0];
-        let a1 = body_alphas[1];
-        let a2 = body_alphas[2];
+        let a0 = scene.body_alphas[0];
+        let a1 = scene.body_alphas[1];
+        let a2 = scene.body_alphas[2];
 
         let (x0, y0) = ctx.to_pixel(p0[0], p0[1]);
         let (x1, y1) = ctx.to_pixel(p1[0], p1[1]);
@@ -1004,52 +979,31 @@ pub(crate) fn render_single_frame_spectral(
             &mut accum_spd,
             width,
             height,
-            x0,
-            y0,
-            z0,
-            x1,
-            y1,
-            z1,
-            c0,
-            c1,
-            a0,
-            a1,
-            render_config.hdr_scale * hdr_mult_01,
-            true,
+            SpectralLineSegment {
+                start: LineVertex { x: x0, y: y0, z: z0, color: c0, alpha: a0 },
+                end: LineVertex { x: x1, y: y1, z: z1, color: c1, alpha: a1 },
+                hdr_scale: render_config.hdr_scale * hdr_mult_01,
+            },
         );
         draw_line_segment_aa_spectral_with_dispersion(
             &mut accum_spd,
             width,
             height,
-            x1,
-            y1,
-            z1,
-            x2,
-            y2,
-            z2,
-            c1,
-            c2,
-            a1,
-            a2,
-            render_config.hdr_scale * hdr_mult_12,
-            true,
+            SpectralLineSegment {
+                start: LineVertex { x: x1, y: y1, z: z1, color: c1, alpha: a1 },
+                end: LineVertex { x: x2, y: y2, z: z2, color: c2, alpha: a2 },
+                hdr_scale: render_config.hdr_scale * hdr_mult_12,
+            },
         );
         draw_line_segment_aa_spectral_with_dispersion(
             &mut accum_spd,
             width,
             height,
-            x2,
-            y2,
-            z2,
-            x0,
-            y0,
-            z0,
-            c2,
-            c0,
-            a2,
-            a0,
-            render_config.hdr_scale * hdr_mult_20,
-            true,
+            SpectralLineSegment {
+                start: LineVertex { x: x2, y: y2, z: z2, color: c2, alpha: a2 },
+                end: LineVertex { x: x0, y: y0, z: z0, color: c0, alpha: a0 },
+                hdr_scale: render_config.hdr_scale * hdr_mult_20,
+            },
         );
     }
 
@@ -1071,7 +1025,7 @@ pub(crate) fn render_single_frame_spectral(
 
     // Composite nebula under trajectories
     let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-    let display_buffer = tonemap_to_display_buffer(&composited, &levels);
+    let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .expect("Failed to process final image finish");
@@ -1414,25 +1368,15 @@ mod tests {
         };
 
         let clean_hist = pass_1_build_histogram_spectral(
-            &positions,
-            &colors,
-            &body_alphas,
-            &clean,
+            SpectralScene::new(&positions, &colors, &body_alphas),
             1,
-            17,
-            &render_config,
-            false,
+            SpectralRenderSettings::new(&clean, &render_config, 17, false),
         );
 
         let styled_hist = pass_1_build_histogram_spectral(
-            &positions,
-            &colors,
-            &body_alphas,
-            &stylized,
+            SpectralScene::new(&positions, &colors, &body_alphas),
             1,
-            999,
-            &render_config,
-            false,
+            SpectralRenderSettings::new(&stylized, &render_config, 999, false),
         );
 
         assert_ne!(clean_hist.data(), styled_hist.data());
@@ -1468,37 +1412,18 @@ mod tests {
             vec![(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.74, 0.05, -0.22), (0.74, 0.05, -0.22)],
         ];
         let body_alphas = vec![1.0, 1.0, 1.0];
+        let levels = ChannelLevels::new(0.0, 0.05, 0.0, 0.05, 0.0, 0.05);
 
         let single_frame = render_single_frame_spectral(
-            &positions,
-            &colors,
-            &body_alphas,
-            &resolved,
-            0.0,
-            0.05,
-            0.0,
-            0.05,
-            0.0,
-            0.05,
-            7,
-            &render_config,
-            false,
+            SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            SpectralRenderSettings::new(&resolved, &render_config, 7, false),
         )
         .expect("legacy single-frame preview should render");
         let final_frame = render_final_frame_spectral(
-            &positions,
-            &colors,
-            &body_alphas,
-            &resolved,
-            0.0,
-            0.05,
-            0.0,
-            0.05,
-            0.0,
-            0.05,
-            7,
-            &render_config,
-            false,
+            SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            SpectralRenderSettings::new(&resolved, &render_config, 7, false),
         )
         .expect("final preview should render");
 

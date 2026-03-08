@@ -4,87 +4,47 @@
 //! line segments together, improving CPU cache utilization and instruction pipelining.
 
 use super::color::OklabColor;
-use super::drawing::draw_line_segment_aa_spectral_with_dispersion;
+use super::drawing::{
+    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_with_dispersion,
+};
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 
 /// Triangle vertex data for batch processing
-#[derive(Copy, Clone)]
-pub struct TriangleVertex {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub color: OklabColor,
-    pub alpha: f64,
-}
+pub type TriangleVertex = LineVertex;
 
 /// Draw a complete triangle (3 line segments) in a batch for better performance
 #[inline]
-#[allow(clippy::too_many_arguments)] // Batched drawing primitive requires all parameters
 pub fn draw_triangle_batch_spectral(
     accum: &mut [[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    v0: TriangleVertex,
-    v1: TriangleVertex,
-    v2: TriangleVertex,
-    hdr_mult_01: f64,
-    hdr_mult_12: f64,
-    hdr_mult_20: f64,
+    vertices: [TriangleVertex; 3],
+    hdr_multipliers: [f64; 3],
     hdr_scale: f64,
 ) {
+    let [v0, v1, v2] = vertices;
+    let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = hdr_multipliers;
+
     draw_line_segment_aa_spectral_with_dispersion(
         accum,
         width,
         height,
-        v0.x,
-        v0.y,
-        v0.z,
-        v1.x,
-        v1.y,
-        v1.z,
-        v0.color,
-        v1.color,
-        v0.alpha,
-        v1.alpha,
-        hdr_scale * hdr_mult_01,
-        true,
+        SpectralLineSegment { start: v0, end: v1, hdr_scale: hdr_scale * hdr_mult_01 },
     );
 
     draw_line_segment_aa_spectral_with_dispersion(
         accum,
         width,
         height,
-        v1.x,
-        v1.y,
-        v1.z,
-        v2.x,
-        v2.y,
-        v2.z,
-        v1.color,
-        v2.color,
-        v1.alpha,
-        v2.alpha,
-        hdr_scale * hdr_mult_12,
-        true,
+        SpectralLineSegment { start: v1, end: v2, hdr_scale: hdr_scale * hdr_mult_12 },
     );
 
     draw_line_segment_aa_spectral_with_dispersion(
         accum,
         width,
         height,
-        v2.x,
-        v2.y,
-        v2.z,
-        v0.x,
-        v0.y,
-        v0.z,
-        v2.color,
-        v0.color,
-        v2.alpha,
-        v0.alpha,
-        hdr_scale * hdr_mult_20,
-        true,
+        SpectralLineSegment { start: v2, end: v0, hdr_scale: hdr_scale * hdr_mult_20 },
     );
 }
 

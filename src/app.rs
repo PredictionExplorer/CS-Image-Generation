@@ -12,9 +12,10 @@ use crate::generation_log::{
     SimulationConfig,
 };
 use crate::render::{
-    self, ChannelLevels, RenderConfig, ToneMappingControls, VideoEncodingOptions, constants,
-    create_video_from_frames_singlepass, generate_body_color_sequences,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
+    self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
+    VideoEncodingOptions, constants, create_video_from_frames_singlepass,
+    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
+    save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
@@ -199,14 +200,9 @@ pub fn build_histogram_and_levels(
     let frame_interval = (positions[0].len() / target_frames as usize).max(1);
 
     let histogram = pass_1_build_histogram_spectral(
-        positions,
-        colors,
-        body_alphas,
-        resolved_config,
+        SpectralScene::new(positions, colors, body_alphas),
         frame_interval,
-        noise_seed,
-        render_config,
-        aspect_correction,
+        SpectralRenderSettings::new(resolved_config, render_config, noise_seed, aspect_correction),
     );
 
     info!("STAGE 6/7: Determine global black/white/gamma...");
@@ -244,19 +240,13 @@ pub fn build_histogram_and_levels(
 }
 
 /// Render full video
-#[allow(clippy::too_many_arguments)] // Core rendering function requires all parameters
 pub fn render_video(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<render::OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &render::randomizable_config::ResolvedEffectConfig,
+    scene: SpectralScene<'_>,
     levels: &ChannelLevels,
-    noise_seed: i32,
-    render_config: &RenderConfig,
+    settings: SpectralRenderSettings<'_>,
     output_vid: &str,
     output_png: &str,
     fast_encode: bool,
-    aspect_correction: bool,
     enable_temporal_smoothing: bool,
 ) -> Result<()> {
     if fast_encode {
@@ -267,7 +257,7 @@ pub fn render_video(
 
     let frame_rate = constants::DEFAULT_VIDEO_FPS;
     let target_frames = constants::DEFAULT_TARGET_FRAMES;
-    let frame_interval = (positions[0].len() / target_frames as usize).max(1);
+    let frame_interval = (scene.step_count() / target_frames as usize).max(1);
 
     let mut last_frame_png: Option<ImageBuffer<Rgb<u16>, Vec<u16>>> = None;
     let video_options = if fast_encode {
@@ -277,30 +267,20 @@ pub fn render_video(
     };
 
     create_video_from_frames_singlepass(
-        resolved_config.width,
-        resolved_config.height,
+        settings.resolved_config.width,
+        settings.resolved_config.height,
         frame_rate,
         |out| {
             pass_2_write_frames_spectral(
-                positions,
-                colors,
-                body_alphas,
-                resolved_config,
+                scene,
                 frame_interval,
-                levels.black[0],
-                levels.range[0] + levels.black[0],
-                levels.black[1],
-                levels.range[1] + levels.black[1],
-                levels.black[2],
-                levels.range[2] + levels.black[2],
-                noise_seed,
+                levels,
+                settings,
                 |buf_8bit| {
                     out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
                     Ok(())
                 },
                 &mut last_frame_png,
-                render_config,
-                aspect_correction,
                 enable_temporal_smoothing,
             )?;
             Ok(())
@@ -553,19 +533,9 @@ mod tests {
         .expect("histogram/levels should succeed");
 
         let image = render::render_single_frame_spectral(
-            &positions,
-            &colors,
-            &body_alphas,
-            &resolved,
-            levels.black[0],
-            levels.range[0] + levels.black[0],
-            levels.black[1],
-            levels.range[1] + levels.black[1],
-            levels.black[2],
-            levels.range[2] + levels.black[2],
-            noise_seed,
-            &render_config,
-            false,
+            SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            SpectralRenderSettings::new(&resolved, &render_config, noise_seed, false),
         )
         .expect("render should succeed");
 

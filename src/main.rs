@@ -281,17 +281,17 @@ fn main() -> Result<()> {
     let output_vid = format!("vids/{}.mp4", args.output);
 
     app::render_video(
-        &positions,
-        &colors,
-        &body_alphas,
-        &resolved_effect_config,
+        render::SpectralScene::new(&positions, &colors, &body_alphas),
         &levels,
-        noise_seed,
-        &render_config,
+        render::SpectralRenderSettings::new(
+            &resolved_effect_config,
+            &render_config,
+            noise_seed,
+            enhancements.aspect_correction,
+        ),
         &output_vid,
         &output_png,
         args.fast_encode,
-        enhancements.aspect_correction,
         true,
     )?;
 

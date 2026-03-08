@@ -275,16 +275,12 @@ pub fn shift_bodies_to_com(b: &mut [Body]) {
 pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
     let mut loc = b.to_vec();
     shift_bodies_to_com(&mut loc);
-    let n = loc.len(); // Cache length to avoid repeated calls
-    #[allow(clippy::needless_range_loop)] // Direct indexing for performance in hot path
-    for i in 0..n {
-        let bi = &loc[i];
+    for (i, bi) in loc.iter().enumerate() {
         let kin =
             crate::render::constants::KINETIC_ENERGY_FACTOR * bi.mass * bi.velocity.norm_squared();
         let mut pot = 0.0;
-        for j in 0..n {
+        for (j, bj) in loc.iter().enumerate() {
             if i != j {
-                let bj = &loc[j];
                 let d = (bi.position - bj.position).norm();
                 if d > 1e-12 {
                     pot += -G * bi.mass * bj.mass / d;

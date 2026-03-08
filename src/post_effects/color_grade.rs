@@ -156,11 +156,13 @@ impl CinematicColorGrade {
         // Shadow and highlight tinting are now luma-gated instead of applied globally.
         let shadow_weight = 1.0 - smoothstep(0.24, 0.46, lum_clarity);
         let highlight_weight = smoothstep(0.58, 0.82, lum_clarity);
-        #[allow(clippy::needless_range_loop)]
-        // Direct indexing clearer for color channel manipulation
-        for i in 0..3 {
-            vibrant[i] += self.params.shadow_tint[i] * shadow_weight;
-            vibrant[i] += self.params.highlight_tint[i] * highlight_weight;
+        for ((channel, shadow_tint), highlight_tint) in vibrant
+            .iter_mut()
+            .zip(self.params.shadow_tint.iter())
+            .zip(self.params.highlight_tint.iter())
+        {
+            *channel += shadow_tint * shadow_weight;
+            *channel += highlight_tint * highlight_weight;
         }
 
         let vignette_mix = 1.0 - self.params.vignette_strength * vignette_factor;
