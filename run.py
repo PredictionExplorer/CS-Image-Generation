@@ -58,9 +58,6 @@ GENERATOR_CANDIDATES = [
     "./three_body_problem",
 ]
 
-IMG_PREFIXES = ("0x{seed}", "enhanced_0x{seed}", "classic_0x{seed}")
-VID_PREFIXES = IMG_PREFIXES
-
 # Environment variable names for required config
 ENV_SSH_HOST = "COSMICSIG_SSH_HOST"
 ENV_SSH_USER = "COSMICSIG_SSH_USER"
@@ -338,7 +335,7 @@ def resolve_generator(generator_arg: str | None) -> str | None:
 
 
 def generate(exec_cmd: str, seed: str, timeout: int) -> bool:
-    cmd_parts = exec_cmd.split() + ["--seed", f"0x{seed}", "--file-name", f"0x{seed}"]
+    cmd_parts = exec_cmd.split() + ["--seed", f"0x{seed}", "--output", f"0x{seed}"]
     log.info("GENERATE  seed=0x%s", seed)
 
     try:
@@ -357,28 +354,20 @@ def generate(exec_cmd: str, seed: str, timeout: int) -> bool:
 
 
 def find_local_files(seed: str) -> tuple[Path | None, Path | None]:
-    """Search for generated image and video files using known naming conventions."""
-    img_path: Path | None = None
-    for pattern in IMG_PREFIXES:
-        cand = LOCAL_IMG_DIR / f"{pattern.format(seed=seed)}.png"
-        if cand.is_file():
-            img_path = cand
-            log.debug("Found image: %s (%d bytes)", cand, cand.stat().st_size)
-            break
-    if img_path is None:
-        tried = [str(LOCAL_IMG_DIR / f"{p.format(seed=seed)}.png") for p in IMG_PREFIXES]
-        log.error("Image NOT FOUND for 0x%s. Tried: %s", seed, ", ".join(tried))
+    """Search for generated image and video files using the canonical seed-based output name."""
+    img_path = LOCAL_IMG_DIR / f"0x{seed}.png"
+    if img_path.is_file():
+        log.debug("Found image: %s (%d bytes)", img_path, img_path.stat().st_size)
+    else:
+        log.error("Image NOT FOUND for 0x%s. Tried: %s", seed, img_path)
+        img_path = None
 
-    vid_path: Path | None = None
-    for pattern in VID_PREFIXES:
-        cand = LOCAL_VID_DIR / f"{pattern.format(seed=seed)}.mp4"
-        if cand.is_file():
-            vid_path = cand
-            log.debug("Found video: %s (%d bytes)", cand, cand.stat().st_size)
-            break
-    if vid_path is None:
-        tried = [str(LOCAL_VID_DIR / f"{p.format(seed=seed)}.mp4") for p in VID_PREFIXES]
-        log.error("Video NOT FOUND for 0x%s. Tried: %s", seed, ", ".join(tried))
+    vid_path = LOCAL_VID_DIR / f"0x{seed}.mp4"
+    if vid_path.is_file():
+        log.debug("Found video: %s (%d bytes)", vid_path, vid_path.stat().st_size)
+    else:
+        log.error("Video NOT FOUND for 0x%s. Tried: %s", seed, vid_path)
+        vid_path = None
 
     return img_path, vid_path
 

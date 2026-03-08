@@ -14,8 +14,7 @@ use crate::generation_log::{
 use crate::render::{
     self, ChannelLevels, RenderConfig, ToneMappingControls, VideoEncodingOptions, constants,
     create_video_from_frames_singlepass, generate_body_color_sequences,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, render_final_frame_spectral,
-    save_image_as_png_16bit,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
@@ -47,14 +46,15 @@ impl Default for Enhancements {
     }
 }
 
-/// Application configuration derived from command-line arguments
-pub struct AppConfig {
+/// Configuration recorded for generation logging.
+pub struct GenerationLogConfig {
     pub num_steps_sim: usize,
     pub width: u32,
     pub height: u32,
     pub clip_black: f64,
     pub clip_white: f64,
     pub alpha_denom: usize,
+    pub alpha_compress: f64,
     pub escape_threshold: f64,
     pub drift_mode: String,
     pub bloom_mode: String,
@@ -243,56 +243,6 @@ pub fn build_histogram_and_levels(
     ))
 }
 
-/// Generate output filename with optional profile tag
-pub fn generate_filename(base_name: &str, profile_tag: &str) -> String {
-    if profile_tag.is_empty() {
-        base_name.to_string()
-    } else {
-        format!("{}_{}", base_name, profile_tag)
-    }
-}
-
-/// Render the final accumulated preview frame and save it as a PNG.
-#[allow(clippy::too_many_arguments)] // Core rendering function requires all parameters
-pub fn render_test_frame(
-    positions: &[Vec<Vector3<f64>>],
-    colors: &[Vec<render::OklabColor>],
-    body_alphas: &[f64],
-    resolved_config: &render::randomizable_config::ResolvedEffectConfig,
-    levels: &ChannelLevels,
-    noise_seed: i32,
-    render_config: &RenderConfig,
-    output_png: &str,
-    best_info: &TrajectoryResult,
-    aspect_correction: bool,
-) -> Result<()> {
-    info!("STAGE 7/7: TEST FRAME MODE => rendering final accumulated frame only...");
-
-    let test_frame = render_final_frame_spectral(
-        positions,
-        colors,
-        body_alphas,
-        resolved_config,
-        levels.black[0],
-        levels.range[0] + levels.black[0],
-        levels.black[1],
-        levels.range[1] + levels.black[1],
-        levels.black[2],
-        levels.range[2] + levels.black[2],
-        noise_seed,
-        render_config,
-        aspect_correction,
-    )?;
-
-    info!("Saving test frame to: {}", output_png);
-    save_image_as_png_16bit(&test_frame, output_png)?;
-
-    info!("✓ Test frame saved successfully (16-bit PNG)!");
-    info!("Best orbit => Weighted Borda = {:.3}\nTest complete!", best_info.total_score_weighted);
-
-    Ok(())
-}
-
 /// Render full video
 #[allow(clippy::too_many_arguments)] // Core rendering function requires all parameters
 pub fn render_video(
@@ -372,7 +322,7 @@ pub fn render_video(
 
 /// Log generation parameters for reproducibility
 pub fn log_generation(
-    config: &AppConfig,
+    config: &GenerationLogConfig,
     file_name: &str,
     seed: &str,
     drift_config: &Option<ResolvedDriftConfig>,
@@ -390,7 +340,7 @@ pub fn log_generation(
         clip_black: config.clip_black,
         clip_white: config.clip_white,
         alpha_denom: config.alpha_denom,
-        alpha_compress: 6.0, // Default value from constants
+        alpha_compress: config.alpha_compress,
         bloom_mode: config.bloom_mode.clone(),
         dog_strength: config.dog_strength,
         dog_sigma: config.dog_sigma,
@@ -478,18 +428,6 @@ mod tests {
         let seed = vec![0x01, 0x02, 0x03, 0x04, 0x05];
         let noise = derive_noise_seed(&seed);
         assert_eq!(noise, i32::from_le_bytes([0x01, 0x02, 0x03, 0x04]));
-    }
-
-    #[test]
-    fn test_generate_filename_no_tag() {
-        let name = generate_filename("test", "");
-        assert_eq!(name, "test");
-    }
-
-    #[test]
-    fn test_generate_filename_with_tag() {
-        let name = generate_filename("test", "profile1");
-        assert_eq!(name, "test_profile1");
     }
 
     #[test]

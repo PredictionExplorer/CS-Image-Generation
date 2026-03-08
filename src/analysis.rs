@@ -1,7 +1,24 @@
 use crate::sim::{Body, G};
 use crate::utils::fourier_transform;
 use nalgebra::Vector3;
-use statrs::statistics::Statistics;
+
+fn sample_std_dev(values: &[f64]) -> f64 {
+    if values.len() < 2 {
+        return f64::NAN;
+    }
+
+    let mut mean = 0.0;
+    let mut sum_sq = 0.0;
+    for (index, value) in values.iter().copied().enumerate() {
+        let count = (index + 1) as f64;
+        let delta = value - mean;
+        mean += delta / count;
+        let delta2 = value - mean;
+        sum_sq += delta * delta2;
+    }
+
+    (sum_sq / (values.len() as f64 - 1.0)).sqrt()
+}
 
 /// Total energy: kinetic + potential
 pub fn calculate_total_energy(bodies: &[Body]) -> f64 {
@@ -54,9 +71,9 @@ pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>
     let abs1: Vec<f64> = fourier_transform(&r1).iter().map(|c| c.norm()).collect();
     let abs2: Vec<f64> = fourier_transform(&r2).iter().map(|c| c.norm()).collect();
     let abs3: Vec<f64> = fourier_transform(&r3).iter().map(|c| c.norm()).collect();
-    let sd1 = Statistics::std_dev(abs1.iter().copied());
-    let sd2 = Statistics::std_dev(abs2.iter().copied());
-    let sd3 = Statistics::std_dev(abs3.iter().copied());
+    let sd1 = sample_std_dev(&abs1);
+    let sd2 = sample_std_dev(&abs2);
+    let sd3 = sample_std_dev(&abs3);
     (sd1 + sd2 + sd3) / 3.0
 }
 
@@ -81,4 +98,24 @@ pub fn equilateralness_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
         sum += 1.0 / (mx / mn);
     }
     sum / (n as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sample_std_dev_matches_known_value() {
+        let values = [1.0, 2.0, 3.0, 4.0];
+        let expected = (5.0_f64 / 3.0).sqrt();
+        let actual = sample_std_dev(&values);
+
+        assert!((actual - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_sample_std_dev_short_input_is_nan() {
+        assert!(sample_std_dev(&[]).is_nan());
+        assert!(sample_std_dev(&[42.0]).is_nan());
+    }
 }

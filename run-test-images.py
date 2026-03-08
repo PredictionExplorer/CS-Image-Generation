@@ -82,7 +82,7 @@ def fmt_duration(seconds: float) -> str:
 def run_one(seed: str, run_id: int) -> tuple:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
-    cmd = [BINARY, "--seed", seed, "--file-name", filename]
+    cmd = [BINARY, "--seed", seed, "--output", filename]
 
     _log_to_file(logging.DEBUG, f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()

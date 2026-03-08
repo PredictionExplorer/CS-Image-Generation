@@ -39,20 +39,16 @@ Output lands in `pics/` (PNG) and `vids/` (MP4).
 
 ```bash
 # Custom resolution and seed
-./target/release/three_body_problem --seed 0x46205528 --width 2560 --height 1440
-
-# Render the final accumulated PNG preview (skip video)
-./target/release/three_body_problem --seed 0x123 --test-frame
+./target/release/three_body_problem --seed 0x46205528 --resolution 2560x1440
 
 # Fast encode with hardware acceleration (macOS VideoToolbox)
 ./target/release/three_body_problem --seed 0x123 --fast-encode
 
-# Disable all museum-quality enhancements
-./target/release/three_body_problem --seed 0x123 --no-enhancements
+# Disable drift entirely
+./target/release/three_body_problem --seed 0x123 --drift none
 ```
 
-Run `--help` for the full list of options covering simulation parameters, drift
-modes, bloom settings, and individual effect toggles.
+Run `--help` for the full list of options.
 
 ---
 
@@ -278,7 +274,7 @@ Each run follows this sequence:
 2. List existing files on the remote server (single SSH call)
 3. Diff the two lists to find missing assets
 4. For each missing seed:
-   - Run the Rust generator (`--seed 0x... --file-name 0x...`)
+   - Run the Rust generator (`--seed 0x... --output 0x...`)
    - Locate the output PNG and MP4
    - Upload both to the remote server via SCP
    - Clean up local files

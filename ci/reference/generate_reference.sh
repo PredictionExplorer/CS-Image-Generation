@@ -17,33 +17,26 @@ cargo build --release
 SEED="0x46205528"
 WIDTH=512
 HEIGHT=288
+RESOLUTION="${WIDTH}x${HEIGHT}"
 NUM_STEPS=100000
 DRIFT_MODE="brownian"
-DRIFT_SCALE=1.0
-ALPHA_COMPRESS=6.0
-PROFILE_TAG="ci_reference"
 
 # Generate the reference image
 echo "Generating reference image with parameters:"
 echo "  Seed: $SEED"
-echo "  Dimensions: ${WIDTH}x${HEIGHT}"
+echo "  Resolution: $RESOLUTION"
 echo "  Steps: $NUM_STEPS"
-echo "  Drift: $DRIFT_MODE (scale=$DRIFT_SCALE)"
-echo "  Alpha compress: $ALPHA_COMPRESS"
+echo "  Drift: $DRIFT_MODE"
 
 ./target/release/three_body_problem \
     --seed "$SEED" \
-    --width "$WIDTH" \
-    --height "$HEIGHT" \
-    --num-steps-sim "$NUM_STEPS" \
-    --drift-mode "$DRIFT_MODE" \
-    --drift-scale "$DRIFT_SCALE" \
-    --alpha-compress "$ALPHA_COMPRESS" \
-    --file-name "baseline" \
-    --profile-tag "$PROFILE_TAG"
+    --resolution "$RESOLUTION" \
+    --steps "$NUM_STEPS" \
+    --drift "$DRIFT_MODE" \
+    --output "baseline"
 
 # Move the generated files to reference directory
-mv "pics/baseline_${PROFILE_TAG}.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
+mv "pics/baseline.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
 
 # Generate JSON metadata
 cat > "ci/reference/baseline_${WIDTH}x${HEIGHT}.json" << EOF
@@ -53,8 +46,6 @@ cat > "ci/reference/baseline_${WIDTH}x${HEIGHT}.json" << EOF
     "height": $HEIGHT,
     "num_steps": $NUM_STEPS,
     "drift_mode": "$DRIFT_MODE",
-    "drift_scale": $DRIFT_SCALE,
-    "alpha_compress": $ALPHA_COMPRESS,
     "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "sha256": "$(shasum -a 256 ci/reference/baseline_${WIDTH}x${HEIGHT}.png | cut -d' ' -f1)"
 }

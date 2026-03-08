@@ -9,21 +9,15 @@
 use rayon::prelude::*;
 
 /// Configuration for gamut mapping strategies when converting from OKLab back to sRGB.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum GamutMapMode {
     /// Simple clamping of out-of-gamut values (fast but can cause discontinuities)
     Clamp,
     /// Preserve hue by scaling towards gray (maintains perceptual hue)
+    #[default]
     PreserveHue,
     /// Soft clipping using smooth transitions (reduces harsh edges)
     SoftClip,
-}
-
-#[allow(clippy::derivable_impls)] // PreserveHue as default is intentional and clear
-impl Default for GamutMapMode {
-    fn default() -> Self {
-        GamutMapMode::PreserveHue
-    }
 }
 
 /// Convert linear sRGB to OKLab color space.

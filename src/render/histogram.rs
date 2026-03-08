@@ -40,20 +40,6 @@ impl HistogramData {
         self.data.push([r, g, b]);
     }
 
-    /// Get the number of collected samples
-    ///
-    /// Useful for monitoring histogram collection progress.
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Check if the histogram is empty
-    ///
-    /// Returns true if no samples have been collected yet.
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
     /// Reserve additional capacity to reduce reallocations
     ///
     /// Call this if you know approximately how many samples you'll collect.
@@ -67,32 +53,10 @@ impl HistogramData {
     pub fn data(&self) -> &[[f64; 3]] {
         &self.data
     }
-
-    /// Consume the histogram and return the collected samples.
-    pub fn into_data(self) -> Vec<[f64; 3]> {
-        self.data
-    }
-
-    /// Extract channels into separate vectors efficiently
-    /// Returns (all_r, all_g, all_b) for use in black/white computation
-    pub fn extract_channels(self) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let len = self.data.len();
-        let mut all_r = Vec::with_capacity(len);
-        let mut all_g = Vec::with_capacity(len);
-        let mut all_b = Vec::with_capacity(len);
-
-        for [r, g, b] in self.data {
-            all_r.push(r);
-            all_g.push(g);
-            all_b.push(b);
-        }
-
-        (all_r, all_g, all_b)
-    }
 }
 
 /// Compute black/white points from histogram data
-pub fn compute_black_white_gamma(
+fn compute_black_white_gamma(
     all_r: &mut [f64],
     all_g: &mut [f64],
     all_b: &mut [f64],

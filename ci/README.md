@@ -41,16 +41,11 @@ The GitHub Actions workflow (`.github/workflows/test.yml`) performs:
    - Runs a benchmark simulation
    - Reports timing and output file sizes
 
-## Using Profile Tags
+## Output Naming
 
-The `--profile-tag` flag can be used to differentiate output files:
+The generator now uses a single explicit output name:
 
 ```bash
-./target/release/three_body_problem --seed 0x123 --profile-tag "experiment_1"
-# Creates: pics/output_experiment_1.png
+./target/release/three_body_problem --seed 0x123 --output experiment-1
+# Creates: pics/experiment-1.png and vids/experiment-1.mp4
 ```
-
-This is particularly useful for:
-- A/B testing different parameters
-- CI builds (using PR numbers or commit hashes)
-- Organizing outputs from parameter sweeps 

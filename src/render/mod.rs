@@ -40,17 +40,9 @@ use self::histogram::HistogramData;
 
 // Re-export core types and functions for public API compatibility
 pub use color::{OklabColor, generate_body_color_sequences};
-#[allow(unused_imports)]
 pub use drawing::{draw_line_segment_aa_spectral_with_dispersion, parallel_blur_2d_rgba};
 pub use effects::{DogBloomConfig, apply_dog_bloom};
-#[allow(unused_imports)] // Public API re-export for library consumers
-pub use histogram::compute_black_white_gamma;
-// Re-export all types as part of public library API (not used internally, but part of API contract)
-#[allow(unused_imports)] // Public API re-exports for library consumers
-pub use types::{
-    BloomConfig, BlurConfig, ChannelLevels, HdrConfig, PerceptualBlurSettings, Resolution,
-    SceneData, ToneMappingControls,
-};
+pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 
 // Re-export types from dependencies used in public API
@@ -74,7 +66,7 @@ impl BloomMode {
         }
     }
 
-    fn as_effect_mode(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Dog => "dog",
             Self::Gaussian => "gaussian",
@@ -380,11 +372,11 @@ fn build_effect_config_from_resolved(
     EffectConfig {
         // Core bloom and blur
         bloom_mode: if use_dog_bloom {
-            BloomMode::Dog.as_effect_mode().to_string()
+            BloomMode::Dog.as_str().to_string()
         } else if use_gaussian_bloom {
-            BloomMode::Gaussian.as_effect_mode().to_string()
+            BloomMode::Gaussian.as_str().to_string()
         } else {
-            BloomMode::None.as_effect_mode().to_string()
+            BloomMode::None.as_str().to_string()
         },
         blur_radius_px,
         blur_strength: resolved.blur_strength,
