@@ -12,7 +12,7 @@ Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 
 
 ## Requirements
 
-- Rust 1.93.1+ via `rustup`
+- Rust 1.94+ via `rustup`
 - FFmpeg
 - Python 3.10+ only if you use `run.py`
 
