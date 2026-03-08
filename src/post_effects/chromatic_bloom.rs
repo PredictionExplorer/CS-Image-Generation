@@ -56,12 +56,7 @@ impl ChromaticBloom {
     }
 
     /// Extract bright pixels above threshold
-    fn extract_bright_pixels(
-        &self,
-        input: &PixelBuffer,
-        _width: usize,
-        _height: usize,
-    ) -> PixelBuffer {
+    fn extract_bright_pixels(&self, input: &PixelBuffer) -> PixelBuffer {
         input
             .par_iter()
             .map(|&(r, g, b, a)| {
@@ -256,7 +251,7 @@ impl PostEffect for ChromaticBloom {
         }
 
         // Extract bright pixels
-        let bright = self.extract_bright_pixels(input, width, height);
+        let bright = self.extract_bright_pixels(input);
 
         // Separate into RGB channels with spatial offsets
         let (mut red, mut green, mut blue) = self.create_separated_channels(&bright, width, height);

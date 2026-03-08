@@ -23,13 +23,7 @@ fn remap_tone_curve(lum: f64, strength: f64) -> f64 {
     (0.5 + (gain * centered).tanh() * 0.5).clamp(0.0, 1.0)
 }
 
-fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    if (edge1 - edge0).abs() < f64::EPSILON {
-        return if x >= edge1 { 1.0 } else { 0.0 };
-    }
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+use super::utils::smoothstep;
 
 #[derive(Clone, Debug)]
 pub struct ColorGradeParams {
@@ -42,7 +36,7 @@ pub struct ColorGradeParams {
     pub tone_curve: f64,
     pub shadow_tint: [f64; 3],
     pub highlight_tint: [f64; 3],
-    pub palette_wave_strength: f64, // New parameter to control palette wave
+    pub palette_wave_strength: f64,
 }
 
 impl Default for ColorGradeParams {

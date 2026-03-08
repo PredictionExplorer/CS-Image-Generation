@@ -116,7 +116,6 @@ impl Default for PostEffectChain {
     }
 }
 
-// Re-export effect implementations
 pub mod aether;
 pub mod atmospheric_depth;
 pub mod champleve;
@@ -135,7 +134,6 @@ pub mod perceptual_blur;
 pub mod temporal_smoothing;
 pub mod utils;
 
-// Export all public types
 pub use aether::{AetherConfig, apply_aether_weave};
 pub use atmospheric_depth::{AtmosphericDepth, AtmosphericDepthConfig};
 pub use champleve::{ChampleveConfig, apply_champleve_iridescence};

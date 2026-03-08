@@ -438,7 +438,7 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
 };
 
 // ==================== NEBULA ====================
-// Currently disabled but parameters defined for potential future use
+// Nebula parameters (feature disabled: strength range is [0, 0])
 
 pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "nebula_strength",

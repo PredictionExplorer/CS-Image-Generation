@@ -1,9 +1,9 @@
 //! Iridescent champlevé post-effect for creating a jewel-like enamel look.
-//
-// This effect partitions the image into Voronoi-like cells, each with a
-// metallic rim and a pearlescent, flow-aligned interior. It is designed to
-// create a high-end, crafted aesthetic reminiscent of fine jewelry or
-// crystalline structures.
+//!
+//! This effect partitions the image into Voronoi-like cells, each with a
+//! metallic rim and a pearlescent, flow-aligned interior. It is designed to
+//! create a high-end, crafted aesthetic reminiscent of fine jewelry or
+//! crystalline structures.
 
 use super::PixelBuffer;
 use crate::render::constants;
@@ -41,23 +41,18 @@ impl Default for ChampleveConfig {
     }
 }
 
-/// A simple 2D hash function to generate pseudo-random points for Voronoi cells.
-#[inline]
-fn hash2(p: (f64, f64)) -> (f64, f64) {
-    let h = (p.0 * 12.9898 + p.1 * 78.233).sin() * 43758.5453;
-    (h.fract(), (h * 1.57).fract())
-}
+use super::utils::hash2;
 
 /// Computes the two closest Voronoi points for a given pixel coordinate.
 #[inline]
-fn voronoi_distances(p: (f64, f64)) -> ((f64, f64), (f64, f64)) {
+fn voronoi_distances(p: (f64, f64)) -> (f64, f64) {
     let ix = p.0.floor();
     let iy = p.1.floor();
     let fx = p.0.fract();
     let fy = p.1.fract();
 
-    let mut closest = (f64::MAX, f64::MAX); // (distance_sq, cell_id_unused)
-    let mut second_closest = (f64::MAX, f64::MAX);
+    let mut closest = f64::MAX;
+    let mut second_closest = f64::MAX;
 
     for j in -1..=1 {
         for i in -1..=1 {
@@ -66,11 +61,11 @@ fn voronoi_distances(p: (f64, f64)) -> ((f64, f64), (f64, f64)) {
             let r = (cell_offset.0 + point.0 - fx, cell_offset.1 + point.1 - fy);
             let d_sq = r.0 * r.0 + r.1 * r.1;
 
-            if d_sq < closest.0 {
+            if d_sq < closest {
                 second_closest = closest;
-                closest = (d_sq, 0.0);
-            } else if d_sq < second_closest.0 {
-                second_closest = (d_sq, 0.0);
+                closest = d_sq;
+            } else if d_sq < second_closest {
+                second_closest = d_sq;
             }
         }
     }
@@ -104,7 +99,7 @@ pub fn apply_champleve_iridescence(
         let v = (idx / width) as f64 * inv_cell_scale;
 
         let (d1, d2) = voronoi_distances((u, v));
-        let rim_dist = (d2.0.sqrt() - d1.0.sqrt()).abs();
+        let rim_dist = (d2.sqrt() - d1.sqrt()).abs();
         let rim = (1.0 - rim_dist.powf(config.rim_sharpness) * 20.0).clamp(0.0, 1.0);
         let interior = 1.0 - rim;
 

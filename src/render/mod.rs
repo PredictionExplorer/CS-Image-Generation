@@ -41,8 +41,7 @@ use self::histogram::HistogramData;
 // Re-export core types and functions for public API compatibility
 pub use color::{OklabColor, generate_body_color_sequences};
 pub use drawing::{
-    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_with_dispersion,
-    parallel_blur_2d_rgba,
+    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral, parallel_blur_2d_rgba,
 };
 pub use effects::{DogBloomConfig, apply_dog_bloom};
 pub use types::{ChannelLevels, ToneMappingControls};
@@ -352,7 +351,7 @@ fn build_effect_config_from_resolved(
     use crate::post_effects::{
         AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ColorGradeParams,
         EdgeLuminanceConfig, FineTextureConfig, GlowEnhancementConfig, MicroContrastConfig,
-        OpalescenceConfig, fine_texture::TextureType,
+        OpalescenceConfig,
     };
 
     let width = resolved.width as usize;
@@ -535,7 +534,6 @@ fn build_effect_config_from_resolved(
         },
         fine_texture_enabled: texture_enabled,
         fine_texture_config: FineTextureConfig {
-            texture_type: TextureType::Canvas, // Fixed
             strength: resolved.fine_texture_strength * texture_strength_scale,
             scale: fine_texture_scale_abs,
             contrast: resolved.fine_texture_contrast,
@@ -645,7 +643,7 @@ pub fn pass_1_build_histogram_spectral(
                 height as usize,
             );
 
-            let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
+            let frame_params = FrameParams { frame_number: step / frame_interval, density: None };
             let rgba_buffer = std::mem::take(&mut accum_rgba);
             let trajectory_proxy = finish_pipeline
                 .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
@@ -753,7 +751,7 @@ pub fn pass_2_write_frames_spectral(
                 height as usize,
             );
 
-            let frame_params = FrameParams { _frame_number: step / frame_interval, _density: None };
+            let frame_params = FrameParams { frame_number: step / frame_interval, density: None };
             let rgba_buffer = std::mem::take(&mut accum_rgba);
             let trajectory_pixels = finish_pipeline
                 .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
@@ -866,7 +864,7 @@ pub fn render_final_frame_spectral(
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
-    let frame_params = FrameParams { _frame_number: preview_frame_number, _density: None };
+    let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .expect("Failed to process final preview frame");
@@ -975,7 +973,7 @@ pub(crate) fn render_single_frame_spectral(
         let hdr_mult_12 = velocity_calc.compute_segment_multiplier(step, 1, 2);
         let hdr_mult_20 = velocity_calc.compute_segment_multiplier(step, 2, 0);
 
-        draw_line_segment_aa_spectral_with_dispersion(
+        draw_line_segment_aa_spectral(
             &mut accum_spd,
             width,
             height,
@@ -985,7 +983,7 @@ pub(crate) fn render_single_frame_spectral(
                 hdr_scale: render_config.hdr_scale * hdr_mult_01,
             },
         );
-        draw_line_segment_aa_spectral_with_dispersion(
+        draw_line_segment_aa_spectral(
             &mut accum_spd,
             width,
             height,
@@ -995,7 +993,7 @@ pub(crate) fn render_single_frame_spectral(
                 hdr_scale: render_config.hdr_scale * hdr_mult_12,
             },
         );
-        draw_line_segment_aa_spectral_with_dispersion(
+        draw_line_segment_aa_spectral(
             &mut accum_spd,
             width,
             height,
@@ -1011,7 +1009,7 @@ pub(crate) fn render_single_frame_spectral(
     apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
-    let frame_params = FrameParams { _frame_number: 0, _density: None };
+    let frame_params = FrameParams { frame_number: 0, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .expect("Failed to process test frame");

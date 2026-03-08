@@ -171,15 +171,14 @@ impl PostEffect for MicroContrast {
                 }
 
                 // Get local average
-                let (avg_r, avg_g, avg_b, _avg_a) = local_avgs[idx];
+                let (avg_r, avg_g, avg_b, avg_a) = local_avgs[idx];
 
-                // Convert to straight alpha
                 let sr = r / a;
                 let sg = g / a;
                 let sb = b / a;
-                let avg_sr = if _avg_a > 0.0 { avg_r / _avg_a } else { avg_r };
-                let avg_sg = if _avg_a > 0.0 { avg_g / _avg_a } else { avg_g };
-                let avg_sb = if _avg_a > 0.0 { avg_b / _avg_a } else { avg_b };
+                let avg_sr = if avg_a > 0.0 { avg_r / avg_a } else { avg_r };
+                let avg_sg = if avg_a > 0.0 { avg_g / avg_a } else { avg_g };
+                let avg_sb = if avg_a > 0.0 { avg_b / avg_a } else { avg_b };
 
                 // Calculate difference from local average (local contrast)
                 let diff_r = sr - avg_sr;

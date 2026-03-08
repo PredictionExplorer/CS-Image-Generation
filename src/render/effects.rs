@@ -73,15 +73,14 @@ pub struct EffectConfig {
 /// Per-frame parameters that may vary
 #[derive(Clone, Debug)]
 pub struct FrameParams {
-    pub _frame_number: usize,
-    pub _density: Option<f64>,
+    pub frame_number: usize,
+    pub density: Option<f64>,
 }
 
 /// Persistent finish pipeline with separate trajectory and image stages.
 pub struct FinishEffectPipeline {
     trajectory_chain: PostEffectChain,
     image_chain: PostEffectChain,
-    _config: EffectConfig,
 }
 
 impl FinishEffectPipeline {
@@ -89,7 +88,7 @@ impl FinishEffectPipeline {
     pub fn new(config: EffectConfig) -> Self {
         let trajectory_chain = Self::build_trajectory_chain(&config);
         let image_chain = Self::build_image_chain(&config);
-        Self { trajectory_chain, image_chain, _config: config }
+        Self { trajectory_chain, image_chain }
     }
 
     /// Build the trajectory finish chain based on configuration.
@@ -118,16 +117,14 @@ impl FinishEffectPipeline {
         }
 
         // 1b. DoG bloom (edge-detected glow, mutually exclusive with Gaussian)
-        match config.bloom_mode.as_str() {
-            "dog" => chain.add(Box::new(DogBloom::new(
+        if config.bloom_mode == "dog" {
+            chain.add(Box::new(DogBloom::new(
                 config.dog_config.clone(),
                 config.blur_core_brightness,
-            ))),
-            "gaussian" => {}
-            _ => {}
+            )));
         }
 
-        // 1c. Glow enhancement (tight sparkle on very bright areas) [NEW]
+        // 1c. Glow enhancement (tight sparkle on very bright areas)
         if config.glow_enhancement_enabled {
             chain.add(Box::new(GlowEnhancement::new(config.glow_enhancement_config.clone())));
         }
@@ -150,7 +147,7 @@ impl FinishEffectPipeline {
         // ===== PHASE 3: DETAIL ENHANCEMENT =====
         // Clarity and definition improvements
 
-        // 3. Micro-contrast (local contrast enhancement for detail clarity) [NEW]
+        // 3. Micro-contrast (local contrast enhancement for detail clarity)
         if config.micro_contrast_enabled {
             chain.add(Box::new(MicroContrast::new(config.micro_contrast_config.clone())));
         }
@@ -171,7 +168,7 @@ impl FinishEffectPipeline {
         // ===== PHASE 5: MATERIAL PROPERTIES =====
         // Iridescence and material quality (layered for depth)
 
-        // 5a. Opalescence (base gem-like shimmer layer) [MOVED EARLIER]
+        // 5a. Opalescence (base gem-like shimmer layer)
         if config.opalescence_enabled {
             chain.add(Box::new(Opalescence::new(config.opalescence_config.clone())));
         }

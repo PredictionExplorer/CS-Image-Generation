@@ -1,9 +1,9 @@
 //! Woven Æther post-effect for creating a flowing, volumetric tapestry of light.
-//
-// This effect transforms the rendered trajectories into a field of luminous,
-// anisotropic filaments. It uses a flow-warped distance field to create an
-// organic, woven texture, and then applies volumetric scattering, iridescent
-// color shifts, and negative space caustics for a deeply textured, ethereal look.
+//!
+//! This effect transforms the rendered trajectories into a field of luminous,
+//! anisotropic filaments. It uses a flow-warped distance field to create an
+//! organic, woven texture, and then applies volumetric scattering, iridescent
+//! color shifts, and negative space caustics for a deeply textured, ethereal look.
 
 use super::PixelBuffer;
 use crate::render::constants;
@@ -39,12 +39,7 @@ impl Default for AetherConfig {
     }
 }
 
-/// A simple 2D hash to generate pseudo-random points for the anisotropic field.
-#[inline]
-fn hash2(p: (f64, f64)) -> (f64, f64) {
-    let h = (p.0 * 12.9898 + p.1 * 78.233).sin() * 43758.5453;
-    (h.fract(), (h * 1.57).fract())
-}
+use super::utils::hash2;
 
 /// Computes the anisotropic Voronoi distance field, warped by flow direction.
 #[inline]

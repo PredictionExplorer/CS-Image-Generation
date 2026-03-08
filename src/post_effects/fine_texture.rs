@@ -12,18 +12,9 @@ use super::{PixelBuffer, PostEffect};
 use rayon::prelude::*;
 use std::error::Error;
 
-/// Type of fine art texture
-#[derive(Clone, Debug)]
-pub enum TextureType {
-    /// Canvas weave pattern (like oil painting canvas)
-    Canvas,
-}
-
 /// Configuration for fine texture overlay
 #[derive(Clone, Debug)]
 pub struct FineTextureConfig {
-    /// Type of texture to apply
-    pub texture_type: TextureType,
     /// Overall strength of the texture (0.0-1.0)
     pub strength: f64,
     /// Scale of texture features (larger = coarser texture)
@@ -40,7 +31,6 @@ impl Default for FineTextureConfig {
     fn default() -> Self {
         let base_scale = (1920.0_f64 * 1080.0).sqrt();
         Self {
-            texture_type: TextureType::Canvas,
             strength: 0.12,
             scale: base_scale * 0.0018,
             contrast: 0.35,
@@ -117,9 +107,7 @@ impl FineTexture {
 
     /// Get texture value for a given position
     fn get_texture_value(&self, x: f64, y: f64) -> f64 {
-        let raw_value = match self.config.texture_type {
-            TextureType::Canvas => self.canvas_pattern(x, y),
-        };
+        let raw_value = self.canvas_pattern(x, y);
 
         // Apply contrast
         let centered = raw_value * self.config.contrast;
@@ -219,27 +207,20 @@ mod tests {
     }
 
     #[test]
-    fn test_all_texture_types() {
-        let types = [TextureType::Canvas];
+    fn test_canvas_produces_varying_values() {
+        let config = FineTextureConfig {
+            strength: 0.1,
+            scale: 10.0,
+            contrast: 0.5,
+            anisotropy: 0.0,
+            angle: 0.0,
+        };
+        let texture = FineTexture::new(config);
 
-        for texture_type in types {
-            let config = FineTextureConfig {
-                texture_type,
-                strength: 0.1,
-                scale: 10.0,
-                contrast: 0.5,
-                anisotropy: 0.0,
-                angle: 0.0,
-            };
-            let texture = FineTexture::new(config);
+        assert!(texture.is_enabled());
 
-            // Should be enabled
-            assert!(texture.is_enabled());
-
-            // Should produce varying values
-            let v1 = texture.get_texture_value(0.0, 0.0);
-            let v2 = texture.get_texture_value(10.0, 10.0);
-            assert_ne!(v1, v2);
-        }
+        let v1 = texture.get_texture_value(0.0, 0.0);
+        let v2 = texture.get_texture_value(10.0, 10.0);
+        assert_ne!(v1, v2);
     }
 }

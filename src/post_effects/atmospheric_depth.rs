@@ -200,9 +200,9 @@ impl PostEffect for AtmosphericDepth {
                 let effective_depth = depth_factor * self.config.strength;
 
                 // Desaturate based on depth
-                let (_h, s, l) = Self::rgb_to_hsl(sr, sg, sb);
+                let (h, s, l) = Self::rgb_to_hsl(sr, sg, sb);
                 let desaturated_s = s * (1.0 - effective_depth * self.config.desaturation);
-                let (desat_r, desat_g, desat_b) = Self::hsl_to_rgb(_h, desaturated_s, l);
+                let (desat_r, desat_g, desat_b) = Self::hsl_to_rgb(h, desaturated_s, l);
 
                 // Apply atmospheric fog tint
                 let fog_r = self.config.fog_color.0;

@@ -39,10 +39,7 @@ pub struct SpectralLineSegment {
 /// - Violet hues (around 300°) map to violet wavelengths (380-450nm)
 #[inline]
 pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
-    // Calculate hue angle in radians (-π to +π)
     let hue_rad = b.atan2(a);
-
-    // Convert to degrees (0 to 360)
     let mut hue_deg = hue_rad.to_degrees();
     if hue_deg < 0.0 {
         hue_deg += 360.0;
@@ -78,7 +75,6 @@ pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
         380.0 + ((hue_deg - 330.0) / 30.0) * 320.0
     };
 
-    // Ensure wavelength is within valid bounds
     wavelength.clamp(LAMBDA_START, LAMBDA_END)
 }
 
@@ -159,19 +155,8 @@ pub fn parallel_blur_2d_rgba(
     });
 }
 
-/// Draw anti-aliased line segment for spectral rendering
-/// (Dispersion has been moved to a post-process for massive performance gains and continuous radial aberration)
-pub fn draw_line_segment_aa_spectral_with_dispersion(
-    accum: &mut [[f64; NUM_BINS]],
-    width: u32,
-    height: u32,
-    segment: SpectralLineSegment,
-) {
-    draw_line_segment_aa_spectral_internal(accum, width, height, segment);
-}
-
-/// Internal implementation of spectral line drawing using Z-depth aware SDF Splatting
-fn draw_line_segment_aa_spectral_internal(
+/// Draw anti-aliased line segment for spectral rendering using Z-depth aware SDF Splatting
+pub fn draw_line_segment_aa_spectral(
     accum: &mut [[f64; NUM_BINS]],
     width: u32,
     height: u32,

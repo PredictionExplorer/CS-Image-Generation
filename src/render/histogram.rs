@@ -48,8 +48,6 @@ impl HistogramData {
     }
 
     /// Get raw histogram data for custom analysis
-    ///
-    /// Returns immutable access to the underlying RGB sample data.
     pub fn data(&self) -> &[[f64; 3]] {
         &self.data
     }
@@ -63,7 +61,6 @@ fn compute_black_white_gamma(
     clip_black: f64,
     clip_white: f64,
 ) -> (f64, f64, f64, f64, f64, f64) {
-    // sort each channel separately (in parallel)
     let r_slice = &mut *all_r;
     let g_slice = &mut *all_g;
     let b_slice = &mut *all_b;

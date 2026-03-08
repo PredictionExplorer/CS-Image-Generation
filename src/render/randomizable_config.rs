@@ -606,9 +606,8 @@ impl RandomizableEffectConfig {
                 &mut log,
             ),
 
-            // Resolve constrained pair (clip_black < clip_white)
-            clip_black: 0.0, // Will be set below
-            clip_white: 0.0, // Will be set below
+            clip_black: 0.0,
+            clip_white: 0.0,
         };
 
         // Resolve clip_black and clip_white as ordered pair
@@ -626,7 +625,6 @@ impl RandomizableEffectConfig {
                 randomizer.randomize_ordered_pair(&pd::CLIP_BLACK, &pd::CLIP_WHITE)
             };
 
-        // Store resolved clip values
         let resolved = ResolvedEffectConfig { clip_black, clip_white, ..resolved };
 
         // Log clip parameters
@@ -728,6 +726,25 @@ impl RandomizableEffectConfig {
 
     /// Extract effect group name from parameter name (e.g., "glow_strength" -> "glow")
     fn effect_group_name(param_name: &str) -> String {
+        if param_name.starts_with("atmospheric_") {
+            return "atmospheric_depth".to_string();
+        }
+
+        const MULTI_WORD_PREFIXES: &[&str] = &[
+            "chromatic_bloom",
+            "gradient_map",
+            "fine_texture",
+            "micro_contrast",
+            "edge_luminance",
+            "color_grade",
+            "tone_curve",
+            "nebula_base",
+        ];
+        for prefix in MULTI_WORD_PREFIXES {
+            if param_name.starts_with(prefix) {
+                return (*prefix).to_string();
+            }
+        }
         param_name.split('_').next().unwrap_or(param_name).to_string()
     }
 }
@@ -1136,79 +1153,10 @@ mod tests {
     #[test]
     fn test_extreme_blur_performance_guard() {
         let config = ResolvedEffectConfig {
-            width: 1920,
-            height: 1080,
             enable_bloom: true,
-            blur_radius_scale: 0.070, // Extreme radius (above 0.060 threshold)
-            blur_strength: 26.0,      // Extreme strength (above 24.0 threshold)
-            // Initialize other required fields with defaults
-            enable_glow: false,
-            enable_chromatic_bloom: false,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
-            enable_opalescence: false,
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
-            blur_core_brightness: 10.0,
-            dog_strength: 0.3,
-            dog_sigma_scale: 0.006,
-            dog_ratio: 2.5,
-            glow_strength: 0.4,
-            glow_threshold: 0.65,
-            glow_radius_scale: 0.007,
-            glow_sharpness: 2.5,
-            glow_saturation_boost: 0.2,
-            chromatic_bloom_strength: 0.6,
-            chromatic_bloom_radius_scale: 0.012,
-            chromatic_bloom_separation_scale: 0.002,
-            chromatic_bloom_threshold: 0.15,
-            perceptual_blur_strength: 0.65,
-            color_grade_strength: 0.5,
-            vignette_strength: 0.4,
-            vignette_softness: 2.5,
-            vibrance: 1.1,
-            clarity_strength: 0.25,
-            tone_curve_strength: 0.5,
-            gradient_map_strength: 0.7,
-            gradient_map_hue_preservation: 0.2,
-            gradient_map_palette: 0,
-            opalescence_strength: 0.15,
-            opalescence_scale: 0.01,
-            opalescence_layers: 3,
-            champleve_flow_alignment: 0.6,
-            champleve_interference_amplitude: 0.5,
-            champleve_rim_intensity: 1.8,
-            champleve_rim_warmth: 0.6,
-            champleve_interior_lift: 0.65,
-            aether_flow_alignment: 0.7,
-            aether_scattering_strength: 0.9,
-            aether_iridescence_amplitude: 0.6,
-            aether_caustic_strength: 0.3,
-            micro_contrast_strength: 0.25,
-            micro_contrast_radius: 5,
-            edge_luminance_strength: 0.2,
-            edge_luminance_threshold: 0.18,
-            edge_luminance_brightness_boost: 0.3,
-            atmospheric_depth_strength: 0.25,
-            atmospheric_desaturation: 0.35,
-            atmospheric_darkening: 0.15,
-            atmospheric_fog_color_r: 0.08,
-            atmospheric_fog_color_g: 0.12,
-            atmospheric_fog_color_b: 0.22,
-            fine_texture_strength: 0.12,
-            fine_texture_scale: 0.0018,
-            fine_texture_contrast: 0.35,
-            hdr_scale: 0.12,
-            clip_black: 0.01,
-            clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
+            blur_radius_scale: 0.070,
+            blur_strength: 26.0,
+            ..baseline_resolved_config()
         };
 
         let mut log = RandomizationLog::new();
@@ -1236,79 +1184,10 @@ mod tests {
     #[test]
     fn test_below_threshold_blur_not_affected() {
         let config = ResolvedEffectConfig {
-            width: 1920,
-            height: 1080,
             enable_bloom: true,
-            blur_radius_scale: 0.055, // Below 0.060 threshold
-            blur_strength: 23.0,      // Below 24.0 threshold
-            // Same defaults as above
-            enable_glow: false,
-            enable_chromatic_bloom: false,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
-            enable_opalescence: false,
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
-            blur_core_brightness: 10.0,
-            dog_strength: 0.3,
-            dog_sigma_scale: 0.006,
-            dog_ratio: 2.5,
-            glow_strength: 0.4,
-            glow_threshold: 0.65,
-            glow_radius_scale: 0.007,
-            glow_sharpness: 2.5,
-            glow_saturation_boost: 0.2,
-            chromatic_bloom_strength: 0.6,
-            chromatic_bloom_radius_scale: 0.012,
-            chromatic_bloom_separation_scale: 0.002,
-            chromatic_bloom_threshold: 0.15,
-            perceptual_blur_strength: 0.65,
-            color_grade_strength: 0.5,
-            vignette_strength: 0.4,
-            vignette_softness: 2.5,
-            vibrance: 1.1,
-            clarity_strength: 0.25,
-            tone_curve_strength: 0.5,
-            gradient_map_strength: 0.7,
-            gradient_map_hue_preservation: 0.2,
-            gradient_map_palette: 0,
-            opalescence_strength: 0.15,
-            opalescence_scale: 0.01,
-            opalescence_layers: 3,
-            champleve_flow_alignment: 0.6,
-            champleve_interference_amplitude: 0.5,
-            champleve_rim_intensity: 1.8,
-            champleve_rim_warmth: 0.6,
-            champleve_interior_lift: 0.65,
-            aether_flow_alignment: 0.7,
-            aether_scattering_strength: 0.9,
-            aether_iridescence_amplitude: 0.6,
-            aether_caustic_strength: 0.3,
-            micro_contrast_strength: 0.25,
-            micro_contrast_radius: 5,
-            edge_luminance_strength: 0.2,
-            edge_luminance_threshold: 0.18,
-            edge_luminance_brightness_boost: 0.3,
-            atmospheric_depth_strength: 0.25,
-            atmospheric_desaturation: 0.35,
-            atmospheric_darkening: 0.15,
-            atmospheric_fog_color_r: 0.08,
-            atmospheric_fog_color_g: 0.12,
-            atmospheric_fog_color_b: 0.22,
-            fine_texture_strength: 0.12,
-            fine_texture_scale: 0.0018,
-            fine_texture_contrast: 0.35,
-            hdr_scale: 0.12,
-            clip_black: 0.01,
-            clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
+            blur_radius_scale: 0.055,
+            blur_strength: 23.0,
+            ..baseline_resolved_config()
         };
 
         let mut log = RandomizationLog::new();
@@ -1332,78 +1211,10 @@ mod tests {
     #[test]
     fn test_opalescence_layers_performance_guard() {
         let config = ResolvedEffectConfig {
-            width: 1920,
-            height: 1080,
-            enable_bloom: false,
-            enable_glow: false,
-            enable_chromatic_bloom: false,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
             enable_opalescence: true,
-            opalescence_layers: 6,      // Above 5 threshold
-            opalescence_strength: 0.35, // Above 0.30 threshold
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
-            blur_radius_scale: 0.02,
-            blur_strength: 10.0,
-            blur_core_brightness: 10.0,
-            dog_strength: 0.3,
-            dog_sigma_scale: 0.006,
-            dog_ratio: 2.5,
-            glow_strength: 0.4,
-            glow_threshold: 0.65,
-            glow_radius_scale: 0.007,
-            glow_sharpness: 2.5,
-            glow_saturation_boost: 0.2,
-            chromatic_bloom_strength: 0.6,
-            chromatic_bloom_radius_scale: 0.012,
-            chromatic_bloom_separation_scale: 0.002,
-            chromatic_bloom_threshold: 0.15,
-            perceptual_blur_strength: 0.65,
-            color_grade_strength: 0.5,
-            vignette_strength: 0.4,
-            vignette_softness: 2.5,
-            vibrance: 1.1,
-            clarity_strength: 0.25,
-            tone_curve_strength: 0.5,
-            gradient_map_strength: 0.7,
-            gradient_map_hue_preservation: 0.2,
-            gradient_map_palette: 0,
-            opalescence_scale: 0.01,
-            champleve_flow_alignment: 0.6,
-            champleve_interference_amplitude: 0.5,
-            champleve_rim_intensity: 1.8,
-            champleve_rim_warmth: 0.6,
-            champleve_interior_lift: 0.65,
-            aether_flow_alignment: 0.7,
-            aether_scattering_strength: 0.9,
-            aether_iridescence_amplitude: 0.6,
-            aether_caustic_strength: 0.3,
-            micro_contrast_strength: 0.25,
-            micro_contrast_radius: 5,
-            edge_luminance_strength: 0.2,
-            edge_luminance_threshold: 0.18,
-            edge_luminance_brightness_boost: 0.3,
-            atmospheric_depth_strength: 0.25,
-            atmospheric_desaturation: 0.35,
-            atmospheric_darkening: 0.15,
-            atmospheric_fog_color_r: 0.08,
-            atmospheric_fog_color_g: 0.12,
-            atmospheric_fog_color_b: 0.22,
-            fine_texture_strength: 0.12,
-            fine_texture_scale: 0.0018,
-            fine_texture_contrast: 0.35,
-            hdr_scale: 0.12,
-            clip_black: 0.01,
-            clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
+            opalescence_layers: 6,
+            opalescence_strength: 0.35,
+            ..baseline_resolved_config()
         };
 
         let mut log = RandomizationLog::new();
@@ -1420,78 +1231,10 @@ mod tests {
     #[test]
     fn test_opalescence_below_threshold_not_affected() {
         let config = ResolvedEffectConfig {
-            width: 1920,
-            height: 1080,
-            enable_bloom: false,
-            enable_glow: false,
-            enable_chromatic_bloom: false,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
             enable_opalescence: true,
-            opalescence_layers: 6,      // Above threshold BUT...
-            opalescence_strength: 0.25, // ...strength below 0.30 threshold
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
-            blur_radius_scale: 0.02,
-            blur_strength: 10.0,
-            blur_core_brightness: 10.0,
-            dog_strength: 0.3,
-            dog_sigma_scale: 0.006,
-            dog_ratio: 2.5,
-            glow_strength: 0.4,
-            glow_threshold: 0.65,
-            glow_radius_scale: 0.007,
-            glow_sharpness: 2.5,
-            glow_saturation_boost: 0.2,
-            chromatic_bloom_strength: 0.6,
-            chromatic_bloom_radius_scale: 0.012,
-            chromatic_bloom_separation_scale: 0.002,
-            chromatic_bloom_threshold: 0.15,
-            perceptual_blur_strength: 0.65,
-            color_grade_strength: 0.5,
-            vignette_strength: 0.4,
-            vignette_softness: 2.5,
-            vibrance: 1.1,
-            clarity_strength: 0.25,
-            tone_curve_strength: 0.5,
-            gradient_map_strength: 0.7,
-            gradient_map_hue_preservation: 0.2,
-            gradient_map_palette: 0,
-            opalescence_scale: 0.01,
-            champleve_flow_alignment: 0.6,
-            champleve_interference_amplitude: 0.5,
-            champleve_rim_intensity: 1.8,
-            champleve_rim_warmth: 0.6,
-            champleve_interior_lift: 0.65,
-            aether_flow_alignment: 0.7,
-            aether_scattering_strength: 0.9,
-            aether_iridescence_amplitude: 0.6,
-            aether_caustic_strength: 0.3,
-            micro_contrast_strength: 0.25,
-            micro_contrast_radius: 5,
-            edge_luminance_strength: 0.2,
-            edge_luminance_threshold: 0.18,
-            edge_luminance_brightness_boost: 0.3,
-            atmospheric_depth_strength: 0.25,
-            atmospheric_desaturation: 0.35,
-            atmospheric_darkening: 0.15,
-            atmospheric_fog_color_r: 0.08,
-            atmospheric_fog_color_g: 0.12,
-            atmospheric_fog_color_b: 0.22,
-            fine_texture_strength: 0.12,
-            fine_texture_scale: 0.0018,
-            fine_texture_contrast: 0.35,
-            hdr_scale: 0.12,
-            clip_black: 0.01,
-            clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
+            opalescence_layers: 6,
+            opalescence_strength: 0.25,
+            ..baseline_resolved_config()
         };
 
         let mut log = RandomizationLog::new();
@@ -1549,6 +1292,22 @@ mod tests {
                     .iter()
                     .any(|parameter| parameter.value.contains("Softened atmospheric depth"))
         }));
+    }
+
+    #[test]
+    fn test_atmospheric_fog_parameters_share_atmospheric_depth_group() {
+        assert_eq!(
+            RandomizableEffectConfig::effect_group_name("atmospheric_depth_strength"),
+            "atmospheric_depth"
+        );
+        assert_eq!(
+            RandomizableEffectConfig::effect_group_name("atmospheric_fog_color_r"),
+            "atmospheric_depth"
+        );
+        assert_eq!(
+            RandomizableEffectConfig::effect_group_name("atmospheric_fog_color_b"),
+            "atmospheric_depth"
+        );
     }
 
     #[test]

@@ -41,10 +41,6 @@ _file_handler.setFormatter(
 logger.addHandler(_file_handler)
 
 
-def _log_to_file(level: int, msg: str) -> None:
-    logger.log(level, msg)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -79,12 +75,12 @@ def fmt_duration(seconds: float) -> str:
 # Single simulation
 # ---------------------------------------------------------------------------
 
-def run_one(seed: str, run_id: int) -> tuple:
+def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
     cmd = [BINARY, "--seed", seed, "--output", filename]
 
-    _log_to_file(logging.DEBUG, f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
+    logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()
 
     try:
@@ -92,33 +88,30 @@ def run_one(seed: str, run_id: int) -> tuple:
         elapsed = time.monotonic() - t0
 
         if proc.stdout:
-            _log_to_file(logging.DEBUG, f"[{run_id}] stdout:\n{proc.stdout.rstrip()}")
+            logger.debug(f"[{run_id}] stdout:\n{proc.stdout.rstrip()}")
         if proc.stderr:
-            _log_to_file(logging.DEBUG, f"[{run_id}] stderr:\n{proc.stderr.rstrip()}")
+            logger.debug(f"[{run_id}] stderr:\n{proc.stderr.rstrip()}")
 
         if proc.returncode == 0:
-            _log_to_file(logging.INFO, f"[{run_id}] OK    {seed}  ({fmt_duration(elapsed)})")
+            logger.info(f"[{run_id}] OK    {seed}  ({fmt_duration(elapsed)})")
             return (True, seed, elapsed)
 
-        _log_to_file(
-            logging.WARNING,
-            f"[{run_id}] FAIL  {seed}  exit={proc.returncode}  ({fmt_duration(elapsed)})",
-        )
+        logger.warning(f"[{run_id}] FAIL  {seed}  exit={proc.returncode}  ({fmt_duration(elapsed)})")
         return (False, seed, elapsed)
 
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] TIMEOUT {seed}  ({fmt_duration(elapsed)})")
+        logger.error(f"[{run_id}] TIMEOUT {seed}  ({fmt_duration(elapsed)})")
         return (False, seed, elapsed)
 
     except OSError as exc:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] OS ERROR {seed}: {exc}")
+        logger.error(f"[{run_id}] OS ERROR {seed}: {exc}")
         return (False, seed, elapsed)
 
     except Exception as exc:
         elapsed = time.monotonic() - t0
-        _log_to_file(logging.ERROR, f"[{run_id}] UNEXPECTED {seed}: {exc}")
+        logger.error(f"[{run_id}] UNEXPECTED {seed}: {exc}")
         return (False, seed, elapsed)
 
 
@@ -129,9 +122,9 @@ def run_one(seed: str, run_id: int) -> tuple:
 def main() -> None:
     check_prerequisites()
 
-    _log_to_file(logging.INFO, f"{'=' * 60}")
-    _log_to_file(logging.INFO, f"Session started  concurrency={CONCURRENT_SIMS}")
-    _log_to_file(logging.INFO, f"{'=' * 60}")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Session started  concurrency={CONCURRENT_SIMS}")
+    logger.info(f"{'=' * 60}")
 
     print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
     print(f"Detailed logs -> {LOG_FILE}")
@@ -143,7 +136,7 @@ def main() -> None:
     completions_since_report = 0
     t_session = time.monotonic()
 
-    in_flight: dict = {}
+    in_flight: dict[concurrent.futures.Future, tuple[int, str]] = {}
 
     shutdown = False
     orig_sigint = signal.getsignal(signal.SIGINT)
@@ -173,7 +166,7 @@ def main() -> None:
             line += f"  -{fail_total} fail"
         line += f")  {elapsed}"
         print(line)
-        _log_to_file(logging.INFO, line)
+        logger.info(line)
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_SIMS) as pool:
@@ -212,8 +205,8 @@ def main() -> None:
 
         summary = f"\nDone: {ok_total} ok, {fail_total} failed / {total} total in {elapsed}"
         print(summary)
-        _log_to_file(logging.INFO, summary)
-        _log_to_file(logging.INFO, "Session ended\n")
+        logger.info(summary)
+        logger.info("Session ended\n")
 
 
 if __name__ == "__main__":

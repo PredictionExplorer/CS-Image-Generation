@@ -3,6 +3,31 @@
 use super::PixelBuffer;
 use rayon::prelude::*;
 
+/// A simple 2D hash to generate pseudo-random points for distance fields.
+#[inline]
+pub fn hash2(p: (f64, f64)) -> (f64, f64) {
+    let h = (p.0 * 12.9898 + p.1 * 78.233).sin() * 43758.5453;
+    (h.fract(), (h * 1.57).fract())
+}
+
+/// Hermite smoothstep interpolation between two edges.
+#[inline]
+pub fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    if (edge1 - edge0).abs() < f64::EPSILON {
+        return if x >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Soft-knee highlight extraction factor based on luminance.
+#[inline]
+pub fn highlight_extract_factor(luminance: f64) -> f64 {
+    let knee = crate::render::constants::DEFAULT_HIGHLIGHT_EXTRACT_KNEE;
+    let threshold = crate::render::constants::DEFAULT_HIGHLIGHT_EXTRACT_THRESHOLD;
+    smoothstep(threshold - knee * 0.5, threshold + knee * 0.5, luminance)
+}
+
 /// Computes luminance gradients for a given pixel buffer, used for flow-aware effects.
 pub fn calculate_gradients(buffer: &PixelBuffer, width: usize, height: usize) -> Vec<(f64, f64)> {
     let mut luminance = vec![0.0f64; buffer.len()];

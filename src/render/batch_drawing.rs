@@ -4,9 +4,7 @@
 //! line segments together, improving CPU cache utilization and instruction pipelining.
 
 use super::color::OklabColor;
-use super::drawing::{
-    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_with_dispersion,
-};
+use super::drawing::{LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral};
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 
@@ -26,21 +24,21 @@ pub fn draw_triangle_batch_spectral(
     let [v0, v1, v2] = vertices;
     let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = hdr_multipliers;
 
-    draw_line_segment_aa_spectral_with_dispersion(
+    draw_line_segment_aa_spectral(
         accum,
         width,
         height,
         SpectralLineSegment { start: v0, end: v1, hdr_scale: hdr_scale * hdr_mult_01 },
     );
 
-    draw_line_segment_aa_spectral_with_dispersion(
+    draw_line_segment_aa_spectral(
         accum,
         width,
         height,
         SpectralLineSegment { start: v1, end: v2, hdr_scale: hdr_scale * hdr_mult_12 },
     );
 
-    draw_line_segment_aa_spectral_with_dispersion(
+    draw_line_segment_aa_spectral(
         accum,
         width,
         height,

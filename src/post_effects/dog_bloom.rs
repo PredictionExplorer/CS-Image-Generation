@@ -1,7 +1,7 @@
 //! Difference of Gaussians (DoG) bloom effect implementation.
 
-use super::{PixelBuffer, PostEffect};
-use crate::render::{DogBloomConfig, apply_dog_bloom, constants};
+use super::{PixelBuffer, PostEffect, utils};
+use crate::render::{DogBloomConfig, apply_dog_bloom};
 use rayon::prelude::*;
 use std::error::Error;
 
@@ -26,19 +26,6 @@ impl DogBloom {
         Self { config, core_brightness, enabled: true }
     }
 
-    #[inline]
-    fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-        t * t * (3.0 - 2.0 * t)
-    }
-
-    #[inline]
-    fn highlight_extract_factor(luminance: f64) -> f64 {
-        let knee = constants::DEFAULT_HIGHLIGHT_EXTRACT_KNEE;
-        let threshold = constants::DEFAULT_HIGHLIGHT_EXTRACT_THRESHOLD;
-        Self::smoothstep(threshold - knee * 0.5, threshold + knee * 0.5, luminance)
-    }
-
     fn extract_highlights(&self, input: &PixelBuffer) -> PixelBuffer {
         input
             .par_iter()
@@ -51,7 +38,7 @@ impl DogBloom {
                 let sg = g / a;
                 let sb = b / a;
                 let luminance = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
-                let factor = Self::highlight_extract_factor(luminance);
+                let factor = utils::highlight_extract_factor(luminance);
                 (r * factor, g * factor, b * factor, a * factor)
             })
             .collect()
