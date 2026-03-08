@@ -471,7 +471,29 @@ mod tests {
     /// Run the full seed-to-pixels pipeline at minimal scale and return the
     /// raw 16-bit pixel buffer.  Two calls with the same seed MUST return
     /// bitwise-identical buffers on the same architecture.
-    fn run_full_pipeline(seed: &[u8]) -> Vec<u16> {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PipelineRenderMode {
+        DefaultParallel,
+        SerialReference,
+    }
+
+    fn assert_pixel_buffers_eq(actual: &[u16], expected: &[u16], label: &str) {
+        assert_eq!(actual.len(), expected.len(), "{label}: pixel buffer lengths differ");
+
+        if actual != expected {
+            let diff_count = actual.iter().zip(expected).filter(|(a, b)| a != b).count();
+            let first = actual.iter().zip(expected).position(|(a, b)| a != b).unwrap();
+            panic!(
+                "{label}: pixel buffers differ: {diff_count} of {} values, \
+                 first at index {first} ({} vs {})",
+                actual.len(),
+                actual[first],
+                expected[first],
+            );
+        }
+    }
+
+    fn run_full_pipeline(seed: &[u8], mode: PipelineRenderMode) -> Vec<u16> {
         use crate::sim::Sha3RandomByteStream;
 
         let width = 64u32;
@@ -521,22 +543,50 @@ mod tests {
 
         let render_config =
             render::RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };
-        let levels = build_histogram_and_levels(
-            &positions,
-            &colors,
-            &body_alphas,
-            &resolved,
-            noise_seed,
-            &render_config,
-            false,
-        )
-        .expect("histogram/levels should succeed");
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, noise_seed, false);
+        let frame_interval = (scene.step_count()
+            / render::constants::DEFAULT_HISTOGRAM_SAMPLE_FRAMES as usize)
+            .max(1);
+        let histogram = match mode {
+            PipelineRenderMode::DefaultParallel => {
+                render::pass_1_build_histogram_spectral(scene, frame_interval, settings)
+            }
+            PipelineRenderMode::SerialReference => {
+                render::pass_1_build_histogram_spectral_serial_reference(
+                    scene,
+                    frame_interval,
+                    settings,
+                )
+            }
+        };
+        let analysis = render::histogram::analyze_tonemapping(
+            histogram.data(),
+            resolved.clip_black,
+            resolved.clip_white,
+        );
+        let levels = render::ChannelLevels::with_tone_mapping(
+            analysis.black_r,
+            analysis.white_r,
+            analysis.black_g,
+            analysis.white_g,
+            analysis.black_b,
+            analysis.white_b,
+            render::ToneMappingControls {
+                exposure_scale: analysis.exposure_scale,
+                paper_white: render::constants::DEFAULT_TONEMAP_PAPER_WHITE,
+                highlight_rolloff: render::constants::DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF,
+            },
+        );
 
-        let image = render::render_single_frame_spectral(
-            SpectralScene::new(&positions, &colors, &body_alphas),
-            &levels,
-            SpectralRenderSettings::new(&resolved, &render_config, noise_seed, false),
-        )
+        let image = match mode {
+            PipelineRenderMode::DefaultParallel => {
+                render::render_single_frame_spectral(scene, &levels, settings)
+            }
+            PipelineRenderMode::SerialReference => {
+                render::render_single_frame_spectral_serial_reference(scene, &levels, settings)
+            }
+        }
         .expect("render should succeed");
 
         image.into_raw()
@@ -544,22 +594,22 @@ mod tests {
 
     #[test]
     fn test_end_to_end_pipeline_determinism() {
-        let seed = [0xCA, 0xFE];
+        for seed in [[0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
+            let pixels_a = run_full_pipeline(&seed, PipelineRenderMode::DefaultParallel);
+            let pixels_b = run_full_pipeline(&seed, PipelineRenderMode::DefaultParallel);
+            assert_pixel_buffers_eq(&pixels_a, &pixels_b, &format!("default_parallel/{seed:02X?}"));
+        }
+    }
 
-        let pixels_a = run_full_pipeline(&seed);
-        let pixels_b = run_full_pipeline(&seed);
-
-        assert_eq!(pixels_a.len(), pixels_b.len(), "pixel buffer lengths differ");
-
-        if pixels_a != pixels_b {
-            let diff_count = pixels_a.iter().zip(&pixels_b).filter(|(a, b)| a != b).count();
-            let first = pixels_a.iter().zip(&pixels_b).position(|(a, b)| a != b).unwrap();
-            panic!(
-                "pixel buffers differ: {diff_count} of {} values, \
-                 first at index {first} ({} vs {})",
-                pixels_a.len(),
-                pixels_a[first],
-                pixels_b[first],
+    #[test]
+    fn test_end_to_end_pipeline_parallel_matches_serial_reference() {
+        for seed in [[0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
+            let parallel_pixels = run_full_pipeline(&seed, PipelineRenderMode::DefaultParallel);
+            let serial_pixels = run_full_pipeline(&seed, PipelineRenderMode::SerialReference);
+            assert_pixel_buffers_eq(
+                &parallel_pixels,
+                &serial_pixels,
+                &format!("parallel_vs_serial_reference/{seed:02X?}"),
             );
         }
     }

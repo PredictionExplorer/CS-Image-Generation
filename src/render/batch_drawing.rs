@@ -4,7 +4,7 @@
 //! line segments together, improving CPU cache utilization and instruction pipelining.
 
 use super::color::OklabColor;
-use super::drawing::{LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral};
+use super::drawing::{LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_rows};
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 
@@ -21,27 +21,56 @@ pub fn draw_triangle_batch_spectral(
     hdr_multipliers: [f64; 3],
     hdr_scale: f64,
 ) {
+    draw_triangle_batch_spectral_rows(
+        accum,
+        width,
+        height,
+        0,
+        height as usize,
+        vertices,
+        hdr_multipliers,
+        hdr_scale,
+    );
+}
+
+/// Draw a complete triangle into an owned row band of the destination buffer.
+pub(crate) fn draw_triangle_batch_spectral_rows(
+    accum: &mut [[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    row_start: usize,
+    row_end: usize,
+    vertices: [TriangleVertex; 3],
+    hdr_multipliers: [f64; 3],
+    hdr_scale: f64,
+) {
     let [v0, v1, v2] = vertices;
     let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = hdr_multipliers;
 
-    draw_line_segment_aa_spectral(
+    draw_line_segment_aa_spectral_rows(
         accum,
         width,
         height,
+        row_start,
+        row_end,
         SpectralLineSegment { start: v0, end: v1, hdr_scale: hdr_scale * hdr_mult_01 },
     );
 
-    draw_line_segment_aa_spectral(
+    draw_line_segment_aa_spectral_rows(
         accum,
         width,
         height,
+        row_start,
+        row_end,
         SpectralLineSegment { start: v1, end: v2, hdr_scale: hdr_scale * hdr_mult_12 },
     );
 
-    draw_line_segment_aa_spectral(
+    draw_line_segment_aa_spectral_rows(
         accum,
         width,
         height,
+        row_start,
+        row_end,
         SpectralLineSegment { start: v2, end: v0, hdr_scale: hdr_scale * hdr_mult_20 },
     );
 }
