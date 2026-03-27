@@ -76,20 +76,15 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
 }
 
-/// Initialize application directories
+/// Initialize all application directories (base + extras)
 pub fn setup_directories() -> Result<()> {
-    fs::create_dir_all("pics").map_err(|e| ConfigError::FileSystem {
-        operation: "create directory".to_string(),
-        path: "pics".to_string(),
-        error: e,
-    })?;
-
-    fs::create_dir_all("vids").map_err(|e| ConfigError::FileSystem {
-        operation: "create directory".to_string(),
-        path: "vids".to_string(),
-        error: e,
-    })?;
-
+    for dir in ["pics", "vids", "pics/spectral", "audio", "models"] {
+        fs::create_dir_all(dir).map_err(|e| ConfigError::FileSystem {
+            operation: "create directory".to_string(),
+            path: dir.to_string(),
+            error: e,
+        })?;
+    }
     Ok(())
 }
 
@@ -128,12 +123,16 @@ pub fn run_borda_selection(
     )
 }
 
-/// Re-run the best orbit to get full trajectory
-pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<Vec<Vector3<f64>>> {
+/// Re-run the best orbit to get full trajectory (positions + velocities)
+#[allow(clippy::type_complexity)]
+pub fn simulate_best_orbit(
+    best_bodies: Vec<Body>,
+    num_steps_sim: usize,
+) -> (Vec<Vec<Vector3<f64>>>, Vec<Vec<Vector3<f64>>>) {
     info!("STAGE 2/7: Re-running best orbit for {} steps...", num_steps_sim);
     let sim_result = sim::get_positions(best_bodies, num_steps_sim);
     info!("   => Done.");
-    sim_result.positions
+    (sim_result.positions, sim_result.velocities)
 }
 
 /// Apply drift transformation to positions
@@ -527,7 +526,7 @@ mod tests {
             crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, 0.75, 11.0, -0.3)
                 .expect("Borda search should find at least one valid orbit");
 
-        let mut positions = simulate_best_orbit(best_bodies, num_steps);
+        let (mut positions, _velocities) = simulate_best_orbit(best_bodies, num_steps);
 
         apply_drift_transformation(&mut positions, "elliptical", None, None, None, &mut rng);
 

@@ -170,9 +170,10 @@ fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
     }
 }
 
-/// Recorded positions
+/// Recorded positions and velocities from simulation
 pub struct FullSim {
     pub positions: Vec<Vec<Vector3<f64>>>,
+    pub velocities: Vec<Vec<Vector3<f64>>>,
 }
 
 /// warmup + record with optional early-exit checks
@@ -184,20 +185,25 @@ pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
         symplectic_step(&mut bodies, dt);
     }
     let mut b2 = bodies.clone();
-    let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for (step, snapshot) in std::iter::repeat_with(|| {
+    let mut all_pos = vec![vec![Vector3::zeros(); steps]; bodies.len()];
+    let mut all_vel = vec![vec![Vector3::zeros(); steps]; bodies.len()];
+    for (step, (pos_snap, vel_snap)) in std::iter::repeat_with(|| {
         let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
+        let velocities: Vec<_> = b2.iter().map(|body| body.velocity).collect();
         symplectic_step(&mut b2, dt);
-        positions
+        (positions, velocities)
     })
     .take(steps)
     .enumerate()
     {
-        for (body_positions, position) in all.iter_mut().zip(snapshot) {
+        for (body_positions, position) in all_pos.iter_mut().zip(pos_snap) {
             body_positions[step] = position;
         }
+        for (body_velocities, velocity) in all_vel.iter_mut().zip(vel_snap) {
+            body_velocities[step] = velocity;
+        }
     }
-    FullSim { positions: all }
+    FullSim { positions: all_pos, velocities: all_vel }
 }
 
 /// Fast trajectory simulation with early-exit for clearly bad candidates
@@ -232,21 +238,26 @@ pub fn get_positions_with_early_exit(
 
     // Record phase - body configuration is good, record the full trajectory
     let mut b2 = bodies.clone();
-    let mut all = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for (step, snapshot) in std::iter::repeat_with(|| {
+    let mut all_pos = vec![vec![Vector3::zeros(); steps]; bodies.len()];
+    let mut all_vel = vec![vec![Vector3::zeros(); steps]; bodies.len()];
+    for (step, (pos_snap, vel_snap)) in std::iter::repeat_with(|| {
         let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
+        let velocities: Vec<_> = b2.iter().map(|body| body.velocity).collect();
         symplectic_step(&mut b2, dt);
-        positions
+        (positions, velocities)
     })
     .take(steps)
     .enumerate()
     {
-        for (body_positions, position) in all.iter_mut().zip(snapshot) {
+        for (body_positions, position) in all_pos.iter_mut().zip(pos_snap) {
             body_positions[step] = position;
+        }
+        for (body_velocities, velocity) in all_vel.iter_mut().zip(vel_snap) {
+            body_velocities[step] = velocity;
         }
     }
 
-    Some(FullSim { positions: all })
+    Some(FullSim { positions: all_pos, velocities: all_vel })
 }
 
 /// Shift to COM
@@ -540,6 +551,61 @@ mod tests {
                 assert_eq!(p1[0].to_bits(), p2[0].to_bits(), "body {body} step {step} X diverged");
                 assert_eq!(p1[1].to_bits(), p2[1].to_bits(), "body {body} step {step} Y diverged");
                 assert_eq!(p1[2].to_bits(), p2[2].to_bits(), "body {body} step {step} Z diverged");
+            }
+        }
+    }
+
+    #[test]
+    fn test_velocities_shape_matches_positions() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let sim = get_positions(bodies, 500);
+
+        assert_eq!(sim.velocities.len(), sim.positions.len());
+        for body in 0..sim.positions.len() {
+            assert_eq!(
+                sim.velocities[body].len(),
+                sim.positions[body].len(),
+                "body {body} velocity/position length mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn test_velocities_nonzero() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let sim = get_positions(bodies, 500);
+
+        let has_nonzero = sim.velocities.iter().any(|body_vels| {
+            body_vels.iter().any(|v| v.norm() > 1e-10)
+        });
+        assert!(has_nonzero, "simulated bodies should have non-zero velocities");
+    }
+
+    #[test]
+    fn test_velocities_deterministic() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let run1 = get_positions(bodies.clone(), 500);
+        let run2 = get_positions(bodies, 500);
+
+        for body in 0..run1.velocities.len() {
+            for step in 0..run1.velocities[body].len() {
+                let v1 = run1.velocities[body][step];
+                let v2 = run2.velocities[body][step];
+                assert_eq!(v1[0].to_bits(), v2[0].to_bits(), "vel body {body} step {step} X");
+                assert_eq!(v1[1].to_bits(), v2[1].to_bits(), "vel body {body} step {step} Y");
+                assert_eq!(v1[2].to_bits(), v2[2].to_bits(), "vel body {body} step {step} Z");
             }
         }
     }

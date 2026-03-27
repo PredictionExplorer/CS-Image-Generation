@@ -90,7 +90,7 @@ impl Default for RenderConfig {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum FinishOutputMode {
+pub(crate) enum FinishOutputMode {
     #[default]
     Still,
     Video,
@@ -273,7 +273,7 @@ pub fn save_image_as_png_16bit(
     Ok(())
 }
 
-fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> PixelBuffer {
+pub(crate) fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> PixelBuffer {
     pixels
         .par_iter()
         .map(|&(fr, fg, fb, fa)| {
@@ -283,7 +283,7 @@ fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> Pi
         .collect()
 }
 
-fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
+pub(crate) fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf_16bit = vec![0u16; pixels.len() * 3];
     buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
         chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
@@ -296,7 +296,7 @@ fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
 // ====================== HELPER FUNCTIONS ===========================
 
 /// Generate nebula background buffer (separate from trajectories)
-fn generate_nebula_background(
+pub(crate) fn generate_nebula_background(
     width: usize,
     height: usize,
     frame_number: usize,
@@ -316,7 +316,7 @@ fn generate_nebula_background(
 /// Background goes first (underneath), then foreground on top
 /// Note: Background is in straight alpha format (RGB + coverage alpha)
 ///       Foreground is in premultiplied alpha format (RGB * alpha + alpha)
-fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> PixelBuffer {
+pub(crate) fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> PixelBuffer {
     background
         .par_iter()
         .zip(foreground.par_iter())
@@ -342,7 +342,7 @@ fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> Pixe
 ///
 /// Creates a fully configured EffectConfig from a ResolvedEffectConfig with all
 /// parameters determined (either explicitly set or randomized).
-fn build_effect_config_from_resolved(
+pub(crate) fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
     output_mode: FinishOutputMode,
@@ -545,7 +545,7 @@ fn build_effect_config_from_resolved(
 
 /// Apply energy density wavelength shift to spectral buffer
 /// Hot regions (high energy) shift toward red, cool regions stay blue
-fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
+pub(crate) fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
     use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
 
     accum_spd.par_iter_mut().for_each(|spd| {
@@ -576,18 +576,18 @@ fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AccumulationBackend {
+pub(crate) enum AccumulationBackend {
     ParallelScanlines,
     #[cfg(test)]
     SerialReference,
 }
 
 #[inline]
-fn default_accumulation_backend() -> AccumulationBackend {
+pub(crate) fn default_accumulation_backend() -> AccumulationBackend {
     AccumulationBackend::ParallelScanlines
 }
 
-fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
+pub(crate) fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     if total_steps == 0 {
         return Vec::new();
     }
@@ -646,7 +646,7 @@ fn accumulate_spectral_steps_into_rows(
     }
 }
 
-fn accumulate_spectral_steps(
+pub(crate) fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
     scene: SpectralScene<'_>,
     ctx: &RenderContext,

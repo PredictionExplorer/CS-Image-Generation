@@ -53,8 +53,8 @@ def check_prerequisites() -> None:
     if not os.access(BINARY, os.X_OK):
         print(f"Error: {BINARY} is not executable")
         sys.exit(1)
-    for d in ("pics", "vids"):
-        Path(d).mkdir(exist_ok=True)
+    for d in ("pics", "vids", "pics/spectral", "audio", "models"):
+        Path(d).mkdir(parents=True, exist_ok=True)
 
 
 def random_seed() -> str:
@@ -78,7 +78,8 @@ def fmt_duration(seconds: float) -> str:
 def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
-    cmd = [BINARY, "--seed", seed, "--output", filename]
+    cmd = [BINARY, "--seed", seed, "--output", filename,
+           "--extras", "--no-wallpapers", "--fast-encode"]
 
     logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()

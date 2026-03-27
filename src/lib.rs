@@ -7,6 +7,7 @@ pub mod app;
 pub mod drift;
 pub mod drift_config;
 pub mod error;
+pub mod extra_outputs;
 pub mod generation_log;
 pub mod oklab;
 pub mod post_effects;

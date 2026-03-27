@@ -2,11 +2,12 @@ use clap::{Parser, ValueEnum};
 use three_body_problem::{
     app,
     error::{self, Result},
+    extra_outputs,
     render::{self, RenderConfig},
     sim::Sha3RandomByteStream,
     spectrum_simd,
 };
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_OUTPUT_NAME: &str = "output";
@@ -93,6 +94,12 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     fast_encode: bool,
+
+    #[arg(long, default_value_t = false, help = "Generate all extra outputs (loop clip, genesis burst, spectral gallery, phase portrait, sonification, avatar, wallpapers, stats card, reveal video, 3D model)")]
+    extras: bool,
+
+    #[arg(long, default_value_t = false, help = "Skip wallpaper pack when generating extras")]
+    no_wallpapers: bool,
 
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
@@ -229,7 +236,7 @@ fn main() -> Result<()> {
         DEFAULT_ESCAPE_THRESHOLD,
     )?;
 
-    let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
+    let (mut positions, velocities) = app::simulate_best_orbit(best_bodies, args.steps);
 
     let drift_config = if args.drift != DriftModeArg::None {
         app::apply_drift_transformation(
@@ -295,6 +302,22 @@ fn main() -> Result<()> {
         true,
     )?;
 
+    if args.extras {
+        generate_extras(
+            &positions,
+            &velocities,
+            &colors,
+            &body_alphas,
+            &levels,
+            &resolved_effect_config,
+            &render_config,
+            noise_seed,
+            &args,
+            hex_seed,
+            &best_info,
+        );
+    }
+
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",
         best_info.total_score_weighted
@@ -313,6 +336,132 @@ fn main() -> Result<()> {
     );
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_extras(
+    positions: &[Vec<nalgebra::Vector3<f64>>],
+    velocities: &[Vec<nalgebra::Vector3<f64>>],
+    colors: &[Vec<render::OklabColor>],
+    body_alphas: &[f64],
+    levels: &render::ChannelLevels,
+    resolved: &render::randomizable_config::ResolvedEffectConfig,
+    render_config: &RenderConfig,
+    noise_seed: i32,
+    args: &Args,
+    seed: &str,
+    best_info: &three_body_problem::sim::TrajectoryResult,
+) {
+    info!("=== Generating extra outputs ===");
+
+    let scene = render::SpectralScene::new(positions, colors, body_alphas);
+    let settings =
+        render::SpectralRenderSettings::new(resolved, render_config, noise_seed, false);
+
+    if let Err(e) = extra_outputs::genesis_burst::render_genesis_burst(
+        scene,
+        levels,
+        settings,
+        &format!("pics/{}_genesis.png", args.output),
+    ) {
+        warn!("Genesis burst failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::spectral_gallery::render_spectral_gallery(
+        scene,
+        settings,
+        "pics/spectral",
+        &args.output,
+    ) {
+        warn!("Spectral gallery failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::loop_clip::render_loop_clip(
+        scene,
+        levels,
+        settings,
+        &format!("vids/{}_loop.mp4", args.output),
+        Some(&format!("vids/{}_loop.webm", args.output)),
+        args.fast_encode,
+    ) {
+        warn!("Loop clip failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::phase_portrait::render_phase_portrait(
+        positions,
+        velocities,
+        colors,
+        body_alphas,
+        levels,
+        settings,
+        &format!("pics/{}_phase.png", args.output),
+    ) {
+        warn!("Phase portrait failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::sonification::generate_sonification(
+        positions,
+        30.0,
+        &format!("audio/{}.wav", args.output),
+        Some(&format!("vids/{}_audio.mp4", args.output)),
+        Some(&format!("vids/{}.mp4", args.output)),
+    ) {
+        warn!("Sonification failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::avatar::render_animated_avatar(
+        scene,
+        levels,
+        settings,
+        &format!("pics/{}_avatar.webp", args.output),
+    ) {
+        warn!("Animated avatar failed: {}", e);
+    }
+
+    if !args.no_wallpapers {
+        if let Err(e) = extra_outputs::wallpaper::render_wallpaper_pack(
+            scene,
+            levels,
+            settings,
+            &format!("pics/{}_wallpapers", args.output),
+            &args.output,
+        ) {
+            warn!("Wallpaper pack failed: {}", e);
+        }
+    }
+
+    if let Err(e) = extra_outputs::stats_card::generate_stats_card(
+        &extra_outputs::stats_card::StatsCardData {
+            seed,
+            result: best_info,
+            config: resolved,
+            num_sims: args.sims,
+            num_steps: args.steps,
+        },
+        &format!("pics/{}_stats.svg", args.output),
+    ) {
+        warn!("Stats card failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::reveal_video::render_reveal_video(
+        scene,
+        levels,
+        settings,
+        &format!("vids/{}_reveal.mp4", args.output),
+        args.fast_encode,
+    ) {
+        warn!("Reveal video failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::gltf_export::export_gltf(
+        positions,
+        colors,
+        &format!("models/{}.glb", args.output),
+    ) {
+        warn!("3D export failed: {}", e);
+    }
+
+    info!("=== Extra outputs complete ===");
 }
 
 #[cfg(test)]
