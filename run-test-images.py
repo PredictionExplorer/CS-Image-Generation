@@ -6,6 +6,12 @@ Continuously generates images with random seeds using the production
 configuration. Uses a rolling pool to keep exactly CONCURRENT_SIMS
 slots busy at all times. Runs forever until Ctrl+C.
 
+Generates all extra outputs including the new luxury gallery formats
+(spectral fingerprint, color palette, light variant, timelapse,
+cinemagraph, social kit, rarity report, orbit comparison, exhibition
+page, dossier, extended audio, AR export) while skipping the most
+compute-heavy outputs (museum 8K prints, cinematic zoom video).
+
 Screen: compact progress line every few completions.
 File:   full subprocess output written to run.log for debugging.
 """
@@ -53,8 +59,7 @@ def check_prerequisites() -> None:
     if not os.access(BINARY, os.X_OK):
         print(f"Error: {BINARY} is not executable")
         sys.exit(1)
-    for d in ("pics", "vids", "pics/spectral", "audio", "models"):
-        Path(d).mkdir(parents=True, exist_ok=True)
+    Path("output").mkdir(exist_ok=True)
 
 
 def random_seed() -> str:
@@ -79,7 +84,8 @@ def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
     cmd = [BINARY, "--seed", seed, "--output", filename,
-           "--extras", "--no-wallpapers", "--fast-encode"]
+           "--extras", "--no-wallpapers", "--no-museum-prints",
+           "--no-cinematic-zoom", "--fast-encode"]
 
     logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()

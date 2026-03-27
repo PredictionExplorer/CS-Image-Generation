@@ -27,7 +27,6 @@ pub fn render_wallpaper_pack(
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
     output_dir: &str,
-    name: &str,
 ) -> crate::render::error::Result<()> {
     info!("Rendering wallpaper pack ({} resolutions)...", TARGETS.len());
 
@@ -53,7 +52,7 @@ pub fn render_wallpaper_pack(
         );
 
         let image = render_final_frame_spectral(scene, levels, target_settings)?;
-        let path = format!("{}/{}_{}.png", output_dir, name, target.name);
+        let path = format!("{}/{}.png", output_dir, target.name);
         save_image_as_png_16bit(&image, &path)?;
     }
 

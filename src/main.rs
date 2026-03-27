@@ -101,6 +101,12 @@ struct Args {
     #[arg(long, default_value_t = false, help = "Skip wallpaper pack when generating extras")]
     no_wallpapers: bool,
 
+    #[arg(long, default_value_t = false, help = "Skip museum-grade 8K print renders (very slow)")]
+    no_museum_prints: bool,
+
+    #[arg(long, default_value_t = false, help = "Skip cinematic zoom video (renders 4x hi-res base frame)")]
+    no_cinematic_zoom: bool,
+
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
 }
@@ -193,7 +199,8 @@ fn main() -> Result<()> {
     render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
-    app::setup_directories()?;
+    let output_base = format!("output/{}", args.output);
+    app::setup_output_directories(&output_base)?;
     error::validation::validate_dimensions(args.resolution.width, args.resolution.height)?;
 
     let seed_bytes = app::parse_seed(&args.seed)?;
@@ -284,8 +291,8 @@ fn main() -> Result<()> {
         enhancements.aspect_correction,
     )?;
 
-    let output_png = format!("pics/{}.png", args.output);
-    let output_vid = format!("vids/{}.mp4", args.output);
+    let output_png = format!("{}/still.png", output_base);
+    let output_vid = format!("{}/video.mp4", output_base);
 
     app::render_video(
         render::SpectralScene::new(&positions, &colors, &body_alphas),
@@ -315,6 +322,7 @@ fn main() -> Result<()> {
             &args,
             hex_seed,
             &best_info,
+            &output_base,
         );
     }
 
@@ -351,6 +359,7 @@ fn generate_extras(
     args: &Args,
     seed: &str,
     best_info: &three_body_problem::sim::TrajectoryResult,
+    base: &str,
 ) {
     info!("=== Generating extra outputs ===");
 
@@ -362,7 +371,7 @@ fn generate_extras(
         scene,
         levels,
         settings,
-        &format!("pics/{}_genesis.png", args.output),
+        &format!("{base}/stills/genesis.png"),
     ) {
         warn!("Genesis burst failed: {}", e);
     }
@@ -370,8 +379,7 @@ fn generate_extras(
     if let Err(e) = extra_outputs::spectral_gallery::render_spectral_gallery(
         scene,
         settings,
-        "pics/spectral",
-        &args.output,
+        &format!("{base}/spectral"),
     ) {
         warn!("Spectral gallery failed: {}", e);
     }
@@ -380,8 +388,8 @@ fn generate_extras(
         scene,
         levels,
         settings,
-        &format!("vids/{}_loop.mp4", args.output),
-        Some(&format!("vids/{}_loop.webm", args.output)),
+        &format!("{base}/videos/loop.mp4"),
+        Some(&format!("{base}/videos/loop.webm")),
         args.fast_encode,
     ) {
         warn!("Loop clip failed: {}", e);
@@ -394,7 +402,7 @@ fn generate_extras(
         body_alphas,
         levels,
         settings,
-        &format!("pics/{}_phase.png", args.output),
+        &format!("{base}/stills/phase.png"),
     ) {
         warn!("Phase portrait failed: {}", e);
     }
@@ -402,9 +410,9 @@ fn generate_extras(
     if let Err(e) = extra_outputs::sonification::generate_sonification(
         positions,
         30.0,
-        &format!("audio/{}.wav", args.output),
-        Some(&format!("vids/{}_audio.mp4", args.output)),
-        Some(&format!("vids/{}.mp4", args.output)),
+        &format!("{base}/audio/sonification.wav"),
+        Some(&format!("{base}/videos/with_audio.mp4")),
+        Some(&format!("{base}/video.mp4")),
     ) {
         warn!("Sonification failed: {}", e);
     }
@@ -413,7 +421,7 @@ fn generate_extras(
         scene,
         levels,
         settings,
-        &format!("pics/{}_avatar.webp", args.output),
+        &format!("{base}/stills/avatar.webp"),
     ) {
         warn!("Animated avatar failed: {}", e);
     }
@@ -423,8 +431,7 @@ fn generate_extras(
             scene,
             levels,
             settings,
-            &format!("pics/{}_wallpapers", args.output),
-            &args.output,
+            &format!("{base}/wallpapers"),
         ) {
             warn!("Wallpaper pack failed: {}", e);
         }
@@ -438,7 +445,7 @@ fn generate_extras(
             num_sims: args.sims,
             num_steps: args.steps,
         },
-        &format!("pics/{}_stats.svg", args.output),
+        &format!("{base}/data/stats.svg"),
     ) {
         warn!("Stats card failed: {}", e);
     }
@@ -447,7 +454,7 @@ fn generate_extras(
         scene,
         levels,
         settings,
-        &format!("vids/{}_reveal.mp4", args.output),
+        &format!("{base}/videos/reveal.mp4"),
         args.fast_encode,
     ) {
         warn!("Reveal video failed: {}", e);
@@ -456,9 +463,157 @@ fn generate_extras(
     if let Err(e) = extra_outputs::gltf_export::export_gltf(
         positions,
         colors,
-        &format!("models/{}.glb", args.output),
+        &format!("{base}/3d/model.glb"),
     ) {
         warn!("3D export failed: {}", e);
+    }
+
+    // --- Luxury gallery outputs ---
+
+    if let Err(e) = extra_outputs::spectral_fingerprint::generate_spectral_fingerprint(
+        scene,
+        settings,
+        seed,
+        &format!("{base}/data/fingerprint.svg"),
+    ) {
+        warn!("Spectral fingerprint failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::color_palette::generate_color_palette(
+        scene,
+        levels,
+        settings,
+        seed,
+        &format!("{base}/data/palette.svg"),
+    ) {
+        warn!("Color palette failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::gallery_variants::render_light_variant(
+        scene,
+        levels,
+        settings,
+        &format!("{base}/stills/light.png"),
+    ) {
+        warn!("Light variant failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::timelapse::render_timelapse(
+        scene,
+        levels,
+        settings,
+        &format!("{base}/videos/timelapse.mp4"),
+        args.fast_encode,
+    ) {
+        warn!("Timelapse failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::cinemagraph::render_cinemagraph(
+        scene,
+        levels,
+        settings,
+        &format!("{base}/videos/living.webm"),
+        args.fast_encode,
+    ) {
+        warn!("Cinemagraph failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::social_kit::generate_social_kit(
+        scene,
+        levels,
+        settings,
+        &format!("{base}/social"),
+    ) {
+        warn!("Social media kit failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::rarity_report::generate_rarity_report(
+        &extra_outputs::rarity_report::RarityReportData {
+            seed,
+            result: best_info,
+            config: resolved,
+            num_sims: args.sims,
+        },
+        &format!("{base}/data/rarity.svg"),
+    ) {
+        warn!("Rarity report failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::orbit_comparison::render_orbit_comparison(
+        scene,
+        levels,
+        settings,
+        best_info,
+        seed,
+        &format!("{base}/stills/comparison.png"),
+    ) {
+        warn!("Orbit comparison failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::exhibition_page::generate_exhibition_page(
+        &extra_outputs::exhibition_page::ExhibitionPageData {
+            seed,
+            output_name: &args.output,
+            result: best_info,
+            config: resolved,
+            num_sims: args.sims,
+            num_steps: args.steps,
+        },
+        &format!("{base}/web/exhibition.html"),
+    ) {
+        warn!("Exhibition page failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::dossier::generate_dossier(
+        &extra_outputs::dossier::DossierData {
+            seed,
+            output_name: &args.output,
+            result: best_info,
+            config: resolved,
+            num_sims: args.sims,
+            num_steps: args.steps,
+        },
+        &format!("{base}/web"),
+    ) {
+        warn!("Dossier failed: {}", e);
+    }
+
+    if let Err(e) = extra_outputs::extended_audio::generate_extended_audio(
+        positions,
+        &format!("{base}/audio/ambient.wav"),
+        Some(&format!("{base}/audio/ambient.mp3")),
+    ) {
+        warn!("Extended audio failed: {}", e);
+    }
+
+    if !args.no_museum_prints {
+        if let Err(e) = extra_outputs::museum_print::render_museum_prints(
+            scene,
+            levels,
+            settings,
+            &format!("{base}/print"),
+        ) {
+            warn!("Museum prints failed: {}", e);
+        }
+    }
+
+    if !args.no_cinematic_zoom {
+        if let Err(e) = extra_outputs::cinematic_zoom::render_cinematic_zoom(
+            scene,
+            levels,
+            settings,
+            &format!("{base}/videos/zoom.mp4"),
+            args.fast_encode,
+        ) {
+            warn!("Cinematic zoom failed: {}", e);
+        }
+    }
+
+    if let Err(e) = extra_outputs::ar_export::export_usdz(
+        &format!("{base}/3d/model.glb"),
+        &format!("{base}/3d/model.usdz"),
+    ) {
+        warn!("AR export failed: {}", e);
     }
 
     info!("=== Extra outputs complete ===");

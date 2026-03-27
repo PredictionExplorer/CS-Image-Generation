@@ -41,8 +41,7 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT = 86400  # 24 hours
 
-LOCAL_IMG_DIR = Path("pics")
-LOCAL_VID_DIR = Path("vids")
+LOCAL_OUTPUT_DIR = Path("output")
 LOG_FILE = "imgcheck.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 LOG_BACKUP_COUNT = 5
@@ -354,15 +353,16 @@ def generate(exec_cmd: str, seed: str, timeout: int) -> bool:
 
 
 def find_local_files(seed: str) -> tuple[Path | None, Path | None]:
-    """Search for generated image and video files using the canonical seed-based output name."""
-    img_path = LOCAL_IMG_DIR / f"0x{seed}.png"
+    """Search for generated image and video files using the per-seed output directory."""
+    base = LOCAL_OUTPUT_DIR / f"0x{seed}"
+    img_path = base / "still.png"
     if img_path.is_file():
         log.debug("Found image: %s (%d bytes)", img_path, img_path.stat().st_size)
     else:
         log.error("Image NOT FOUND for 0x%s. Tried: %s", seed, img_path)
         img_path = None
 
-    vid_path = LOCAL_VID_DIR / f"0x{seed}.mp4"
+    vid_path = base / "video.mp4"
     if vid_path.is_file():
         log.debug("Found video: %s (%d bytes)", vid_path, vid_path.stat().st_size)
     else:
@@ -417,6 +417,18 @@ def cleanup_local_files(*paths: Path | None) -> None:
             log.warning("Failed to remove %s: %s", p, exc)
 
 
+def cleanup_seed_directory(seed: str) -> None:
+    """Remove the entire per-seed output directory after successful upload."""
+    import shutil
+    seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
+    if seed_dir.is_dir():
+        try:
+            shutil.rmtree(seed_dir)
+            log.debug("Cleaned up seed directory: %s", seed_dir)
+        except OSError as exc:
+            log.warning("Failed to remove %s: %s", seed_dir, exc)
+
+
 def process_seed(
     seed: str,
     exec_cmd: str,
@@ -448,7 +460,7 @@ def process_seed(
     vid_ok = upload_file(ssh_host, ssh_user, vid_path, remote_vid)
 
     if img_ok and vid_ok:
-        cleanup_local_files(img_path, vid_path)
+        cleanup_seed_directory(seed)
         elapsed = time.monotonic() - t0
         log.info("OK  seed=0x%s  (total %s)", seed, fmt_duration(elapsed))
         return True
@@ -622,8 +634,7 @@ def main() -> int:
         log.error("No generator available and not in dry-run mode. Exiting.")
         return 1
 
-    LOCAL_IMG_DIR.mkdir(exist_ok=True)
-    LOCAL_VID_DIR.mkdir(exist_ok=True)
+    LOCAL_OUTPUT_DIR.mkdir(exist_ok=True)
 
     # --- Phase 1: discover what's missing ---
 

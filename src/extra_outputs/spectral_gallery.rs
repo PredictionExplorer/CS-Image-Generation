@@ -16,7 +16,6 @@ pub fn render_spectral_gallery(
     scene: SpectralScene<'_>,
     settings: SpectralRenderSettings<'_>,
     output_dir: &str,
-    name: &str,
 ) -> crate::render::error::Result<()> {
     info!("Rendering spectral decomposition gallery ({} bins)...", NUM_BINS);
 
@@ -69,11 +68,11 @@ pub fn render_spectral_gallery(
             ))
         })?;
 
-        let path = format!("{}/{}_{:02}_{:.0}nm.png", output_dir, name, bin, wavelength);
+        let path = format!("{}/{:02}_{:.0}nm.png", output_dir, bin, wavelength);
         save_image_as_png_16bit(&image, &path)?;
     }
 
-    render_dominant_wavelength_map(&accum_spd, width, height, output_dir, name)?;
+    render_dominant_wavelength_map(&accum_spd, width, height, output_dir)?;
 
     info!("   Saved {} spectral bin images + heatmap => {}/", NUM_BINS, output_dir);
     Ok(())
@@ -84,7 +83,6 @@ fn render_dominant_wavelength_map(
     width: u32,
     height: u32,
     output_dir: &str,
-    name: &str,
 ) -> crate::render::error::Result<()> {
     let pixel_count = (width * height) as usize;
     let mut buf_16bit = vec![0u16; pixel_count * 3];
@@ -116,7 +114,7 @@ fn render_dominant_wavelength_map(
         )
     })?;
 
-    let path = format!("{}/{}_heatmap.png", output_dir, name);
+    let path = format!("{}/heatmap.png", output_dir);
     save_image_as_png_16bit(&image, &path)
 }
 

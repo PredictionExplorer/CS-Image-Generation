@@ -36,7 +36,7 @@ echo "  Drift: $DRIFT_MODE"
     --output "baseline"
 
 # Move the generated files to reference directory
-mv "pics/baseline.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
+mv "output/baseline/still.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
 
 # Generate JSON metadata
 cat > "ci/reference/baseline_${WIDTH}x${HEIGHT}.json" << EOF
