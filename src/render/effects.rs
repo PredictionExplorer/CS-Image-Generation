@@ -456,7 +456,13 @@ pub fn apply_dog_bloom(
     dog_result
 }
 
-/// Convert SPD buffer to RGBA, with post-process radial dispersion (chromatic aberration)
+/// Convert SPD buffer to RGBA with fused energy-density redshift and
+/// radial spectral dispersion (chromatic aberration).
+///
+/// Merges the previously separate `apply_energy_density_shift` pass into this
+/// function to eliminate a redundant full-buffer traversal (~253 MB at 1080p).
+/// The shift is applied per-pixel *after* dispersion sampling and *before*
+/// the SPD-to-RGBA conversion, preserving identical output.
 pub(crate) fn convert_spd_buffer_to_rgba(
     src: &[[f64; NUM_BINS]],
     dest: &mut [(f64, f64, f64, f64)],
@@ -465,6 +471,7 @@ pub(crate) fn convert_spd_buffer_to_rgba(
 ) {
     assert_eq!(src.len(), dest.len());
 
+    use crate::render::constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
     use crate::render::drawing::DISPERSION_BOOST_ENABLED;
     use std::sync::atomic::Ordering;
 
@@ -478,41 +485,68 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     let cy = height as f64 / 2.0;
     let max_r = (cx * cx + cy * cy).sqrt();
 
-    dest.par_iter_mut().enumerate().for_each(|(idx, dest_pixel)| {
-        let x = (idx % width) as f64;
-        let y = (idx / width) as f64;
+    // Process in tiles of 64 rows for better cache locality on the
+    // random-access dispersion reads.
+    const TILE_ROWS: usize = 64;
+    let tile_count = height.div_ceil(TILE_ROWS);
 
-        let dx = x - cx;
-        let dy = y - cy;
-        let r = (dx * dx + dy * dy).sqrt();
-        let dir_x = if r > 0.0 { dx / r } else { 0.0 };
-        let dir_y = if r > 0.0 { dy / r } else { 0.0 };
-
-        let r_norm = r / max_r;
-
-        let mut local_spd = [0.0f64; NUM_BINS];
-
-        if dispersion_strength > 0.0 {
-            for bin in 0..NUM_BINS {
-                let bin_offset =
-                    (bin as f64 - (NUM_BINS as f64 - 1.0) / 2.0) / ((NUM_BINS as f64 - 1.0) / 2.0);
-                let shift = bin_offset * dispersion_strength * r_norm * 50.0;
-
-                let sx = (x - dir_x * shift).round() as isize;
-                let sy = (y - dir_y * shift).round() as isize;
-
-                if sx >= 0 && sx < width as isize && sy >= 0 && sy < height as isize {
-                    let s_idx = sy as usize * width + sx as usize;
-                    local_spd[bin] = src[s_idx][bin];
+    dest.par_chunks_mut(width * TILE_ROWS)
+        .enumerate()
+        .for_each(|(tile_idx, tile_dest)| {
+            let row_start = tile_idx * TILE_ROWS;
+            for (local_idx, dest_pixel) in tile_dest.iter_mut().enumerate() {
+                let global_idx = row_start * width + local_idx;
+                if global_idx >= src.len() {
+                    break;
                 }
-            }
-        } else {
-            local_spd = src[idx];
-        }
+                let x = (global_idx % width) as f64;
+                let y = (global_idx / width) as f64;
 
-        let rgba = spd_to_rgba(&local_spd);
-        *dest_pixel = rgba;
-    });
+                let dx = x - cx;
+                let dy = y - cy;
+                let r = (dx * dx + dy * dy).sqrt();
+                let dir_x = if r > 0.0 { dx / r } else { 0.0 };
+                let dir_y = if r > 0.0 { dy / r } else { 0.0 };
+                let r_norm = r / max_r;
+
+                let mut local_spd = [0.0f64; NUM_BINS];
+
+                if dispersion_strength > 0.0 {
+                    for bin in 0..NUM_BINS {
+                        let bin_offset = (bin as f64 - (NUM_BINS as f64 - 1.0) / 2.0)
+                            / ((NUM_BINS as f64 - 1.0) / 2.0);
+                        let shift = bin_offset * dispersion_strength * r_norm * 50.0;
+
+                        let sx = (x - dir_x * shift).round() as isize;
+                        let sy = (y - dir_y * shift).round() as isize;
+
+                        if sx >= 0 && sx < width as isize && sy >= 0 && sy < height as isize {
+                            let s_idx = sy as usize * width + sx as usize;
+                            local_spd[bin] = src[s_idx][bin];
+                        }
+                    }
+                } else {
+                    local_spd = src[global_idx];
+                }
+
+                // Fused energy-density redshift (was apply_energy_density_shift)
+                let total_energy: f64 = local_spd.iter().sum();
+                if total_energy >= ENERGY_DENSITY_SHIFT_THRESHOLD {
+                    let excess = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD;
+                    let shift_amount = (excess * ENERGY_DENSITY_SHIFT_STRENGTH).min(1.0);
+                    let mut shifted = local_spd;
+                    for i in (1..NUM_BINS).rev() {
+                        shifted[i] =
+                            local_spd[i] * (1.0 - shift_amount) + local_spd[i - 1] * shift_amount;
+                    }
+                    shifted[0] = local_spd[0] * (1.0 - shift_amount);
+                    local_spd = shifted;
+                }
+
+                *dest_pixel = spd_to_rgba(&local_spd);
+            }
+        });
+    let _ = tile_count;
 }
 
 struct ChampleveFinish {

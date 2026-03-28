@@ -233,3 +233,37 @@ pub const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
 
 /// Percentage conversion factor
 pub const PERCENT_FACTOR: f64 = 100.0;
+
+// Compile-time constant validations
+const _: () = {
+    assert!(DEFAULT_DT > 0.0);
+    assert!(DEFAULT_TONEMAP_PAPER_WHITE < 1.0);
+    assert!(DEFAULT_TONEMAP_PAPER_WHITE > 0.5);
+    assert!(DEFAULT_MIN_EXPOSURE_SCALE > 0.0);
+    assert!(DEFAULT_MIN_EXPOSURE_SCALE < 1.0);
+    assert!(ENERGY_DENSITY_SHIFT_THRESHOLD > 0.0);
+    assert!(ENERGY_DENSITY_SHIFT_STRENGTH > 0.0);
+    assert!(DEFAULT_VIDEO_FPS > 0);
+    assert!(DEFAULT_TARGET_FRAMES > 0);
+    assert!(DEFAULT_HISTOGRAM_SAMPLE_FRAMES > 0);
+    assert!(DEFAULT_HISTOGRAM_SAMPLE_FRAMES <= DEFAULT_TARGET_FRAMES);
+};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_body_hue_phase_sum_is_circle() {
+        let sum: f64 = BODY_HUE_PHASE.iter().sum();
+        assert!((sum - HUE_FULL_CIRCLE).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_body_hue_separation_divides_circle() {
+        let val = BODY_HUE_SEPARATION * 3.0 - HUE_FULL_CIRCLE;
+        assert!(val.abs() < 1e-10);
+    }
+
+    const _: () = assert!(SPECTRAL_DISPERSION_STRENGTH <= SPECTRAL_DISPERSION_STRENGTH_BOOSTED);
+}

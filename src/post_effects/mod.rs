@@ -36,14 +36,6 @@ impl Error for PostEffectError {}
 /// Effects should be stateless and safe to call multiple times.
 pub trait PostEffect: Send + Sync {
     /// Process the input buffer and return the result.
-    ///
-    /// # Arguments
-    /// * `input` - Input pixel buffer
-    /// * `width` - Buffer width in pixels
-    /// * `height` - Buffer height in pixels
-    ///
-    /// # Returns
-    /// Processed pixel buffer or error
     fn process(
         &self,
         input: &PixelBuffer,
@@ -51,8 +43,22 @@ pub trait PostEffect: Send + Sync {
         height: usize,
     ) -> Result<PixelBuffer, Box<dyn Error>>;
 
+    /// Process the buffer in-place to avoid an extra allocation+copy.
+    ///
+    /// Default implementation falls back to the allocating `process` path.
+    /// Override this for effects that can mutate the buffer directly.
+    fn process_in_place(
+        &self,
+        buffer: &mut PixelBuffer,
+        width: usize,
+        height: usize,
+    ) -> Result<(), Box<dyn Error>> {
+        let result = self.process(buffer, width, height)?;
+        *buffer = result;
+        Ok(())
+    }
+
     /// Returns whether this effect is currently enabled.
-    /// Default implementation returns true.
     fn is_enabled(&self) -> bool {
         true
     }
@@ -76,13 +82,8 @@ impl PostEffectChain {
 
     /// Processes a buffer through all enabled effects in order.
     ///
-    /// # Arguments
-    /// * `buffer` - Input pixel buffer
-    /// * `width` - Buffer width in pixels
-    /// * `height` - Buffer height in pixels
-    ///
-    /// # Returns
-    /// Final processed buffer or first error encountered
+    /// Uses in-place processing to avoid unnecessary allocations when
+    /// the effect supports it.
     pub fn process(
         &self,
         mut buffer: PixelBuffer,
@@ -91,7 +92,7 @@ impl PostEffectChain {
     ) -> Result<PixelBuffer, Box<dyn Error>> {
         for effect in &self.effects {
             if effect.is_enabled() {
-                buffer = effect.process(&buffer, width, height)?;
+                effect.process_in_place(&mut buffer, width, height)?;
             }
         }
         Ok(buffer)

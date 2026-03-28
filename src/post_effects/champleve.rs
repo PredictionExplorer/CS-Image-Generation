@@ -138,3 +138,64 @@ pub fn apply_champleve_iridescence(
         *pixel = (sr.max(0.0) * a, sg.max(0.0) * a, sb.max(0.0) * a, a);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gradient_buffer(w: usize, h: usize) -> PixelBuffer {
+        (0..w * h)
+            .map(|i| {
+                let t = i as f64 / (w * h) as f64;
+                (t * 0.8, (1.0 - t) * 0.5, 0.3, 0.9)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_champleve_preserves_buffer_length() {
+        let config = ChampleveConfig::default();
+        let mut buf = gradient_buffer(64, 48);
+        let original_len = buf.len();
+        apply_champleve_iridescence(&mut buf, 64, 48, &config);
+        assert_eq!(buf.len(), original_len);
+    }
+
+    #[test]
+    fn test_champleve_modifies_pixels() {
+        let config = ChampleveConfig::default();
+        let original = gradient_buffer(32, 24);
+        let mut buf = original.clone();
+        apply_champleve_iridescence(&mut buf, 32, 24, &config);
+        let changed = buf.iter().zip(original.iter()).filter(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-12 || (a.1 - b.1).abs() > 1e-12 || (a.2 - b.2).abs() > 1e-12
+        }).count();
+        assert!(changed > 0, "champlevé should modify at least some pixels");
+    }
+
+    #[test]
+    fn test_champleve_all_black_stays_black() {
+        let config = ChampleveConfig::default();
+        let mut buf = vec![(0.0, 0.0, 0.0, 0.0); 16 * 16];
+        apply_champleve_iridescence(&mut buf, 16, 16, &config);
+        for &(r, g, b, a) in &buf {
+            assert_eq!(r, 0.0);
+            assert_eq!(g, 0.0);
+            assert_eq!(b, 0.0);
+            assert_eq!(a, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_champleve_no_nan_in_output() {
+        let config = ChampleveConfig::default();
+        let mut buf = gradient_buffer(48, 32);
+        apply_champleve_iridescence(&mut buf, 48, 32, &config);
+        for &(r, g, b, a) in &buf {
+            assert!(!r.is_nan(), "R is NaN");
+            assert!(!g.is_nan(), "G is NaN");
+            assert!(!b.is_nan(), "B is NaN");
+            assert!(!a.is_nan(), "A is NaN");
+        }
+    }
+}

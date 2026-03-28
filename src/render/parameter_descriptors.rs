@@ -437,3 +437,54 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
     description: "White point percentile clipping",
 };
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const _: () = {
+        macro_rules! const_assert_prob {
+            ($val:expr) => {
+                assert!($val >= 0.0);
+                assert!($val <= 1.0);
+            };
+        }
+        const_assert_prob!(ENABLE_PROB_BLOOM);
+        const_assert_prob!(ENABLE_PROB_GLOW);
+        const_assert_prob!(ENABLE_PROB_CHROMATIC_BLOOM);
+        const_assert_prob!(ENABLE_PROB_PERCEPTUAL_BLUR);
+        const_assert_prob!(ENABLE_PROB_MICRO_CONTRAST);
+        const_assert_prob!(ENABLE_PROB_GRADIENT_MAP);
+        const_assert_prob!(ENABLE_PROB_COLOR_GRADE);
+        const_assert_prob!(ENABLE_PROB_CHAMPLEVE);
+        const_assert_prob!(ENABLE_PROB_AETHER);
+        const_assert_prob!(ENABLE_PROB_OPALESCENCE);
+        const_assert_prob!(ENABLE_PROB_EDGE_LUMINANCE);
+        const_assert_prob!(ENABLE_PROB_ATMOSPHERIC_DEPTH);
+        const_assert_prob!(ENABLE_PROB_FINE_TEXTURE);
+    };
+
+    #[test]
+    fn test_float_param_descriptors_min_lt_max() {
+        let descs: &[&FloatParamDescriptor] = &[
+            &BLUR_STRENGTH, &BLUR_RADIUS_SCALE, &BLUR_CORE_BRIGHTNESS,
+            &DOG_STRENGTH, &DOG_SIGMA_SCALE, &DOG_RATIO,
+            &HDR_SCALE, &CLIP_BLACK, &CLIP_WHITE,
+        ];
+        for d in descs {
+            assert!(d.min < d.max, "{}: min {} >= max {}", d.name, d.min, d.max);
+        }
+    }
+
+    #[test]
+    fn test_int_param_descriptors_min_le_max() {
+        let descs: &[&IntParamDescriptor] = &[
+            &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS,
+        ];
+        for d in descs {
+            assert!(d.min <= d.max, "{}: min {} > max {}", d.name, d.min, d.max);
+        }
+    }
+
+    const _: () = assert!(CLIP_BLACK.max < CLIP_WHITE.min);
+}
+

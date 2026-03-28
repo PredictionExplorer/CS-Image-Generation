@@ -284,3 +284,68 @@ impl PostEffect for ChromaticBloom {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::post_effects::PostEffect;
+
+    fn uniform_buffer(width: usize, height: usize, val: f64) -> PixelBuffer {
+        vec![(val, val, val, 1.0); width * height]
+    }
+
+    #[test]
+    fn test_chromatic_bloom_preserves_dimensions() {
+        let config = ChromaticBloomConfig { radius: 3, strength: 0.5, separation: 2.0, threshold: 0.1 };
+        let bloom = ChromaticBloom::new(config);
+        let input = uniform_buffer(32, 24, 0.8);
+        let output = bloom.process(&input, 32, 24).unwrap();
+        assert_eq!(output.len(), input.len());
+    }
+
+    #[test]
+    fn test_chromatic_bloom_disabled_when_zero_strength() {
+        let config = ChromaticBloomConfig { radius: 5, strength: 0.0, separation: 2.0, threshold: 0.1 };
+        let bloom = ChromaticBloom::new(config);
+        assert!(!bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_chromatic_bloom_disabled_when_zero_radius() {
+        let config = ChromaticBloomConfig { radius: 0, strength: 0.5, separation: 2.0, threshold: 0.1 };
+        let bloom = ChromaticBloom::new(config);
+        assert!(!bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_chromatic_bloom_below_threshold_unchanged() {
+        let config = ChromaticBloomConfig { radius: 3, strength: 0.5, separation: 2.0, threshold: 0.9 };
+        let bloom = ChromaticBloom::new(config);
+        let input = uniform_buffer(16, 16, 0.1);
+        let output = bloom.process(&input, 16, 16).unwrap();
+        for (&(ir, ig, ib, _), &(or, og, ob, _)) in input.iter().zip(output.iter()) {
+            assert!((ir - or).abs() < 1e-10);
+            assert!((ig - og).abs() < 1e-10);
+            assert!((ib - ob).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_chromatic_bloom_adds_energy_above_threshold() {
+        let config = ChromaticBloomConfig { radius: 2, strength: 1.0, separation: 3.0, threshold: 0.0 };
+        let bloom = ChromaticBloom::new(config);
+        let mut input = uniform_buffer(32, 32, 0.0);
+        input[16 * 32 + 16] = (2.0, 2.0, 2.0, 1.0);
+        let output = bloom.process(&input, 32, 32).unwrap();
+        let input_energy: f64 = input.iter().map(|(r, g, b, _)| r + g + b).sum();
+        let output_energy: f64 = output.iter().map(|(r, g, b, _)| r + g + b).sum();
+        assert!(output_energy >= input_energy);
+    }
+
+    #[test]
+    fn test_from_resolution_scales_params() {
+        let small = ChromaticBloomConfig::from_resolution(640, 360);
+        let large = ChromaticBloomConfig::from_resolution(3840, 2160);
+        assert!(large.radius >= small.radius);
+    }
+}

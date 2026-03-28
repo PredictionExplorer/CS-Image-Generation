@@ -158,7 +158,7 @@ fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) ->
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit)
 /// Returns final RGB channels in 0.0-1.0 range
 /// Upgraded to AgX for superior color rendition without hue-skewing in extreme highlights
-#[inline]
+#[inline(always)]
 fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [f64; 3] {
     let alpha = fa.clamp(0.0, 1.0);
     if alpha <= 0.0 {
@@ -308,6 +308,22 @@ pub(crate) fn quantize_display_buffer_to_16bit_into(pixels: &PixelBuffer, dest: 
         chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
         chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
         chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    });
+}
+
+/// Fused tonemap + quantize to 16-bit, eliminating the intermediate display buffer.
+#[allow(dead_code)]
+pub(crate) fn tonemap_and_quantize_to_16bit(
+    pixels: &PixelBuffer,
+    levels: &ChannelLevels,
+    dest: &mut Vec<u16>,
+) {
+    dest.resize(pixels.len() * 3, 0u16);
+    dest.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(fr, fg, fb, fa))| {
+        let mapped = tonemap_core(fr, fg, fb, fa, levels);
+        chunk[0] = (mapped[0].clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[1] = (mapped[1].clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[2] = (mapped[2].clamp(0.0, 1.0) * 65535.0).round() as u16;
     });
 }
 
@@ -550,9 +566,13 @@ pub(crate) fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
     });
 }
 
-/// Maximum number of step-chunks to avoid excessive memory usage.
-/// Each chunk allocates a full-image SPD buffer (~253 MB at 1920x1080x16 bins).
-const MAX_STEP_CHUNKS: usize = 8;
+/// Maximum number of step-chunks.
+///
+/// On machines with plenty of memory each chunk allocates a full-image SPD
+/// buffer (~253 MB at 1920x1080x16 bins).  We allow up to 64 chunks so that
+/// a 64-core server can keep all cores busy during the histogram and
+/// final-frame passes where the step count is very large (1M+).
+const MAX_STEP_CHUNKS: usize = 64;
 
 /// Minimum step range to justify the overhead of step-chunked parallelism.
 /// Set above the video-pass per-checkpoint count (~556) so the video loop uses
@@ -783,7 +803,6 @@ fn pass_1_build_histogram_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(&mut accum_spd);
         convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
@@ -923,7 +942,6 @@ fn pass_2_write_frames_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(&mut accum_spd);
         convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
@@ -1050,7 +1068,6 @@ fn render_final_frame_spectral_with_backend(
         backend,
     );
 
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
@@ -1139,7 +1156,6 @@ fn render_single_frame_spectral_with_backend(
         backend,
     );
 
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { frame_number: 0, density: None };
@@ -2266,5 +2282,96 @@ mod tests {
             "large-step-chunking",
             1e-12,
         );
+    }
+
+    #[test]
+    fn test_tonemap_monotonicity() {
+        let levels = default_levels();
+        let mut prev_lum = 0.0_f64;
+        for i in 1..=20 {
+            let v = i as f64 * 0.05;
+            let result = tonemap_core(v, v, v, 1.0, &levels);
+            let lum = 0.2126 * result[0] + 0.7152 * result[1] + 0.0722 * result[2];
+            assert!(
+                lum >= prev_lum - 1e-10,
+                "tonemap should be monotonic: v={v} lum={lum} < prev={prev_lum}"
+            );
+            prev_lum = lum;
+        }
+    }
+
+    #[test]
+    fn test_tonemap_and_quantize_matches_two_step() {
+        let pixels: PixelBuffer = (0..100)
+            .map(|i| {
+                let t = i as f64 / 100.0;
+                (t * 0.8, (1.0 - t) * 0.6, 0.3, 0.9)
+            })
+            .collect();
+        let levels = default_levels();
+
+        let display = tonemap_to_display_buffer(&pixels, &levels);
+        let two_step = quantize_display_buffer_to_16bit(&display);
+
+        let mut fused = Vec::new();
+        tonemap_and_quantize_to_16bit(&pixels, &levels, &mut fused);
+
+        assert_eq!(two_step, fused, "fused tonemap+quantize should match two-step");
+    }
+
+    #[test]
+    fn test_histogram_all_identical_samples() {
+        let scene_data = sample_scene();
+        let resolved = baseline_resolved_config(16, 16);
+        let render_config = RenderConfig { hdr_scale: 1.0, bloom_mode: BloomMode::None };
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let scene = SpectralScene::new(&scene_data.0, &scene_data.1, &scene_data.2);
+        let histogram = pass_1_build_histogram_spectral(scene, 2, settings);
+        assert!(!histogram.data().is_empty(), "histogram should have samples even for tiny scene");
+    }
+
+    #[test]
+    fn test_effect_chain_disabled_effects_are_identity() {
+        let config = EffectConfig {
+            bloom_mode: "none".to_string(),
+            blur_radius_px: 0,
+            blur_strength: 0.0,
+            blur_core_brightness: 1.0,
+            dog_config: DogBloomConfig::default(),
+            perceptual_blur_enabled: false,
+            perceptual_blur_config: None,
+            color_grade_enabled: false,
+            color_grade_params: crate::post_effects::ColorGradeParams::default(),
+            gradient_map_enabled: false,
+            gradient_map_config: crate::post_effects::GradientMapConfig::default(),
+            champleve_enabled: false,
+            champleve_config: crate::post_effects::ChampleveConfig::default(),
+            aether_enabled: false,
+            aether_config: crate::post_effects::aether::AetherConfig::default(),
+            chromatic_bloom_enabled: false,
+            chromatic_bloom_config: crate::post_effects::ChromaticBloomConfig::default(),
+            opalescence_enabled: false,
+            opalescence_config: crate::post_effects::OpalescenceConfig::default(),
+            edge_luminance_enabled: false,
+            edge_luminance_config: crate::post_effects::EdgeLuminanceConfig::default(),
+            micro_contrast_enabled: false,
+            micro_contrast_config: crate::post_effects::MicroContrastConfig::default(),
+            glow_enhancement_enabled: false,
+            glow_enhancement_config: crate::post_effects::GlowEnhancementConfig::default(),
+            atmospheric_depth_enabled: false,
+            atmospheric_depth_config: crate::post_effects::AtmosphericDepthConfig::default(),
+            fine_texture_enabled: false,
+            fine_texture_config: crate::post_effects::FineTextureConfig::default(),
+        };
+        let pipeline = FinishEffectPipeline::new(config);
+        assert_eq!(pipeline.trajectory_len(), 0);
+        assert_eq!(pipeline.image_len(), 0);
+
+        let input: PixelBuffer = (0..64)
+            .map(|i| (i as f64 / 64.0, 0.5, 0.3, 0.9))
+            .collect();
+        let frame_params = FrameParams { frame_number: 0, density: None };
+        let output = pipeline.process_trajectory(input.clone(), 8, 8, &frame_params).unwrap();
+        assert_eq!(input, output, "empty chain should be identity");
     }
 }

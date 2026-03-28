@@ -9,7 +9,13 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use tracing::info;
 
-const FRAME_CHANNEL_CAPACITY: usize = 4;
+/// Bounded channel depth for frame buffering between the renderer and FFmpeg.
+///
+/// Increased from 4 to 32 to keep 64-core renderers busy while the (slower)
+/// libx265 encoder drains frames.  Each queued frame is ~12 MB at 1080p
+/// rgb48le, so 32 frames is ~384 MB -- well within reach for servers with
+/// "plenty of memory".
+const FRAME_CHANNEL_CAPACITY: usize = 32;
 
 /// Adapter that buffers `write_all` calls and sends complete frames through
 /// a bounded channel to a dedicated writer thread. This decouples frame

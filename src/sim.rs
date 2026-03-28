@@ -15,7 +15,14 @@ use tracing::info;
 /// Gravitational constant
 pub const G: f64 = 9.8;
 
-/// A custom RNG based on repeated Sha3 hashing
+/// SHA3 hash output length in bytes.
+const SHA3_HASH_LEN: usize = 32;
+
+/// Number of SHA3 hashes to chain per refill (8 hashes = 256 bytes).
+/// Larger batches amortise the per-hash overhead of seed concatenation.
+const HASH_BATCH_SIZE: usize = 8;
+
+/// A custom RNG based on repeated Sha3 hashing with batched refill.
 pub struct Sha3RandomByteStream {
     hasher: Sha3_256,
     seed: Vec<u8>,
@@ -31,7 +38,9 @@ impl Sha3RandomByteStream {
     pub fn new(seed: &[u8], min_mass: f64, max_mass: f64, location: f64, velocity: f64) -> Self {
         let mut hasher = Sha3_256::new();
         hasher.update(seed);
-        let buffer = hasher.clone().finalize_reset().to_vec();
+        let initial = hasher.clone().finalize_reset();
+        let mut buffer = Vec::with_capacity(SHA3_HASH_LEN * HASH_BATCH_SIZE);
+        buffer.extend_from_slice(&initial);
         Self {
             hasher,
             seed: seed.to_vec(),
@@ -43,17 +52,36 @@ impl Sha3RandomByteStream {
             velocity_range: velocity,
         }
     }
+
+    /// Refill the internal buffer by chaining multiple SHA3 hashes.
+    fn refill_buffer(&mut self) {
+        let prev_tail_start = self.buffer.len().saturating_sub(SHA3_HASH_LEN);
+        let prev_tail: [u8; SHA3_HASH_LEN] = {
+            let mut arr = [0u8; SHA3_HASH_LEN];
+            arr.copy_from_slice(&self.buffer[prev_tail_start..]);
+            arr
+        };
+        self.buffer.clear();
+        let mut chain_input = prev_tail;
+        for _ in 0..HASH_BATCH_SIZE {
+            self.hasher.update(&self.seed);
+            self.hasher.update(chain_input);
+            let hash = self.hasher.finalize_reset();
+            self.buffer.extend_from_slice(&hash);
+            chain_input.copy_from_slice(&hash);
+        }
+        self.index = 0;
+    }
+
     pub fn next_byte(&mut self) -> u8 {
         if self.index >= self.buffer.len() {
-            self.hasher.update(&self.seed);
-            self.hasher.update(&self.buffer);
-            self.buffer = self.hasher.finalize_reset().to_vec();
-            self.index = 0;
+            self.refill_buffer();
         }
         let b = self.buffer[self.index];
         self.index += 1;
         b
     }
+
     fn next_u64(&mut self) -> u64 {
         let mut bytes = [0u8; 8];
         for b in &mut bytes {
@@ -90,25 +118,12 @@ impl Body {
     pub fn new(mass: f64, pos: Vector3<f64>, vel: Vector3<f64>) -> Self {
         Self { mass, position: pos, velocity: vel, acceleration: Vector3::zeros() }
     }
-    fn reset_acceleration(&mut self) {
-        self.acceleration = Vector3::zeros();
-    }
-    fn update_acceleration(&mut self, om: f64, op: &Vector3<f64>) {
-        let dir = self.position - *op;
-        let d = dir.norm();
-        if d > 1e-10 {
-            self.acceleration += -G * om * dir / d.powi(3);
-        }
-    }
 }
 
 /// 4th-Order Yoshida Symplectic Integrator (conserves energy infinitely)
 fn symplectic_step(bodies: &mut [Body], dt: f64) {
     debug_assert_eq!(bodies.len(), 3, "Optimized for 3-body problem");
-    let mut mass = [0.0; 3];
-    for (i, b) in bodies.iter().enumerate().take(3) {
-        mass[i] = b.mass;
-    }
+    let mass = [bodies[0].mass, bodies[1].mass, bodies[2].mass];
 
     const W1: f64 = 1.3512071919596578;
     const W0: f64 = -1.7024143839193153;
@@ -123,52 +138,93 @@ fn symplectic_step(bodies: &mut [Body], dt: f64) {
     const D3: f64 = W1;
 
     // Step 1
-    for b in bodies.iter_mut() {
-        b.position += b.velocity * (C1 * dt);
-    }
-    compute_accelerations(bodies, &mass);
-    for b in bodies.iter_mut() {
-        b.velocity += b.acceleration * (D1 * dt);
-    }
+    let c1dt = C1 * dt;
+    bodies[0].position += bodies[0].velocity * c1dt;
+    bodies[1].position += bodies[1].velocity * c1dt;
+    bodies[2].position += bodies[2].velocity * c1dt;
+    compute_accelerations_unrolled(bodies, &mass);
+    let d1dt = D1 * dt;
+    bodies[0].velocity += bodies[0].acceleration * d1dt;
+    bodies[1].velocity += bodies[1].acceleration * d1dt;
+    bodies[2].velocity += bodies[2].acceleration * d1dt;
 
     // Step 2
-    for b in bodies.iter_mut() {
-        b.position += b.velocity * (C2 * dt);
-    }
-    compute_accelerations(bodies, &mass);
-    for b in bodies.iter_mut() {
-        b.velocity += b.acceleration * (D2 * dt);
-    }
+    let c2dt = C2 * dt;
+    bodies[0].position += bodies[0].velocity * c2dt;
+    bodies[1].position += bodies[1].velocity * c2dt;
+    bodies[2].position += bodies[2].velocity * c2dt;
+    compute_accelerations_unrolled(bodies, &mass);
+    let d2dt = D2 * dt;
+    bodies[0].velocity += bodies[0].acceleration * d2dt;
+    bodies[1].velocity += bodies[1].acceleration * d2dt;
+    bodies[2].velocity += bodies[2].acceleration * d2dt;
 
     // Step 3
-    for b in bodies.iter_mut() {
-        b.position += b.velocity * (C3 * dt);
-    }
-    compute_accelerations(bodies, &mass);
-    for b in bodies.iter_mut() {
-        b.velocity += b.acceleration * (D3 * dt);
-    }
+    let c3dt = C3 * dt;
+    bodies[0].position += bodies[0].velocity * c3dt;
+    bodies[1].position += bodies[1].velocity * c3dt;
+    bodies[2].position += bodies[2].velocity * c3dt;
+    compute_accelerations_unrolled(bodies, &mass);
+    let d3dt = D3 * dt;
+    bodies[0].velocity += bodies[0].acceleration * d3dt;
+    bodies[1].velocity += bodies[1].acceleration * d3dt;
+    bodies[2].velocity += bodies[2].acceleration * d3dt;
 
     // Step 4
-    for b in bodies.iter_mut() {
-        b.position += b.velocity * (C4 * dt);
-    }
+    let c4dt = C4 * dt;
+    bodies[0].position += bodies[0].velocity * c4dt;
+    bodies[1].position += bodies[1].velocity * c4dt;
+    bodies[2].position += bodies[2].velocity * c4dt;
 }
 
+/// Fully unrolled pairwise gravitational acceleration for exactly 3 bodies.
+///
+/// Computes all three pairs (0-1, 0-2, 1-2) with Newton's third law so each
+/// displacement vector is computed once. Uses `d_sq.sqrt()` and manual `d^{-3}`
+/// to give the compiler maximal freedom for FMA scheduling.
 #[inline(always)]
-fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
-    let mut pos = [Vector3::zeros(); 3];
-    for (i, b) in bodies.iter().enumerate().take(3) {
-        pos[i] = b.position;
+fn compute_accelerations_unrolled(bodies: &mut [Body], mass: &[f64; 3]) {
+    let p0 = bodies[0].position;
+    let p1 = bodies[1].position;
+    let p2 = bodies[2].position;
+
+    let mut a0 = Vector3::zeros();
+    let mut a1 = Vector3::zeros();
+    let mut a2 = Vector3::zeros();
+
+    // Pair (0, 1)
+    let d01 = p0 - p1;
+    let r01_sq = d01.norm_squared();
+    if r01_sq > 1e-20 {
+        let r01 = r01_sq.sqrt();
+        let inv_r3 = G / (r01 * r01_sq);
+        a0 -= d01 * (mass[1] * inv_r3);
+        a1 += d01 * (mass[0] * inv_r3);
     }
-    for (i, body) in bodies.iter_mut().enumerate().take(3) {
-        body.reset_acceleration();
-        for j in 0..3 {
-            if i != j {
-                body.update_acceleration(mass[j], &pos[j])
-            }
-        }
+
+    // Pair (0, 2)
+    let d02 = p0 - p2;
+    let r02_sq = d02.norm_squared();
+    if r02_sq > 1e-20 {
+        let r02 = r02_sq.sqrt();
+        let inv_r3 = G / (r02 * r02_sq);
+        a0 -= d02 * (mass[2] * inv_r3);
+        a2 += d02 * (mass[0] * inv_r3);
     }
+
+    // Pair (1, 2)
+    let d12 = p1 - p2;
+    let r12_sq = d12.norm_squared();
+    if r12_sq > 1e-20 {
+        let r12 = r12_sq.sqrt();
+        let inv_r3 = G / (r12 * r12_sq);
+        a1 -= d12 * (mass[2] * inv_r3);
+        a2 += d12 * (mass[1] * inv_r3);
+    }
+
+    bodies[0].acceleration = a0;
+    bodies[1].acceleration = a1;
+    bodies[2].acceleration = a2;
 }
 
 /// Recorded positions and velocities from simulation
@@ -177,32 +233,23 @@ pub struct FullSim {
     pub velocities: Vec<Vec<Vector3<f64>>>,
 }
 
-/// warmup + record with optional early-exit checks
+/// warmup + record with zero per-step heap allocations
 pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
-    // Ensure the initial state is expressed in the centre-of-mass (COM) frame
     shift_bodies_to_com(&mut bodies);
     let dt = crate::render::constants::DEFAULT_DT;
     for _ in 0..steps {
         symplectic_step(&mut bodies, dt);
     }
     let mut b2 = bodies.clone();
-    let mut all_pos = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    let mut all_vel = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for (step, (pos_snap, vel_snap)) in std::iter::repeat_with(|| {
-        let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
-        let velocities: Vec<_> = b2.iter().map(|body| body.velocity).collect();
+    let n_bodies = bodies.len();
+    let mut all_pos = vec![vec![Vector3::zeros(); steps]; n_bodies];
+    let mut all_vel = vec![vec![Vector3::zeros(); steps]; n_bodies];
+    for step in 0..steps {
+        for body_idx in 0..n_bodies {
+            all_pos[body_idx][step] = b2[body_idx].position;
+            all_vel[body_idx][step] = b2[body_idx].velocity;
+        }
         symplectic_step(&mut b2, dt);
-        (positions, velocities)
-    })
-    .take(steps)
-    .enumerate()
-    {
-        for (body_positions, position) in all_pos.iter_mut().zip(pos_snap) {
-            body_positions[step] = position;
-        }
-        for (body_velocities, velocity) in all_vel.iter_mut().zip(vel_snap) {
-            body_velocities[step] = velocity;
-        }
     }
     FullSim { positions: all_pos, velocities: all_vel }
 }
@@ -237,25 +284,17 @@ pub fn get_positions_with_early_exit(
         return None;
     }
 
-    // Record phase - body configuration is good, record the full trajectory
+    // Record phase -- zero per-step heap allocations
     let mut b2 = bodies.clone();
-    let mut all_pos = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    let mut all_vel = vec![vec![Vector3::zeros(); steps]; bodies.len()];
-    for (step, (pos_snap, vel_snap)) in std::iter::repeat_with(|| {
-        let positions: Vec<_> = b2.iter().map(|body| body.position).collect();
-        let velocities: Vec<_> = b2.iter().map(|body| body.velocity).collect();
+    let n_bodies = bodies.len();
+    let mut all_pos = vec![vec![Vector3::zeros(); steps]; n_bodies];
+    let mut all_vel = vec![vec![Vector3::zeros(); steps]; n_bodies];
+    for step in 0..steps {
+        for body_idx in 0..n_bodies {
+            all_pos[body_idx][step] = b2[body_idx].position;
+            all_vel[body_idx][step] = b2[body_idx].velocity;
+        }
         symplectic_step(&mut b2, dt);
-        (positions, velocities)
-    })
-    .take(steps)
-    .enumerate()
-    {
-        for (body_positions, position) in all_pos.iter_mut().zip(pos_snap) {
-            body_positions[step] = position;
-        }
-        for (body_velocities, velocity) in all_vel.iter_mut().zip(vel_snap) {
-            body_velocities[step] = velocity;
-        }
     }
 
     Some(FullSim { positions: all_pos, velocities: all_vel })
@@ -283,17 +322,29 @@ pub fn shift_bodies_to_com(b: &mut [Body]) {
     }
 }
 
-/// Escaping check
+/// Escaping check -- operates on borrowed data without cloning.
+///
+/// Computes COM-frame positions and velocities inline to avoid a mutable
+/// `to_vec()` + `shift_bodies_to_com` clone on every call.
 pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
-    let mut loc = b.to_vec();
-    shift_bodies_to_com(&mut loc);
-    for (i, bi) in loc.iter().enumerate() {
-        let kin =
-            crate::render::constants::KINETIC_ENERGY_FACTOR * bi.mass * bi.velocity.norm_squared();
+    let mt: f64 = b.iter().map(|x| x.mass).sum();
+    if mt < 1e-14 {
+        return false;
+    }
+    let inv_mt = 1.0 / mt;
+    let rc: Vector3<f64> =
+        b.iter().map(|x| x.mass * x.position).sum::<Vector3<f64>>() * inv_mt;
+    let vc: Vector3<f64> =
+        b.iter().map(|x| x.mass * x.velocity).sum::<Vector3<f64>>() * inv_mt;
+
+    for (i, bi) in b.iter().enumerate() {
+        let vi = bi.velocity - vc;
+        let pi = bi.position - rc;
+        let kin = crate::render::constants::KINETIC_ENERGY_FACTOR * bi.mass * vi.norm_squared();
         let mut pot = 0.0;
-        for (j, bj) in loc.iter().enumerate() {
+        for (j, bj) in b.iter().enumerate() {
             if i != j {
-                let d = (bi.position - bj.position).norm();
+                let d = (pi - (bj.position - rc)).norm();
                 if d > 1e-12 {
                     pot += -G * bi.mass * bj.mass / d;
                 }
@@ -680,6 +731,110 @@ mod tests {
         assert!(
             rel_error < 0.01,
             "symplectic integrator should conserve energy within 1%, got {rel_error:.6}"
+        );
+    }
+
+    #[test]
+    fn test_long_term_energy_drift() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.3, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.2, -0.1, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.2, -0.2, 0.0)),
+        ];
+
+        let initial_energy = crate::analysis::calculate_total_energy(&bodies);
+        let sim = get_positions(bodies, 100_000);
+
+        let final_bodies = vec![
+            Body::new(200.0, *sim.positions[0].last().unwrap(), *sim.velocities[0].last().unwrap()),
+            Body::new(150.0, *sim.positions[1].last().unwrap(), *sim.velocities[1].last().unwrap()),
+            Body::new(250.0, *sim.positions[2].last().unwrap(), *sim.velocities[2].last().unwrap()),
+        ];
+        let final_energy = crate::analysis::calculate_total_energy(&final_bodies);
+
+        let rel_error = ((final_energy - initial_energy) / initial_energy.abs()).abs();
+        assert!(
+            rel_error < 0.05,
+            "100k-step integrator drift should be < 5%, got {rel_error:.6}"
+        );
+    }
+
+    #[test]
+    fn test_rng_chi_squared_uniformity() {
+        let mut rng = Sha3RandomByteStream::new(&[0xDE, 0xAD], 0.0, 1.0, 1.0, 1.0);
+        let n = 10000;
+        let k = 10;
+        let mut bins = vec![0usize; k];
+        for _ in 0..n {
+            let v = rng.next_f64();
+            assert!((0.0..1.0).contains(&v), "next_f64 produced {v}");
+            let idx = (v * k as f64).min((k - 1) as f64) as usize;
+            bins[idx] += 1;
+        }
+        let expected = n as f64 / k as f64;
+        let chi_sq: f64 = bins.iter().map(|&b| {
+            let diff = b as f64 - expected;
+            diff * diff / expected
+        }).sum();
+        assert!(chi_sq < 30.0, "chi-squared {chi_sq} too high for k={k} bins (threshold ~30)");
+    }
+
+    #[test]
+    fn test_rng_batched_refill_determinism() {
+        let seed = [0x42, 0x43, 0x44, 0x45];
+        let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        for i in 0..2000 {
+            let a = rng1.next_byte();
+            let b = rng2.next_byte();
+            assert_eq!(a, b, "RNG bytes diverged at step {i}");
+        }
+    }
+
+    #[test]
+    fn test_escape_check_no_clone_correctness() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.5, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.5, 0.0)),
+        ];
+        let result_tight = is_definitely_escaping(&bodies, -100.0);
+        let result_loose = is_definitely_escaping(&bodies, 1000.0);
+        assert!(!result_tight, "tightly bound threshold should not escape");
+        assert!(!result_loose, "very loose threshold should not escape");
+    }
+
+    #[test]
+    fn test_get_positions_single_step() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let sim = get_positions(bodies, 1);
+        assert_eq!(sim.positions[0].len(), 1);
+        assert_eq!(sim.velocities[0].len(), 1);
+    }
+
+    #[test]
+    fn test_unrolled_acceleration_matches_physics() {
+        let mut bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::zeros()),
+            Body::new(200.0, Vector3::new(-100.0, 0.0, 0.0), Vector3::zeros()),
+            Body::new(200.0, Vector3::new(0.0, 100.0, 0.0), Vector3::zeros()),
+        ];
+        let mass = [200.0, 200.0, 200.0];
+        compute_accelerations_unrolled(&mut bodies, &mass);
+
+        for b in &bodies {
+            assert!(b.acceleration.norm() > 0.0, "acceleration should be nonzero");
+        }
+
+        let total_force: Vector3<f64> = bodies.iter().map(|b| b.mass * b.acceleration).sum();
+        assert!(
+            total_force.norm() < 1e-10,
+            "Newton's third law: total force should be ~zero, got {}",
+            total_force.norm()
         );
     }
 }

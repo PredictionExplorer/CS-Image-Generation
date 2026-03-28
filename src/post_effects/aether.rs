@@ -134,3 +134,75 @@ pub fn apply_aether_weave(
         *pixel = (final_r.max(0.0) * a, final_g.max(0.0) * a, final_b.max(0.0) * a, a);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gradient_buffer(w: usize, h: usize) -> PixelBuffer {
+        (0..w * h)
+            .map(|i| {
+                let t = i as f64 / (w * h) as f64;
+                (t * 0.7, (1.0 - t) * 0.4, 0.25, 0.85)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_aether_preserves_buffer_length() {
+        let config = AetherConfig::default();
+        let mut buf = gradient_buffer(48, 36);
+        let len = buf.len();
+        apply_aether_weave(&mut buf, 48, 36, &config);
+        assert_eq!(buf.len(), len);
+    }
+
+    #[test]
+    fn test_aether_modifies_pixels() {
+        let config = AetherConfig::default();
+        let original = gradient_buffer(32, 24);
+        let mut buf = original.clone();
+        apply_aether_weave(&mut buf, 32, 24, &config);
+        let changed = buf.iter().zip(original.iter()).filter(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-12 || (a.1 - b.1).abs() > 1e-12
+        }).count();
+        assert!(changed > 0, "aether weave should modify at least some pixels");
+    }
+
+    #[test]
+    fn test_aether_all_black_stays_black() {
+        let config = AetherConfig::default();
+        let mut buf = vec![(0.0, 0.0, 0.0, 0.0); 16 * 16];
+        apply_aether_weave(&mut buf, 16, 16, &config);
+        for &(r, g, b, a) in &buf {
+            assert_eq!(r, 0.0);
+            assert_eq!(g, 0.0);
+            assert_eq!(b, 0.0);
+            assert_eq!(a, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_aether_no_nan_in_output() {
+        let config = AetherConfig::default();
+        let mut buf = gradient_buffer(48, 32);
+        apply_aether_weave(&mut buf, 48, 32, &config);
+        for (i, &(r, g, b, a)) in buf.iter().enumerate() {
+            assert!(!r.is_nan(), "R NaN at pixel {i}");
+            assert!(!g.is_nan(), "G NaN at pixel {i}");
+            assert!(!b.is_nan(), "B NaN at pixel {i}");
+            assert!(!a.is_nan(), "A NaN at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_aether_luxury_mode_differs_from_rainbow() {
+        let luxury = AetherConfig { luxury_mode: true, ..AetherConfig::default() };
+        let rainbow = AetherConfig { luxury_mode: false, ..AetherConfig::default() };
+        let mut buf_l = gradient_buffer(24, 16);
+        let mut buf_r = buf_l.clone();
+        apply_aether_weave(&mut buf_l, 24, 16, &luxury);
+        apply_aether_weave(&mut buf_r, 24, 16, &rainbow);
+        assert_ne!(buf_l, buf_r, "luxury vs rainbow modes should produce different output");
+    }
+}

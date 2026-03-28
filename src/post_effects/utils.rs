@@ -56,3 +56,80 @@ pub fn calculate_gradients(buffer: &PixelBuffer, width: usize, height: usize) ->
     });
     gradients
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash2_returns_finite_values() {
+        for i in 0..100 {
+            let (x, y) = hash2((i as f64 * 1.7, i as f64 * 3.1));
+            assert!(x.is_finite(), "hash2 x={x} not finite");
+            assert!(y.is_finite(), "hash2 y={y} not finite");
+        }
+    }
+
+    #[test]
+    fn test_hash2_deterministic() {
+        let (a1, b1) = hash2((42.0, 99.0));
+        let (a2, b2) = hash2((42.0, 99.0));
+        assert_eq!(a1.to_bits(), a2.to_bits());
+        assert_eq!(b1.to_bits(), b2.to_bits());
+    }
+
+    #[test]
+    fn test_smoothstep_edges() {
+        assert!((smoothstep(0.0, 1.0, 0.0) - 0.0).abs() < 1e-12);
+        assert!((smoothstep(0.0, 1.0, 1.0) - 1.0).abs() < 1e-12);
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_smoothstep_clamps() {
+        assert!((smoothstep(0.0, 1.0, -1.0) - 0.0).abs() < 1e-12);
+        assert!((smoothstep(0.0, 1.0, 2.0) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_smoothstep_degenerate_edges() {
+        let result = smoothstep(0.5, 0.5, 0.5);
+        assert!(!result.is_nan(), "degenerate edges should not produce NaN");
+    }
+
+    #[test]
+    fn test_highlight_extract_factor_range() {
+        for i in 0..=20 {
+            let lum = i as f64 * 0.1;
+            let f = highlight_extract_factor(lum);
+            assert!((0.0..=1.0).contains(&f), "extract_factor({lum}) = {f} out of [0,1]");
+        }
+    }
+
+    #[test]
+    fn test_highlight_extract_monotonic() {
+        let mut prev = highlight_extract_factor(0.0);
+        for i in 1..=20 {
+            let lum = i as f64 * 0.1;
+            let curr = highlight_extract_factor(lum);
+            assert!(curr >= prev, "extract_factor should be monotonic: f({lum}) = {curr} < f(prev) = {prev}");
+            prev = curr;
+        }
+    }
+
+    #[test]
+    fn test_calculate_gradients_dimensions() {
+        let buf: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 16 * 12];
+        let grads = calculate_gradients(&buf, 16, 12);
+        assert_eq!(grads.len(), 16 * 12);
+    }
+
+    #[test]
+    fn test_calculate_gradients_uniform_is_zero() {
+        let buf: PixelBuffer = vec![(0.4, 0.4, 0.4, 1.0); 8 * 8];
+        let grads = calculate_gradients(&buf, 8, 8);
+        for &(gx, gy) in &grads {
+            assert!(gx.abs() < 1e-10 && gy.abs() < 1e-10, "uniform buffer should have zero gradient");
+        }
+    }
+}

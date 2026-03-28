@@ -6,7 +6,6 @@
 //! Public API methods are provided for library consumers even if not used internally.
 
 use crate::render::constants;
-use rayon::prelude::*;
 
 /// Combined channel and luminance analysis used to drive tone mapping.
 #[derive(Clone, Copy, Debug)]
@@ -58,7 +57,15 @@ impl HistogramData {
     }
 }
 
-/// Compute black/white points from histogram data
+/// Select the value at a given percentile index using O(n) partial sort.
+fn select_percentile(data: &mut [f64], idx: usize) -> f64 {
+    let cmp = |a: &f64, b: &f64| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+    data.select_nth_unstable_by(idx, cmp);
+    data[idx]
+}
+
+/// Compute black/white points from histogram data using O(n) partial selection
+/// instead of O(n log n) full sorts.
 fn compute_black_white_gamma(
     all_r: &mut [f64],
     all_g: &mut [f64],
@@ -66,14 +73,6 @@ fn compute_black_white_gamma(
     clip_black: f64,
     clip_white: f64,
 ) -> (f64, f64, f64, f64, f64, f64) {
-    let r_slice = &mut *all_r;
-    let g_slice = &mut *all_g;
-    let b_slice = &mut *all_b;
-
-    [r_slice, g_slice, b_slice].par_iter_mut().for_each(|channel| {
-        channel.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    });
-
     let total_pix = all_r.len();
     if total_pix == 0 {
         return (0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
@@ -84,12 +83,29 @@ fn compute_black_white_gamma(
     let white_idx =
         ((clip_white * total_pix as f64).round() as usize).min(total_pix.saturating_sub(1));
 
-    let black_r = all_r[black_idx];
-    let white_r = all_r[white_idx];
-    let black_g = all_g[black_idx];
-    let white_g = all_g[white_idx];
-    let black_b = all_b[black_idx];
-    let white_b = all_b[white_idx];
+    // Parallel partial selection: each channel finds its black and white
+    // percentiles independently in O(n) average time.
+    let ((black_r, white_r), ((black_g, white_g), (black_b, white_b))) = rayon::join(
+        || {
+            let br = select_percentile(all_r, black_idx);
+            let wr = select_percentile(all_r, white_idx);
+            (br, wr)
+        },
+        || {
+            rayon::join(
+                || {
+                    let bg = select_percentile(all_g, black_idx);
+                    let wg = select_percentile(all_g, white_idx);
+                    (bg, wg)
+                },
+                || {
+                    let bb = select_percentile(all_b, black_idx);
+                    let wb = select_percentile(all_b, white_idx);
+                    (bb, wb)
+                },
+            )
+        },
+    );
 
     (black_r, white_r, black_g, white_g, black_b, white_b)
 }
@@ -138,11 +154,10 @@ pub fn analyze_tonemapping(
         normalized_luminances.push(0.2126 * nr + 0.7152 * ng + 0.0722 * nb);
     }
 
-    normalized_luminances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let total_samples = normalized_luminances.len();
     let white_idx =
         ((clip_white * total_samples as f64).round() as usize).min(total_samples.saturating_sub(1));
-    let normalized_luma_white = normalized_luminances[white_idx].max(1e-6);
+    let normalized_luma_white = select_percentile(&mut normalized_luminances, white_idx).max(1e-6);
 
     let mut exposure_scale =
         (constants::DEFAULT_PRETONEMAP_LUMA_TARGET / normalized_luma_white).min(1.0);
@@ -229,5 +244,43 @@ mod tests {
             hist.push(i as f64, i as f64 * 2.0, i as f64 * 3.0);
         }
         assert_eq!(hist.data().len(), 300);
+    }
+
+    #[test]
+    fn test_analyze_tonemapping_empty_returns_defaults() {
+        let analysis = analyze_tonemapping(&[], 0.01, 0.99);
+        assert_eq!(analysis.black_r, 0.0);
+        assert_eq!(analysis.white_r, 1.0);
+        assert_eq!(analysis.exposure_scale, 1.0);
+    }
+
+    #[test]
+    fn test_analyze_tonemapping_all_identical_samples() {
+        let samples = vec![[0.5, 0.5, 0.5]; 1000];
+        let analysis = analyze_tonemapping(&samples, 0.01, 0.99);
+        assert!(analysis.exposure_scale > 0.0);
+        assert!(analysis.exposure_scale <= 1.0);
+        assert!(!analysis.normalized_luma_white.is_nan());
+    }
+
+    #[test]
+    fn test_analyze_tonemapping_single_sample() {
+        let samples = vec![[0.3, 0.6, 0.9]];
+        let analysis = analyze_tonemapping(&samples, 0.0, 1.0);
+        assert!(analysis.exposure_scale > 0.0);
+    }
+
+    #[test]
+    fn test_select_percentile_correctness() {
+        let mut data = vec![5.0, 1.0, 3.0, 2.0, 4.0];
+        let median = super::select_percentile(&mut data, 2);
+        assert_eq!(median, 3.0);
+
+        let mut data2 = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let p90 = super::select_percentile(&mut data2, 4);
+        assert_eq!(p90, 50.0);
+
+        let p0 = super::select_percentile(&mut data2, 0);
+        assert_eq!(p0, 10.0);
     }
 }
