@@ -304,6 +304,7 @@ pub fn render_video(
 }
 
 /// Log generation parameters for reproducibility
+#[allow(clippy::too_many_arguments)]
 pub fn log_generation(
     config: &GenerationLogConfig,
     file_name: &str,
@@ -312,6 +313,7 @@ pub fn log_generation(
     num_sims: usize,
     best_info: &TrajectoryResult,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
+    performance: Option<crate::perf::PerformanceProfile>,
 ) {
     let logger = GenerationLogger::new();
 
@@ -375,8 +377,8 @@ pub fn log_generation(
         discarded_count: best_info.discarded_count,
     };
 
-    // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
+    record.performance = performance;
 
     logger.log_generation(record);
 }

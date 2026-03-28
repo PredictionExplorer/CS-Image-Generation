@@ -1,8 +1,10 @@
 use clap::{Parser, ValueEnum};
+use std::time::Instant;
 use three_body_problem::{
     app,
     error::{self, Result},
     extra_outputs,
+    perf::{PerformanceProfile, StageTimer},
     render::{self, RenderConfig},
     sim::Sha3RandomByteStream,
     spectrum_simd,
@@ -188,9 +190,12 @@ fn build_generation_log_config(
 }
 
 fn main() -> Result<()> {
+    let pipeline_start = Instant::now();
     let args = Args::parse();
 
     setup_logging(&args.log_level);
+
+    let mut profile = PerformanceProfile::new();
 
     let enhancements = app::Enhancements::default();
     spectrum_simd::SAT_BOOST_ENABLED
@@ -213,6 +218,8 @@ fn main() -> Result<()> {
         DEFAULT_VELOCITY,
     );
 
+    // ── Effect Resolution ──
+    let timer = StageTimer::start("Effect Resolution");
     info!("Resolving effect configuration...");
     let randomizable_config = render::randomizable_config::RandomizableEffectConfig::default();
     let (resolved_effect_config, randomization_log) =
@@ -231,7 +238,13 @@ fn main() -> Result<()> {
         randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
             - num_randomized
     );
+    profile.push(timer.finish_with_throughput(Some(format!(
+        "{} effects",
+        randomization_log.effects.len()
+    ))));
 
+    // ── Borda Search ──
+    let timer = StageTimer::start("Borda Search");
     let (best_bodies, best_info) = app::run_borda_selection(
         &mut rng,
         args.sims,
@@ -240,9 +253,18 @@ fn main() -> Result<()> {
         DEFAULT_EQUIL_WEIGHT,
         DEFAULT_ESCAPE_THRESHOLD,
     )?;
+    profile.push(timer.finish_with_throughput(Some(format!(
+        "{} candidates, {} steps",
+        args.sims, args.steps
+    ))));
 
+    // ── Final Simulation ──
+    let timer = StageTimer::start("Final Simulation");
     let (mut positions, velocities) = app::simulate_best_orbit(best_bodies, args.steps);
+    profile.push(timer.finish_with_throughput(Some(format!("{} steps", args.steps))));
 
+    // ── Drift Transform ──
+    let timer = StageTimer::start("Drift Transform");
     let drift_config = if args.drift != DriftModeArg::None {
         app::apply_drift_transformation(
             &mut positions,
@@ -256,11 +278,16 @@ fn main() -> Result<()> {
         info!("STAGE 2.5/7: Drift disabled");
         None
     };
+    profile.push(timer.finish_with_throughput(Some(args.drift.as_str())));
 
+    // ── Color Generation ──
+    let timer = StageTimer::start("Color Generation");
     let (colors, body_alphas) =
         app::generate_colors(&mut rng, args.steps, DEFAULT_ALPHA_DENOM, &enhancements);
-
     info!("   => Using OKLab color space for accumulation");
+    profile.push(timer.finish_with_throughput(Some(format!("{} steps", args.steps))));
+
+    // ── Bounding Box ──
     info!("STAGE 4/7: Determining bounding box...");
     let render_ctx = render::context::RenderContext::new(
         args.resolution.width,
@@ -279,6 +306,8 @@ fn main() -> Result<()> {
         bloom_mode: render::BloomMode::Dog,
     };
 
+    // ── Histogram Pass ──
+    let timer = StageTimer::start("Histogram Pass");
     let levels = app::build_histogram_and_levels(
         &positions,
         &colors,
@@ -287,10 +316,16 @@ fn main() -> Result<()> {
         &render_config,
         enhancements.aspect_correction,
     )?;
+    profile.push(timer.finish_with_throughput(Some(format!(
+        "{}x{}",
+        args.resolution.width, args.resolution.height
+    ))));
 
+    // ── Video Render ──
     let output_png = format!("{}/still.png", output_base);
     let output_vid = format!("{}/video.mp4", output_base);
 
+    let timer = StageTimer::start("Video Render");
     app::render_video(
         render::SpectralScene::new(&positions, &colors, &body_alphas),
         &levels,
@@ -304,22 +339,40 @@ fn main() -> Result<()> {
         args.fast_encode,
         true,
     )?;
+    profile.push(timer.finish_with_throughput(Some(format!(
+        "{} target frames at {}x{}",
+        render::constants::DEFAULT_TARGET_FRAMES,
+        args.resolution.width,
+        args.resolution.height
+    ))));
 
+    // ── Extra Outputs ──
     if !args.no_extras {
-        generate_extras(
+        let timer = StageTimer::start("Extra Outputs");
+        let extra_timings = generate_extras(
             &positions,
             &velocities,
             &colors,
             &body_alphas,
             &levels,
-        &resolved_effect_config,
-        &render_config,
-        &args,
+            &resolved_effect_config,
+            &render_config,
+            &args,
             hex_seed,
             &best_info,
             &output_base,
         );
+        let mut extras_stage = timer.finish_with_throughput(Some(format!(
+            "{} tasks",
+            extra_timings.len()
+        )));
+        extras_stage.sub_stages = Some(extra_timings);
+        profile.push(extras_stage);
     }
+
+    // ── Finalize ──
+    profile.set_total(pipeline_start.elapsed().as_secs_f64());
+    profile.log_summary();
 
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",
@@ -336,6 +389,7 @@ fn main() -> Result<()> {
         args.sims,
         &best_info,
         Some(&randomization_log),
+        Some(profile),
     );
 
     Ok(())
@@ -354,7 +408,10 @@ fn generate_extras(
     seed: &str,
     best_info: &three_body_problem::sim::TrajectoryResult,
     base: &str,
-) {
+) -> Vec<three_body_problem::perf::StageTiming> {
+    use std::sync::Mutex;
+    use three_body_problem::perf::StageTiming;
+
     info!("=== Generating extra outputs (parallel) ===");
 
     let scene = render::SpectralScene::new(positions, colors, body_alphas);
@@ -369,8 +426,21 @@ fn generate_extras(
     let num_steps = args.steps;
     let output_name = &args.output;
 
+    let timings: Mutex<Vec<StageTiming>> = Mutex::new(Vec::new());
+
+    macro_rules! timed_spawn {
+        ($scope:ident, $name:expr, $body:expr) => {
+            $scope.spawn(|_| {
+                let t = StageTimer::start($name);
+                let result = $body;
+                timings.lock().unwrap().push(t.finish());
+                result
+            });
+        };
+    }
+
     rayon::scope(|s| {
-        s.spawn(|_| {
+        timed_spawn!(s, "genesis_burst", {
             if let Err(e) = extra_outputs::genesis_burst::render_genesis_burst(
                 scene,
                 levels,
@@ -381,7 +451,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "spectral_gallery", {
             if let Err(e) = extra_outputs::spectral_gallery::render_spectral_gallery(
                 scene,
                 settings,
@@ -391,7 +461,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "loop_clip", {
             if let Err(e) = extra_outputs::loop_clip::render_loop_clip(
                 scene,
                 levels,
@@ -404,7 +474,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "phase_portrait", {
             if let Err(e) = extra_outputs::phase_portrait::render_phase_portrait(
                 positions,
                 velocities,
@@ -418,7 +488,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "sonification", {
             if let Err(e) = extra_outputs::sonification::generate_sonification(
                 positions,
                 30.0,
@@ -430,7 +500,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "avatar", {
             if let Err(e) = extra_outputs::avatar::render_animated_avatar(
                 scene,
                 levels,
@@ -442,7 +512,7 @@ fn generate_extras(
         });
 
         if !no_wallpapers {
-            s.spawn(|_| {
+            timed_spawn!(s, "wallpaper_pack", {
                 if let Err(e) = extra_outputs::wallpaper::render_wallpaper_pack(
                     scene,
                     levels,
@@ -454,7 +524,7 @@ fn generate_extras(
             });
         }
 
-        s.spawn(|_| {
+        timed_spawn!(s, "stats_card", {
             if let Err(e) = extra_outputs::stats_card::generate_stats_card(
                 &extra_outputs::stats_card::StatsCardData {
                     seed,
@@ -469,7 +539,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "reveal_video", {
             if let Err(e) = extra_outputs::reveal_video::render_reveal_video(
                 scene,
                 levels,
@@ -481,8 +551,7 @@ fn generate_extras(
             }
         });
 
-        // glTF -> AR export dependency chain: run sequentially within one task
-        s.spawn(|_| {
+        timed_spawn!(s, "3d_and_ar_export", {
             if let Err(e) = extra_outputs::gltf_export::export_gltf(
                 positions,
                 colors,
@@ -499,7 +568,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "spectral_fingerprint", {
             if let Err(e) = extra_outputs::spectral_fingerprint::generate_spectral_fingerprint(
                 scene,
                 settings,
@@ -510,7 +579,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "color_palette", {
             if let Err(e) = extra_outputs::color_palette::generate_color_palette(
                 scene,
                 levels,
@@ -522,7 +591,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "light_variant", {
             if let Err(e) = extra_outputs::gallery_variants::render_light_variant(
                 scene,
                 levels,
@@ -533,7 +602,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "timelapse", {
             if let Err(e) = extra_outputs::timelapse::render_timelapse(
                 scene,
                 levels,
@@ -545,7 +614,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "cinemagraph", {
             if let Err(e) = extra_outputs::cinemagraph::render_cinemagraph(
                 scene,
                 levels,
@@ -557,7 +626,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "social_kit", {
             if let Err(e) = extra_outputs::social_kit::generate_social_kit(
                 scene,
                 levels,
@@ -568,7 +637,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "rarity_report", {
             if let Err(e) = extra_outputs::rarity_report::generate_rarity_report(
                 &extra_outputs::rarity_report::RarityReportData {
                     seed,
@@ -582,7 +651,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "orbit_comparison", {
             if let Err(e) = extra_outputs::orbit_comparison::render_orbit_comparison(
                 scene,
                 levels,
@@ -595,7 +664,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "exhibition_page", {
             if let Err(e) = extra_outputs::exhibition_page::generate_exhibition_page(
                 &extra_outputs::exhibition_page::ExhibitionPageData {
                     seed,
@@ -611,7 +680,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "dossier", {
             if let Err(e) = extra_outputs::dossier::generate_dossier(
                 &extra_outputs::dossier::DossierData {
                     seed,
@@ -627,7 +696,7 @@ fn generate_extras(
             }
         });
 
-        s.spawn(|_| {
+        timed_spawn!(s, "extended_audio", {
             if let Err(e) = extra_outputs::extended_audio::generate_extended_audio(
                 positions,
                 &format!("{base}/audio/ambient.wav"),
@@ -638,7 +707,7 @@ fn generate_extras(
         });
 
         if !no_museum_prints {
-            s.spawn(|_| {
+            timed_spawn!(s, "museum_prints", {
                 if let Err(e) = extra_outputs::museum_print::render_museum_prints(
                     scene,
                     levels,
@@ -651,7 +720,7 @@ fn generate_extras(
         }
 
         if !no_cinematic_zoom {
-            s.spawn(|_| {
+            timed_spawn!(s, "cinematic_zoom", {
                 if let Err(e) = extra_outputs::cinematic_zoom::render_cinematic_zoom(
                     scene,
                     levels,
@@ -666,6 +735,10 @@ fn generate_extras(
     });
 
     info!("=== Extra outputs complete ===");
+
+    let mut result = timings.into_inner().unwrap();
+    result.sort_by(|a, b| b.wall_clock_secs.partial_cmp(&a.wall_clock_secs).unwrap());
+    result
 }
 
 #[cfg(test)]

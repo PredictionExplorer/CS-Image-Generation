@@ -40,6 +40,10 @@ pub struct GenerationRecord {
     /// Randomization log (if any parameters were randomized)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub randomization_log: Option<crate::render::effect_randomizer::RandomizationLog>,
+
+    /// Performance profile with per-stage timing, memory, and throughput data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performance: Option<crate::perf::PerformanceProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +112,7 @@ impl GenerationRecord {
             simulation_config: SimulationConfig::default(),
             orbit_info: OrbitInfo::default(),
             randomization_log: None,
+            performance: None,
         }
     }
 }
@@ -433,6 +438,84 @@ mod tests {
         let records = logger.load_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].file_name, "brand_new");
+
+        cleanup(&paths);
+    }
+
+    #[test]
+    fn test_performance_profile_persisted_in_log() {
+        use crate::perf::{PerformanceProfile, StageTiming};
+
+        let paths = temp_paths("perf");
+        let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
+
+        let mut record = make_record("perf_test");
+        let mut profile = PerformanceProfile::new();
+        profile.set_total(42.5);
+        profile.push(StageTiming {
+            stage_name: "Borda Search".to_string(),
+            wall_clock_secs: 30.0,
+            peak_rss_mb_start: 100.0,
+            peak_rss_mb_end: 500.0,
+            rayon_threads: 8,
+            throughput: Some("10000 candidates".to_string()),
+            sub_stages: None,
+        });
+        profile.push(StageTiming {
+            stage_name: "Extra Outputs".to_string(),
+            wall_clock_secs: 12.5,
+            peak_rss_mb_start: 500.0,
+            peak_rss_mb_end: 800.0,
+            rayon_threads: 8,
+            throughput: Some("20 tasks".to_string()),
+            sub_stages: Some(vec![StageTiming {
+                stage_name: "genesis_burst".to_string(),
+                wall_clock_secs: 3.1,
+                peak_rss_mb_start: 500.0,
+                peak_rss_mb_end: 600.0,
+                rayon_threads: 8,
+                throughput: None,
+                sub_stages: None,
+            }]),
+        });
+        record.performance = Some(profile);
+
+        logger.log_generation(record);
+
+        let records = logger.load_records();
+        assert_eq!(records.len(), 1);
+        let perf = records[0].performance.as_ref().expect("performance should be present");
+        assert_eq!(perf.total_wall_clock_secs, 42.5);
+        assert_eq!(perf.stages.len(), 2);
+        assert_eq!(perf.stages[0].stage_name, "Borda Search");
+        assert_eq!(perf.stages[0].throughput.as_deref(), Some("10000 candidates"));
+        assert_eq!(perf.stages[1].sub_stages.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            perf.stages[1].sub_stages.as_ref().unwrap()[0].stage_name,
+            "genesis_burst"
+        );
+
+        cleanup(&paths);
+    }
+
+    #[test]
+    fn test_performance_absent_when_none() {
+        let paths = temp_paths("noperf");
+        let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
+
+        let record = make_record("no_perf");
+        assert!(record.performance.is_none());
+        logger.log_generation(record);
+
+        let raw = std::fs::read_to_string(&paths.0).unwrap();
+        assert!(
+            !raw.contains("\"performance\""),
+            "performance key should be absent when None"
+        );
+
+        let records = logger.load_records();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].performance.is_none());
 
         cleanup(&paths);
     }

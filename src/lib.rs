@@ -10,6 +10,7 @@ pub mod error;
 pub mod extra_outputs;
 pub mod generation_log;
 pub mod oklab;
+pub mod perf;
 pub mod post_effects;
 pub mod render;
 pub mod sim;

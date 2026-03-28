@@ -20,6 +20,7 @@ chrono   = "0.4.43"
 clap     = { version = "4.5.60", features = ["derive"] }
 hex      = "0.4.3"
 image    = { version = "0.25.9", default-features = false, features = ["png"] }
+libc = "0.2.183"
 nalgebra = "0.34.1"
 once_cell = "1.21.3"
 rayon    = "1.11.0"
