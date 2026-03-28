@@ -8,6 +8,7 @@
 //! instead of going through the stateless `PostEffect` trait.
 
 use super::PixelBuffer;
+use rayon::prelude::*;
 use std::sync::Mutex;
 
 /// Configuration for temporal smoothing effect
@@ -65,42 +66,35 @@ impl TemporalSmoothing {
         let mut prev_guard = self.previous_frame.lock().unwrap();
 
         let result = if let Some(prev) = prev_guard.as_ref() {
-            // Ensure frame sizes match
             if prev.len() != current.len() {
-                // Size mismatch - just use current frame and reset
                 *prev_guard = Some(current.clone());
                 return current;
             }
 
-            // Blend current with previous
             let blend_factor = self.config.blend_factor;
             let inv_blend = 1.0 - blend_factor;
             let threshold = self.config.alpha_threshold;
 
             current
-                .iter()
-                .zip(prev.iter())
+                .par_iter()
+                .zip(prev.par_iter())
                 .map(|(&(cr, cg, cb, ca), &(pr, pg, pb, pa))| {
-                    // Only blend if both frames have visible content
                     if ca > threshold && pa > threshold {
-                        // Blend RGB and alpha
-                        let r = cr * inv_blend + pr * blend_factor;
-                        let g = cg * inv_blend + pg * blend_factor;
-                        let b = cb * inv_blend + pb * blend_factor;
-                        let a = ca * inv_blend + pa * blend_factor;
-                        (r, g, b, a)
+                        (
+                            cr * inv_blend + pr * blend_factor,
+                            cg * inv_blend + pg * blend_factor,
+                            cb * inv_blend + pb * blend_factor,
+                            ca * inv_blend + pa * blend_factor,
+                        )
                     } else {
-                        // No blending for transparent or appearing pixels
                         (cr, cg, cb, ca)
                     }
                 })
                 .collect()
         } else {
-            // First frame - no previous to blend with
             current.clone()
         };
 
-        // Store current frame for next iteration
         *prev_guard = Some(current);
 
         result
@@ -194,19 +188,77 @@ mod tests {
     fn test_alpha_threshold() {
         let config = TemporalSmoothingConfig {
             blend_factor: 0.5,
-            alpha_threshold: 0.5, // High threshold
+            alpha_threshold: 0.5,
         };
         let smoother = TemporalSmoothing::new(config);
 
-        // First frame with low alpha
         let frame1 = vec![(1.0, 1.0, 1.0, 0.3); 100];
         let _result1 = smoother.process_frame(frame1);
 
-        // Second frame with low alpha
         let frame2 = vec![(0.0, 0.0, 0.0, 0.3); 100];
         let result2 = smoother.process_frame(frame2.clone());
 
-        // Should NOT blend (alpha below threshold)
         assert_eq!(result2, frame2);
+    }
+
+    #[test]
+    fn test_parallel_smoothing_deterministic() {
+        let config = TemporalSmoothingConfig { blend_factor: 0.3, alpha_threshold: 0.01 };
+        let n = 5000;
+
+        let frame1: PixelBuffer = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                (t, 1.0 - t, t * 0.5, 0.8)
+            })
+            .collect();
+        let frame2: PixelBuffer = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                (1.0 - t, t, 0.5, 0.9)
+            })
+            .collect();
+
+        let smoother_a = TemporalSmoothing::new(config.clone());
+        let _ = smoother_a.process_frame(frame1.clone());
+        let result_a = smoother_a.process_frame(frame2.clone());
+
+        let smoother_b = TemporalSmoothing::new(config);
+        let _ = smoother_b.process_frame(frame1);
+        let result_b = smoother_b.process_frame(frame2);
+
+        for (i, (a, b)) in result_a.iter().zip(result_b.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "R differs at pixel {i}");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "G differs at pixel {i}");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "B differs at pixel {i}");
+            assert_eq!(a.3.to_bits(), b.3.to_bits(), "A differs at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_process_frame_blends_known_values() {
+        let config = TemporalSmoothingConfig { blend_factor: 0.25, alpha_threshold: 0.01 };
+        let smoother = TemporalSmoothing::new(config);
+
+        let frame1 = vec![(1.0, 0.0, 0.5, 1.0)];
+        let _ = smoother.process_frame(frame1);
+
+        let frame2 = vec![(0.0, 1.0, 0.5, 1.0)];
+        let result = smoother.process_frame(frame2);
+
+        // blend_factor=0.25: result = current*0.75 + prev*0.25
+        assert!((result[0].0 - 0.25).abs() < 1e-10, "R: {} vs 0.25", result[0].0);
+        assert!((result[0].1 - 0.75).abs() < 1e-10, "G: {} vs 0.75", result[0].1);
+        assert!((result[0].2 - 0.50).abs() < 1e-10, "B: {} vs 0.50", result[0].2);
+    }
+
+    #[test]
+    fn test_disabled_smoother_is_passthrough() {
+        let config = TemporalSmoothingConfig { blend_factor: 0.0, alpha_threshold: 0.01 };
+        let smoother = TemporalSmoothing::new(config);
+
+        let frame = vec![(0.42, 0.84, 0.13, 0.99); 50];
+        let result = smoother.process_frame(frame.clone());
+        assert_eq!(result, frame, "disabled smoother must return input unchanged");
     }
 }

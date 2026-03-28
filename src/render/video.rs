@@ -6,7 +6,31 @@
 use std::error::Error;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use tracing::info;
+
+const FRAME_CHANNEL_CAPACITY: usize = 4;
+
+/// Adapter that buffers `write_all` calls and sends complete frames through
+/// a bounded channel to a dedicated writer thread. This decouples frame
+/// production from FFmpeg's encoding throughput.
+struct ChannelFrameWriter {
+    tx: Option<mpsc::SyncSender<Vec<u8>>>,
+}
+
+impl Write for ChannelFrameWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(tx) = &self.tx {
+            tx.send(buf.to_vec())
+                .map_err(|_| std::io::Error::other("FFmpeg writer channel closed"))?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 use crate::render::error::{RenderError, Result};
 
@@ -278,7 +302,6 @@ pub fn create_video_from_frames_singlepass(
     // Output file
     cmd.arg(output_file);
 
-    // Spawn FFmpeg process
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -286,19 +309,51 @@ pub fn create_video_from_frames_singlepass(
         .spawn()
         .map_err(RenderError::VideoEncoding)?;
 
-    // Write frames to FFmpeg's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = frames_iter(&mut stdin) {
-            let _ = stdin.flush();
-            let _ = child.kill();
-            return Err(RenderError::VideoEncoding(std::io::Error::other(e.to_string())));
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| RenderError::InvalidConfig("Failed to capture FFmpeg stdin".to_string()))?;
+
+    // Bounded channel decouples the renderer from FFmpeg's encoding speed:
+    // the renderer can push up to FRAME_CHANNEL_CAPACITY frames ahead while
+    // the writer thread drains them into FFmpeg's stdin pipe.
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+
+    let writer_handle = std::thread::spawn(move || -> std::io::Result<()> {
+        let mut stdin = stdin;
+        for frame_bytes in rx {
+            stdin.write_all(&frame_bytes)?;
         }
-        // Ensure stdin is closed so ffmpeg sees EOF
-        let _ = stdin.flush();
-        drop(stdin);
+        stdin.flush()?;
+        Ok(())
+    });
+
+    let mut channel_writer = ChannelFrameWriter { tx: Some(tx) };
+    let render_result = frames_iter(&mut channel_writer);
+    // Drop sender so the writer thread sees EOF
+    drop(channel_writer);
+
+    let writer_result = writer_handle.join();
+
+    if let Err(e) = render_result {
+        let _ = child.kill();
+        return Err(RenderError::VideoEncoding(std::io::Error::other(e.to_string())));
     }
 
-    // Wait for FFmpeg to complete
+    match writer_result {
+        Ok(Ok(())) => {}
+        Ok(Err(io_err)) => {
+            let _ = child.kill();
+            return Err(RenderError::VideoEncoding(io_err));
+        }
+        Err(_panic) => {
+            let _ = child.kill();
+            return Err(RenderError::VideoEncoding(std::io::Error::other(
+                "FFmpeg writer thread panicked",
+            )));
+        }
+    }
+
     let output = child.wait_with_output().map_err(RenderError::VideoEncoding)?;
 
     if !output.status.success() {
@@ -438,5 +493,82 @@ mod tests {
                 "4:2:2 pixel format requires main422-10 profile"
             );
         }
+    }
+
+    #[test]
+    fn test_channel_frame_writer_sends_data() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+
+        let data = vec![1u8, 2, 3, 4, 5];
+        writer.write_all(&data).unwrap();
+
+        let received = rx.recv().unwrap();
+        assert_eq!(received, data);
+    }
+
+    #[test]
+    fn test_channel_frame_writer_multiple_writes() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+
+        for i in 0..4 {
+            let data = vec![i as u8; 100];
+            writer.write_all(&data).unwrap();
+        }
+        drop(writer);
+
+        let mut collected = Vec::new();
+        while let Ok(chunk) = rx.recv() {
+            collected.push(chunk);
+        }
+        assert_eq!(collected.len(), 4);
+        for (i, chunk) in collected.iter().enumerate() {
+            assert_eq!(chunk.len(), 100);
+            assert!(chunk.iter().all(|&b| b == i as u8));
+        }
+    }
+
+    #[test]
+    fn test_writer_thread_drains_all_frames() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+        let n_frames = 20;
+
+        let writer_handle = std::thread::spawn(move || {
+            let mut total_bytes = 0usize;
+            for frame in rx {
+                total_bytes += frame.len();
+            }
+            total_bytes
+        });
+
+        for i in 0..n_frames {
+            tx.send(vec![i as u8; 256]).unwrap();
+        }
+        drop(tx);
+
+        let total = writer_handle.join().unwrap();
+        assert_eq!(total, n_frames * 256);
+    }
+
+    #[test]
+    fn test_frame_channel_capacity_bounds() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2);
+
+        tx.send(vec![1; 10]).unwrap();
+        tx.send(vec![2; 10]).unwrap();
+        // Channel is full (capacity=2), try_send should fail
+        assert!(tx.try_send(vec![3; 10]).is_err());
+
+        let _ = rx.recv().unwrap();
+        // Now there's room
+        tx.send(vec![3; 10]).unwrap();
+        drop(tx);
+
+        let mut count = 0;
+        while rx.recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(count, 2);
     }
 }

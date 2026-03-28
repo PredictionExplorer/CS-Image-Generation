@@ -283,6 +283,18 @@ pub(crate) fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLe
         .collect()
 }
 
+pub(crate) fn tonemap_to_display_buffer_into(
+    pixels: &PixelBuffer,
+    levels: &ChannelLevels,
+    dest: &mut PixelBuffer,
+) {
+    dest.resize(pixels.len(), (0.0, 0.0, 0.0, 0.0));
+    dest.par_iter_mut().zip(pixels.par_iter()).for_each(|(out, &(fr, fg, fb, fa))| {
+        let mapped = tonemap_core(fr, fg, fb, fa, levels);
+        *out = (mapped[0], mapped[1], mapped[2], fa.clamp(0.0, 1.0));
+    });
+}
+
 pub(crate) fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf_16bit = vec![0u16; pixels.len() * 3];
     buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
@@ -291,6 +303,15 @@ pub(crate) fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16>
         chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
     });
     buf_16bit
+}
+
+pub(crate) fn quantize_display_buffer_to_16bit_into(pixels: &PixelBuffer, dest: &mut Vec<u16>) {
+    dest.resize(pixels.len() * 3, 0u16);
+    dest.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
+        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    });
 }
 
 // ====================== HELPER FUNCTIONS ===========================
@@ -336,6 +357,32 @@ pub(crate) fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuff
             }
         })
         .collect()
+}
+
+pub(crate) fn composite_buffers_into(
+    background: &PixelBuffer,
+    foreground: &PixelBuffer,
+    dest: &mut PixelBuffer,
+) {
+    dest.resize(background.len(), (0.0, 0.0, 0.0, 0.0));
+    dest.par_iter_mut()
+        .zip(background.par_iter())
+        .zip(foreground.par_iter())
+        .for_each(|((out, &(br, bg, bb, ba)), &(fr, fg, fb, fa))| {
+            *out = if fa >= 1.0 {
+                (fr, fg, fb, fa)
+            } else if fa <= 0.0 {
+                (br * ba, bg * ba, bb * ba, ba)
+            } else {
+                let alpha_out = fa + ba * (1.0 - fa);
+                (
+                    fr + (br * ba) * (1.0 - fa),
+                    fg + (bg * ba) * (1.0 - fa),
+                    fb + (bb * ba) * (1.0 - fa),
+                    alpha_out,
+                )
+            };
+        });
 }
 
 /// Build effect configuration from resolved randomizable config
@@ -580,7 +627,10 @@ pub(crate) fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
 const MAX_STEP_CHUNKS: usize = 8;
 
 /// Minimum step range to justify the overhead of step-chunked parallelism.
-const MIN_STEPS_FOR_CHUNKING: usize = 256;
+/// Set above the video-pass per-checkpoint count (~556) so the video loop uses
+/// the zero-overhead scanline-band path, while the histogram pass (~4167) and
+/// final-frame render (~1M) still benefit from step-chunking.
+const MIN_STEPS_FOR_CHUNKING: usize = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AccumulationBackend {
@@ -927,7 +977,7 @@ fn pass_2_write_frames_spectral_with_backend(
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-    let empty_background = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
+    let has_nebula = resolved_config.nebula_strength > 0.0;
 
     use crate::post_effects::{TemporalSmoothing, TemporalSmoothingConfig};
     let temporal_smoother = if enable_temporal_smoothing {
@@ -939,6 +989,9 @@ fn pass_2_write_frames_spectral_with_backend(
         None
     };
     let mut step_start = 0;
+    let mut display_buf: PixelBuffer = Vec::with_capacity(pixel_count);
+    let mut composited_buf: PixelBuffer = Vec::with_capacity(pixel_count);
+    let mut quant_buf: Vec<u16> = Vec::with_capacity(pixel_count * 3);
 
     for &checkpoint_step in &checkpoints {
         if step_start < total_steps && step_start % chunk_line == 0 {
@@ -962,46 +1015,45 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
-        // Swap accum_rgba with the pre-allocated spare to avoid allocation
         std::mem::swap(&mut accum_rgba, &mut spare_rgba);
         let trajectory_pixels = finish_pipeline
             .process_trajectory(spare_rgba, width as usize, height as usize, &frame_params)
             .expect("Failed to process frame during spectral render pass");
-        // Zero the current accum_rgba (which was the old spare) for next iteration
         accum_rgba.par_iter_mut().for_each(|px| *px = (0.0, 0.0, 0.0, 0.0));
-        // Reclaim trajectory_pixels allocation for next iteration's spare
         spare_rgba = trajectory_pixels;
 
-        let nebula_background = if resolved_config.nebula_strength > 0.0 {
-            generate_nebula_background(
+        if has_nebula {
+            let bg = generate_nebula_background(
                 width as usize,
                 height as usize,
                 checkpoint_step / frame_interval,
                 &nebula_config,
-            )
+            );
+            composite_buffers_into(&bg, &spare_rgba, &mut composited_buf);
+            tonemap_to_display_buffer_into(&composited_buf, levels, &mut display_buf);
         } else {
-            empty_background.clone()
+            tonemap_to_display_buffer_into(&spare_rgba, levels, &mut display_buf);
         };
 
-        let composited = composite_buffers(&nebula_background, &spare_rgba);
-        let display_buffer = tonemap_to_display_buffer(&composited, levels);
         let smoothed_display = match &temporal_smoother {
-            Some(smoother) => smoother.process_frame(display_buffer),
-            None => display_buffer,
+            Some(smoother) => smoother.process_frame(std::mem::take(&mut display_buf)),
+            None => std::mem::take(&mut display_buf),
         };
 
         let final_display = finish_pipeline
             .process_image(smoothed_display, width as usize, height as usize, &frame_params)
             .expect("Failed to process final image finish during spectral render pass");
-        let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
+        quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
         let buf_bytes = unsafe {
-            std::slice::from_raw_parts(buf_16bit.as_ptr() as *const u8, buf_16bit.len() * 2)
+            std::slice::from_raw_parts(quant_buf.as_ptr() as *const u8, quant_buf.len() * 2)
         };
 
         frame_sink(buf_bytes)?;
         if checkpoint_step + 1 == total_steps {
-            *last_frame_out = ImageBuffer::from_raw(width, height, buf_16bit);
+            *last_frame_out = ImageBuffer::from_raw(width, height, quant_buf.clone());
         }
+
+        display_buf = final_display;
 
         step_start = checkpoint_step + 1;
     }
@@ -2290,5 +2342,113 @@ mod tests {
             AccumulationBackend::SerialReference,
         );
         assert_spd_buffers_bits_eq(&small_range, &serial_ref, "auto-fallback-small-range");
+    }
+
+    #[test]
+    fn test_tonemap_into_matches_allocating() {
+        let pixels: PixelBuffer = (0..200)
+            .map(|i| {
+                let t = i as f64 / 200.0;
+                (t * 0.8, (1.0 - t) * 0.6, 0.3, 0.9)
+            })
+            .collect();
+        let levels = default_levels();
+
+        let allocating = tonemap_to_display_buffer(&pixels, &levels);
+        let mut reused = Vec::new();
+        tonemap_to_display_buffer_into(&pixels, &levels, &mut reused);
+
+        assert_eq!(allocating.len(), reused.len());
+        for (i, (a, b)) in allocating.iter().zip(reused.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "R at {i}");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "G at {i}");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "B at {i}");
+            assert_eq!(a.3.to_bits(), b.3.to_bits(), "A at {i}");
+        }
+    }
+
+    #[test]
+    fn test_composite_into_matches_allocating() {
+        let bg: PixelBuffer = vec![(0.1, 0.2, 0.3, 0.5); 100];
+        let fg: PixelBuffer = vec![(0.4, 0.5, 0.6, 0.7); 100];
+
+        let allocating = composite_buffers(&bg, &fg);
+        let mut reused = Vec::new();
+        composite_buffers_into(&bg, &fg, &mut reused);
+
+        assert_eq!(allocating.len(), reused.len());
+        for (i, (a, b)) in allocating.iter().zip(reused.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "R at {i}");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "G at {i}");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "B at {i}");
+            assert_eq!(a.3.to_bits(), b.3.to_bits(), "A at {i}");
+        }
+    }
+
+    #[test]
+    fn test_quantize_into_matches_allocating() {
+        let pixels: PixelBuffer = (0..200)
+            .map(|i| {
+                let t = i as f64 / 200.0;
+                (t, 1.0 - t, 0.5, 1.0)
+            })
+            .collect();
+
+        let allocating = quantize_display_buffer_to_16bit(&pixels);
+        let mut reused = Vec::new();
+        quantize_display_buffer_to_16bit_into(&pixels, &mut reused);
+
+        assert_eq!(allocating, reused);
+    }
+
+    #[test]
+    fn test_small_step_range_uses_scanline_bands_bitwise() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(9, 7, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+
+        let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut serial, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
+            AccumulationBackend::SerialReference,
+        );
+
+        let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut parallel, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
+            AccumulationBackend::ParallelScanlines,
+        );
+
+        assert_spd_buffers_bits_eq(&parallel, &serial, "small-step-scanline-bands");
+    }
+
+    #[test]
+    fn test_large_step_range_uses_step_chunking() {
+        let n_steps = 3000;
+        let (positions, colors, body_alphas) = make_circular_scene(n_steps);
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(32, 24, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+
+        let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut serial, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+            AccumulationBackend::SerialReference,
+        );
+
+        let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut parallel, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+            AccumulationBackend::ParallelScanlines,
+        );
+
+        assert_spd_buffers_approx_eq(
+            &parallel, &serial,
+            "large-step-chunking",
+            1e-12,
+        );
     }
 }
