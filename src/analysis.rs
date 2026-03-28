@@ -1,5 +1,5 @@
 use crate::sim::{Body, G};
-use crate::utils::fourier_transform;
+use crate::utils::{FftCache, fourier_transform};
 use nalgebra::Vector3;
 
 fn sample_std_dev(values: &[f64]) -> f64 {
@@ -48,12 +48,13 @@ pub fn calculate_total_angular_momentum(bodies: &[Body]) -> Vector3<f64> {
     total_l
 }
 
-/// A measure of "regularity" vs "chaos", smaller => more chaotic
-pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
+fn compute_jacobi_radii(
+    m1: f64,
+    m2: f64,
+    m3: f64,
+    positions: &[Vec<Vector3<f64>>],
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let len = positions[0].len();
-    if len == 0 {
-        return 0.0;
-    }
     let mut r1 = vec![0.0; len];
     let mut r2 = vec![0.0; len];
     let mut r3 = vec![0.0; len];
@@ -68,13 +69,38 @@ pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>
         r2[i] = (p2 - cm2).norm();
         r3[i] = (p3 - cm3).norm();
     }
+    (r1, r2, r3)
+}
+
+/// A measure of "regularity" vs "chaos", smaller => more chaotic.
+/// Uses a thread-local FFT planner cache for efficiency in parallel contexts.
+pub fn non_chaoticness_cached(
+    m1: f64,
+    m2: f64,
+    m3: f64,
+    positions: &[Vec<Vector3<f64>>],
+    fft_cache: &mut FftCache,
+) -> f64 {
+    if positions[0].is_empty() {
+        return 0.0;
+    }
+    let (r1, r2, r3) = compute_jacobi_radii(m1, m2, m3, positions);
+    let abs1: Vec<f64> = fft_cache.transform(&r1).iter().map(|c| c.norm()).collect();
+    let abs2: Vec<f64> = fft_cache.transform(&r2).iter().map(|c| c.norm()).collect();
+    let abs3: Vec<f64> = fft_cache.transform(&r3).iter().map(|c| c.norm()).collect();
+    (sample_std_dev(&abs1) + sample_std_dev(&abs2) + sample_std_dev(&abs3)) / 3.0
+}
+
+/// A measure of "regularity" vs "chaos", smaller => more chaotic
+pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
+    if positions[0].is_empty() {
+        return 0.0;
+    }
+    let (r1, r2, r3) = compute_jacobi_radii(m1, m2, m3, positions);
     let abs1: Vec<f64> = fourier_transform(&r1).iter().map(|c| c.norm()).collect();
     let abs2: Vec<f64> = fourier_transform(&r2).iter().map(|c| c.norm()).collect();
     let abs3: Vec<f64> = fourier_transform(&r3).iter().map(|c| c.norm()).collect();
-    let sd1 = sample_std_dev(&abs1);
-    let sd2 = sample_std_dev(&abs2);
-    let sd3 = sample_std_dev(&abs3);
-    (sd1 + sd2 + sd3) / 3.0
+    (sample_std_dev(&abs1) + sample_std_dev(&abs2) + sample_std_dev(&abs3)) / 3.0
 }
 
 /// Score how "equilateral" the 3-body triangle is over time
@@ -117,5 +143,86 @@ mod tests {
     fn test_sample_std_dev_short_input_is_nan() {
         assert!(sample_std_dev(&[]).is_nan());
         assert!(sample_std_dev(&[42.0]).is_nan());
+    }
+
+    fn triangle_positions(n: usize) -> Vec<Vec<Vector3<f64>>> {
+        (0..3)
+            .map(|body| {
+                (0..n)
+                    .map(|s| {
+                        let t = s as f64 / n as f64 * std::f64::consts::TAU;
+                        let phase = body as f64 * std::f64::consts::TAU / 3.0;
+                        Vector3::new((t + phase).cos() * 100.0, (t + phase).sin() * 80.0, 0.0)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_non_chaoticness_cached_matches_uncached() {
+        let positions = triangle_positions(512);
+        let (m1, m2, m3) = (200.0, 150.0, 250.0);
+
+        let uncached = non_chaoticness(m1, m2, m3, &positions);
+        let mut cache = FftCache::new();
+        let cached = non_chaoticness_cached(m1, m2, m3, &positions, &mut cache);
+
+        assert_eq!(
+            uncached.to_bits(),
+            cached.to_bits(),
+            "cached FFT should produce bitwise identical result"
+        );
+    }
+
+    #[test]
+    fn test_non_chaoticness_cached_deterministic_across_calls() {
+        let positions = triangle_positions(256);
+        let (m1, m2, m3) = (180.0, 220.0, 160.0);
+        let mut cache = FftCache::new();
+
+        let run1 = non_chaoticness_cached(m1, m2, m3, &positions, &mut cache);
+        let run2 = non_chaoticness_cached(m1, m2, m3, &positions, &mut cache);
+
+        assert_eq!(run1.to_bits(), run2.to_bits(), "repeated calls should be identical");
+    }
+
+    #[test]
+    fn test_non_chaoticness_empty_positions() {
+        let positions = vec![vec![], vec![], vec![]];
+        assert_eq!(non_chaoticness(1.0, 1.0, 1.0, &positions), 0.0);
+
+        let mut cache = FftCache::new();
+        assert_eq!(non_chaoticness_cached(1.0, 1.0, 1.0, &positions, &mut cache), 0.0);
+    }
+
+    #[test]
+    fn test_equilateralness_perfect_triangle() {
+        let n = 100;
+        let positions = triangle_positions(n);
+        let score = equilateralness_score(&positions);
+        assert!(score > 0.0, "equilateral triangle should have positive score");
+    }
+
+    #[test]
+    fn test_calculate_total_energy_bound_system() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.3, 0.0)),
+            Body::new(200.0, Vector3::new(-100.0, 0.0, 0.0), Vector3::new(0.0, -0.3, 0.0)),
+            Body::new(200.0, Vector3::new(0.0, 100.0, 0.0), Vector3::new(-0.3, 0.0, 0.0)),
+        ];
+        let energy = calculate_total_energy(&bodies);
+        assert!(energy < 0.0, "closely bound system should have negative energy, got {energy}");
+    }
+
+    #[test]
+    fn test_angular_momentum_symmetric_system() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(200.0, Vector3::new(-50.0, 86.6, 0.0), Vector3::new(-0.433, -0.25, 0.0)),
+            Body::new(200.0, Vector3::new(-50.0, -86.6, 0.0), Vector3::new(0.433, -0.25, 0.0)),
+        ];
+        let l = calculate_total_angular_momentum(&bodies);
+        assert!(l.norm() > 0.0, "rotating system should have non-zero angular momentum");
     }
 }

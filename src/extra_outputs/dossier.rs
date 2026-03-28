@@ -275,7 +275,8 @@ fn build_effects_page(seed: &str, effects: &[&str], data: &DossierData<'_>) -> S
 }
 
 fn compute_combined_rarity(config: &ResolvedEffectConfig) -> f64 {
-    let effects_and_probs: &[(&dyn Fn(&ResolvedEffectConfig) -> bool, f64)] = &[
+    type EffectCheckFn = dyn Fn(&ResolvedEffectConfig) -> bool;
+    let effects_and_probs: &[(&EffectCheckFn, f64)] = &[
         (&|c| c.enable_micro_contrast, 0.85),
         (&|c| c.enable_color_grade, 0.60),
         (&|c| c.enable_glow, 0.55),

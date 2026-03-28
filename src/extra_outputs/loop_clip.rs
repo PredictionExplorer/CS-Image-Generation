@@ -219,6 +219,47 @@ fn write_frames_to_video(
     )
 }
 
+fn write_frames_to_webm(
+    frames: &[Vec<u16>],
+    width: u32,
+    height: u32,
+    fps: u32,
+    output_path: &str,
+) -> crate::render::error::Result<()> {
+    let options = VideoEncodingOptions {
+        codec: "libvpx-vp9".to_string(),
+        preset: String::new(),
+        crf: 30,
+        bitrate: String::new(),
+        pixel_format: "yuv420p".to_string(),
+        input_pixel_format: "rgb48le".to_string(),
+        extra_args: vec![
+            "-row-mt".to_string(),
+            "1".to_string(),
+            "-b:v".to_string(),
+            "0".to_string(),
+        ],
+    };
+
+    create_video_from_frames_singlepass(
+        width,
+        height,
+        fps,
+        |out| {
+            for frame in frames {
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 2)
+                };
+                out.write_all(bytes)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            }
+            Ok(())
+        },
+        output_path,
+        &options,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,8 +311,8 @@ mod tests {
             frames[n - fade + tail_i] = vec![50000u16; px];
         }
         // Set start frames (indices 0..fade = 0,1,2) to a low value
-        for start_i in 0..fade {
-            frames[start_i] = vec![100u16; px];
+        for frame in frames.iter_mut().take(fade) {
+            *frame = vec![100u16; px];
         }
 
         let result = apply_crossfade(&frames, fade, output_count);
@@ -289,45 +330,4 @@ mod tests {
         assert_eq!(result.len(), 15);
         assert!(!result[0].is_empty());
     }
-}
-
-fn write_frames_to_webm(
-    frames: &[Vec<u16>],
-    width: u32,
-    height: u32,
-    fps: u32,
-    output_path: &str,
-) -> crate::render::error::Result<()> {
-    let options = VideoEncodingOptions {
-        codec: "libvpx-vp9".to_string(),
-        preset: String::new(),
-        crf: 30,
-        bitrate: String::new(),
-        pixel_format: "yuv420p".to_string(),
-        input_pixel_format: "rgb48le".to_string(),
-        extra_args: vec![
-            "-row-mt".to_string(),
-            "1".to_string(),
-            "-b:v".to_string(),
-            "0".to_string(),
-        ],
-    };
-
-    create_video_from_frames_singlepass(
-        width,
-        height,
-        fps,
-        |out| {
-            for frame in frames {
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 2)
-                };
-                out.write_all(bytes)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            }
-            Ok(())
-        },
-        output_path,
-        &options,
-    )
 }

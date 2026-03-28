@@ -103,6 +103,7 @@ impl ChannelLevels {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::constants;
 
     #[test]
     fn test_channel_levels() {
@@ -121,19 +122,95 @@ mod tests {
     }
 
     #[test]
-    fn test_channel_levels_with_tone_mapping() {
+    fn test_channel_levels_new_computes_ranges() {
+        let black_r = 0.05;
+        let white_r = 0.95;
+        let black_g = 0.1;
+        let white_g = 0.7;
+        let black_b = 0.0;
+        let white_b = 1.0;
+
+        let levels = ChannelLevels::new(black_r, white_r, black_g, white_g, black_b, white_b);
+
+        let expected = [
+            white_r - black_r,
+            white_g - black_g,
+            white_b - black_b,
+        ];
+        for (i, &exp) in expected.iter().enumerate() {
+            assert!((levels.range[i] - exp).abs() < 1e-12, "channel {i}");
+        }
+    }
+
+    #[test]
+    fn test_channel_levels_with_tone_mapping_stores_controls() {
+        let controls = ToneMappingControls {
+            exposure_scale: 1.25,
+            paper_white: 0.88,
+            highlight_rolloff: 4.0,
+        };
         let levels = ChannelLevels::with_tone_mapping(
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            ToneMappingControls { exposure_scale: 0.75, paper_white: 0.9, highlight_rolloff: 3.0 },
+            0.0, 1.0, 0.0, 1.0, 0.0, 1.0, controls,
         );
 
-        assert!((levels.exposure_scale() - 0.75).abs() < 1e-10);
-        assert!((levels.paper_white() - 0.9).abs() < 1e-10);
-        assert!((levels.highlight_rolloff() - 3.0).abs() < 1e-10);
+        assert!((levels.exposure_scale - controls.exposure_scale).abs() < 1e-12);
+        assert!((levels.paper_white - controls.paper_white).abs() < 1e-12);
+        assert!((levels.highlight_rolloff - controls.highlight_rolloff).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_channel_levels_default_tone_mapping() {
+        let levels = ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+
+        assert!((levels.exposure_scale - 1.0).abs() < 1e-12);
+        assert!((levels.paper_white - constants::DEFAULT_TONEMAP_PAPER_WHITE).abs() < 1e-12);
+        assert!(
+            (levels.highlight_rolloff - constants::DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn test_channel_levels_range_never_negative() {
+        let levels = ChannelLevels::new(
+            0.5, 0.2,
+            0.0, 1.0,
+            0.0, 1.0,
+        );
+
+        assert!(levels.range[0] >= 0.0);
+        let raw = 0.2_f64 - 0.5_f64;
+        let expected = raw.max(1e-14);
+        assert!((levels.range[0] - expected).abs() < 1e-20);
+        assert!((levels.range[1] - 1.0).abs() < 1e-12);
+        assert!((levels.range[2] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_tone_mapping_controls_applied_to_levels() {
+        let base = (
+            0.0_f64, 1.0_f64,
+            0.0_f64, 1.0_f64,
+            0.0_f64, 1.0_f64,
+        );
+        let a = ChannelLevels::with_tone_mapping(
+            base.0, base.1, base.2, base.3, base.4, base.5,
+            ToneMappingControls {
+                exposure_scale: 0.5,
+                paper_white: 0.6,
+                highlight_rolloff: 1.5,
+            },
+        );
+        let b = ChannelLevels::with_tone_mapping(
+            base.0, base.1, base.2, base.3, base.4, base.5,
+            ToneMappingControls {
+                exposure_scale: 2.0,
+                paper_white: 0.95,
+                highlight_rolloff: 5.0,
+            },
+        );
+
+        assert_ne!(a.exposure_scale, b.exposure_scale);
+        assert_ne!(a.paper_white, b.paper_white);
+        assert_ne!(a.highlight_rolloff, b.highlight_rolloff);
     }
 }

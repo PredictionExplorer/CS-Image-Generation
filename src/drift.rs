@@ -371,4 +371,74 @@ mod tests {
         drift.apply(&mut positions, 0.001);
         assert_eq!(positions, positions_clone);
     }
+
+    #[test]
+    fn test_drift_parameters_clamps_values() {
+        let neg_scale = DriftParameters::new(-2.0, 0.5, 0.3);
+        assert_eq!(neg_scale.scale, 0.0);
+        assert_eq!(neg_scale.arc_fraction, 0.5);
+        assert_eq!(neg_scale.eccentricity, 0.3);
+
+        let low_arc = DriftParameters::new(1.0, -0.25, 0.2);
+        assert_eq!(low_arc.arc_fraction, 0.0);
+
+        let high_arc = DriftParameters::new(1.0, 1.5, 0.2);
+        assert_eq!(high_arc.arc_fraction, 1.0);
+
+        let low_ecc = DriftParameters::new(1.0, 0.5, -0.5);
+        assert_eq!(low_ecc.eccentricity, 0.0);
+
+        let high_ecc = DriftParameters::new(1.0, 0.5, 1.5);
+        assert_eq!(high_ecc.eccentricity, 0.95);
+    }
+
+    #[test]
+    fn test_brownian_drift_changes_positions() {
+        let original = test_bodies();
+        let mut positions = original.clone();
+        let mut rng = make_rng();
+        let mut drift = BrownianDrift::new(&mut rng, 1.0, 3);
+        drift.apply(&mut positions, 0.001);
+        assert_ne!(positions, original);
+    }
+
+    #[test]
+    fn test_linear_drift_changes_positions() {
+        let original = test_bodies();
+        let mut positions = original.clone();
+        let mut rng = make_rng();
+        let mut drift = LinearDrift::new(&mut rng, 1.0);
+        drift.apply(&mut positions, 0.001);
+        assert_ne!(positions, original);
+    }
+
+    #[test]
+    fn test_parse_drift_mode_creates_correct_type() {
+        let params = DriftParameters::new(1.0, 0.25, 0.1);
+        for mode in ["linear", "brownian", "elliptical"] {
+            let original = test_bodies();
+            let mut positions = original.clone();
+            let mut rng = make_rng();
+            let mut drift = parse_drift_mode(mode, &mut rng, params, 3);
+            drift.apply(&mut positions, 0.001);
+            assert_ne!(positions, original, "drift mode {mode} should move bodies");
+        }
+    }
+
+    #[test]
+    fn test_elliptical_drift_determinism() {
+        let params = DriftParameters::new(1.0, 0.25, 0.1);
+
+        let mut positions_a = test_bodies();
+        let mut rng_a = make_rng();
+        let mut drift_a = EllipticalDrift::new(&mut rng_a, params);
+        drift_a.apply(&mut positions_a, 0.001);
+
+        let mut positions_b = test_bodies();
+        let mut rng_b = make_rng();
+        let mut drift_b = EllipticalDrift::new(&mut rng_b, params);
+        drift_b.apply(&mut positions_b, 0.001);
+
+        assert_eq!(positions_a, positions_b);
+    }
 }

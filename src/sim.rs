@@ -2,9 +2,10 @@
 
 use crate::analysis::{
     calculate_total_angular_momentum, calculate_total_energy, equilateralness_score,
-    non_chaoticness,
+    non_chaoticness_cached,
 };
 use crate::error::{Result, SimulationError};
+use crate::utils::FftCache;
 use nalgebra::Vector3;
 use rayon::prelude::*;
 use sha3::{Digest, Sha3_256};
@@ -385,7 +386,7 @@ pub fn select_best_trajectory(
     let results: Vec<Option<(TrajectoryResult, usize)>> = many
         .par_iter()
         .enumerate()
-        .map(|(i, b)| {
+        .map_init(FftCache::new, |fft_cache, (i, b)| {
             let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
             if cnt.is_multiple_of(cs) {
                 info!(
@@ -393,7 +394,6 @@ pub fn select_best_trajectory(
                     (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
                 );
             }
-            // Quick rejection: check energy and angular momentum first
             let e = calculate_total_energy(b);
             let ang = calculate_total_angular_momentum(b).norm();
             if e > 10.0 || ang < 10.0 {
@@ -401,11 +401,9 @@ pub fn select_best_trajectory(
                 return None;
             }
 
-            // Run simulation with early-exit checks for escaping bodies
             let simr = match get_positions_with_early_exit(b.clone(), steps, th) {
                 Some(result) => result,
                 None => {
-                    // Early-exit triggered - body escaped during simulation
                     dc.fetch_add(1, Ordering::Relaxed);
                     return None;
                 }
@@ -416,14 +414,11 @@ pub fn select_best_trajectory(
             let m2 = b[1].mass;
             let m3 = b[2].mass;
 
-            // Compute quality metrics
-            let c = non_chaoticness(m1, m2, m3, &pos);
+            let c = non_chaoticness_cached(m1, m2, m3, &pos, fft_cache);
             let eq = equilateralness_score(&pos);
 
-            // Early rejection: if both metrics are terrible, skip
-            // This saves time on Borda ranking for clearly unsuitable candidates
-            const MIN_VIABLE_CHAOS: f64 = 0.1; // Below this, too chaotic
-            const MIN_VIABLE_EQUILATERAL: f64 = 0.01; // Below this, too linear
+            const MIN_VIABLE_CHAOS: f64 = 0.1;
+            const MIN_VIABLE_EQUILATERAL: f64 = 0.01;
 
             if c < MIN_VIABLE_CHAOS && eq < MIN_VIABLE_EQUILATERAL {
                 dc.fetch_add(1, Ordering::Relaxed);
@@ -608,5 +603,83 @@ mod tests {
                 assert_eq!(v1[2].to_bits(), v2[2].to_bits(), "vel body {body} step {step} Z");
             }
         }
+    }
+
+    #[test]
+    fn test_borda_search_determinism_with_fft_cache() {
+        let seed = [0x10, 0x00, 0x33];
+        let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+
+        let result1 = select_best_trajectory(&mut rng1, 20, 5000, 0.75, 11.0, -0.3);
+        let result2 = select_best_trajectory(&mut rng2, 20, 5000, 0.75, 11.0, -0.3);
+
+        match (result1, result2) {
+            (Ok((_, info1)), Ok((_, info2))) => {
+                assert_eq!(
+                    info1.total_score_weighted.to_bits(),
+                    info2.total_score_weighted.to_bits(),
+                    "Borda scores must be deterministic"
+                );
+                assert_eq!(info1.selected_index, info2.selected_index);
+            }
+            (Err(_), Err(_)) => {}
+            _ => panic!("Both runs should produce the same Ok/Err variant"),
+        }
+    }
+
+    #[test]
+    fn test_early_exit_escaping_bodies() {
+        let bodies = vec![
+            Body::new(100.0, Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 10.0, 10.0)),
+            Body::new(100.0, Vector3::new(1.0, 0.0, 0.0), Vector3::new(-10.0, -10.0, -10.0)),
+            Body::new(100.0, Vector3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 0.0)),
+        ];
+        let result = get_positions_with_early_exit(bodies, 50000, -0.3);
+        assert!(result.is_none(), "high-velocity bodies should trigger early exit");
+    }
+
+    #[test]
+    fn test_shift_bodies_to_com_zeroes_momentum() {
+        let mut bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.5, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.5, 0.0)),
+        ];
+        shift_bodies_to_com(&mut bodies);
+
+        let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();
+        let com: Vector3<f64> =
+            bodies.iter().map(|b| b.mass * b.position).sum::<Vector3<f64>>() / total_mass;
+        let mom: Vector3<f64> =
+            bodies.iter().map(|b| b.mass * b.velocity).sum::<Vector3<f64>>() / total_mass;
+
+        assert!(com.norm() < 1e-10, "COM position should be near zero");
+        assert!(mom.norm() < 1e-10, "COM velocity should be near zero");
+    }
+
+    #[test]
+    fn test_symplectic_integrator_energy_conservation() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.3, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.2, -0.1, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.2, -0.2, 0.0)),
+        ];
+
+        let initial_energy = crate::analysis::calculate_total_energy(&bodies);
+        let sim = get_positions(bodies, 10000);
+
+        let final_bodies = vec![
+            Body::new(200.0, *sim.positions[0].last().unwrap(), *sim.velocities[0].last().unwrap()),
+            Body::new(150.0, *sim.positions[1].last().unwrap(), *sim.velocities[1].last().unwrap()),
+            Body::new(250.0, *sim.positions[2].last().unwrap(), *sim.velocities[2].last().unwrap()),
+        ];
+        let final_energy = crate::analysis::calculate_total_energy(&final_bodies);
+
+        let rel_error = ((final_energy - initial_energy) / initial_energy.abs()).abs();
+        assert!(
+            rel_error < 0.01,
+            "symplectic integrator should conserve energy within 1%, got {rel_error:.6}"
+        );
     }
 }

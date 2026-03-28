@@ -113,6 +113,7 @@ fn compose_strip(
     strip
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_border(
     img: &mut ImageBuffer<Rgb<u16>, Vec<u16>>,
     x: u32, y: u32, w: u32, h: u32,

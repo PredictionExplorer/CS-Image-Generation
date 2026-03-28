@@ -156,6 +156,63 @@ fn fade_envelope(t: f64) -> f64 {
     fade_in * fade_out
 }
 
+fn write_wav(samples: &[i16], path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let data_size = (samples.len() * 2) as u32;
+    let file_size = 36 + data_size;
+
+    let mut file = std::fs::File::create(path)?;
+
+    file.write_all(b"RIFF")?;
+    file.write_all(&file_size.to_le_bytes())?;
+    file.write_all(b"WAVE")?;
+
+    file.write_all(b"fmt ")?;
+    file.write_all(&16u32.to_le_bytes())?;
+    file.write_all(&1u16.to_le_bytes())?;
+    file.write_all(&CHANNELS.to_le_bytes())?;
+    file.write_all(&SAMPLE_RATE.to_le_bytes())?;
+    let byte_rate = SAMPLE_RATE * CHANNELS as u32 * (BITS_PER_SAMPLE / 8) as u32;
+    file.write_all(&byte_rate.to_le_bytes())?;
+    let block_align = CHANNELS * (BITS_PER_SAMPLE / 8);
+    file.write_all(&block_align.to_le_bytes())?;
+    file.write_all(&BITS_PER_SAMPLE.to_le_bytes())?;
+
+    file.write_all(b"data")?;
+    file.write_all(&data_size.to_le_bytes())?;
+    for &sample in samples {
+        file.write_all(&sample.to_le_bytes())?;
+    }
+
+    Ok(())
+}
+
+fn mux_audio_video(
+    audio_path: &str,
+    video_path: &str,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("ffmpeg mux failed with status {:?}", status).into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,61 +295,4 @@ mod tests {
             );
         }
     }
-}
-
-fn write_wav(samples: &[i16], path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let data_size = (samples.len() * 2) as u32;
-    let file_size = 36 + data_size;
-
-    let mut file = std::fs::File::create(path)?;
-
-    file.write_all(b"RIFF")?;
-    file.write_all(&file_size.to_le_bytes())?;
-    file.write_all(b"WAVE")?;
-
-    file.write_all(b"fmt ")?;
-    file.write_all(&16u32.to_le_bytes())?;
-    file.write_all(&1u16.to_le_bytes())?;
-    file.write_all(&CHANNELS.to_le_bytes())?;
-    file.write_all(&SAMPLE_RATE.to_le_bytes())?;
-    let byte_rate = SAMPLE_RATE * CHANNELS as u32 * (BITS_PER_SAMPLE / 8) as u32;
-    file.write_all(&byte_rate.to_le_bytes())?;
-    let block_align = CHANNELS * (BITS_PER_SAMPLE / 8);
-    file.write_all(&block_align.to_le_bytes())?;
-    file.write_all(&BITS_PER_SAMPLE.to_le_bytes())?;
-
-    file.write_all(b"data")?;
-    file.write_all(&data_size.to_le_bytes())?;
-    for &sample in samples {
-        file.write_all(&sample.to_le_bytes())?;
-    }
-
-    Ok(())
-}
-
-fn mux_audio_video(
-    audio_path: &str,
-    video_path: &str,
-    output_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let status = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_path,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()?;
-
-    if !status.success() {
-        return Err(format!("ffmpeg mux failed with status {:?}", status).into());
-    }
-    Ok(())
 }

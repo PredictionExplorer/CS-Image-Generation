@@ -20,13 +20,35 @@ pub fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() < FLOAT_EPSILON
 }
 
+/// Reusable FFT planner that caches plans across calls of the same length.
+/// Avoids the cost of re-planning every invocation (significant for N=1M).
+pub struct FftCache {
+    planner: FftPlanner<f64>,
+}
+
+impl Default for FftCache {
+    fn default() -> Self {
+        Self { planner: FftPlanner::new() }
+    }
+}
+
+impl FftCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn transform(&mut self, input: &[f64]) -> Vec<Complex<f64>> {
+        let fft = self.planner.plan_fft_forward(input.len());
+        let mut data: Vec<_> = input.iter().map(|&x| Complex::new(x, 0.0)).collect();
+        fft.process(&mut data);
+        data
+    }
+}
+
 /// Compute Fourier transform of a real-valued signal
 pub fn fourier_transform(input: &[f64]) -> Vec<Complex<f64>> {
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(input.len());
-    let mut data: Vec<_> = input.iter().map(|&x| Complex::new(x, 0.0)).collect();
-    fft.process(&mut data);
-    data
+    let mut cache = FftCache::new();
+    cache.transform(input)
 }
 
 /// 2D bounding box: (min_x, max_x, min_y, max_y)
@@ -192,9 +214,60 @@ mod tests {
         let input = vec![0.0; 10];
         let output = fourier_transform(&input);
 
-        // FFT of all zeros should be all zeros (approximately)
         for c in output {
             assert!(c.norm() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_fft_cache_matches_uncached() {
+        let input: Vec<f64> = (0..128).map(|i| (i as f64 * 0.1).sin()).collect();
+        let uncached = fourier_transform(&input);
+        let mut cache = FftCache::new();
+        let cached = cache.transform(&input);
+
+        assert_eq!(uncached.len(), cached.len());
+        for (i, (a, b)) in uncached.iter().zip(cached.iter()).enumerate() {
+            assert_eq!(a.re.to_bits(), b.re.to_bits(), "re differs at index {i}");
+            assert_eq!(a.im.to_bits(), b.im.to_bits(), "im differs at index {i}");
+        }
+    }
+
+    #[test]
+    fn test_fft_cache_reuse_same_length() {
+        let mut cache = FftCache::new();
+        let input1: Vec<f64> = (0..64).map(|i| (i as f64).sin()).collect();
+        let input2: Vec<f64> = (0..64).map(|i| (i as f64).cos()).collect();
+
+        let result1 = cache.transform(&input1);
+        let result2 = cache.transform(&input2);
+
+        assert_ne!(result1[1].re.to_bits(), result2[1].re.to_bits());
+    }
+
+    #[test]
+    fn test_fft_cache_different_lengths() {
+        let mut cache = FftCache::new();
+        let small: Vec<f64> = (0..16).map(|i| i as f64).collect();
+        let large: Vec<f64> = (0..256).map(|i| i as f64).collect();
+
+        let r_small = cache.transform(&small);
+        let r_large = cache.transform(&large);
+
+        assert_eq!(r_small.len(), 16);
+        assert_eq!(r_large.len(), 256);
+    }
+
+    #[test]
+    fn test_fft_cache_deterministic() {
+        let input: Vec<f64> = (0..512).map(|i| (i as f64 * 0.05).sin()).collect();
+        let mut cache = FftCache::new();
+        let run1 = cache.transform(&input);
+        let run2 = cache.transform(&input);
+
+        for (i, (a, b)) in run1.iter().zip(run2.iter()).enumerate() {
+            assert_eq!(a.re.to_bits(), b.re.to_bits(), "determinism: re at {i}");
+            assert_eq!(a.im.to_bits(), b.im.to_bits(), "determinism: im at {i}");
         }
     }
 }

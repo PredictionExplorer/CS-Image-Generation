@@ -132,4 +132,68 @@ mod tests {
         let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
         assert_tuple_bits_eq(via_public, via_simd, "simd_dispatch");
     }
+
+    #[test]
+    fn test_wavelength_nm_for_bin_monotonic() {
+        let mut prev = wavelength_nm_for_bin(0);
+        for bin in 1..NUM_BINS {
+            let w = wavelength_nm_for_bin(bin);
+            assert!(
+                w > prev,
+                "bin {bin}: wavelength {w} should exceed previous {prev}"
+            );
+            prev = w;
+        }
+    }
+
+    #[test]
+    fn test_wavelength_nm_for_bin_range() {
+        for bin in 0..NUM_BINS {
+            let w = wavelength_nm_for_bin(bin);
+            assert!(
+                (380.0..=700.0).contains(&w),
+                "bin {bin}: wavelength {w} nm outside [380, 700]"
+            );
+        }
+    }
+
+    #[test]
+    fn test_num_bins_is_16() {
+        const _ASSERT: [(); NUM_BINS] = [(); 16];
+        assert_eq!(_ASSERT.len(), 16);
+    }
+
+    #[test]
+    fn test_spd_to_rgba_all_zeros_is_black() {
+        let spd = [0.0; NUM_BINS];
+        let (r, g, b, a) = spd_to_rgba(&spd);
+        assert_eq!(r, 0.0);
+        assert_eq!(g, 0.0);
+        assert_eq!(b, 0.0);
+        assert_eq!(a, 0.0);
+    }
+
+    #[test]
+    fn test_spd_to_rgba_uniform_spectrum_positive() {
+        let spd = [1.0; NUM_BINS];
+        let (r, g, b, a) = spd_to_rgba(&spd);
+        assert!(r > 0.0, "R should be positive for uniform SPD");
+        assert!(g > 0.0, "G should be positive for uniform SPD");
+        assert!(b > 0.0, "B should be positive for uniform SPD");
+        assert!(a > 0.0, "A should be positive for uniform SPD");
+    }
+
+    #[test]
+    fn test_bin_combined_lut_has_correct_length() {
+        assert_eq!(BIN_COMBINED_LUT.len(), NUM_BINS);
+    }
+
+    #[test]
+    fn test_bin_combined_lut_rgb_non_negative() {
+        for (i, &(r, g, b, _k)) in BIN_COMBINED_LUT.iter().enumerate() {
+            assert!(r >= 0.0, "bin {i}: R = {r} should be >= 0");
+            assert!(g >= 0.0, "bin {i}: G = {g} should be >= 0");
+            assert!(b >= 0.0, "bin {i}: B = {b} should be >= 0");
+        }
+    }
 }

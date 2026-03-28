@@ -205,6 +205,49 @@ fn crop_and_resize_16bit(
     out
 }
 
+fn encode_webp(
+    frame_bytes: &[u8],
+    width: u32,
+    height: u32,
+    fps: u32,
+    output_path: &str,
+) -> crate::render::error::Result<()> {
+    let mut child = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb48le",
+            "-s", &format!("{}x{}", width, height),
+            "-r", &fps.to_string(),
+            "-i", "-",
+            "-vf", &format!("format=rgba,scale={}:{}", width, height),
+            "-c:v", "libwebp_anim",
+            "-quality", "80",
+            "-loop", "0",
+            "-lossless", "0",
+            output_path,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(crate::render::error::RenderError::VideoEncoding)?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(frame_bytes);
+        let _ = stdin.flush();
+        drop(stdin);
+    }
+
+    let status = child.wait().map_err(crate::render::error::RenderError::VideoEncoding)?;
+    if !status.success() {
+        return Err(crate::render::error::RenderError::InvalidConfig(
+            "WebP encoding failed; ffmpeg may lack libwebp_anim support".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,8 +294,8 @@ mod tests {
         let size = 4;
         let crop = CropRegion { x: 0, y: 0, size };
         let mut buf = vec![0u16; size * size * 3];
-        for i in 0..buf.len() {
-            buf[i] = (i * 100) as u16;
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = (i * 100) as u16;
         }
 
         let result = crop_and_resize_16bit(&buf, size, size, &crop, size as u32);
@@ -261,47 +304,4 @@ mod tests {
             assert_eq!(got, expected, "pixel {i} differs in identity crop");
         }
     }
-}
-
-fn encode_webp(
-    frame_bytes: &[u8],
-    width: u32,
-    height: u32,
-    fps: u32,
-    output_path: &str,
-) -> crate::render::error::Result<()> {
-    let mut child = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb48le",
-            "-s", &format!("{}x{}", width, height),
-            "-r", &fps.to_string(),
-            "-i", "-",
-            "-vf", &format!("format=rgba,scale={}:{}", width, height),
-            "-c:v", "libwebp_anim",
-            "-quality", "80",
-            "-loop", "0",
-            "-lossless", "0",
-            output_path,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(crate::render::error::RenderError::VideoEncoding)?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(frame_bytes);
-        let _ = stdin.flush();
-        drop(stdin);
-    }
-
-    let status = child.wait().map_err(crate::render::error::RenderError::VideoEncoding)?;
-    if !status.success() {
-        return Err(crate::render::error::RenderError::InvalidConfig(
-            "WebP encoding failed; ffmpeg may lack libwebp_anim support".to_string(),
-        ));
-    }
-    Ok(())
 }

@@ -129,6 +129,7 @@ fn find_energy_hotspot(
     (best_bx * block + block / 2, best_by * block + block / 2)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn crop_and_resize(
     src: &image::ImageBuffer<image::Rgb<u16>, Vec<u16>>,
     _src_w: u32,

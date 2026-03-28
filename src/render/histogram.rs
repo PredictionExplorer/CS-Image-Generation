@@ -47,6 +47,11 @@ impl HistogramData {
         self.data.reserve(additional);
     }
 
+    /// Extend the histogram with a pre-built slice of samples.
+    pub fn extend_from_slice(&mut self, samples: &[[f64; 3]]) {
+        self.data.extend_from_slice(samples);
+    }
+
     /// Get raw histogram data for custom analysis
     pub fn data(&self) -> &[[f64; 3]] {
         &self.data
@@ -194,5 +199,35 @@ mod tests {
 
         assert!(analysis.near_clip_ratio > 0.0);
         assert!(analysis.exposure_scale <= 1.0);
+    }
+
+    #[test]
+    fn test_extend_from_slice_matches_sequential_push() {
+        let samples = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]];
+
+        let mut via_push = HistogramData::with_capacity(3);
+        for &[r, g, b] in &samples {
+            via_push.push(r, g, b);
+        }
+
+        let mut via_extend = HistogramData::with_capacity(3);
+        via_extend.extend_from_slice(&samples);
+
+        assert_eq!(via_push.data().len(), via_extend.data().len());
+        for (a, b) in via_push.data().iter().zip(via_extend.data()) {
+            assert_eq!(a[0].to_bits(), b[0].to_bits());
+            assert_eq!(a[1].to_bits(), b[1].to_bits());
+            assert_eq!(a[2].to_bits(), b[2].to_bits());
+        }
+    }
+
+    #[test]
+    fn test_histogram_data_reserve_and_capacity() {
+        let mut hist = HistogramData::with_capacity(100);
+        hist.reserve(200);
+        for i in 0..300 {
+            hist.push(i as f64, i as f64 * 2.0, i as f64 * 3.0);
+        }
+        assert_eq!(hist.data().len(), 300);
     }
 }

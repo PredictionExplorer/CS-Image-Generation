@@ -39,12 +39,12 @@ fn find_converter() -> Option<String> {
     let xcrun = Command::new("xcrun")
         .args(["--find", "usdzconvert"])
         .output();
-    if let Ok(output) = xcrun {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
-            }
+    if let Ok(output) = xcrun
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(path);
         }
     }
 

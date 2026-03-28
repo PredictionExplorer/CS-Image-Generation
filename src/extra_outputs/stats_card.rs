@@ -161,6 +161,25 @@ fn build_effects_svg(effects: &[&str]) -> String {
     svg
 }
 
+fn collect_active_effects(config: &ResolvedEffectConfig) -> Vec<&'static str> {
+    let mut effects = Vec::new();
+    if config.enable_bloom { effects.push("DoG Bloom"); }
+    if config.enable_glow { effects.push("Glow Enhancement"); }
+    if config.enable_chromatic_bloom { effects.push("Chromatic Bloom"); }
+    if config.enable_perceptual_blur { effects.push("Perceptual Blur"); }
+    if config.enable_micro_contrast { effects.push("Micro Contrast"); }
+    if config.enable_gradient_map { effects.push("Gradient Map"); }
+    if config.enable_color_grade { effects.push("Color Grade"); }
+    if config.enable_opalescence { effects.push("Opalescence"); }
+    if config.enable_champleve { effects.push("Champlevé"); }
+    if config.enable_aether { effects.push("Aether Weave"); }
+    if config.enable_edge_luminance { effects.push("Edge Luminance"); }
+    if config.enable_atmospheric_depth { effects.push("Atmospheric Depth"); }
+    if config.enable_fine_texture { effects.push("Fine Texture"); }
+    if config.nebula_strength > 0.0 { effects.push("Nebula Clouds"); }
+    effects
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,23 +312,4 @@ mod tests {
         assert!(svg.contains("DoG Bloom"));
         assert!(svg.contains("Aether Weave"));
     }
-}
-
-fn collect_active_effects(config: &ResolvedEffectConfig) -> Vec<&'static str> {
-    let mut effects = Vec::new();
-    if config.enable_bloom { effects.push("DoG Bloom"); }
-    if config.enable_glow { effects.push("Glow Enhancement"); }
-    if config.enable_chromatic_bloom { effects.push("Chromatic Bloom"); }
-    if config.enable_perceptual_blur { effects.push("Perceptual Blur"); }
-    if config.enable_micro_contrast { effects.push("Micro Contrast"); }
-    if config.enable_gradient_map { effects.push("Gradient Map"); }
-    if config.enable_color_grade { effects.push("Color Grade"); }
-    if config.enable_opalescence { effects.push("Opalescence"); }
-    if config.enable_champleve { effects.push("Champlevé"); }
-    if config.enable_aether { effects.push("Aether Weave"); }
-    if config.enable_edge_luminance { effects.push("Edge Luminance"); }
-    if config.enable_atmospheric_depth { effects.push("Atmospheric Depth"); }
-    if config.enable_fine_texture { effects.push("Fine Texture"); }
-    if config.nebula_strength > 0.0 { effects.push("Nebula Clouds"); }
-    effects
 }

@@ -109,10 +109,10 @@ fn build_fingerprint_svg(energies: &[f64; NUM_BINS], seed: &str) -> String {
     let mut wedges = String::new();
     let mut labels = String::new();
 
-    for bin in 0..NUM_BINS {
+    for (bin, &energy) in energies.iter().enumerate().take(NUM_BINS) {
         let nm = wavelength_nm_for_bin(bin);
         let color = wavelength_to_hex(nm);
-        let normalized = energies[bin] / max_energy;
+        let normalized = energy / max_energy;
         let outer_r = inner_radius + (max_radius - inner_radius) * normalized;
 
         let start_angle = bin as f64 * angle_per_bin - std::f64::consts::FRAC_PI_2;
