@@ -1,5 +1,7 @@
 use crate::sim::{Body, G};
-use crate::utils::{FftCache, fourier_transform};
+use crate::utils::FftCache;
+#[cfg(test)]
+use crate::utils::fourier_transform;
 use nalgebra::Vector3;
 
 fn sample_std_dev(values: &[f64]) -> f64 {
@@ -91,7 +93,7 @@ pub fn non_chaoticness_cached(
     (sample_std_dev(&abs1) + sample_std_dev(&abs2) + sample_std_dev(&abs3)) / 3.0
 }
 
-/// A measure of "regularity" vs "chaos", smaller => more chaotic
+#[cfg(test)]
 pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
     if positions[0].is_empty() {
         return 0.0;

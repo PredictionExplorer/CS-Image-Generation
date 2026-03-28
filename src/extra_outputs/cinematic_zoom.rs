@@ -35,7 +35,6 @@ pub fn render_cinematic_zoom(
     let hi_settings = SpectralRenderSettings::new(
         &hi_resolved,
         settings.render_config,
-        settings.noise_seed,
         settings.aspect_correction,
     );
 

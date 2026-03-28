@@ -11,28 +11,6 @@ use nalgebra::Vector3;
 /// Triangle vertex data for batch processing
 pub type TriangleVertex = LineVertex;
 
-/// Draw a complete triangle (3 line segments) in a batch for better performance
-#[inline]
-pub fn draw_triangle_batch_spectral(
-    accum: &mut [[f64; NUM_BINS]],
-    width: u32,
-    height: u32,
-    vertices: [TriangleVertex; 3],
-    hdr_multipliers: [f64; 3],
-    hdr_scale: f64,
-) {
-    draw_triangle_batch_spectral_rows(
-        accum,
-        width,
-        height,
-        0,
-        height as usize,
-        vertices,
-        hdr_multipliers,
-        hdr_scale,
-    );
-}
-
 /// Draw a complete triangle into an owned row band of the destination buffer.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_triangle_batch_spectral_rows(

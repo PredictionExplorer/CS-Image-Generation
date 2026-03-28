@@ -103,11 +103,6 @@ pub struct RandomizableEffectConfig {
     // Clipping
     pub clip_black: Option<f64>,
     pub clip_white: Option<f64>,
-
-    // Nebula
-    pub nebula_strength: Option<f64>,
-    pub nebula_octaves: Option<usize>,
-    pub nebula_base_frequency: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -584,27 +579,6 @@ impl RandomizableEffectConfig {
                 &mut randomizer,
                 &mut log,
             ),
-            nebula_strength: self.resolve_float(
-                "nebula_strength",
-                self.nebula_strength,
-                &pd::NEBULA_STRENGTH,
-                &mut randomizer,
-                &mut log,
-            ),
-            nebula_octaves: self.resolve_int(
-                "nebula_octaves",
-                self.nebula_octaves,
-                &pd::NEBULA_OCTAVES,
-                &mut randomizer,
-                &mut log,
-            ),
-            nebula_base_frequency: self.resolve_float(
-                "nebula_base_frequency",
-                self.nebula_base_frequency,
-                &pd::NEBULA_BASE_FREQUENCY,
-                &mut randomizer,
-                &mut log,
-            ),
 
             clip_black: 0.0,
             clip_white: 0.0,
@@ -738,7 +712,6 @@ impl RandomizableEffectConfig {
             "edge_luminance",
             "color_grade",
             "tone_curve",
-            "nebula_base",
         ];
         for prefix in MULTI_WORD_PREFIXES {
             if param_name.starts_with(prefix) {
@@ -825,9 +798,6 @@ pub struct ResolvedEffectConfig {
     pub hdr_scale: f64,
     pub clip_black: f64,
     pub clip_white: f64,
-    pub nebula_strength: f64,
-    pub nebula_octaves: usize,
-    pub nebula_base_frequency: f64,
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
@@ -1143,9 +1113,6 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
         }
     }
 

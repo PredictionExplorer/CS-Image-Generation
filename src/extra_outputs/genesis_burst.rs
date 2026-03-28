@@ -1,14 +1,13 @@
 //! "Genesis Burst" still — the first ~1% of the trajectory, capturing the
 //! explosive initial divergence of the three bodies.
 
-use crate::post_effects::NebulaCloudConfig;
 use crate::render::context::RenderContext;
 use crate::render::effects::{FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
 use crate::render::velocity_hdr;
 use crate::render::{
     ChannelLevels, FinishOutputMode, SpectralRenderSettings, SpectralScene,
     accumulate_spectral_steps, apply_energy_density_shift, build_effect_config_from_resolved,
-    composite_buffers, constants, default_accumulation_backend, generate_nebula_background,
+    constants, default_accumulation_backend,
     quantize_display_buffer_to_16bit, save_image_as_png_16bit, tonemap_to_display_buffer,
 };
 use crate::spectrum::NUM_BINS;
@@ -60,34 +59,7 @@ pub fn render_genesis_burst(
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
 
-    let nebula_background = if resolved.nebula_strength > 0.0 {
-        generate_nebula_background(
-            width as usize,
-            height as usize,
-            0,
-            &NebulaCloudConfig {
-                strength: resolved.nebula_strength,
-                octaves: resolved.nebula_octaves,
-                base_frequency: resolved.nebula_base_frequency,
-                lacunarity: 2.0,
-                persistence: 0.5,
-                noise_seed: settings.noise_seed as i64,
-                colors: [
-                    [0.08, 0.12, 0.22],
-                    [0.15, 0.08, 0.25],
-                    [0.25, 0.12, 0.18],
-                    [0.12, 0.15, 0.28],
-                ],
-                time_scale: 1.0,
-                edge_fade: 0.3,
-            },
-        )
-    } else {
-        vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()]
-    };
-
-    let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-    let display_buffer = tonemap_to_display_buffer(&composited, levels);
+    let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
@@ -144,7 +116,6 @@ mod tests {
             atmospheric_fog_color_r: 0.0, atmospheric_fog_color_g: 0.0, atmospheric_fog_color_b: 0.0,
             fine_texture_strength: 0.0, fine_texture_scale: 0.0, fine_texture_contrast: 0.0,
             hdr_scale: 0.12, clip_black: 0.01, clip_white: 0.99,
-            nebula_strength: 0.0, nebula_octaves: 4, nebula_base_frequency: 0.0015,
         }
     }
 
@@ -186,7 +157,7 @@ mod tests {
         let render_config = RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::None };
         let levels = crate::render::ChannelLevels::new(0.0, 0.1, 0.0, 0.1, 0.0, 0.1);
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, 42, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
 
         let tmp_dir = std::env::temp_dir().join("cosmic_sig_test_genesis");
         let _ = std::fs::create_dir_all(&tmp_dir);

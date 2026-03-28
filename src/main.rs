@@ -205,8 +205,6 @@ fn main() -> Result<()> {
 
     let seed_bytes = app::parse_seed(&args.seed)?;
     let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
-    let noise_seed = app::derive_noise_seed(&seed_bytes);
-
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
         DEFAULT_MIN_MASS,
@@ -286,7 +284,6 @@ fn main() -> Result<()> {
         &colors,
         &body_alphas,
         &resolved_effect_config,
-        noise_seed,
         &render_config,
         enhancements.aspect_correction,
     )?;
@@ -300,7 +297,6 @@ fn main() -> Result<()> {
         render::SpectralRenderSettings::new(
             &resolved_effect_config,
             &render_config,
-            noise_seed,
             enhancements.aspect_correction,
         ),
         &output_vid,
@@ -316,10 +312,9 @@ fn main() -> Result<()> {
             &colors,
             &body_alphas,
             &levels,
-            &resolved_effect_config,
-            &render_config,
-            noise_seed,
-            &args,
+        &resolved_effect_config,
+        &render_config,
+        &args,
             hex_seed,
             &best_info,
             &output_base,
@@ -355,7 +350,6 @@ fn generate_extras(
     levels: &render::ChannelLevels,
     resolved: &render::randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
-    noise_seed: i32,
     args: &Args,
     seed: &str,
     best_info: &three_body_problem::sim::TrajectoryResult,
@@ -365,7 +359,7 @@ fn generate_extras(
 
     let scene = render::SpectralScene::new(positions, colors, body_alphas);
     let settings =
-        render::SpectralRenderSettings::new(resolved, render_config, noise_seed, false);
+        render::SpectralRenderSettings::new(resolved, render_config, false);
 
     let fast_encode = args.fast_encode;
     let no_wallpapers = args.no_wallpapers;

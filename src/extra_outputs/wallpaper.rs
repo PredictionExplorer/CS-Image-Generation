@@ -47,7 +47,6 @@ pub fn render_wallpaper_pack(
         let target_settings = SpectralRenderSettings::new(
             &target_resolved,
             settings.render_config,
-            settings.noise_seed,
             settings.aspect_correction,
         );
 

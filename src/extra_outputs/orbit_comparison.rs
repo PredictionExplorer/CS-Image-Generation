@@ -56,8 +56,6 @@ fn render_comparison_panels(
         if i == 1 {
             target_resolved.enable_bloom = false;
             target_resolved.enable_glow = false;
-        } else if i == 2 {
-            target_resolved.nebula_strength = 0.0;
         } else if i == 3 {
             target_resolved.enable_gradient_map = false;
             target_resolved.enable_color_grade = false;
@@ -67,7 +65,6 @@ fn render_comparison_panels(
         let target_settings = SpectralRenderSettings::new(
             &target_resolved,
             settings.render_config,
-            settings.noise_seed,
             settings.aspect_correction,
         );
 

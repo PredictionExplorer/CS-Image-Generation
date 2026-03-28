@@ -437,26 +437,3 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
     description: "White point percentile clipping",
 };
 
-// ==================== NEBULA ====================
-// Nebula parameters (feature disabled: strength range is [0, 0])
-
-pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_strength",
-    min: 0.0,
-    max: 0.0,
-    description: "Nebula cloud background opacity (currently disabled)",
-};
-
-pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
-    name: "nebula_octaves",
-    min: 3,
-    max: 4,
-    description: "Nebula noise detail octaves",
-};
-
-pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_base_frequency",
-    min: 0.0010,
-    max: 0.0020,
-    description: "Nebula noise base frequency",
-};

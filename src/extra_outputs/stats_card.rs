@@ -176,7 +176,6 @@ fn collect_active_effects(config: &ResolvedEffectConfig) -> Vec<&'static str> {
     if config.enable_edge_luminance { effects.push("Edge Luminance"); }
     if config.enable_atmospheric_depth { effects.push("Atmospheric Depth"); }
     if config.enable_fine_texture { effects.push("Fine Texture"); }
-    if config.nebula_strength > 0.0 { effects.push("Nebula Clouds"); }
     effects
 }
 
@@ -214,7 +213,6 @@ mod tests {
             enable_edge_luminance: false,
             enable_atmospheric_depth: false,
             enable_fine_texture: false,
-            nebula_strength: 0.0,
             blur_strength: 0.0, blur_radius_scale: 0.0, blur_core_brightness: 0.0,
             dog_strength: 0.0, dog_sigma_scale: 0.0, dog_ratio: 0.0,
             glow_strength: 0.0, glow_threshold: 0.0, glow_radius_scale: 0.0,
@@ -238,7 +236,6 @@ mod tests {
             atmospheric_fog_color_r: 0.0, atmospheric_fog_color_g: 0.0, atmospheric_fog_color_b: 0.0,
             fine_texture_strength: 0.0, fine_texture_scale: 0.0, fine_texture_contrast: 0.0,
             hdr_scale: 0.0, clip_black: 0.0, clip_white: 1.0,
-            nebula_octaves: 0, nebula_base_frequency: 0.0,
         }
     }
 
@@ -284,8 +281,7 @@ mod tests {
         config.enable_edge_luminance = true;
         config.enable_atmospheric_depth = true;
         config.enable_fine_texture = true;
-        config.nebula_strength = 0.5;
-        assert_eq!(collect_active_effects(&config).len(), 14);
+        assert_eq!(collect_active_effects(&config).len(), 13);
     }
 
     #[test]

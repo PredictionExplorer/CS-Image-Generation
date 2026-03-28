@@ -46,7 +46,6 @@ pub fn generate_social_kit(
         let target_settings = SpectralRenderSettings::new(
             &target_resolved,
             settings.render_config,
-            settings.noise_seed,
             settings.aspect_correction,
         );
 
