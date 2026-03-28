@@ -817,6 +817,76 @@ mod tests {
     }
 
     #[test]
+    fn test_body_creation_with_zero_mass() {
+        let body = Body::new(0.0, Vector3::new(1.0, 2.0, 3.0), Vector3::new(0.1, 0.2, 0.3));
+        assert_eq!(body.mass, 0.0);
+        assert_eq!(body.position, Vector3::new(1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn test_body_creation_with_negative_coordinates() {
+        let body = Body::new(
+            100.0,
+            Vector3::new(-1e6, -2e6, -3e6),
+            Vector3::new(-100.0, -200.0, -300.0),
+        );
+        assert_eq!(body.mass, 100.0);
+        assert!(body.position.x < 0.0);
+        assert!(body.velocity.y < 0.0);
+    }
+
+    #[test]
+    fn test_body_creation_with_huge_velocities() {
+        let body = Body::new(1.0, Vector3::zeros(), Vector3::new(1e10, 1e10, 1e10));
+        assert!(body.velocity.norm() > 1e10);
+    }
+
+    #[test]
+    fn test_simulation_with_equal_masses_symmetric() {
+        let bodies = vec![
+            Body::new(100.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.3, 0.0)),
+            Body::new(100.0, Vector3::new(-100.0, 0.0, 0.0), Vector3::new(0.0, -0.3, 0.0)),
+            Body::new(100.0, Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.0)),
+        ];
+        let sim = get_positions(bodies, 1000);
+        assert!(sim.positions[0].len() > 0);
+    }
+
+    #[test]
+    fn test_rng_output_spans_full_range() {
+        let mut rng = Sha3RandomByteStream::new(b"span_test", 0.0, 1.0, 1.0, 1.0);
+        let mut min_val = 1.0f64;
+        let mut max_val = 0.0f64;
+        for _ in 0..100_000 {
+            let v = rng.next_f64();
+            min_val = min_val.min(v);
+            max_val = max_val.max(v);
+        }
+        assert!(min_val < 0.01, "min should be near 0, got {min_val}");
+        assert!(max_val > 0.99, "max should be near 1, got {max_val}");
+    }
+
+    #[test]
+    fn test_rng_mass_range_boundaries() {
+        let mut rng = Sha3RandomByteStream::new(b"mass_bound", 10.0, 10.0, 1.0, 1.0);
+        for _ in 0..100 {
+            let mass = rng.random_mass();
+            assert!((mass - 10.0).abs() < 1e-10, "with equal min/max, mass should be ~10.0");
+        }
+    }
+
+    #[test]
+    fn test_get_positions_zero_steps() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::new(0.0, 0.5, 0.0)),
+            Body::new(150.0, Vector3::new(-50.0, 86.0, 0.0), Vector3::new(-0.3, -0.2, 0.0)),
+            Body::new(250.0, Vector3::new(-50.0, -86.0, 0.0), Vector3::new(0.3, -0.3, 0.0)),
+        ];
+        let sim = get_positions(bodies, 0);
+        assert!(sim.positions[0].is_empty() || sim.positions[0].len() <= 1);
+    }
+
+    #[test]
     fn test_unrolled_acceleration_matches_physics() {
         let mut bodies = vec![
             Body::new(200.0, Vector3::new(100.0, 0.0, 0.0), Vector3::zeros()),

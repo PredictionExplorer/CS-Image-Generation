@@ -964,9 +964,7 @@ fn pass_2_write_frames_spectral_with_backend(
             .process_image(smoothed_display, width as usize, height as usize, &frame_params)
             .expect("Failed to process final image finish during spectral render pass");
         quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
-        let buf_bytes = unsafe {
-            std::slice::from_raw_parts(quant_buf.as_ptr() as *const u8, quant_buf.len() * 2)
-        };
+        let buf_bytes = crate::utils::u16_slice_as_bytes(&quant_buf);
 
         frame_sink(buf_bytes)?;
         if checkpoint_step + 1 == total_steps {

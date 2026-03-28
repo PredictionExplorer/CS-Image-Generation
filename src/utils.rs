@@ -4,6 +4,22 @@ use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 use smallvec::SmallVec;
 
+#[cfg(not(target_endian = "little"))]
+compile_error!("This crate requires a little-endian target for rgb48le video frame encoding");
+
+/// Reinterpret a `&[u16]` slice as `&[u8]` with native (little-endian) byte order.
+///
+/// This is the safe, centralized replacement for the repeated `unsafe {
+/// from_raw_parts(...) }` pattern used when piping rgb48le frames to FFmpeg.
+#[inline]
+pub fn u16_slice_as_bytes(slice: &[u16]) -> &[u8] {
+    // SAFETY: u16 has no padding, the slice is a contiguous valid allocation,
+    // and the compile_error! above guarantees little-endian layout.
+    unsafe {
+        std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), slice.len() * std::mem::size_of::<u16>())
+    }
+}
+
 /// Standard epsilon for float comparisons
 pub const FLOAT_EPSILON: f64 = 1e-10;
 
@@ -269,5 +285,47 @@ mod tests {
             assert_eq!(a.re.to_bits(), b.re.to_bits(), "determinism: re at {i}");
             assert_eq!(a.im.to_bits(), b.im.to_bits(), "determinism: im at {i}");
         }
+    }
+
+    // ── u16_slice_as_bytes tests ────────────────────────────────────
+
+    #[test]
+    fn test_u16_slice_as_bytes_empty() {
+        let empty: &[u16] = &[];
+        assert!(super::u16_slice_as_bytes(empty).is_empty());
+    }
+
+    #[test]
+    fn test_u16_slice_as_bytes_length() {
+        let data = vec![0u16; 100];
+        assert_eq!(super::u16_slice_as_bytes(&data).len(), 200);
+    }
+
+    #[test]
+    fn test_u16_slice_as_bytes_le_byte_order() {
+        let data: &[u16] = &[0x0102];
+        let bytes = super::u16_slice_as_bytes(data);
+        assert_eq!(bytes[0], 0x02);
+        assert_eq!(bytes[1], 0x01);
+    }
+
+    #[test]
+    fn test_u16_slice_as_bytes_roundtrip() {
+        let original: Vec<u16> = (0u16..512).collect();
+        let bytes = super::u16_slice_as_bytes(&original);
+        for (i, &val) in original.iter().enumerate() {
+            let lo = bytes[i * 2];
+            let hi = bytes[i * 2 + 1];
+            assert_eq!(u16::from_le_bytes([lo, hi]), val);
+        }
+    }
+
+    #[test]
+    fn test_u16_slice_as_bytes_boundary_values() {
+        let data: &[u16] = &[0, 1, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF];
+        let bytes = super::u16_slice_as_bytes(data);
+        assert_eq!(bytes.len(), 12);
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0);
+        assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 0xFFFF);
     }
 }

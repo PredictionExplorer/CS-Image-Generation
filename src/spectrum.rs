@@ -115,19 +115,9 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
-    #[test]
-    fn test_public_spd_to_rgba_uses_simd_on_x86_avx2() {
-        let spd = [0.0, 0.3, 0.6, 0.9, 1.1, 0.8, 0.4, 0.2, 0.1, 0.5, 0.7, 0.6, 0.3, 0.1, 0.0, 0.0];
-        let via_public = spd_to_rgba(&spd);
-        let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
-        assert_tuple_bits_eq(via_public, via_simd, "x86_avx2_dispatch");
-    }
-
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2", not(miri))))]
     #[test]
     fn test_public_spd_to_rgba_uses_simd_dispatch() {
-        let spd = [0.0, 0.2, 0.5, 0.7, 1.0, 0.9, 0.4, 0.1, 0.0, 0.3, 0.6, 0.8, 0.5, 0.2, 0.0, 0.0];
+        let spd = [0.0, 0.3, 0.6, 0.9, 1.1, 0.8, 0.4, 0.2, 0.1, 0.5, 0.7, 0.6, 0.3, 0.1, 0.0, 0.0];
         let via_public = spd_to_rgba(&spd);
         let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
         assert_tuple_bits_eq(via_public, via_simd, "simd_dispatch");

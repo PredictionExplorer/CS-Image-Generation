@@ -22,6 +22,7 @@ pub fn export_usdz(
     Ok(())
 }
 
+#[cfg(unix)]
 fn find_converter() -> Option<String> {
     for cmd in &["usdzconvert", "reality_converter"] {
         if Command::new("which")
@@ -48,6 +49,11 @@ fn find_converter() -> Option<String> {
         }
     }
 
+    None
+}
+
+#[cfg(not(unix))]
+fn find_converter() -> Option<String> {
     None
 }
 

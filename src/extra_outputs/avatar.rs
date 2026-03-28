@@ -101,10 +101,7 @@ pub fn render_animated_avatar(
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
         let cropped = crop_and_resize_16bit(&buf_16bit, orig_width, orig_height, &crop, AVATAR_SIZE);
-        let bytes = unsafe {
-            std::slice::from_raw_parts(cropped.as_ptr() as *const u8, cropped.len() * 2)
-        };
-        all_frame_bytes.extend_from_slice(bytes);
+        all_frame_bytes.extend_from_slice(crate::utils::u16_slice_as_bytes(&cropped));
     }
 
     encode_webp(&all_frame_bytes, AVATAR_SIZE, AVATAR_SIZE, AVATAR_FPS, output_path)?;

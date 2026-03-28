@@ -90,12 +90,7 @@ pub fn render_timelapse(
                     .expect("timelapse frame image processing failed");
 
                 let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        buf_16bit.as_ptr() as *const u8,
-                        buf_16bit.len() * 2,
-                    )
-                };
+                let bytes = crate::utils::u16_slice_as_bytes(&buf_16bit);
                 out.write_all(bytes)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }

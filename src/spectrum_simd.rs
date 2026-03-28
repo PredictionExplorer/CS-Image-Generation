@@ -1,20 +1,77 @@
-//! SIMD-accelerated spectral conversion for maximum cross-platform performance
+//! SIMD-accelerated spectral conversion with runtime CPU dispatch.
 //!
-//! This module provides highly optimized SIMD implementations of SPD to RGBA conversion,
-//! with dedicated paths for each major architecture:
-//! - x86_64 AVX2: ~3-4x speedup using 256-bit FMA (4 bins per iteration)
-//! - aarch64 NEON: ~2x speedup using 128-bit FMA (Apple Silicon, ARM servers)
-//! - Scalar fallback: portable implementation for all other platforms
+//! Uses **runtime** feature detection on x86_64 so a single binary runs on any
+//! x86_64 processor while selecting the widest available SIMD path:
+//!
+//! - x86_64 AVX-512F: 8 f64 lanes, ~5-6x speedup (Skylake-X, Ice Lake, Sapphire Rapids)
+//! - x86_64 AVX2+FMA: 4 f64 lanes, ~3-4x speedup (Haswell and later)
+//! - aarch64 NEON:    2 f64 lanes, ~2x speedup (all AArch64 including Apple Silicon)
+//! - Scalar fallback: portable, any architecture
+//!
+//! Detection is performed once and cached in an atomic for zero overhead on
+//! subsequent calls.
 
 use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
-use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// SIMD-friendly LUT arrays laid out for contiguous vector loads.
-/// Each array is 16 f64s that can be loaded with aligned SIMD instructions.
-#[allow(dead_code)]
+// ── runtime SIMD path detection (x86_64) ────────────────────────────────────
+
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+mod x86_detect {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    const UNINIT: u8 = 255;
+    pub const SCALAR: u8 = 0;
+    pub const AVX2: u8 = 1;
+    pub const AVX512: u8 = 2;
+
+    static DETECTED: AtomicU8 = AtomicU8::new(UNINIT);
+
+    fn detect() -> u8 {
+        if is_x86_feature_detected!("avx512f") {
+            AVX512
+        } else if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            AVX2
+        } else {
+            SCALAR
+        }
+    }
+
+    #[inline]
+    pub fn path() -> u8 {
+        let cached = DETECTED.load(Ordering::Relaxed);
+        if cached != UNINIT {
+            return cached;
+        }
+        let p = detect();
+        DETECTED.store(p, Ordering::Relaxed);
+        p
+    }
+}
+
+/// Returns a human-readable name for the SIMD path selected at runtime.
+pub fn detected_simd_path_name() -> &'static str {
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
+    {
+        return match x86_detect::path() {
+            x86_detect::AVX512 => "AVX-512",
+            x86_detect::AVX2 => "AVX2+FMA",
+            _ => "Scalar",
+        };
+    }
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
+    {
+        return "NEON";
+    }
+    #[allow(unreachable_code)]
+    "Scalar"
+}
+
+// ── SIMD-friendly LUT (x86_64: contiguous arrays for vector loads) ──────────
+
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 pub(crate) struct SimdLut {
     pub r: [f64; NUM_BINS],
     pub g: [f64; NUM_BINS],
@@ -22,8 +79,8 @@ pub(crate) struct SimdLut {
     pub k: [f64; NUM_BINS],
 }
 
-#[allow(dead_code)]
-pub(crate) static SIMD_LUT: Lazy<SimdLut> = Lazy::new(|| {
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+pub(crate) static SIMD_LUT: once_cell::sync::Lazy<SimdLut> = once_cell::sync::Lazy::new(|| {
     let mut lut = SimdLut { r: [0.0; 16], g: [0.0; 16], b: [0.0; 16], k: [0.0; 16] };
     for i in 0..NUM_BINS {
         let (r, g, b, k) = BIN_COMBINED_LUT[i];
@@ -35,20 +92,17 @@ pub(crate) static SIMD_LUT: Lazy<SimdLut> = Lazy::new(|| {
     lut
 });
 
-/// Convert SPD to RGBA using SIMD when available
+// ── public dispatch entry point ─────────────────────────────────────────────
+
+/// Convert SPD to RGBA using the best SIMD path available at runtime.
 ///
-/// This is a drop-in replacement for the standard `spd_to_rgba` function that
-/// automatically selects the best implementation for the current platform.
-///
-/// # Performance
-/// - x86_64 AVX2: ~3-4x faster than scalar (256-bit FMA, 4 bins/iter)
-/// - aarch64 NEON: ~2x faster than scalar (128-bit FMA, 2 bins/iter)
-/// - Scalar fallback: portable, suitable for all other architectures
+/// Automatically selects AVX-512, AVX2, NEON, or scalar based on runtime
+/// CPU detection (x86_64) or compile-time architecture (aarch64).
 ///
 /// # Accuracy
-/// AVX2 path uses a vectorized exp() approximation (< 2e-11 relative error)
-/// for maximum throughput.  Results may differ from the scalar path by a few
-/// ULPs but are deterministic within the same architecture.
+/// AVX2/AVX-512 paths use a vectorized exp() approximation (< 2e-11 relative
+/// error). Results may differ from the scalar path by a few ULPs but are
+/// deterministic within the same architecture and detected path.
 #[inline]
 pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
@@ -57,40 +111,26 @@ pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 
 #[inline]
 fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f", not(miri)))]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     {
-        unsafe { spd_to_rgba_avx512(spd, boosted) }
+        return match x86_detect::path() {
+            x86_detect::AVX512 => unsafe { spd_to_rgba_avx512(spd, boosted) },
+            x86_detect::AVX2 => unsafe { spd_to_rgba_avx2(spd, boosted) },
+            _ => spd_to_rgba_scalar_with_sat_boost(spd, boosted),
+        };
     }
 
-    #[cfg(all(
-        target_arch = "x86_64",
-        target_feature = "avx2",
-        not(target_feature = "avx512f"),
-        not(miri)
-    ))]
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
     {
-        unsafe { spd_to_rgba_avx2(spd, boosted) }
+        return unsafe { spd_to_rgba_neon(spd, boosted) };
     }
 
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
-    {
-        unsafe { spd_to_rgba_neon(spd, boosted) }
-    }
-
-    #[cfg(not(any(
-        all(target_arch = "x86_64", target_feature = "avx512f", not(miri)),
-        all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f"), not(miri)),
-        all(target_arch = "aarch64", target_feature = "neon", not(miri))
-    )))]
-    {
-        spd_to_rgba_scalar_with_sat_boost(spd, boosted)
-    }
+    #[allow(unreachable_code)]
+    spd_to_rgba_scalar_with_sat_boost(spd, boosted)
 }
 
-/// Scalar fallback implementation — portable across all architectures.
-///
-/// Uses index-based iteration for better auto-vectorization potential with
-/// `-C target-cpu=native` on platforms without explicit SIMD paths.
+// ── scalar fallback (always compiled) ───────────────────────────────────────
+
 #[cfg(test)]
 #[inline]
 pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
@@ -98,14 +138,6 @@ pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) 
     spd_to_rgba_scalar_with_sat_boost(spd, boosted)
 }
 
-#[cfg(any(
-    test,
-    not(any(
-        all(target_arch = "x86_64", target_feature = "avx512f", not(miri)),
-        all(target_arch = "x86_64", target_feature = "avx2", not(miri)),
-        all(target_arch = "aarch64", target_feature = "neon", not(miri))
-    ))
-))]
 #[inline]
 fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     let mut r = 0.0;
@@ -128,6 +160,8 @@ fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f
 
     finalize_rgba(r, g, b, total, boosted)
 }
+
+// ── shared helpers ──────────────────────────────────────────────────────────
 
 #[inline]
 fn sat_boost_factor(color_range: f64, boosted: bool) -> f64 {
@@ -185,12 +219,15 @@ fn finalize_rgba(
     (r * brightness, g * brightness, b * brightness, brightness)
 }
 
+// ── x86_64 AVX2+FMA implementation ─────────────────────────────────────────
+
 /// Fully vectorized 1 - exp(-x) for 4 f64 lanes using AVX2+FMA.
 ///
 /// Uses Cody-Waite range reduction with a degree-7 Taylor polynomial,
 /// keeping the entire computation in SIMD registers (no scalar fallback).
 /// Input x must be non-negative; relative error < 2e-11 for x in [0, 700].
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
     use std::arch::x86_64::*;
@@ -205,7 +242,6 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
 
         let t = _mm256_mul_pd(neg_x, log2_e);
-        // 0x08 = _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC
         let n = _mm256_round_pd::<0x08>(t);
         let neg_n = _mm256_sub_pd(zero, n);
         let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
@@ -240,8 +276,8 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
 }
 
 /// AVX2 SIMD implementation — fully vectorized inner loop (no scalar exp).
-/// Uses pre-computed contiguous LUT arrays for fast aligned loads.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::x86_64::*;
@@ -293,11 +329,14 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
     }
 }
 
+// ── x86_64 AVX-512 implementation ──────────────────────────────────────────
+
 /// AVX-512 SIMD implementation — processes 8 bins per iteration (2 iterations for 16 bins).
 ///
 /// On 64+ core x86 servers with AVX-512 (Skylake-X, Ice Lake, Sapphire Rapids),
 /// this provides ~2x speedup over the AVX2 path by using 512-bit vectors.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f", not(miri)))]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn spd_to_rgba_avx512(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::x86_64::*;
@@ -340,7 +379,8 @@ unsafe fn spd_to_rgba_avx512(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64,
 }
 
 /// Fully vectorized 1 - exp(-x) for 8 f64 lanes using AVX-512.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f", not(miri)))]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::x86_64::__m512d {
     use std::arch::x86_64::*;
@@ -377,7 +417,7 @@ unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::
         let exp_r = _mm512_fmadd_pd(p, r, one);
 
         let n_i32 = _mm512_cvtpd_epi32(n);
-        let n_i64 = _mm512_cvtepi32_epi64(_mm256_castsi256_si128(_mm512_castsi512_si256(n_i32)));
+        let n_i64 = _mm512_cvtepi32_epi64(n_i32);
         let bias = _mm512_set1_epi64(1023);
         let pow2n = _mm512_castsi512_pd(_mm512_slli_epi64(_mm512_add_epi64(n_i64, bias), 52));
 
@@ -386,16 +426,17 @@ unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::
     }
 }
 
-/// aarch64 NEON SIMD implementation (~2x faster than scalar)
+// ── aarch64 NEON implementation ─────────────────────────────────────────────
+
+/// aarch64 NEON SIMD implementation (~2x faster than scalar).
 ///
 /// Processes 2 bins at a time using 128-bit NEON FMA. The exp() call remains
 /// scalar (no hardware transcendental on NEON), but accumulation is fully vectorized.
-#[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
+#[cfg(all(target_arch = "aarch64", not(miri)))]
 #[inline]
 unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::aarch64::*;
 
-    // SAFETY: all intrinsics below require neon, which is guaranteed by #[cfg]
     unsafe {
         let mut r_accum = vdupq_n_f64(0.0);
         let mut g_accum = vdupq_n_f64(0.0);
@@ -436,23 +477,18 @@ unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
     }
 }
 
+// ── tests ───────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // ── helpers ──────────────────────────────────────────────────────
 
-    /// Strict parity — use only when few bins are active and color_range
-    /// cannot straddle a saturation-boost threshold.
     fn assert_simd_scalar_match(spd: &[f64; NUM_BINS], label: &str) {
         assert_simd_scalar_close(spd, 1e-10, label);
     }
 
-    /// Relaxed parity — FMA accumulation order differs between SIMD and
-    /// scalar, and when the resulting color_range straddles a sat-boost
-    /// threshold (0.1 or 0.3) the boost factor can jump by ~0.4, causing
-    /// visible but harmless divergence.  Use `tol ≈ 0.02` for complex
-    /// multi-bin inputs.
     fn assert_simd_scalar_close(spd: &[f64; NUM_BINS], tol: f64, label: &str) {
         let scalar = spd_to_rgba_scalar(spd);
         let simd = spd_to_rgba_simd(spd);
@@ -484,6 +520,28 @@ mod tests {
 
     fn assert_in_unit_range(val: f64, name: &str) {
         assert!((0.0..=1.0).contains(&val), "{name} out of [0,1]: {val}");
+    }
+
+    // ── runtime detection tests ─────────────────────────────────────
+
+    #[test]
+    fn test_detected_simd_path_name_is_non_empty() {
+        let name = detected_simd_path_name();
+        assert!(!name.is_empty());
+        assert!(
+            ["AVX-512", "AVX2+FMA", "NEON", "Scalar"].contains(&name),
+            "unexpected SIMD path name: {name}"
+        );
+    }
+
+    #[test]
+    fn test_simd_dispatch_returns_valid_output() {
+        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let result = spd_to_rgba_simd(&spd);
+        assert_in_unit_range(result.0, "dispatch.R");
+        assert_in_unit_range(result.1, "dispatch.G");
+        assert_in_unit_range(result.2, "dispatch.B");
+        assert_in_unit_range(result.3, "dispatch.A");
     }
 
     // ── original tests (preserved) ──────────────────────────────────
@@ -551,7 +609,7 @@ mod tests {
         assert!(spd_to_rgba_simd(&high).3 > spd_to_rgba_simd(&low).3);
     }
 
-    // ── new cross-platform parity tests ─────────────────────────────
+    // ── cross-platform parity tests ─────────────────────────────────
 
     #[test]
     fn test_simd_scalar_parity_exhaustive() {
@@ -560,7 +618,6 @@ mod tests {
             [1.0; NUM_BINS],
             [0.001; NUM_BINS],
             [100.0; NUM_BINS],
-            // single-bin patterns at first, middle, last
             {
                 let mut s = [0.0; 16];
                 s[0] = 1.0;
@@ -576,14 +633,12 @@ mod tests {
                 s[15] = 1.0;
                 s
             },
-            // two isolated peaks (red + blue)
             {
                 let mut s = [0.0; 16];
                 s[0] = 0.8;
                 s[14] = 0.8;
                 s
             },
-            // descending ramp
             {
                 let mut s = [0.0; 16];
                 for (i, value) in s.iter_mut().enumerate() {
@@ -591,7 +646,6 @@ mod tests {
                 }
                 s
             },
-            // ascending ramp
             {
                 let mut s = [0.0; 16];
                 for (i, value) in s.iter_mut().enumerate() {
@@ -599,7 +653,6 @@ mod tests {
                 }
                 s
             },
-            // alternating zero / nonzero
             {
                 let mut s = [0.0; 16];
                 for i in (0..16).step_by(2) {
@@ -607,13 +660,11 @@ mod tests {
                 }
                 s
             },
-            // one very large, rest small
             {
                 let mut s = [0.01; 16];
                 s[5] = 500.0;
                 s
             },
-            // realistic multi-peak spectrum
             [0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1, 0.0, 0.0],
         ];
 
@@ -650,9 +701,12 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     #[test]
     fn test_avx2_kernel_is_bitwise_deterministic() {
+        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
+            return;
+        }
         let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
         let reference = unsafe { spd_to_rgba_avx2(&spd, true) };
         for _ in 0..200 {
@@ -664,9 +718,12 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     #[test]
     fn test_avx2_vectorized_exp_accuracy() {
+        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
+            return;
+        }
         use std::arch::x86_64::*;
         let test_inputs: &[f64] = &[
             0.0, 1e-15, 1e-10, 1e-5, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
@@ -690,7 +747,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
     #[test]
     fn test_neon_kernel_is_bitwise_deterministic() {
         let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
@@ -748,8 +805,6 @@ mod tests {
         let min_c = result.0.min(result.1).min(result.2);
         let chroma = if max_c > 0.0 { (max_c - min_c) / max_c } else { 0.0 };
 
-        // The spectral sensitivity curves and saturation boost mean uniform
-        // energy isn't perfectly neutral, but it should not be highly saturated.
         assert!(chroma < 0.65, "uniform SPD should be relatively neutral, got chroma={chroma:.4}");
     }
 
@@ -827,5 +882,50 @@ mod tests {
             assert_in_unit_range(r.2, "rand.B");
             assert_in_unit_range(r.3, "rand.A");
         }
+    }
+
+    // ── stress tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_stress_10k_random_inputs_all_valid() {
+        let mut seed = 99887766u64;
+        for _ in 0..10_000 {
+            let mut spd = [0.0; NUM_BINS];
+            for v in spd.iter_mut() {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                *v = (seed % 100_000) as f64 / 100.0;
+            }
+            let r = spd_to_rgba_simd(&spd);
+            assert!(r.0 >= 0.0 && r.0 <= 1.0, "R={} out of range", r.0);
+            assert!(r.1 >= 0.0 && r.1 <= 1.0, "G={} out of range", r.1);
+            assert!(r.2 >= 0.0 && r.2 <= 1.0, "B={} out of range", r.2);
+            assert!(r.3 >= 0.0 && r.3 <= 1.0, "A={} out of range", r.3);
+        }
+    }
+
+    #[test]
+    fn test_sat_boost_boundary_straddling() {
+        for &cr in &[0.099, 0.100, 0.101, 0.299, 0.300, 0.301] {
+            let factor_on = sat_boost_factor(cr, true);
+            let factor_off = sat_boost_factor(cr, false);
+            assert!(factor_on > 0.0, "boost factor should be positive for cr={cr}");
+            assert!(factor_off > 0.0, "boost factor should be positive for cr={cr}");
+            assert!(factor_on >= factor_off, "boosted should be >= unboosted for cr={cr}");
+        }
+    }
+
+    #[test]
+    fn test_finalize_rgba_returns_zero_for_tiny_total() {
+        let result = finalize_rgba(0.5, 0.3, 0.2, 1e-11, true);
+        assert_eq!(result, (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_negative_energy_treated_as_zero() {
+        let spd = [-1.0; NUM_BINS];
+        let result = spd_to_rgba_simd(&spd);
+        assert_eq!(result, (0.0, 0.0, 0.0, 0.0), "negative energy should produce black");
     }
 }

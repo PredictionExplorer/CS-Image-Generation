@@ -186,10 +186,7 @@ fn write_frames_to_video(
         fps,
         |out| {
             for frame in frames {
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 2)
-                };
-                out.write_all(bytes)
+                out.write_all(crate::utils::u16_slice_as_bytes(frame))
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())
@@ -227,10 +224,7 @@ fn write_frames_to_webm(
         fps,
         |out| {
             for frame in frames {
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 2)
-                };
-                out.write_all(bytes)
+                out.write_all(crate::utils::u16_slice_as_bytes(frame))
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())

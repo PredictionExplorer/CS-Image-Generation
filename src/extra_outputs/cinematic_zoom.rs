@@ -74,12 +74,7 @@ pub fn render_cinematic_zoom(
                     width, height,
                 );
 
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        frame.as_ptr() as *const u8,
-                        frame.len() * 2,
-                    )
-                };
+                let bytes = crate::utils::u16_slice_as_bytes(&frame);
                 out.write_all(bytes)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }

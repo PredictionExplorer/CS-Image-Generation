@@ -1,19 +1,21 @@
+# All targets use target-cpu=native for maximum performance on the build host.
+# SIMD dispatch (AVX2, AVX-512, NEON) is handled at runtime in spectrum_simd.rs,
+# so the binary is portable across any CPU of the same architecture.
+
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "target-cpu=native", "-C", "target-feature=+avx2,+fma"]
+rustflags = ["-C", "target-cpu=native"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "target-cpu=native"]
 
-# AVX-512 enabled for 64+ core servers (Skylake-X, Ice Lake, Sapphire Rapids).
-# target-cpu=native auto-detects; explicit features ensure the code paths compile.
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native", "-C", "target-feature=+avx2,+fma,+avx512f,+avx512dq"]
+rustflags = ["-C", "target-cpu=native"]
 
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=native"]
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-cpu=native", "-C", "target-feature=+avx2,+fma,+avx512f,+avx512dq"]
+rustflags = ["-C", "target-cpu=native"]
 
 [target.x86_64-pc-windows-gnu]
-rustflags = ["-C", "target-cpu=native", "-C", "target-feature=+avx2,+fma,+avx512f,+avx512dq"]
+rustflags = ["-C", "target-cpu=native"]

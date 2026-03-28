@@ -577,4 +577,89 @@ mod tests {
         }
         assert_eq!(count, 2);
     }
+
+    #[test]
+    fn test_custom_video_encoding_options() {
+        let opts = VideoEncodingOptions {
+            codec: "libx264".to_string(),
+            preset: "ultrafast".to_string(),
+            crf: 28,
+            bitrate: String::new(),
+            pixel_format: "yuv420p".to_string(),
+            input_pixel_format: "rgb24".to_string(),
+            extra_args: vec!["-tune".to_string(), "zerolatency".to_string()],
+        };
+        assert_eq!(opts.codec, "libx264");
+        assert_eq!(opts.crf, 28);
+        assert_eq!(opts.pixel_format, "yuv420p");
+        assert_eq!(opts.input_pixel_format, "rgb24");
+    }
+
+    #[test]
+    fn test_zero_dimensions_rejected() {
+        let result = create_video_from_frames_singlepass(
+            0, 100, 30,
+            |_out| Ok(()),
+            "/dev/null",
+            &VideoEncodingOptions::default(),
+        );
+        assert!(result.is_err(), "zero width should be rejected");
+    }
+
+    #[test]
+    fn test_zero_height_rejected() {
+        let result = create_video_from_frames_singlepass(
+            100, 0, 30,
+            |_out| Ok(()),
+            "/dev/null",
+            &VideoEncodingOptions::default(),
+        );
+        assert!(result.is_err(), "zero height should be rejected");
+    }
+
+    #[test]
+    fn test_zero_framerate_rejected() {
+        let result = create_video_from_frames_singlepass(
+            100, 100, 0,
+            |_out| Ok(()),
+            "/dev/null",
+            &VideoEncodingOptions::default(),
+        );
+        assert!(result.is_err(), "zero framerate should be rejected");
+    }
+
+    #[test]
+    fn test_channel_writer_error_on_closed_channel() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
+        drop(rx);
+
+        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        let result = writer.write_all(&[1, 2, 3]);
+        assert!(result.is_err(), "writing to closed channel should fail");
+    }
+
+    #[test]
+    fn test_channel_writer_flush_succeeds() {
+        let (tx, _rx) = mpsc::sync_channel::<Vec<u8>>(1);
+        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        assert!(writer.flush().is_ok());
+    }
+
+    #[test]
+    fn test_default_options_have_faststart() {
+        let opts = VideoEncodingOptions::default();
+        assert!(
+            opts.extra_args.contains(&"+faststart".to_string()),
+            "default options should include faststart for web compatibility"
+        );
+    }
+
+    #[test]
+    fn test_fast_encode_has_color_metadata() {
+        let opts = VideoEncodingOptions::fast_encode();
+        assert!(
+            opts.extra_args.contains(&"-colorspace".to_string()),
+            "fast encode should include color metadata"
+        );
+    }
 }
