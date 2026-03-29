@@ -584,6 +584,15 @@ struct OrbitStats {
     max_distance: f64,
     max_area: f64,
     max_ang_mom: f64,
+    max_tumble_rate: f64,
+}
+
+fn plane_normal_at(positions: &[Vec<Vector3<f64>>], step: usize) -> Vector3<f64> {
+    let edge1 = positions[1][step] - positions[0][step];
+    let edge2 = positions[2][step] - positions[0][step];
+    let normal = edge1.cross(&edge2);
+    let len = normal.norm();
+    if len > 1e-14 { normal / len } else { Vector3::new(0.0, 0.0, 1.0) }
 }
 
 fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
@@ -593,6 +602,12 @@ fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
     let mut max_distance = 0.0f64;
     let mut max_area = 0.0f64;
     let mut max_ang_mom = 0.0f64;
+    let mut max_tumble_rate = 0.0f64;
+    let mut prev_normal = if nb >= 3 && steps > 0 {
+        plane_normal_at(positions, 0)
+    } else {
+        Vector3::new(0.0, 0.0, 1.0)
+    };
 
     for step in 1..steps {
         for body_pos in positions.iter().take(nb) {
@@ -621,6 +636,12 @@ fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
                 ang += r.cross(&v);
             }
             max_ang_mom = max_ang_mom.max(ang.norm());
+
+            let cur_normal = plane_normal_at(positions, step);
+            let dot = prev_normal.dot(&cur_normal).clamp(-1.0, 1.0);
+            let tumble = dot.acos();
+            max_tumble_rate = max_tumble_rate.max(tumble);
+            prev_normal = cur_normal;
         }
     }
 
@@ -629,6 +650,7 @@ fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
         max_distance: max_distance.max(1e-10),
         max_area: max_area.max(1e-10),
         max_ang_mom: max_ang_mom.max(1e-10),
+        max_tumble_rate: max_tumble_rate.max(1e-14),
     }
 }
 
@@ -686,6 +708,9 @@ fn synthesize_gravitational_strings(
     let sympathy = 0.08;
 
     let mut sub_ph = 0.0f64;
+    let mut prev_normal = plane_normal_at(positions, 0);
+    let mut sm_plane_az = 0.0f64;
+    let plane_az_a = 1.0 - (-1.0 / (0.3 * SR)).exp();
 
     for si in 0..total_samples {
         let t = si as f64 / total_samples as f64;
@@ -696,6 +721,14 @@ fn synthesize_gravitational_strings(
 
         let area = triangle_area_at(positions, s);
         let norm_area = (area / stats.max_area).clamp(0.0, 1.0);
+
+        let cur_normal = plane_normal_at(positions, s);
+        let tumble_dot = prev_normal.dot(&cur_normal).clamp(-1.0, 1.0);
+        let tumble_rate = tumble_dot.acos();
+        let norm_tumble = (tumble_rate / stats.max_tumble_rate).clamp(0.0, 1.0);
+        prev_normal = cur_normal;
+        let plane_az = cur_normal.x.atan2(cur_normal.y);
+        sm_plane_az += plane_az_a * (plane_az - sm_plane_az);
 
         let mut pluck_bodies = [false; 3];
         let mut pluck_intensities = [0.0f64; 3];
@@ -723,7 +756,7 @@ fn synthesize_gravitational_strings(
                 let intensity = pluck_intensities[b];
                 let spd = body_speed(positions, b, step, frac, step_count);
                 let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
-                let bright = tuning.brightness * (0.5 + 0.5 * ns);
+                let bright = tuning.brightness * (0.5 + 0.5 * ns) * (0.8 + 0.4 * norm_tumble);
                 strings[b].pluck(&mut rng, intensity * 0.7, bright);
 
                 for other in 0..nb {
@@ -768,9 +801,15 @@ fn synthesize_gravitational_strings(
         left += sub;
         right += sub;
 
+        let rot = sm_plane_az * 0.4;
+        let cos_r = rot.cos();
+        let sin_r = rot.sin();
+        let rl = left * cos_r - right * sin_r;
+        let rr = left * sin_r + right * cos_r;
+
         let fade = smoothstep_fade(t, 3.0, 5.0, duration_s);
-        buf[si * 2] = left * fade;
-        buf[si * 2 + 1] = right * fade;
+        buf[si * 2] = rl * fade;
+        buf[si * 2 + 1] = rr * fade;
     }
 
     apply_freeverb(&mut buf, total_samples, tuning.reverb_size, tuning.reverb_damp, tuning.reverb_wet);
@@ -817,6 +856,9 @@ fn synthesize_orbital_terrain(
     let grain_cooldown = (0.05 * SR) as usize;
 
     let mut sub_ph = 0.0f64;
+    let mut prev_normal = plane_normal_at(positions, 0);
+    let mut sm_plane_az = 0.0f64;
+    let plane_az_a = 1.0 - (-1.0 / (0.3 * SR)).exp();
 
     let mut pos_range_x = (f64::MAX, f64::MIN);
     let mut pos_range_y = (f64::MAX, f64::MIN);
@@ -837,6 +879,13 @@ fn synthesize_orbital_terrain(
         let step = sf as usize;
         let frac = sf - step as f64;
         let s = step.min(step_count - 1);
+
+        let cur_normal = plane_normal_at(positions, s);
+        let tumble_dot = prev_normal.dot(&cur_normal).clamp(-1.0, 1.0);
+        let norm_tumble = (tumble_dot.acos() / stats.max_tumble_rate).clamp(0.0, 1.0);
+        prev_normal = cur_normal;
+        let plane_az = cur_normal.x.atan2(cur_normal.y);
+        sm_plane_az += plane_az_a * (plane_az - sm_plane_az);
 
         let mut left = 0.0f64;
         let mut right = 0.0f64;
@@ -875,7 +924,8 @@ fn synthesize_orbital_terrain(
 
             let close = body_closeness(positions, b, s, nb, stats.max_distance);
             let amp = 0.2 * (0.3 + 0.7 * close);
-            let driven = soft_saturate(raw * amp, tuning.terrain_drive);
+            let dynamic_drive = tuning.terrain_drive + norm_tumble * 1.5;
+            let driven = soft_saturate(raw * amp, dynamic_drive);
 
             let centroid = (positions[0][s] + positions[1][s] + positions[2][s]) / 3.0;
             let rel: Vector3<f64> = pos - centroid;
@@ -934,9 +984,15 @@ fn synthesize_orbital_terrain(
         left += sub;
         right += sub;
 
+        let rot = sm_plane_az * 0.4;
+        let cos_r = rot.cos();
+        let sin_r = rot.sin();
+        let rl = left * cos_r - right * sin_r;
+        let rr = left * sin_r + right * cos_r;
+
         let fade = smoothstep_fade(t, 3.0, 5.0, duration_s);
-        buf[si * 2] = left * fade;
-        buf[si * 2 + 1] = right * fade;
+        buf[si * 2] = rl * fade;
+        buf[si * 2 + 1] = rr * fade;
     }
 
     apply_freeverb(&mut buf, total_samples, tuning.reverb_size, tuning.reverb_damp, tuning.reverb_wet);
@@ -981,6 +1037,9 @@ fn synthesize_void_resonance(
 
     let mut breath_state_l = 0.0f64;
     let mut breath_state_r = 0.0f64;
+    let mut prev_normal = plane_normal_at(positions, 0);
+    let mut sm_plane_az = 0.0f64;
+    let plane_az_a = 1.0 - (-1.0 / (0.3 * SR)).exp();
 
     for si in 0..total_samples {
         let t = si as f64 / total_samples as f64;
@@ -993,6 +1052,13 @@ fn synthesize_void_resonance(
         let norm_ang = (ang_mom / stats.max_ang_mom).clamp(0.0, 1.0);
         let area = triangle_area_at(positions, s);
         let norm_area = (area / stats.max_area).clamp(0.0, 1.0);
+
+        let cur_normal = plane_normal_at(positions, s);
+        let tumble_dot = prev_normal.dot(&cur_normal).clamp(-1.0, 1.0);
+        let norm_tumble = (tumble_dot.acos() / stats.max_tumble_rate).clamp(0.0, 1.0);
+        prev_normal = cur_normal;
+        let plane_az = cur_normal.x.atan2(cur_normal.y);
+        sm_plane_az += plane_az_a * (plane_az - sm_plane_az);
 
         for b in 0..nb {
             for other in 0..nb {
@@ -1043,17 +1109,24 @@ fn synthesize_void_resonance(
         left += frozen * 0.6;
         right += frozen * 0.6;
 
-        let breath_raw_l = rng.next_f64() * 0.015 * norm_ang;
-        let breath_raw_r = rng.next_f64() * 0.015 * norm_ang;
+        let breath_intensity = norm_ang + norm_tumble * 0.5;
+        let breath_raw_l = rng.next_f64() * 0.015 * breath_intensity;
+        let breath_raw_r = rng.next_f64() * 0.015 * breath_intensity;
         let breath_coeff = 0.05 + 0.15 * norm_area;
         breath_state_l = breath_state_l * (1.0 - breath_coeff) + breath_raw_l * breath_coeff;
         breath_state_r = breath_state_r * (1.0 - breath_coeff) + breath_raw_r * breath_coeff;
         left += breath_state_l;
         right += breath_state_r;
 
+        let rot = sm_plane_az * 0.6;
+        let cos_r = rot.cos();
+        let sin_r = rot.sin();
+        let rl = left * cos_r - right * sin_r;
+        let rr = left * sin_r + right * cos_r;
+
         let fade = smoothstep_fade(t, 5.0, 8.0, duration_s);
-        buf[si * 2] = left * fade;
-        buf[si * 2 + 1] = right * fade;
+        buf[si * 2] = rl * fade;
+        buf[si * 2 + 1] = rr * fade;
     }
 
     apply_freeverb(&mut buf, total_samples, 0.95, 0.15, 0.55);
@@ -1611,5 +1684,69 @@ mod tests {
         let b = synthesize_orbital_choir(&pos, &stats, 441, pos[0].len(), 0.01);
         assert_eq!(a.len(), 441 * 2);
         assert_eq!(a, b);
+    }
+
+    // ─── Plane Normal Tests ──────────────────────────────────
+
+    #[test]
+    fn test_plane_normal_unit_length() {
+        let pos = sample_positions();
+        let n = plane_normal_at(&pos, 0);
+        assert!((n.norm() - 1.0).abs() < 1e-10, "plane normal should be unit length");
+    }
+
+    #[test]
+    fn test_plane_normal_perpendicular_to_edges() {
+        let pos = sample_positions();
+        let n = plane_normal_at(&pos, 0);
+        let e1 = pos[1][0] - pos[0][0];
+        let e2 = pos[2][0] - pos[0][0];
+        assert!(n.dot(&e1).abs() < 1e-10, "normal should be perpendicular to edge1");
+        assert!(n.dot(&e2).abs() < 1e-10, "normal should be perpendicular to edge2");
+    }
+
+    #[test]
+    fn test_plane_normal_deterministic() {
+        let pos = sample_positions();
+        let a = plane_normal_at(&pos, 1);
+        let b = plane_normal_at(&pos, 1);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_orbit_stats_has_tumble_rate() {
+        let pos = sample_positions();
+        let stats = compute_orbit_stats(&pos);
+        assert!(stats.max_tumble_rate > 0.0, "tumble rate should be positive for moving bodies");
+    }
+
+    #[test]
+    fn test_stereo_rotation_preserves_energy() {
+        let left = 0.6f64;
+        let right = 0.4f64;
+        let energy_before = left * left + right * right;
+        let angle = 0.3f64;
+        let cos_r = angle.cos();
+        let sin_r = angle.sin();
+        let rl = left * cos_r - right * sin_r;
+        let rr = left * sin_r + right * cos_r;
+        let energy_after = rl * rl + rr * rr;
+        assert!(
+            (energy_before - energy_after).abs() < 1e-10,
+            "rotation should preserve total energy"
+        );
+    }
+
+    #[test]
+    fn test_stereo_rotation_zero_angle_is_identity() {
+        let left = 0.7f64;
+        let right = 0.3f64;
+        let angle = 0.0f64;
+        let cos_r = angle.cos();
+        let sin_r = angle.sin();
+        let rl = left * cos_r - right * sin_r;
+        let rr = left * sin_r + right * cos_r;
+        assert!((rl - left).abs() < 1e-14);
+        assert!((rr - right).abs() < 1e-14);
     }
 }
