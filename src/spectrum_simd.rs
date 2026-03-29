@@ -81,7 +81,7 @@ pub(crate) struct SimdLut {
 
 #[cfg(all(target_arch = "x86_64", not(miri)))]
 pub(crate) static SIMD_LUT: once_cell::sync::Lazy<SimdLut> = once_cell::sync::Lazy::new(|| {
-    let mut lut = SimdLut { r: [0.0; 16], g: [0.0; 16], b: [0.0; 16], k: [0.0; 16] };
+    let mut lut = SimdLut { r: [0.0; NUM_BINS], g: [0.0; NUM_BINS], b: [0.0; NUM_BINS], k: [0.0; NUM_BINS] };
     for i in 0..NUM_BINS {
         let (r, g, b, k) = BIN_COMBINED_LUT[i];
         lut.r[i] = r;
@@ -329,7 +329,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
 
 // ── x86_64 AVX-512 implementation ──────────────────────────────────────────
 
-/// AVX-512 SIMD implementation — processes 8 bins per iteration (2 iterations for 16 bins).
+/// AVX-512 SIMD implementation — processes 8 bins per iteration (8 iterations for 64 bins).
 ///
 /// On 64+ core x86 servers with AVX-512 (Skylake-X, Ice Lake, Sapphire Rapids),
 /// this provides ~2x speedup over the AVX2 path by using 512-bit vectors.
@@ -530,9 +530,17 @@ mod tests {
         );
     }
 
+    fn make_spd(values: &[f64]) -> [f64; NUM_BINS] {
+        let mut spd = [0.0; NUM_BINS];
+        for (i, &v) in values.iter().enumerate().take(NUM_BINS) {
+            spd[i] = v;
+        }
+        spd
+    }
+
     #[test]
     fn test_simd_dispatch_returns_valid_output() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0]);
         let result = spd_to_rgba_simd(&spd);
         assert_in_unit_range(result.0, "dispatch.R");
         assert_in_unit_range(result.1, "dispatch.G");
@@ -545,9 +553,9 @@ mod tests {
     #[test]
     fn test_simd_matches_scalar() {
         let test_cases = vec![
-            [1.0, 0.5, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.1; 16],
+            make_spd(&[1.0, 0.5, 0.2]),
+            make_spd(&[0.0, 0.0, 0.0, 0.5, 1.0, 0.5]),
+            [0.1; NUM_BINS],
         ];
         for spd in test_cases {
             assert_simd_scalar_match(&spd, "basic");
@@ -615,53 +623,53 @@ mod tests {
             [0.001; NUM_BINS],
             [100.0; NUM_BINS],
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 s[0] = 1.0;
                 s
             },
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 s[7] = 1.0;
                 s
             },
             {
-                let mut s = [0.0; 16];
-                s[15] = 1.0;
+                let mut s = [0.0; NUM_BINS];
+                s[NUM_BINS - 1] = 1.0;
                 s
             },
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 s[0] = 0.8;
-                s[14] = 0.8;
+                s[NUM_BINS - 2] = 0.8;
                 s
             },
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 for (i, value) in s.iter_mut().enumerate() {
-                    *value = (16 - i) as f64 / 16.0;
+                    *value = (NUM_BINS - i) as f64 / NUM_BINS as f64;
                 }
                 s
             },
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 for (i, value) in s.iter_mut().enumerate() {
-                    *value = (i + 1) as f64 / 16.0;
+                    *value = (i + 1) as f64 / NUM_BINS as f64;
                 }
                 s
             },
             {
-                let mut s = [0.0; 16];
-                for i in (0..16).step_by(2) {
+                let mut s = [0.0; NUM_BINS];
+                for i in (0..NUM_BINS).step_by(2) {
                     s[i] = 0.5;
                 }
                 s
             },
             {
-                let mut s = [0.01; 16];
+                let mut s = [0.01; NUM_BINS];
                 s[5] = 500.0;
                 s
             },
-            [0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1, 0.0, 0.0],
+            make_spd(&[0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1, 0.0, 0.0]),
         ];
 
         for (i, spd) in cases.iter().enumerate() {
@@ -686,7 +694,7 @@ mod tests {
 
     #[test]
     fn test_simd_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0]);
         let reference = spd_to_rgba_simd_with_sat_boost(&spd, true);
         for _ in 0..200 {
             let r = spd_to_rgba_simd_with_sat_boost(&spd, true);
@@ -703,7 +711,7 @@ mod tests {
         if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
             return;
         }
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0]);
         let reference = unsafe { spd_to_rgba_avx2(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_avx2(&spd, true) };
@@ -746,7 +754,7 @@ mod tests {
     #[cfg(all(target_arch = "aarch64", not(miri)))]
     #[test]
     fn test_neon_kernel_is_bitwise_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0]);
         let reference = unsafe { spd_to_rgba_neon(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_neon(&spd, true) };
@@ -834,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_sat_boost_affects_output() {
-        let spd = [0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2, 0.0];
+        let spd = make_spd(&[0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2, 0.0]);
 
         let boosted = spd_to_rgba_simd_with_sat_boost(&spd, true);
         let unboosted = spd_to_rgba_simd_with_sat_boost(&spd, false);

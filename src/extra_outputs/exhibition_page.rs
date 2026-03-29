@@ -226,7 +226,7 @@ footer{{
   <div class="provenance">
     Seed: <span>0x{seed}</span><br>
     Resolution: <span>{width} &times; {height}</span><br>
-    Pipeline: <span>SHA3-256 &rarr; Yoshida-4 &rarr; Borda &rarr; Spectral 16-bin</span><br>
+    Pipeline: <span>SHA3-256 &rarr; Yoshida-4 &rarr; Borda &rarr; Spectral 64-bin</span><br>
     Render: <span>16-bit RGB &middot; H.265 10-bit &middot; 60fps</span>
   </div>
 </section>

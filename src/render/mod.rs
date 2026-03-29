@@ -570,7 +570,7 @@ pub(crate) fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
 /// Maximum number of step-chunks.
 ///
 /// On machines with plenty of memory each chunk allocates a full-image SPD
-/// buffer (~253 MB at 1920x1080x16 bins).  We allow up to 64 chunks so that
+/// buffer (~1012 MB at 1920x1080x64 bins).  We allow up to 64 chunks so that
 /// a 64-core server can keep all cores busy during the histogram and
 /// final-frame passes where the step count is very large (1M+).
 const MAX_STEP_CHUNKS: usize = 64;

@@ -42,10 +42,18 @@ fn bench_simulation(c: &mut Criterion) {
     });
 }
 
+fn make_bench_spd(values: &[f64]) -> [f64; NUM_BINS] {
+    let mut spd = [0.0; NUM_BINS];
+    for (i, &v) in values.iter().enumerate().take(NUM_BINS) {
+        spd[i] = v;
+    }
+    spd
+}
+
 fn bench_spd_to_rgba(c: &mut Criterion) {
     use three_body_problem::spectrum::spd_to_rgba;
 
-    let spd = [0.1, 0.3, 0.6, 0.9, 1.2, 0.8, 0.5, 0.3, 0.1, 0.4, 0.7, 0.9, 0.6, 0.2, 0.05, 0.0];
+    let spd = make_bench_spd(&[0.1, 0.3, 0.6, 0.9, 1.2, 0.8, 0.5, 0.3, 0.1, 0.4, 0.7, 0.9, 0.6, 0.2, 0.05, 0.0]);
 
     c.bench_function("spd_to_rgba/single", |b| {
         b.iter(|| spd_to_rgba(black_box(&spd)))
@@ -54,9 +62,9 @@ fn bench_spd_to_rgba(c: &mut Criterion) {
     let batch: Vec<[f64; NUM_BINS]> = (0..10000)
         .map(|i| {
             let scale = (i as f64) / 10000.0;
-            let mut s = [0.0; 16];
+            let mut s = [0.0; NUM_BINS];
             for (j, v) in s.iter_mut().enumerate() {
-                *v = scale * (j as f64 + 1.0) / 16.0;
+                *v = scale * (j as f64 + 1.0) / NUM_BINS as f64;
             }
             s
         })
@@ -169,7 +177,7 @@ fn bench_histogram_analysis(c: &mut Criterion) {
 fn bench_simd_dispatch(c: &mut Criterion) {
     use three_body_problem::spectrum_simd;
 
-    let spd = [0.1, 0.3, 0.6, 0.9, 1.2, 0.8, 0.5, 0.3, 0.1, 0.4, 0.7, 0.9, 0.6, 0.2, 0.05, 0.0];
+    let spd = make_bench_spd(&[0.1, 0.3, 0.6, 0.9, 1.2, 0.8, 0.5, 0.3, 0.1, 0.4, 0.7, 0.9, 0.6, 0.2, 0.05, 0.0]);
 
     c.bench_function("simd_dispatch/single", |b| {
         b.iter(|| spectrum_simd::spd_to_rgba_simd(black_box(&spd)))
@@ -187,9 +195,9 @@ fn bench_parallel_spd_conversion(c: &mut Criterion) {
     let batch: Vec<[f64; NUM_BINS]> = (0..10000)
         .map(|i| {
             let scale = (i as f64) / 10000.0;
-            let mut s = [0.0; 16];
+            let mut s = [0.0; NUM_BINS];
             for (j, v) in s.iter_mut().enumerate() {
-                *v = scale * (j as f64 + 1.0) / 16.0;
+                *v = scale * (j as f64 + 1.0) / NUM_BINS as f64;
             }
             s
         })

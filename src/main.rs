@@ -775,6 +775,116 @@ fn generate_extras(
                 }
             });
         }
+
+        timed_spawn!(s, "spectral_cycle", {
+            if let Err(e) = extra_outputs::spectral_cycle_video::render_spectral_cycle_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_cycle.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral cycle video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_assembly", {
+            if let Err(e) = extra_outputs::spectral_assembly_video::render_spectral_assembly_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_assembly.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral assembly video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_breathing", {
+            if let Err(e) = extra_outputs::spectral_breathing_video::render_spectral_breathing_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_breathing.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral breathing video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_narrowband", {
+            if let Err(e) = extra_outputs::spectral_narrowband_video::render_spectral_narrowband_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_narrowband.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral narrowband video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_doppler", {
+            if let Err(e) = extra_outputs::spectral_doppler_video::render_spectral_doppler_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_doppler.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral Doppler video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_prism", {
+            if let Err(e) = extra_outputs::spectral_prism_video::render_spectral_prism_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_prism.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral prism video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_decomposition", {
+            if let Err(e) = extra_outputs::spectral_decomposition_video::render_spectral_decomposition_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_decomposition.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral decomposition video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_ripple", {
+            if let Err(e) = extra_outputs::spectral_ripple_video::render_spectral_ripple_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_ripple.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral ripple video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_slit_scan", {
+            if let Err(e) = extra_outputs::spectral_slit_scan_video::render_spectral_slit_scan_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_slit_scan.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral slit-scan video failed: {}", e);
+            }
+        });
+
+        timed_spawn!(s, "spectral_aurora", {
+            if let Err(e) = extra_outputs::spectral_aurora_video::render_spectral_aurora_video(
+                scene,
+                settings,
+                &format!("{base}/videos/spectral_aurora.mp4"),
+                fast_encode,
+            ) {
+                warn!("Spectral aurora video failed: {}", e);
+            }
+        });
     });
 
     info!("=== Extra outputs complete ===");

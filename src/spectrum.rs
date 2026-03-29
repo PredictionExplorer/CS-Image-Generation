@@ -1,4 +1,4 @@
-//! Spectral utilities: 16-bin SPD handling and conversions.
+//! Spectral utilities: 64-bin SPD handling and conversions.
 //!
 //! Our "spectral accumulation" keeps one energy value per wavelength bin
 //! (bins are equally spaced from 380-700 nm).  Rendering draws into this
@@ -9,7 +9,7 @@ use crate::spectrum_simd;
 use once_cell::sync::Lazy;
 
 /// Number of wavelength buckets in the SPD.
-pub const NUM_BINS: usize = 16;
+pub const NUM_BINS: usize = 64;
 /// Start / end wavelengths in nanometres.
 const LAMBDA_START: f64 = 380.0;
 const LAMBDA_END: f64 = 700.0;
@@ -105,9 +105,17 @@ mod tests {
         assert_eq!(lhs.3.to_bits(), rhs.3.to_bits(), "{label}: A differs");
     }
 
+    fn make_spd(values: &[f64]) -> [f64; NUM_BINS] {
+        let mut spd = [0.0; NUM_BINS];
+        for (i, &v) in values.iter().enumerate().take(NUM_BINS) {
+            spd[i] = v;
+        }
+        spd
+    }
+
     #[test]
     fn test_public_spd_to_rgba_is_deterministic() {
-        let spd = [0.0, 0.1, 0.2, 0.8, 1.2, 0.6, 0.3, 0.1, 0.0, 0.4, 0.9, 0.7, 0.2, 0.1, 0.0, 0.0];
+        let spd = make_spd(&[0.0, 0.1, 0.2, 0.8, 1.2, 0.6, 0.3, 0.1, 0.0, 0.4, 0.9, 0.7, 0.2, 0.1, 0.0, 0.0]);
         let reference = spd_to_rgba(&spd);
         for _ in 0..256 {
             let value = spd_to_rgba(&spd);
@@ -117,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_public_spd_to_rgba_uses_simd_dispatch() {
-        let spd = [0.0, 0.3, 0.6, 0.9, 1.1, 0.8, 0.4, 0.2, 0.1, 0.5, 0.7, 0.6, 0.3, 0.1, 0.0, 0.0];
+        let spd = make_spd(&[0.0, 0.3, 0.6, 0.9, 1.1, 0.8, 0.4, 0.2, 0.1, 0.5, 0.7, 0.6, 0.3, 0.1, 0.0, 0.0]);
         let via_public = spd_to_rgba(&spd);
         let via_simd = crate::spectrum_simd::spd_to_rgba_simd(&spd);
         assert_tuple_bits_eq(via_public, via_simd, "simd_dispatch");
@@ -148,9 +156,9 @@ mod tests {
     }
 
     #[test]
-    fn test_num_bins_is_16() {
-        const _ASSERT: [(); NUM_BINS] = [(); 16];
-        assert_eq!(_ASSERT.len(), 16);
+    fn test_num_bins_is_64() {
+        const _ASSERT: [(); NUM_BINS] = [(); 64];
+        assert_eq!(_ASSERT.len(), 64);
     }
 
     #[test]

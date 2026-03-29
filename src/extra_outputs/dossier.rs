@@ -111,7 +111,7 @@ fn build_certificate_page(seed: &str, data: &DossierData<'_>) -> String {
   <text x="297" y="710" text-anchor="middle" fill="#8B7BAA"
         font-family="monospace" font-size="10" letter-spacing="0.15em">PIPELINE</text>
   <text x="297" y="738" text-anchor="middle" fill="#F0EDFF"
-        font-family="monospace" font-size="11">SHA3-256 → Yoshida-4 → Borda → Spectral 16-bin</text>
+        font-family="monospace" font-size="11">SHA3-256 → Yoshida-4 → Borda → Spectral 64-bin</text>
   <text x="297" y="800" text-anchor="middle" fill="#4A3A6A"
         font-family="monospace" font-size="8">COSMIC SIGNATURE · cosmicsignature.com</text>
 </svg>"##,

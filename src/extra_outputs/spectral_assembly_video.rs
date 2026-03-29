@@ -1,0 +1,116 @@
+//! Spectral assembly video — bins arrive in 8 wavelength-grouped waves,
+//! progressively reconstructing the full artwork from its spectral components.
+
+use crate::extra_outputs::spectral_video_utils::{BinBuffers, NUM_GROUPS, BINS_PER_GROUP};
+use crate::render::context::RenderContext;
+use crate::render::velocity_hdr;
+use crate::render::{
+    SpectralRenderSettings, SpectralScene, VideoEncodingOptions,
+    accumulate_spectral_steps, constants, create_video_from_frames_singlepass,
+    default_accumulation_backend,
+};
+use crate::spectrum::NUM_BINS;
+use tracing::info;
+
+const ASSEMBLY_DURATION_SECONDS: f64 = 15.0;
+const HOLD_SECONDS: f64 = 3.0;
+const WAVE_FADE_SECONDS: f64 = 0.5;
+
+#[inline]
+fn smoothstep(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+pub fn render_spectral_assembly_video(
+    scene: SpectralScene<'_>,
+    settings: SpectralRenderSettings<'_>,
+    output_path: &str,
+    fast_encode: bool,
+) -> crate::render::error::Result<()> {
+    info!(
+        "Rendering spectral assembly video ({:.0}s, {} groups × {} bins)...",
+        ASSEMBLY_DURATION_SECONDS,
+        NUM_GROUPS,
+        BINS_PER_GROUP
+    );
+
+    let resolved = settings.resolved_config;
+    let width = resolved.width;
+    let height = resolved.height;
+    let fps = constants::DEFAULT_VIDEO_FPS;
+    let total_frames = (ASSEMBLY_DURATION_SECONDS * fps as f64) as usize;
+
+    let active_duration = ASSEMBLY_DURATION_SECONDS - HOLD_SECONDS;
+    let wave_interval = active_duration / NUM_GROUPS as f64;
+
+    let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
+    let dt = constants::DEFAULT_DT;
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
+
+    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let total_steps = scene.step_count();
+    accumulate_spectral_steps(
+        &mut accum_spd,
+        scene,
+        &ctx,
+        &velocity_calc,
+        0,
+        total_steps,
+        settings.render_config.hdr_scale,
+        default_accumulation_backend(),
+    );
+
+    let bins = BinBuffers::from_spd(accum_spd, width, height);
+
+    let options = if fast_encode {
+        VideoEncodingOptions::fast_encode()
+    } else {
+        VideoEncodingOptions::default()
+    };
+
+    create_video_from_frames_singlepass(
+        width,
+        height,
+        fps,
+        |out| {
+            let mut frame_buf = Vec::<u16>::new();
+            let mut weights = [0.0f64; NUM_BINS];
+
+            for frame in 0..total_frames {
+                let t = frame as f64 / fps as f64;
+
+                if t >= active_duration {
+                    weights.fill(1.0);
+                } else {
+                    let current_group = (t / wave_interval).floor() as usize;
+                    let current_group = current_group.min(NUM_GROUPS - 1);
+                    let group_start = current_group as f64 * wave_interval;
+
+                    for bin in 0..NUM_BINS {
+                        let g = bin / BINS_PER_GROUP;
+                        weights[bin] = if g < current_group {
+                            1.0
+                        } else if g > current_group {
+                            0.0
+                        } else {
+                            let linear = ((t - group_start) / WAVE_FADE_SECONDS).clamp(0.0, 1.0);
+                            smoothstep(linear)
+                        };
+                    }
+                }
+
+                bins.weighted_blend(&weights, &mut frame_buf);
+                let bytes = crate::utils::u16_slice_as_bytes(&frame_buf);
+                out.write_all(bytes)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            }
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+        output_path,
+        &options,
+    )?;
+
+    info!("   Saved spectral assembly video => {}", output_path);
+    Ok(())
+}

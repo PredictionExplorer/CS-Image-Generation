@@ -9,9 +9,17 @@ use three_body_problem::spectrum_simd;
 
 // ── SIMD dispatch tests ─────────────────────────────────────────────────────
 
+fn make_spd(values: &[f64]) -> [f64; NUM_BINS] {
+    let mut spd = [0.0; NUM_BINS];
+    for (i, &v) in values.iter().enumerate().take(NUM_BINS) {
+        spd[i] = v;
+    }
+    spd
+}
+
 #[test]
 fn test_simd_dispatch_produces_valid_rgba_on_any_platform() {
-    let spd = [0.3, 0.1, 0.7, 0.2, 0.0, 0.5, 0.9, 0.4, 0.0, 0.6, 0.8, 0.1, 0.4, 0.2, 0.1, 0.0];
+    let spd = make_spd(&[0.3, 0.1, 0.7, 0.2, 0.0, 0.5, 0.9, 0.4, 0.0, 0.6, 0.8, 0.1, 0.4, 0.2, 0.1, 0.0]);
     let (r, g, b, a) = spectrum_simd::spd_to_rgba_simd(&spd);
     assert!((0.0..=1.0).contains(&r), "R out of range: {r}");
     assert!((0.0..=1.0).contains(&g), "G out of range: {g}");
@@ -32,7 +40,7 @@ fn test_simd_dispatch_is_deterministic_across_calls() {
     // Pin the sat-boost flag so parallel tests toggling it don't interfere.
     spectrum_simd::SAT_BOOST_ENABLED.store(true, Ordering::SeqCst);
 
-    let spd = [0.0, 0.2, 0.5, 0.7, 1.0, 0.9, 0.4, 0.1, 0.0, 0.3, 0.6, 0.8, 0.5, 0.2, 0.0, 0.0];
+    let spd = make_spd(&[0.0, 0.2, 0.5, 0.7, 1.0, 0.9, 0.4, 0.1, 0.0, 0.3, 0.6, 0.8, 0.5, 0.2, 0.0, 0.0]);
     let reference = spectrum_simd::spd_to_rgba_simd(&spd);
     for _ in 0..500 {
         // Re-pin in case a parallel test toggled it.
@@ -79,7 +87,7 @@ fn test_simd_negative_energy_is_black() {
 
 #[test]
 fn test_simd_mixed_positive_negative_valid() {
-    let spd = [-1.0, 0.5, -0.3, 0.7, 1.0, -0.1, 0.0, 0.3, -0.5, 0.2, 0.4, -0.2, 0.6, 0.1, -0.4, 0.8];
+    let spd = make_spd(&[-1.0, 0.5, -0.3, 0.7, 1.0, -0.1, 0.0, 0.3, -0.5, 0.2, 0.4, -0.2, 0.6, 0.1, -0.4, 0.8]);
     let (r, g, b, a) = spectrum_simd::spd_to_rgba_simd(&spd);
     assert!((0.0..=1.0).contains(&r));
     assert!((0.0..=1.0).contains(&g));
@@ -90,7 +98,7 @@ fn test_simd_mixed_positive_negative_valid() {
 #[test]
 fn test_simd_sat_boost_toggle_is_observable() {
     use std::sync::atomic::Ordering;
-    let spd = [0.0, 0.3, 0.6, 0.9, 1.2, 0.8, 0.4, 0.1, 0.0, 0.5, 0.7, 0.9, 0.6, 0.3, 0.1, 0.0];
+    let spd = make_spd(&[0.0, 0.3, 0.6, 0.9, 1.2, 0.8, 0.4, 0.1, 0.0, 0.5, 0.7, 0.9, 0.6, 0.3, 0.1, 0.0]);
 
     spectrum_simd::SAT_BOOST_ENABLED.store(true, Ordering::Relaxed);
     let boosted = spectrum_simd::spd_to_rgba_simd(&spd);
@@ -239,7 +247,7 @@ fn test_stage_timer_measures_nonzero_time() {
 
 #[test]
 fn test_spd_to_rgba_public_api_matches_simd() {
-    let spd = [0.1, 0.4, 0.7, 0.3, 0.9, 0.5, 0.2, 0.8, 0.6, 0.1, 0.3, 0.7, 0.4, 0.2, 0.0, 0.5];
+    let spd = make_spd(&[0.1, 0.4, 0.7, 0.3, 0.9, 0.5, 0.2, 0.8, 0.6, 0.1, 0.3, 0.7, 0.4, 0.2, 0.0, 0.5]);
     let via_public = three_body_problem::spectrum::spd_to_rgba(&spd);
     let via_simd = spectrum_simd::spd_to_rgba_simd(&spd);
     assert_eq!(via_public.0.to_bits(), via_simd.0.to_bits());

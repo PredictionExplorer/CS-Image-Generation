@@ -1,4 +1,4 @@
-//! Spectral fingerprint — a radial polar-area chart of the 16-bin spectral
+//! Spectral fingerprint — a radial polar-area chart of the 64-bin spectral
 //! distribution, rendered as SVG.  Each wedge is colored by its wavelength
 //! and sized by accumulated energy, producing a unique "color DNA" mark.
 
@@ -179,7 +179,7 @@ fn build_fingerprint_svg(energies: &[f64; NUM_BINS], seed: &str) -> String {
   <text x="{cx}" y="28" text-anchor="middle" fill="#8B7BAA" font-family="monospace"
         font-size="10" letter-spacing="3">SPECTRAL FINGERPRINT</text>
   <text x="{cx}" y="586" text-anchor="middle" fill="#4A3A6A" font-family="monospace"
-        font-size="8">16-bin SPD · 380–700 nm</text>
+        font-size="8">64-bin SPD · 380–700 nm</text>
 </svg>"##,
         cx = cx, cy = cy, ir = inner_radius, mr = max_radius,
         wedges = wedges, labels = labels,
@@ -200,8 +200,10 @@ mod tests {
 
     #[test]
     fn test_build_fingerprint_svg_contains_structure() {
-        let energies = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-                        9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0];
+        let mut energies = [0.0; NUM_BINS];
+        for (i, v) in energies.iter_mut().enumerate() {
+            *v = (i + 1) as f64;
+        }
         let svg = build_fingerprint_svg(&energies, "0xCAFEBABE");
         assert!(svg.contains("<svg"));
         assert!(svg.contains("SPECTRAL FINGERPRINT"));
