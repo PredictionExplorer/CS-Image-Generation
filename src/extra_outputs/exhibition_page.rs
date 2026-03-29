@@ -2,6 +2,7 @@
 //! serves as a virtual gallery room with video, 3D viewer, audio, orbital
 //! data, effect chain, and provenance information.
 
+use crate::extra_outputs::sonification;
 use crate::render::randomizable_config::ResolvedEffectConfig;
 use crate::sim::TrajectoryResult;
 use std::io::Write;
@@ -26,6 +27,11 @@ pub fn generate_exhibition_page(
     let effects_html = build_effects_html(&active_effects);
     let survival_rate =
         (data.num_sims - data.result.discarded_count) as f64 / data.num_sims as f64 * 100.0;
+
+    let sonic_world = sonification::select_sonic_world(
+        data.result.chaos,
+        data.result.equilateralness,
+    );
 
     let seed_display = data.seed.strip_prefix("0x").unwrap_or(data.seed);
 
@@ -197,8 +203,18 @@ footer{{
 <section class="fade-in">
   <h2>Sonification</h2>
   <p style="color:var(--muted);font-size:0.9rem;margin-bottom:16px;">
-    Orbital mechanics translated to sound — velocity maps to pitch, proximity maps to amplitude.
+    Gallery-grade spectral sonification &mdash; physical resonators excited by orbital events, tuned to this orbit&rsquo;s chaos character and triangle geometry, spatialised in depth from the three-body positions.
   </p>
+  <div class="data-grid" style="margin-bottom:20px;">
+    <div class="data-item">
+      <div class="label">Sonic World</div>
+      <div class="value">{sonic_world_name}</div>
+    </div>
+    <div class="data-item">
+      <div class="label">Character</div>
+      <div class="value" style="font-size:0.8rem;color:var(--muted)">{sonic_world_desc}</div>
+    </div>
+  </div>
   <button class="audio-toggle" onclick="toggleAudio()">
     <span id="audioIcon">&#9654;</span> Listen to this orbit
   </button>
@@ -301,6 +317,8 @@ document.querySelectorAll('.fade-in').forEach(el => {{
         effects = effects_html,
         width = data.config.width,
         height = data.config.height,
+        sonic_world_name = sonic_world.name(),
+        sonic_world_desc = sonic_world.description(),
     );
 
     let mut file = std::fs::File::create(output_path)?;

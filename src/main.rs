@@ -258,6 +258,8 @@ fn main() -> Result<()> {
         args.sims, args.steps
     ))));
 
+    let body_masses = [best_bodies[0].mass, best_bodies[1].mass, best_bodies[2].mass];
+
     // ── Final Simulation ──
     let timer = StageTimer::start("Final Simulation");
     let (mut positions, velocities) = app::simulate_best_orbit(best_bodies, args.steps);
@@ -346,9 +348,16 @@ fn main() -> Result<()> {
         args.resolution.height
     ))));
 
-    // ── Sonification (always embed audio into the video) ──
+    // ── Sonification (gallery-grade with orbit character) ──
     let timer = StageTimer::start("Sonification");
-    if let Err(e) = extra_outputs::sonification::generate_sonification(&positions, 30.0, &output_vid) {
+    let audio_ctx = extra_outputs::sonification::GalleryAudioContext {
+        chaos: best_info.chaos,
+        equilateralness: best_info.equilateralness,
+        masses: body_masses,
+    };
+    if let Err(e) = extra_outputs::sonification::generate_gallery_sonification(
+        &positions, 30.0, &output_vid, &audio_ctx,
+    ) {
         warn!("Sonification failed: {}", e);
     }
     profile.push(timer.finish());
