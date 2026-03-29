@@ -221,11 +221,38 @@ fn finalize_rgba(
 
 // ── x86_64 AVX2+FMA implementation ─────────────────────────────────────────
 
+#[cfg(target_arch = "x86_64")]
+const fn inv_factorial(n: u32) -> f64 {
+    let mut result = 1u64;
+    let mut i = 2u32;
+    while i <= n {
+        result *= i as u64;
+        i += 1;
+    }
+    1.0 / result as f64
+}
+
+/// Taylor series coefficients for exp(x): `EXP_COEFFS[k] = 1/k!`.
+/// Degree 11 gives truncation error < 1e-14 for |r| <= ln2/2.
+#[cfg(target_arch = "x86_64")]
+const EXP_POLY_DEGREE: usize = 11;
+
+#[cfg(target_arch = "x86_64")]
+const EXP_COEFFS: [f64; EXP_POLY_DEGREE + 1] = {
+    let mut c = [0.0; EXP_POLY_DEGREE + 1];
+    let mut i = 0u32;
+    while (i as usize) < EXP_POLY_DEGREE + 1 {
+        c[i as usize] = inv_factorial(i);
+        i += 1;
+    }
+    c
+};
+
 /// Fully vectorized 1 - exp(-x) for 4 f64 lanes using AVX2+FMA.
 ///
-/// Uses Cody-Waite range reduction with a degree-7 Taylor polynomial,
+/// Uses Cody-Waite range reduction with a degree-11 Taylor polynomial,
 /// keeping the entire computation in SIMD registers (no scalar fallback).
-/// Input x must be non-negative; relative error < 2e-11 for x in [0, 700].
+/// Input x must be non-negative; relative error < 1e-14 for x in [0, 700].
 #[cfg(all(target_arch = "x86_64", not(miri)))]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
@@ -246,20 +273,14 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
     let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
     let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
 
-    let c7 = _mm256_set1_pd(1.984_126_984_126_984e-4);
-    let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
-    let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
-    let c4 = _mm256_set1_pd(4.166_666_666_666_666_4e-2);
-    let c3 = _mm256_set1_pd(1.666_666_666_666_666_6e-1);
-    let c2 = _mm256_set1_pd(0.5);
     let one = _mm256_set1_pd(1.0);
-
-    let p = _mm256_fmadd_pd(c7, r, c6);
-    let p = _mm256_fmadd_pd(p, r, c5);
-    let p = _mm256_fmadd_pd(p, r, c4);
-    let p = _mm256_fmadd_pd(p, r, c3);
-    let p = _mm256_fmadd_pd(p, r, c2);
-    let p = _mm256_fmadd_pd(p, r, one);
+    let mut p = _mm256_set1_pd(EXP_COEFFS[EXP_POLY_DEGREE]);
+    let mut i = EXP_POLY_DEGREE - 1;
+    while i >= 2 {
+        p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(EXP_COEFFS[i]));
+        i -= 1;
+    }
+    p = _mm256_fmadd_pd(p, r, one);
     let exp_r = _mm256_fmadd_pd(p, r, one);
 
     let n_i32 = _mm256_cvtpd_epi32(n);
@@ -397,20 +418,14 @@ unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::
     let r = _mm512_fmadd_pd(neg_n, ln2_hi, neg_x);
     let r = _mm512_fmadd_pd(neg_n, ln2_lo, r);
 
-    let c7 = _mm512_set1_pd(1.984_126_984_126_984e-4);
-    let c6 = _mm512_set1_pd(1.388_888_888_888_889e-3);
-    let c5 = _mm512_set1_pd(8.333_333_333_333_333e-3);
-    let c4 = _mm512_set1_pd(4.166_666_666_666_666_4e-2);
-    let c3 = _mm512_set1_pd(1.666_666_666_666_666_6e-1);
-    let c2 = _mm512_set1_pd(0.5);
     let one = _mm512_set1_pd(1.0);
-
-    let p = _mm512_fmadd_pd(c7, r, c6);
-    let p = _mm512_fmadd_pd(p, r, c5);
-    let p = _mm512_fmadd_pd(p, r, c4);
-    let p = _mm512_fmadd_pd(p, r, c3);
-    let p = _mm512_fmadd_pd(p, r, c2);
-    let p = _mm512_fmadd_pd(p, r, one);
+    let mut p = _mm512_set1_pd(EXP_COEFFS[EXP_POLY_DEGREE]);
+    let mut i = EXP_POLY_DEGREE - 1;
+    while i >= 2 {
+        p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(EXP_COEFFS[i]));
+        i -= 1;
+    }
+    p = _mm512_fmadd_pd(p, r, one);
     let exp_r = _mm512_fmadd_pd(p, r, one);
 
     let n_i32 = _mm512_cvtpd_epi32(n);
