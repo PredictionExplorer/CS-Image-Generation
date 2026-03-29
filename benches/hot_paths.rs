@@ -176,7 +176,7 @@ fn bench_simd_dispatch(c: &mut Criterion) {
     });
 
     c.bench_function("simd_dispatch/path_name", |b| {
-        b.iter(|| spectrum_simd::detected_simd_path_name())
+        b.iter(spectrum_simd::detected_simd_path_name)
     });
 }
 

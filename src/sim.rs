@@ -846,7 +846,7 @@ mod tests {
             Body::new(100.0, Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.0)),
         ];
         let sim = get_positions(bodies, 1000);
-        assert!(sim.positions[0].len() > 0);
+        assert!(!sim.positions[0].is_empty());
     }
 
     #[test]

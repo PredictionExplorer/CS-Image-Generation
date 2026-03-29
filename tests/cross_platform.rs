@@ -115,10 +115,10 @@ fn test_simd_stress_1000_random_spectra() {
             *v = (seed % 50_000) as f64 / 100.0;
         }
         let (r, g, b, a) = spectrum_simd::spd_to_rgba_simd(&spd);
-        assert!(r >= 0.0 && r <= 1.0, "R={r}");
-        assert!(g >= 0.0 && g <= 1.0, "G={g}");
-        assert!(b >= 0.0 && b <= 1.0, "B={b}");
-        assert!(a >= 0.0 && a <= 1.0, "A={a}");
+        assert!((0.0..=1.0).contains(&r), "R={r}");
+        assert!((0.0..=1.0).contains(&g), "G={g}");
+        assert!((0.0..=1.0).contains(&b), "B={b}");
+        assert!((0.0..=1.0).contains(&a), "A={a}");
     }
 }
 
@@ -252,8 +252,8 @@ fn test_spd_to_rgba_public_api_matches_simd() {
 fn test_wavelength_bins_span_visible_range() {
     let first = three_body_problem::spectrum::wavelength_nm_for_bin(0);
     let last = three_body_problem::spectrum::wavelength_nm_for_bin(NUM_BINS - 1);
-    assert!(first >= 380.0 && first < 420.0, "first bin should be near 380nm");
-    assert!(last > 660.0 && last <= 700.0, "last bin should be near 700nm");
+    assert!((380.0..420.0).contains(&first), "first bin should be near 380nm");
+    assert!((660.0..=700.0).contains(&last), "last bin should be near 700nm");
 }
 
 // ── simulation RNG portability ──────────────────────────────────────────────
@@ -297,6 +297,6 @@ fn test_rng_output_in_unit_range() {
     let mut rng = Sha3RandomByteStream::new(b"range_test", 100.0, 300.0, 300.0, 1.0);
     for _ in 0..10_000 {
         let val = rng.next_f64();
-        assert!(val >= 0.0 && val <= 1.0, "f64 out of [0,1]: {val}");
+        assert!((0.0..=1.0).contains(&val), "f64 out of [0,1]: {val}");
     }
 }

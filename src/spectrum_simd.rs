@@ -232,47 +232,45 @@ fn finalize_rgba(
 unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
     use std::arch::x86_64::*;
 
-    unsafe {
-        let x_safe = _mm256_min_pd(x, _mm256_set1_pd(700.0));
-        let zero = _mm256_setzero_pd();
-        let neg_x = _mm256_sub_pd(zero, x_safe);
+    let x_safe = _mm256_min_pd(x, _mm256_set1_pd(700.0));
+    let zero = _mm256_setzero_pd();
+    let neg_x = _mm256_sub_pd(zero, x_safe);
 
-        let log2_e = _mm256_set1_pd(1.442_695_040_888_963_4);
-        let ln2_hi = _mm256_set1_pd(6.931_471_803_691_238e-1);
-        let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
+    let log2_e = _mm256_set1_pd(std::f64::consts::LOG2_E);
+    let ln2_hi = _mm256_set1_pd(6.931_471_803_691_238e-1);
+    let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
 
-        let t = _mm256_mul_pd(neg_x, log2_e);
-        let n = _mm256_round_pd::<0x08>(t);
-        let neg_n = _mm256_sub_pd(zero, n);
-        let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
-        let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
+    let t = _mm256_mul_pd(neg_x, log2_e);
+    let n = _mm256_round_pd::<0x08>(t);
+    let neg_n = _mm256_sub_pd(zero, n);
+    let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
+    let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
 
-        let c7 = _mm256_set1_pd(1.984_126_984_126_984_1e-4);
-        let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
-        let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
-        let c4 = _mm256_set1_pd(4.166_666_666_666_666_4e-2);
-        let c3 = _mm256_set1_pd(1.666_666_666_666_666_6e-1);
-        let c2 = _mm256_set1_pd(5.000_000_000_000_000_0e-1);
-        let one = _mm256_set1_pd(1.0);
+    let c7 = _mm256_set1_pd(1.984_126_984_126_984e-4);
+    let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
+    let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
+    let c4 = _mm256_set1_pd(4.166_666_666_666_666_4e-2);
+    let c3 = _mm256_set1_pd(1.666_666_666_666_666_6e-1);
+    let c2 = _mm256_set1_pd(0.5);
+    let one = _mm256_set1_pd(1.0);
 
-        let p = _mm256_fmadd_pd(c7, r, c6);
-        let p = _mm256_fmadd_pd(p, r, c5);
-        let p = _mm256_fmadd_pd(p, r, c4);
-        let p = _mm256_fmadd_pd(p, r, c3);
-        let p = _mm256_fmadd_pd(p, r, c2);
-        let p = _mm256_fmadd_pd(p, r, one);
-        let exp_r = _mm256_fmadd_pd(p, r, one);
+    let p = _mm256_fmadd_pd(c7, r, c6);
+    let p = _mm256_fmadd_pd(p, r, c5);
+    let p = _mm256_fmadd_pd(p, r, c4);
+    let p = _mm256_fmadd_pd(p, r, c3);
+    let p = _mm256_fmadd_pd(p, r, c2);
+    let p = _mm256_fmadd_pd(p, r, one);
+    let exp_r = _mm256_fmadd_pd(p, r, one);
 
-        let n_i32 = _mm256_cvtpd_epi32(n);
-        let n_i64 = _mm256_cvtepi32_epi64(n_i32);
-        let pow2n = _mm256_castsi256_pd(_mm256_slli_epi64(
-            _mm256_add_epi64(n_i64, _mm256_set1_epi64x(1023)),
-            52,
-        ));
+    let n_i32 = _mm256_cvtpd_epi32(n);
+    let n_i64 = _mm256_cvtepi32_epi64(n_i32);
+    let pow2n = _mm256_castsi256_pd(_mm256_slli_epi64(
+        _mm256_add_epi64(n_i64, _mm256_set1_epi64x(1023)),
+        52,
+    ));
 
-        let exp_neg = _mm256_mul_pd(exp_r, pow2n);
-        _mm256_sub_pd(one, exp_neg)
-    }
+    let exp_neg = _mm256_mul_pd(exp_r, pow2n);
+    _mm256_sub_pd(one, exp_neg)
 }
 
 /// AVX2 SIMD implementation — fully vectorized inner loop (no scalar exp).
@@ -385,45 +383,43 @@ unsafe fn spd_to_rgba_avx512(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64,
 unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::x86_64::__m512d {
     use std::arch::x86_64::*;
 
-    unsafe {
-        let x_safe = _mm512_min_pd(x, _mm512_set1_pd(700.0));
-        let zero = _mm512_setzero_pd();
-        let neg_x = _mm512_sub_pd(zero, x_safe);
+    let x_safe = _mm512_min_pd(x, _mm512_set1_pd(700.0));
+    let zero = _mm512_setzero_pd();
+    let neg_x = _mm512_sub_pd(zero, x_safe);
 
-        let log2_e = _mm512_set1_pd(1.442_695_040_888_963_4);
-        let ln2_hi = _mm512_set1_pd(6.931_471_803_691_238e-1);
-        let ln2_lo = _mm512_set1_pd(1.908_214_929_270_585e-10);
+    let log2_e = _mm512_set1_pd(std::f64::consts::LOG2_E);
+    let ln2_hi = _mm512_set1_pd(6.931_471_803_691_238e-1);
+    let ln2_lo = _mm512_set1_pd(1.908_214_929_270_585e-10);
 
-        let t = _mm512_mul_pd(neg_x, log2_e);
-        let n = _mm512_roundscale_pd::<0x08>(t);
-        let neg_n = _mm512_sub_pd(zero, n);
-        let r = _mm512_fmadd_pd(neg_n, ln2_hi, neg_x);
-        let r = _mm512_fmadd_pd(neg_n, ln2_lo, r);
+    let t = _mm512_mul_pd(neg_x, log2_e);
+    let n = _mm512_roundscale_pd::<0x08>(t);
+    let neg_n = _mm512_sub_pd(zero, n);
+    let r = _mm512_fmadd_pd(neg_n, ln2_hi, neg_x);
+    let r = _mm512_fmadd_pd(neg_n, ln2_lo, r);
 
-        let c7 = _mm512_set1_pd(1.984_126_984_126_984_1e-4);
-        let c6 = _mm512_set1_pd(1.388_888_888_888_889e-3);
-        let c5 = _mm512_set1_pd(8.333_333_333_333_333e-3);
-        let c4 = _mm512_set1_pd(4.166_666_666_666_666_4e-2);
-        let c3 = _mm512_set1_pd(1.666_666_666_666_666_6e-1);
-        let c2 = _mm512_set1_pd(5.000_000_000_000_000_0e-1);
-        let one = _mm512_set1_pd(1.0);
+    let c7 = _mm512_set1_pd(1.984_126_984_126_984e-4);
+    let c6 = _mm512_set1_pd(1.388_888_888_888_889e-3);
+    let c5 = _mm512_set1_pd(8.333_333_333_333_333e-3);
+    let c4 = _mm512_set1_pd(4.166_666_666_666_666_4e-2);
+    let c3 = _mm512_set1_pd(1.666_666_666_666_666_6e-1);
+    let c2 = _mm512_set1_pd(0.5);
+    let one = _mm512_set1_pd(1.0);
 
-        let p = _mm512_fmadd_pd(c7, r, c6);
-        let p = _mm512_fmadd_pd(p, r, c5);
-        let p = _mm512_fmadd_pd(p, r, c4);
-        let p = _mm512_fmadd_pd(p, r, c3);
-        let p = _mm512_fmadd_pd(p, r, c2);
-        let p = _mm512_fmadd_pd(p, r, one);
-        let exp_r = _mm512_fmadd_pd(p, r, one);
+    let p = _mm512_fmadd_pd(c7, r, c6);
+    let p = _mm512_fmadd_pd(p, r, c5);
+    let p = _mm512_fmadd_pd(p, r, c4);
+    let p = _mm512_fmadd_pd(p, r, c3);
+    let p = _mm512_fmadd_pd(p, r, c2);
+    let p = _mm512_fmadd_pd(p, r, one);
+    let exp_r = _mm512_fmadd_pd(p, r, one);
 
-        let n_i32 = _mm512_cvtpd_epi32(n);
-        let n_i64 = _mm512_cvtepi32_epi64(n_i32);
-        let bias = _mm512_set1_epi64(1023);
-        let pow2n = _mm512_castsi512_pd(_mm512_slli_epi64(_mm512_add_epi64(n_i64, bias), 52));
+    let n_i32 = _mm512_cvtpd_epi32(n);
+    let n_i64 = _mm512_cvtepi32_epi64(n_i32);
+    let bias = _mm512_set1_epi64(1023);
+    let pow2n = _mm512_castsi512_pd(_mm512_slli_epi64(_mm512_add_epi64(n_i64, bias), 52));
 
-        let exp_neg = _mm512_mul_pd(exp_r, pow2n);
-        _mm512_sub_pd(one, exp_neg)
-    }
+    let exp_neg = _mm512_mul_pd(exp_r, pow2n);
+    _mm512_sub_pd(one, exp_neg)
 }
 
 // ── aarch64 NEON implementation ─────────────────────────────────────────────

@@ -16,7 +16,7 @@ pub fn u16_slice_as_bytes(slice: &[u16]) -> &[u8] {
     // SAFETY: u16 has no padding, the slice is a contiguous valid allocation,
     // and the compile_error! above guarantees little-endian layout.
     unsafe {
-        std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), slice.len() * std::mem::size_of::<u16>())
+        std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice))
     }
 }
 

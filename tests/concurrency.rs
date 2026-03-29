@@ -64,7 +64,7 @@ fn test_parallel_spd_batch_deterministic() {
         })
         .collect();
 
-    let reference: Vec<_> = batch.iter().map(|s| spectrum_simd::spd_to_rgba_simd(s)).collect();
+    let reference: Vec<_> = batch.iter().map(spectrum_simd::spd_to_rgba_simd).collect();
 
     for num_threads in [1, 2, 4] {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -74,7 +74,7 @@ fn test_parallel_spd_batch_deterministic() {
 
         let result: Vec<_> = pool.install(|| {
             use rayon::prelude::*;
-            batch.par_iter().map(|s| spectrum_simd::spd_to_rgba_simd(s)).collect()
+            batch.par_iter().map(spectrum_simd::spd_to_rgba_simd).collect()
         });
 
         for (i, (r, t)) in reference.iter().zip(result.iter()).enumerate() {
@@ -185,7 +185,7 @@ fn test_sat_boost_atomic_toggle_under_contention() {
     }
 
     let final_val = flag.load(Ordering::Relaxed);
-    assert!(final_val || !final_val, "should be a valid bool");
+    let _ = final_val; // confirm the atomic was readable without panic
 }
 
 // ── channel frame writer ────────────────────────────────────────────────────
@@ -237,7 +237,8 @@ fn test_channel_producer_drop_signals_consumer_eof() {
 fn test_rng_per_thread_independence() {
     use std::sync::Arc;
 
-    let results: Arc<std::sync::Mutex<Vec<(usize, Vec<f64>)>>> =
+    type ThreadResult = Vec<(usize, Vec<f64>)>;
+    let results: Arc<std::sync::Mutex<ThreadResult>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let barrier = Arc::new(std::sync::Barrier::new(4));
 
@@ -412,7 +413,7 @@ fn test_thread_pool_various_sizes() {
             .build()
             .unwrap();
 
-        let count = pool.install(|| rayon::current_num_threads());
+        let count = pool.install(rayon::current_num_threads);
         assert_eq!(count, size, "pool should have {size} threads");
     }
 }

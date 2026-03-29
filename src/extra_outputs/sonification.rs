@@ -469,7 +469,7 @@ fn synthesize_orbital_choir(
     let mut rng = SimpleRng::new(0xCE1E_5714_A1C1_0412);
 
     let amp_a = 1.0 - (-1.0 / (1.5 * SR)).exp();
-    let pans = [0.3, 0.5, 0.7];
+    let pans: [f64; 3] = [0.3, 0.5, 0.7];
 
     for si in 0..total_samples {
         let t = si as f64 / total_samples as f64;
@@ -511,14 +511,14 @@ fn synthesize_orbital_choir(
             let tgt = close.clamp(0.0, 1.0) * 0.20;
             sm_amp[b] += amp_a * (tgt - sm_amp[b]);
 
-            left += filtered * sm_amp[b] * (1.0 - pans[b] as f64).sqrt();
-            right += filtered * sm_amp[b] * (pans[b] as f64).sqrt();
+            left += filtered * sm_amp[b] * (1.0 - pans[b]).sqrt();
+            right += filtered * sm_amp[b] * pans[b].sqrt();
         }
 
         let avg_spd = if step + 1 < step_count {
             let mut v = 0.0;
-            for b in 0..nb {
-                v += (positions[b][(step + 1).min(step_count - 1)] - positions[b][s]).norm();
+            for pos in positions.iter().take(nb) {
+                v += (pos[(step + 1).min(step_count - 1)] - pos[s]).norm();
             }
             v / nb as f64
         } else {

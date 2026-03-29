@@ -171,7 +171,7 @@ fn test_rng_mass_in_range() {
     for _ in 0..10_000 {
         let mass = rng.random_mass();
         assert!(
-            mass >= 50.0 && mass <= 500.0,
+            (50.0..=500.0).contains(&mass),
             "mass {mass} out of range [50, 500]"
         );
     }
@@ -438,10 +438,10 @@ fn test_spd_conversion_with_large_values() {
         let val = 10.0f64.powi(exp);
         let spd = [val; NUM_BINS];
         let (r, g, b, a) = spectrum_simd::spd_to_rgba_simd(&spd);
-        assert!(r >= 0.0 && r <= 1.0, "exp={exp}: R={r}");
-        assert!(g >= 0.0 && g <= 1.0, "exp={exp}: G={g}");
-        assert!(b >= 0.0 && b <= 1.0, "exp={exp}: B={b}");
-        assert!(a >= 0.0 && a <= 1.0, "exp={exp}: A={a}");
+        assert!((0.0..=1.0).contains(&r), "exp={exp}: R={r}");
+        assert!((0.0..=1.0).contains(&g), "exp={exp}: G={g}");
+        assert!((0.0..=1.0).contains(&b), "exp={exp}: B={b}");
+        assert!((0.0..=1.0).contains(&a), "exp={exp}: A={a}");
     }
 }
 
