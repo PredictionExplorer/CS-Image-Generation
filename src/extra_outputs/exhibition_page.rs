@@ -203,7 +203,7 @@ footer{{
 <section class="fade-in">
   <h2>Sonification</h2>
   <p style="color:var(--muted);font-size:0.9rem;margin-bottom:16px;">
-    Gallery-grade spectral sonification &mdash; physical resonators excited by orbital events, tuned to this orbit&rsquo;s chaos character and triangle geometry, spatialised in depth from the three-body positions.
+    Karplus-Strong waveguide strings plucked by gravitational near-misses, with HRTF binaural spatialization and Freeverb reverb. Each body is a vibrating string whose pitch comes from its mass and whose damping is shaped by this orbit&rsquo;s chaos character.
   </p>
   <div class="data-grid" style="margin-bottom:20px;">
     <div class="data-item">
