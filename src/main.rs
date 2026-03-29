@@ -9,7 +9,7 @@ use three_body_problem::{
     sim::Sha3RandomByteStream,
     spectrum_simd,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_OUTPUT_NAME: &str = "output";
@@ -415,7 +415,7 @@ fn main() -> Result<()> {
         )
     };
     if let Err(e) = gallery_result {
-        warn!("Spectral gallery failed: {}", e);
+        error!("Spectral gallery failed: {}", e);
     }
     profile.push(timer.finish());
 
@@ -446,61 +446,61 @@ fn main() -> Result<()> {
                 if let Err(e) = extra_outputs::spectral_cycle_video::render_spectral_cycle_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_cycle.mp4"), sv_fast,
-                ) { warn!("Spectral cycle video failed: {}", e); }
+                ) { error!("Spectral cycle video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_assembly", {
                 if let Err(e) = extra_outputs::spectral_assembly_video::render_spectral_assembly_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_assembly.mp4"), sv_fast,
-                ) { warn!("Spectral assembly video failed: {}", e); }
+                ) { error!("Spectral assembly video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_breathing", {
                 if let Err(e) = extra_outputs::spectral_breathing_video::render_spectral_breathing_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_breathing.mp4"), sv_fast,
-                ) { warn!("Spectral breathing video failed: {}", e); }
+                ) { error!("Spectral breathing video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_narrowband", {
                 if let Err(e) = extra_outputs::spectral_narrowband_video::render_spectral_narrowband_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_narrowband.mp4"), sv_fast,
-                ) { warn!("Spectral narrowband video failed: {}", e); }
+                ) { error!("Spectral narrowband video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_doppler", {
                 if let Err(e) = extra_outputs::spectral_doppler_video::render_spectral_doppler_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_doppler.mp4"), sv_fast,
-                ) { warn!("Spectral Doppler video failed: {}", e); }
+                ) { error!("Spectral Doppler video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_prism", {
                 if let Err(e) = extra_outputs::spectral_prism_video::render_spectral_prism_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_prism.mp4"), sv_fast,
-                ) { warn!("Spectral prism video failed: {}", e); }
+                ) { error!("Spectral prism video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_decomposition", {
                 if let Err(e) = extra_outputs::spectral_decomposition_video::render_spectral_decomposition_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_decomposition.mp4"), sv_fast,
-                ) { warn!("Spectral decomposition video failed: {}", e); }
+                ) { error!("Spectral decomposition video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_ripple", {
                 if let Err(e) = extra_outputs::spectral_ripple_video::render_spectral_ripple_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_ripple.mp4"), sv_fast,
-                ) { warn!("Spectral ripple video failed: {}", e); }
+                ) { error!("Spectral ripple video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_slit_scan", {
                 if let Err(e) = extra_outputs::spectral_slit_scan_video::render_spectral_slit_scan_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_slit_scan.mp4"), sv_fast,
-                ) { warn!("Spectral slit-scan video failed: {}", e); }
+                ) { error!("Spectral slit-scan video failed: {}", e); }
             });
             sv_spawn!(s, "spectral_aurora", {
                 if let Err(e) = extra_outputs::spectral_aurora_video::render_spectral_aurora_video(
                     sv_scene, sv_settings,
                     &format!("{sv_dir}/spectral_aurora.mp4"), sv_fast,
-                ) { warn!("Spectral aurora video failed: {}", e); }
+                ) { error!("Spectral aurora video failed: {}", e); }
             });
         });
 

@@ -46,6 +46,13 @@ _file_handler.setFormatter(
 )
 logger.addHandler(_file_handler)
 
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.WARNING)
+_console_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)-5s] %(message)s", datefmt="%H:%M:%S")
+)
+logger.addHandler(_console_handler)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,6 +103,14 @@ def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
             logger.debug(f"[{run_id}] stdout:\n{proc.stdout.rstrip()}")
         if proc.stderr:
             logger.debug(f"[{run_id}] stderr:\n{proc.stderr.rstrip()}")
+            for line in proc.stderr.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if " ERROR " in line:
+                    logger.error(f"[{run_id}] {seed}: {stripped}")
+                elif " WARN " in line:
+                    logger.warning(f"[{run_id}] {seed}: {stripped}")
 
         if proc.returncode == 0:
             logger.info(f"[{run_id}] OK    {seed}  ({fmt_duration(elapsed)})")

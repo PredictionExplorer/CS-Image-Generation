@@ -311,7 +311,7 @@ pub fn create_video_from_frames_singlepass(
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(RenderError::VideoEncoding)?;
 
