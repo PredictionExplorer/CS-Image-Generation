@@ -194,4 +194,95 @@ mod tests {
             assert!(b >= 0.0, "bin {i}: B = {b} should be >= 0");
         }
     }
+
+    #[test]
+    fn test_lut_k_values_are_positive() {
+        for (i, &(_r, _g, _b, k)) in BIN_COMBINED_LUT.iter().enumerate() {
+            assert!(k > 0.0, "bin {i}: tone-mapping k = {k} should be positive");
+        }
+    }
+
+    #[test]
+    fn test_lut_rgb_sum_per_bin_is_positive() {
+        for (i, &(r, g, b, _k)) in BIN_COMBINED_LUT.iter().enumerate() {
+            let sum = r + g + b;
+            assert!(
+                sum > 0.0,
+                "bin {i}: R+G+B = {sum} should be positive (no invisible bins)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_lut_wavelength_to_rgb_covers_full_spectrum() {
+        let quarter = NUM_BINS / 4;
+        let three_quarter = 3 * NUM_BINS / 4;
+
+        let (r_blue, _g_blue, b_blue, _) = BIN_COMBINED_LUT[quarter];
+        assert!(
+            b_blue > r_blue,
+            "bin {quarter} (~blue): B={b_blue} should exceed R={r_blue}"
+        );
+
+        let (_r_red, _g_red, b_red, _) = BIN_COMBINED_LUT[three_quarter];
+        let (r_red, _, _, _) = BIN_COMBINED_LUT[three_quarter];
+        assert!(
+            r_red > b_red,
+            "bin {three_quarter} (~red): R={r_red} should exceed B={b_red}"
+        );
+    }
+
+    #[test]
+    fn test_spd_to_rgba_single_bin_color_varies_across_spectrum() {
+        let mut spd_blue = [0.0; NUM_BINS];
+        spd_blue[0] = 1.0;
+        let blue_result = spd_to_rgba(&spd_blue);
+
+        let mut spd_mid = [0.0; NUM_BINS];
+        spd_mid[NUM_BINS / 2] = 1.0;
+        let mid_result = spd_to_rgba(&spd_mid);
+
+        let mut spd_red = [0.0; NUM_BINS];
+        spd_red[NUM_BINS - 1] = 1.0;
+        let red_result = spd_to_rgba(&spd_red);
+
+        let color_differs = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| -> bool {
+            (a.0 - b.0).abs() > 0.01 || (a.1 - b.1).abs() > 0.01 || (a.2 - b.2).abs() > 0.01
+        };
+
+        assert!(
+            color_differs(blue_result, mid_result),
+            "blue bin and mid bin should produce different colors"
+        );
+        assert!(
+            color_differs(mid_result, red_result),
+            "mid bin and red bin should produce different colors"
+        );
+        assert!(
+            color_differs(blue_result, red_result),
+            "blue bin and red bin should produce different colors"
+        );
+    }
+
+    #[test]
+    fn test_spd_to_rgba_brightness_of_sum_exceeds_parts() {
+        let mut a = [0.0; NUM_BINS];
+        a[NUM_BINS / 4] = 1.0;
+        let mut b = [0.0; NUM_BINS];
+        b[3 * NUM_BINS / 4] = 1.0;
+
+        let mut sum = [0.0; NUM_BINS];
+        for i in 0..NUM_BINS {
+            sum[i] = a[i] + b[i];
+        }
+
+        let alpha_a = spd_to_rgba(&a).3;
+        let alpha_b = spd_to_rgba(&b).3;
+        let alpha_sum = spd_to_rgba(&sum).3;
+
+        assert!(
+            alpha_sum >= alpha_a && alpha_sum >= alpha_b,
+            "combined SPD brightness ({alpha_sum}) should be >= each part ({alpha_a}, {alpha_b})"
+        );
+    }
 }

@@ -73,12 +73,57 @@ mod tests {
 
     #[test]
     fn test_roundtrip_conversion() {
-        // Test that converting bin -> wavelength -> bin gives consistent results
         for bin in 0..NUM_BINS {
             let wavelength = bin_to_wavelength(bin);
             let bin_f = wavelength_to_bin(wavelength);
-            // Should be within 0.5 bins (since we use bin center)
             assert!((bin_f - bin as f64).abs() < 0.51);
         }
+    }
+
+    #[test]
+    fn test_wavelength_below_range_clamps_to_zero() {
+        assert_eq!(wavelength_to_bin(300.0), 0.0);
+        assert_eq!(wavelength_to_bin(0.0), 0.0);
+        assert_eq!(wavelength_to_bin(-100.0), 0.0);
+    }
+
+    #[test]
+    fn test_wavelength_above_range_clamps_to_last() {
+        let last = (NUM_BINS - 1) as f64;
+        assert_eq!(wavelength_to_bin(800.0), last);
+        assert_eq!(wavelength_to_bin(10000.0), last);
+    }
+
+    #[test]
+    fn test_bin_width_consistent_with_num_bins() {
+        let reconstructed_range = BIN_WIDTH * NUM_BINS as f64;
+        assert!(
+            (reconstructed_range - LAMBDA_RANGE).abs() < 1e-10,
+            "BIN_WIDTH * NUM_BINS ({reconstructed_range}) should equal LAMBDA_RANGE ({LAMBDA_RANGE})"
+        );
+    }
+
+    #[test]
+    fn test_all_bin_centers_are_monotonically_increasing() {
+        let mut prev = bin_to_wavelength(0);
+        for bin in 1..NUM_BINS {
+            let current = bin_to_wavelength(bin);
+            assert!(
+                current > prev,
+                "bin_to_wavelength({bin}) = {current} should exceed bin_to_wavelength({}) = {prev}",
+                bin - 1
+            );
+            prev = current;
+        }
+    }
+
+    #[test]
+    fn test_wavelength_to_bin_at_exact_boundaries() {
+        assert_eq!(wavelength_to_bin(LAMBDA_START), 0.0);
+        let at_end = wavelength_to_bin(LAMBDA_END);
+        assert!(
+            (at_end - (NUM_BINS - 1) as f64).abs() < 1e-10,
+            "LAMBDA_END should map to last bin index, got {at_end}"
+        );
     }
 }

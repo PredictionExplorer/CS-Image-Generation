@@ -136,3 +136,45 @@ pub fn render_spectral_prism_video(
     info!("   Saved spectral prism video => {}", output_path);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smoothstep_below_edge0_is_zero() {
+        assert!((smoothstep(0.0, 1.0, -0.5) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_above_edge1_is_one() {
+        assert!((smoothstep(0.0, 1.0, 1.5) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_midpoint_is_half() {
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_degenerate_equal_edges() {
+        assert!((smoothstep(0.5, 0.5, 0.3) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(0.5, 0.5, 0.5) - 1.0).abs() < 1e-10);
+        assert!((smoothstep(0.5, 0.5, 0.7) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_degenerate_reversed_edges() {
+        assert!((smoothstep(1.0, 0.0, -0.1) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(1.0, 0.0, 1.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_output_in_unit_range() {
+        for i in -20..=120 {
+            let x = i as f64 / 100.0;
+            let val = smoothstep(0.0, 1.0, x);
+            assert!((0.0..=1.0).contains(&val), "smoothstep(0,1,{x}) = {val} out of [0,1]");
+        }
+    }
+}

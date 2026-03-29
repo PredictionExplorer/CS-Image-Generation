@@ -2383,4 +2383,71 @@ mod tests {
         let output = pipeline.process_trajectory(input.clone(), 8, 8, &frame_params).unwrap();
         assert_eq!(input, output, "empty chain should be identity");
     }
+
+    #[test]
+    fn test_merge_partial_is_commutative() {
+        let a = vec![[1.0f64; NUM_BINS]; 5];
+        let b = vec![[2.0f64; NUM_BINS]; 5];
+        let c = vec![[3.0f64; NUM_BINS]; 5];
+
+        let mut path1 = a.clone();
+        merge_partial_into(&mut path1, &b);
+        merge_partial_into(&mut path1, &c);
+
+        let mut path2 = a.clone();
+        merge_partial_into(&mut path2, &c);
+        merge_partial_into(&mut path2, &b);
+
+        for (i, (p1, p2)) in path1.iter().zip(path2.iter()).enumerate() {
+            for bin in 0..NUM_BINS {
+                assert_eq!(
+                    p1[bin].to_bits(),
+                    p2[bin].to_bits(),
+                    "pixel {i} bin {bin}: merge order should not matter"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_merge_partial_preserves_zeros() {
+        let original = vec![[7.5f64; NUM_BINS]; 4];
+        let zeros = vec![[0.0f64; NUM_BINS]; 4];
+        let mut dest = original.clone();
+        merge_partial_into(&mut dest, &zeros);
+
+        for (i, (got, expected)) in dest.iter().zip(original.iter()).enumerate() {
+            for bin in 0..NUM_BINS {
+                assert_eq!(
+                    got[bin].to_bits(),
+                    expected[bin].to_bits(),
+                    "pixel {i} bin {bin}: merging zeros should be identity"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_energy_density_shift_idempotent_below_threshold() {
+        use constants::ENERGY_DENSITY_SHIFT_THRESHOLD;
+        let energy_per_bin = ENERGY_DENSITY_SHIFT_THRESHOLD / (NUM_BINS as f64 * 2.0);
+        let original = vec![[energy_per_bin; NUM_BINS]; 4];
+
+        let mut once = original.clone();
+        apply_energy_density_shift(&mut once);
+
+        let mut twice = original.clone();
+        apply_energy_density_shift(&mut twice);
+        apply_energy_density_shift(&mut twice);
+
+        for (i, (o, t)) in once.iter().zip(twice.iter()).enumerate() {
+            for bin in 0..NUM_BINS {
+                assert_eq!(
+                    o[bin].to_bits(),
+                    t[bin].to_bits(),
+                    "pixel {i} bin {bin}: below-threshold shift should be idempotent"
+                );
+            }
+        }
+    }
 }

@@ -67,10 +67,10 @@ pub fn render_spectral_narrowband_video(
             for frame in 0..total_frames {
                 let center = frame as f64 * n / total_frames as f64;
                 let mut weights = [0.0f64; NUM_BINS];
-                for bin in 0..NUM_BINS {
+                for (bin, w) in weights.iter_mut().enumerate() {
                     let diff = (bin as f64 - center).rem_euclid(n);
                     let d = diff.min(n - diff);
-                    weights[bin] = (-0.5 * (d / GAUSSIAN_SIGMA).powi(2)).exp();
+                    *w = (-0.5 * (d / GAUSSIAN_SIGMA).powi(2)).exp();
                 }
                 bins.weighted_blend(&weights, &mut frame_buf);
                 let bytes = crate::utils::u16_slice_as_bytes(&frame_buf);

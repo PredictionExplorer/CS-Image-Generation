@@ -93,6 +93,7 @@ impl BinBuffers {
                 let mut r = 0.0f64;
                 let mut g = 0.0f64;
                 let mut b = 0.0f64;
+                #[allow(clippy::needless_range_loop)]
                 for bin in 0..NUM_BINS {
                     let w = weights[bin];
                     if w > 0.0 {
@@ -132,10 +133,7 @@ impl BinBuffers {
     /// Build a full-composite buffer by summing all bins equally.
     pub fn full_composite(&self, dest: &mut Vec<u16>) {
         let mut weights = [0.0f64; NUM_BINS];
-        let w = 1.0 / NUM_BINS as f64;
-        for weight in &mut weights {
-            *weight = w;
-        }
+        weights.fill(1.0 / NUM_BINS as f64);
         self.weighted_blend(&weights, dest);
     }
 
@@ -194,5 +192,180 @@ mod tests {
     #[test]
     fn test_group_count() {
         assert_eq!(NUM_BINS / BINS_PER_GROUP, NUM_GROUPS);
+    }
+
+    #[test]
+    fn test_bin_group_saturates_beyond_last_bin() {
+        assert_eq!(bin_group(NUM_BINS), NUM_GROUPS - 1);
+        assert_eq!(bin_group(NUM_BINS + 100), NUM_GROUPS - 1);
+    }
+
+    fn make_test_spd(width: u32, height: u32) -> Vec<[f64; NUM_BINS]> {
+        let pixel_count = (width * height) as usize;
+        let mut spd = vec![[0.0; NUM_BINS]; pixel_count];
+        for (i, px) in spd.iter_mut().enumerate() {
+            let bin = i % NUM_BINS;
+            px[bin] = 1.0 + i as f64 * 0.1;
+        }
+        spd
+    }
+
+    #[test]
+    fn test_from_spd_buffer_count() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        assert_eq!(bins.buffers.len(), NUM_BINS);
+    }
+
+    #[test]
+    fn test_from_spd_pixel_count() {
+        let bins = BinBuffers::from_spd(make_test_spd(3, 2), 3, 2);
+        assert_eq!(bins.pixel_count, 6);
+        for buf in &bins.buffers {
+            assert_eq!(buf.len(), 6);
+        }
+    }
+
+    #[test]
+    fn test_from_spd_values_in_unit_range() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        for buf in &bins.buffers {
+            for px in buf {
+                for &ch in px {
+                    assert!(ch >= 0.0 && ch <= 1.0, "channel {ch} out of [0,1]");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_spd_nonzero_for_nonzero_input() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let any_nonzero = bins.buffers.iter().any(|buf| {
+            buf.iter().any(|px| px[0] > 0.0 || px[1] > 0.0 || px[2] > 0.0)
+        });
+        assert!(any_nonzero, "non-zero SPD should produce non-zero bin buffers");
+    }
+
+    #[test]
+    fn test_from_spd_zero_input_produces_black() {
+        let spd = vec![[0.0; NUM_BINS]; 4];
+        let bins = BinBuffers::from_spd(spd, 2, 2);
+        for buf in &bins.buffers {
+            for px in buf {
+                assert_eq!(*px, [0.0, 0.0, 0.0]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lerp_bins_output_length() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest = Vec::new();
+        bins.lerp_bins(0.0, &mut dest);
+        assert_eq!(dest.len(), 4 * 3);
+    }
+
+    #[test]
+    fn test_lerp_bins_integer_returns_exact_bin() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest_int = Vec::new();
+        let mut dest_lerp = Vec::new();
+        bins.lerp_bins(5.0, &mut dest_int);
+        bins.lerp_bins(5.0001, &mut dest_lerp);
+        for (a, b) in dest_int.iter().zip(dest_lerp.iter()) {
+            assert!((*a as i32 - *b as i32).unsigned_abs() <= 10,
+                "integer bin and near-integer should be close: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn test_lerp_bins_wraps_at_num_bins() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest_a = Vec::new();
+        let mut dest_b = Vec::new();
+        bins.lerp_bins(0.0, &mut dest_a);
+        bins.lerp_bins(NUM_BINS as f64, &mut dest_b);
+        assert_eq!(dest_a, dest_b, "bin 0 and bin NUM_BINS should wrap identically");
+    }
+
+    #[test]
+    fn test_lerp_bins_negative_wraps() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest_neg = Vec::new();
+        let mut dest_pos = Vec::new();
+        bins.lerp_bins(-1.0, &mut dest_neg);
+        bins.lerp_bins((NUM_BINS - 1) as f64, &mut dest_pos);
+        assert_eq!(dest_neg, dest_pos, "negative index should wrap");
+    }
+
+    #[test]
+    fn test_weighted_blend_zero_weights_produces_black() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let weights = [0.0; NUM_BINS];
+        let mut dest = Vec::new();
+        bins.weighted_blend(&weights, &mut dest);
+        assert!(dest.iter().all(|&v| v == 0), "zero weights should produce all-black");
+    }
+
+    #[test]
+    fn test_weighted_blend_uniform_matches_full_composite() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest_uniform = Vec::new();
+        let mut dest_composite = Vec::new();
+        let w = 1.0 / NUM_BINS as f64;
+        let weights = [w; NUM_BINS];
+        bins.weighted_blend(&weights, &mut dest_uniform);
+        bins.full_composite(&mut dest_composite);
+        assert_eq!(dest_uniform, dest_composite);
+    }
+
+    #[test]
+    fn test_per_pixel_bin_select_output_length() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let bin_map = vec![3.0; 4];
+        let mut dest = Vec::new();
+        bins.per_pixel_bin_select(&bin_map, &mut dest);
+        assert_eq!(dest.len(), 4 * 3);
+    }
+
+    #[test]
+    fn test_per_pixel_bin_select_negative_wraps() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let bin_map_neg = vec![-1.0; 4];
+        let bin_map_pos = vec![(NUM_BINS - 1) as f64; 4];
+        let mut dest_neg = Vec::new();
+        let mut dest_pos = Vec::new();
+        bins.per_pixel_bin_select(&bin_map_neg, &mut dest_neg);
+        bins.per_pixel_bin_select(&bin_map_pos, &mut dest_pos);
+        assert_eq!(dest_neg, dest_pos, "negative bin index should wrap");
+    }
+
+    #[test]
+    fn test_full_composite_nonzero() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest = Vec::new();
+        bins.full_composite(&mut dest);
+        let any_nonzero = dest.iter().any(|&v| v > 0);
+        assert!(any_nonzero, "full composite of non-zero SPD should have non-zero pixels");
+    }
+
+    #[test]
+    fn test_dominant_bin_colors_single_hot_bin() {
+        let mut spd = vec![[0.0; NUM_BINS]; 2];
+        spd[0][10] = 5.0;
+        spd[1][50] = 3.0;
+        let bins = BinBuffers::from_spd(vec![[1.0; NUM_BINS]; 2], 2, 1);
+        let result = bins.dominant_bin_colors(&spd);
+        assert_eq!(result[0].1, 10, "pixel 0 dominant should be bin 10");
+        assert_eq!(result[1].1, 50, "pixel 1 dominant should be bin 50");
+    }
+
+    #[test]
+    fn test_dominant_bin_colors_zero_energy() {
+        let spd = vec![[0.0; NUM_BINS]; 2];
+        let bins = BinBuffers::from_spd(vec![[0.0; NUM_BINS]; 2], 2, 1);
+        let result = bins.dominant_bin_colors(&spd);
+        assert_eq!(result.len(), 2);
+        assert!(result[0].1 < NUM_BINS, "dominant bin should be a valid index");
     }
 }

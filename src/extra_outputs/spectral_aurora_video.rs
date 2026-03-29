@@ -74,9 +74,9 @@ pub fn render_spectral_aurora_video(
         .iter()
         .map(|c| {
             let mut profile = [0.0f64; NUM_BINS];
-            for bin in 0..NUM_BINS {
+            for (bin, val) in profile.iter_mut().enumerate() {
                 let d = bin as f64 - c.center_bin;
-                profile[bin] = (-0.5 * (d / c.width).powi(2)).exp();
+                *val = (-0.5 * (d / c.width).powi(2)).exp();
             }
             profile
         })
@@ -121,6 +121,7 @@ pub fn render_spectral_aurora_video(
                             let cx = (x + drift + wave).fract().abs();
                             let spatial = (-0.5 * ((cx - 0.5) / 0.18).powi(2)).exp();
 
+                            #[allow(clippy::needless_range_loop)]
                             for bin in 0..NUM_BINS {
                                 let w = spatial * curtain_profiles[ci][bin];
                                 if w > 0.001 {

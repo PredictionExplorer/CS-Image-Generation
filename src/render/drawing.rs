@@ -398,6 +398,199 @@ mod tests {
         assert!(red.0 > 0.0, "red lightness should be positive");
     }
 
+    fn make_uniform_color_segment(
+        start: (f32, f32, f32),
+        end: (f32, f32, f32),
+        wavelength: f64,
+        hdr_scale: f64,
+    ) -> SpectralLineSegment {
+        let color = wavelength_to_oklab(wavelength, 0.8);
+        SpectralLineSegment {
+            start: LineVertex { x: start.0, y: start.1, z: start.2, color, alpha: 1.0 },
+            end: LineVertex { x: end.0, y: end.1, z: end.2, color, alpha: 1.0 },
+            hdr_scale,
+        }
+    }
+
+    #[test]
+    fn test_single_bin_deposit_at_integer_position() {
+        let width = 16usize;
+        let height = 16usize;
+        let bin_center_wl = crate::spectrum::wavelength_nm_for_bin(NUM_BINS / 2);
+        let seg = make_uniform_color_segment(
+            (8.0, 8.0, 0.0), (8.0, 8.0, 0.0), bin_center_wl, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let mut total_energy = 0.0;
+        let mut active_bins = std::collections::HashSet::new();
+        for pixel in &accum {
+            for (bin, &val) in pixel.iter().enumerate() {
+                if val > 0.0 {
+                    total_energy += val;
+                    active_bins.insert(bin);
+                }
+            }
+        }
+
+        assert!(total_energy > 0.0, "should deposit some energy");
+        assert!(
+            active_bins.len() <= 2,
+            "uniform-color dot should only activate 1-2 adjacent bins, got {:?}",
+            active_bins
+        );
+    }
+
+    #[test]
+    fn test_bin_deposit_splits_between_adjacent_bins() {
+        let width = 16usize;
+        let height = 16usize;
+        let seg = make_uniform_color_segment(
+            (8.0, 8.0, 0.0), (8.0, 8.0, 0.0), 540.0, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let mut active_bins: Vec<(usize, f64)> = Vec::new();
+        let mut per_bin_total = [0.0f64; NUM_BINS];
+        for pixel in &accum {
+            for (bin, &val) in pixel.iter().enumerate() {
+                per_bin_total[bin] += val;
+            }
+        }
+        for (bin, &total) in per_bin_total.iter().enumerate() {
+            if total > 0.0 {
+                active_bins.push((bin, total));
+            }
+        }
+
+        assert!(
+            !active_bins.is_empty(),
+            "should deposit energy in at least one bin"
+        );
+        assert!(
+            active_bins.len() <= 2,
+            "uniform-color dot should only activate 1-2 adjacent bins, got {active_bins:?}"
+        );
+        if active_bins.len() == 2 {
+            assert_eq!(
+                active_bins[1].0 - active_bins[0].0, 1,
+                "active bins should be adjacent"
+            );
+        }
+    }
+
+    #[test]
+    fn test_last_bin_boundary() {
+        let width = 16usize;
+        let height = 16usize;
+        let seg = make_uniform_color_segment(
+            (8.0, 8.0, 0.0), (8.0, 8.0, 0.0), 700.0, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let mut max_bin = 0;
+        let mut max_energy = 0.0;
+        for pixel in &accum {
+            for (bin, &val) in pixel.iter().enumerate() {
+                if val > max_energy {
+                    max_energy = val;
+                    max_bin = bin;
+                }
+            }
+        }
+        assert!(max_energy > 0.0, "should deposit energy");
+        assert!(
+            max_bin >= NUM_BINS / 2,
+            "700nm (red) should deposit in the upper half of bins, got bin {max_bin}"
+        );
+    }
+
+    #[test]
+    fn test_first_bin_boundary() {
+        let width = 16usize;
+        let height = 16usize;
+        let seg = make_uniform_color_segment(
+            (8.0, 8.0, 0.0), (8.0, 8.0, 0.0), 380.0, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let mut max_bin = NUM_BINS;
+        let mut max_energy = 0.0;
+        for pixel in &accum {
+            for (bin, &val) in pixel.iter().enumerate() {
+                if val > max_energy {
+                    max_energy = val;
+                    max_bin = bin;
+                }
+            }
+        }
+        assert!(max_energy > 0.0, "should deposit energy");
+        assert!(
+            max_bin < NUM_BINS / 2,
+            "380nm (violet) should deposit in the lower half of bins, got bin {max_bin}"
+        );
+    }
+
+    #[test]
+    fn test_degenerate_zero_length_segment() {
+        let width = 16usize;
+        let height = 16usize;
+        let seg = make_uniform_color_segment(
+            (8.0, 8.0, 0.0), (8.0, 8.0, 0.0), 550.0, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let total: f64 = accum.iter().flat_map(|p| p.iter()).sum();
+        assert!(total > 0.0, "zero-length segment should still deposit energy as a dot");
+    }
+
+    #[test]
+    fn test_offscreen_segment_deposits_nothing() {
+        let width = 16usize;
+        let height = 16usize;
+        let seg = make_uniform_color_segment(
+            (-100.0, -100.0, 0.0), (-90.0, -90.0, 0.0), 550.0, 1.0,
+        );
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
+
+        let total: f64 = accum.iter().flat_map(|p| p.iter()).sum();
+        assert_eq!(total, 0.0, "offscreen segment should deposit no energy");
+    }
+
+    #[test]
+    fn test_energy_is_nonnegative_after_draw() {
+        let width = 32usize;
+        let height = 32usize;
+        let segments = [
+            make_segment((0.0, 0.0, 0.0), (31.0, 31.0, 0.0), 2.0),
+            make_segment((31.0, 0.0, -1.0), (0.0, 31.0, 1.0), 1.5),
+            make_segment((16.0, 0.0, 0.5), (16.0, 31.0, -0.5), 0.8),
+        ];
+
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        for seg in &segments {
+            draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, *seg);
+        }
+
+        for (px, pixel) in accum.iter().enumerate() {
+            for (bin, &val) in pixel.iter().enumerate() {
+                assert!(val >= 0.0, "pixel {px} bin {bin}: energy {val} should be non-negative");
+            }
+        }
+    }
+
     #[test]
     fn test_row_banded_line_draw_matches_full_frame_bits() {
         let width = 24usize;

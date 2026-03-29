@@ -419,6 +419,98 @@ fn main() -> Result<()> {
     }
     profile.push(timer.finish());
 
+    // ── Spectral Videos (always run in parallel, output alongside gallery PNGs) ──
+    let timer = StageTimer::start("Spectral Videos");
+    {
+        use std::sync::Mutex;
+        let sv_scene = render::SpectralScene::new(render_positions, &colors, &body_alphas);
+        let sv_settings = render::SpectralRenderSettings::new(
+            &resolved_effect_config, &render_config, false,
+        );
+        let sv_fast = args.fast_encode;
+        let sv_dir = &spectral_dir;
+        let sv_timings: Mutex<Vec<three_body_problem::perf::StageTiming>> = Mutex::new(Vec::new());
+
+        macro_rules! sv_spawn {
+            ($scope:ident, $name:expr, $body:expr) => {
+                $scope.spawn(|_| {
+                    let t = StageTimer::start($name);
+                    $body;
+                    sv_timings.lock().unwrap().push(t.finish());
+                });
+            };
+        }
+
+        rayon::scope(|s| {
+            sv_spawn!(s, "spectral_cycle", {
+                if let Err(e) = extra_outputs::spectral_cycle_video::render_spectral_cycle_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_cycle.mp4"), sv_fast,
+                ) { warn!("Spectral cycle video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_assembly", {
+                if let Err(e) = extra_outputs::spectral_assembly_video::render_spectral_assembly_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_assembly.mp4"), sv_fast,
+                ) { warn!("Spectral assembly video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_breathing", {
+                if let Err(e) = extra_outputs::spectral_breathing_video::render_spectral_breathing_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_breathing.mp4"), sv_fast,
+                ) { warn!("Spectral breathing video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_narrowband", {
+                if let Err(e) = extra_outputs::spectral_narrowband_video::render_spectral_narrowband_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_narrowband.mp4"), sv_fast,
+                ) { warn!("Spectral narrowband video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_doppler", {
+                if let Err(e) = extra_outputs::spectral_doppler_video::render_spectral_doppler_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_doppler.mp4"), sv_fast,
+                ) { warn!("Spectral Doppler video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_prism", {
+                if let Err(e) = extra_outputs::spectral_prism_video::render_spectral_prism_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_prism.mp4"), sv_fast,
+                ) { warn!("Spectral prism video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_decomposition", {
+                if let Err(e) = extra_outputs::spectral_decomposition_video::render_spectral_decomposition_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_decomposition.mp4"), sv_fast,
+                ) { warn!("Spectral decomposition video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_ripple", {
+                if let Err(e) = extra_outputs::spectral_ripple_video::render_spectral_ripple_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_ripple.mp4"), sv_fast,
+                ) { warn!("Spectral ripple video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_slit_scan", {
+                if let Err(e) = extra_outputs::spectral_slit_scan_video::render_spectral_slit_scan_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_slit_scan.mp4"), sv_fast,
+                ) { warn!("Spectral slit-scan video failed: {}", e); }
+            });
+            sv_spawn!(s, "spectral_aurora", {
+                if let Err(e) = extra_outputs::spectral_aurora_video::render_spectral_aurora_video(
+                    sv_scene, sv_settings,
+                    &format!("{sv_dir}/spectral_aurora.mp4"), sv_fast,
+                ) { warn!("Spectral aurora video failed: {}", e); }
+            });
+        });
+
+        let mut sv_stage = timer.finish_with_throughput(Some(format!(
+            "{} videos", sv_timings.lock().unwrap().len()
+        )));
+        sv_stage.sub_stages = Some(sv_timings.into_inner().unwrap());
+        profile.push(sv_stage);
+    }
+
     // ── Extra Outputs ──
     if args.extras {
         app::setup_extras_directories(&output_base)?;
@@ -776,115 +868,6 @@ fn generate_extras(
             });
         }
 
-        timed_spawn!(s, "spectral_cycle", {
-            if let Err(e) = extra_outputs::spectral_cycle_video::render_spectral_cycle_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_cycle.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral cycle video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_assembly", {
-            if let Err(e) = extra_outputs::spectral_assembly_video::render_spectral_assembly_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_assembly.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral assembly video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_breathing", {
-            if let Err(e) = extra_outputs::spectral_breathing_video::render_spectral_breathing_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_breathing.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral breathing video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_narrowband", {
-            if let Err(e) = extra_outputs::spectral_narrowband_video::render_spectral_narrowband_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_narrowband.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral narrowband video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_doppler", {
-            if let Err(e) = extra_outputs::spectral_doppler_video::render_spectral_doppler_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_doppler.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral Doppler video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_prism", {
-            if let Err(e) = extra_outputs::spectral_prism_video::render_spectral_prism_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_prism.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral prism video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_decomposition", {
-            if let Err(e) = extra_outputs::spectral_decomposition_video::render_spectral_decomposition_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_decomposition.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral decomposition video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_ripple", {
-            if let Err(e) = extra_outputs::spectral_ripple_video::render_spectral_ripple_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_ripple.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral ripple video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_slit_scan", {
-            if let Err(e) = extra_outputs::spectral_slit_scan_video::render_spectral_slit_scan_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_slit_scan.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral slit-scan video failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_aurora", {
-            if let Err(e) = extra_outputs::spectral_aurora_video::render_spectral_aurora_video(
-                scene,
-                settings,
-                &format!("{base}/videos/spectral_aurora.mp4"),
-                fast_encode,
-            ) {
-                warn!("Spectral aurora video failed: {}", e);
-            }
-        });
     });
 
     info!("=== Extra outputs complete ===");
@@ -906,7 +889,7 @@ mod tests {
         assert_eq!(args.sims, DEFAULT_NUM_SIMS);
         assert_eq!(args.steps, DEFAULT_NUM_STEPS);
         assert_eq!(args.resolution, OutputResolution { width: 1920, height: 1080 });
-        assert_eq!(args.drift, DriftModeArg::Elliptical);
+        assert_eq!(args.drift, DriftModeArg::None);
         assert!(!args.fast_encode);
         assert!(!args.extras);
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);

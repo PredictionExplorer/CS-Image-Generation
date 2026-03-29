@@ -72,10 +72,9 @@ pub fn render_spectral_breathing_video(
             for frame in 0..total_frames {
                 let t = frame as f64 / total_frames as f64;
                 let mut weights = [0.0f64; NUM_BINS];
-                for bin in 0..NUM_BINS {
+                for (bin, w) in weights.iter_mut().enumerate() {
                     let phase = bin as f64 * angle_per_bin;
-                    weights[bin] =
-                        BASE_WEIGHT + AMPLITUDE * (std::f64::consts::TAU * t + phase).sin();
+                    *w = BASE_WEIGHT + AMPLITUDE * (std::f64::consts::TAU * t + phase).sin();
                 }
                 bins.weighted_blend(&weights, &mut frame_buf);
                 Write::write_all(out, crate::utils::u16_slice_as_bytes(&frame_buf))

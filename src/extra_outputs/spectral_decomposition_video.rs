@@ -37,9 +37,9 @@ fn weights_for_decomp_t(
     let reverse_group = NUM_GROUPS - 1 - current_removing_group;
     let group_start = current_removing_group as f64 * wave_interval;
 
-    for bin in 0..NUM_BINS {
+    for (bin, w) in weights.iter_mut().enumerate() {
         let g = bin / BINS_PER_GROUP;
-        weights[bin] = if g > reverse_group {
+        *w = if g > reverse_group {
             0.0
         } else if g < reverse_group {
             1.0
@@ -142,4 +142,88 @@ pub fn render_spectral_decomposition_video(
 
     info!("   Saved spectral decomposition video => {}", output_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_ACTIVE: f64 = 12.0;
+    const TEST_INTERVAL: f64 = TEST_ACTIVE / NUM_GROUPS as f64;
+
+    #[test]
+    fn test_decomp_t_zero_all_weights_one() {
+        let mut w = [0.0; NUM_BINS];
+        weights_for_decomp_t(&mut w, 0.0, TEST_ACTIVE, TEST_INTERVAL);
+        for (bin, &val) in w.iter().enumerate() {
+            assert!(
+                (val - 1.0).abs() < 1e-6,
+                "at t=0 all bins should be 1.0, bin {bin} = {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decomp_t_end_only_violet_partially_remains() {
+        let mut w = [0.0; NUM_BINS];
+        weights_for_decomp_t(&mut w, TEST_ACTIVE, TEST_ACTIVE, TEST_INTERVAL);
+        for bin in BINS_PER_GROUP..NUM_BINS {
+            assert!(
+                w[bin] < 1e-6,
+                "at t=active_duration, bin {bin} (group {}) should be ~0, got {}",
+                bin / BINS_PER_GROUP,
+                w[bin]
+            );
+        }
+    }
+
+    #[test]
+    fn test_decomp_weights_all_in_unit_range() {
+        let mut w = [0.0; NUM_BINS];
+        for i in 0..=100 {
+            let t = TEST_ACTIVE * i as f64 / 100.0;
+            weights_for_decomp_t(&mut w, t, TEST_ACTIVE, TEST_INTERVAL);
+            for (bin, &val) in w.iter().enumerate() {
+                assert!(
+                    (0.0..=1.0 + 1e-10).contains(&val),
+                    "weight out of [0,1] at t={t}, bin {bin}: {val}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_decomp_mid_removes_red_first() {
+        let mut w = [0.0; NUM_BINS];
+        let mid_t = TEST_INTERVAL * 0.9;
+        weights_for_decomp_t(&mut w, mid_t, TEST_ACTIVE, TEST_INTERVAL);
+        let last_group_start = (NUM_GROUPS - 1) * BINS_PER_GROUP;
+        for bin in last_group_start..NUM_BINS {
+            assert!(
+                w[bin] < 0.5,
+                "red group (bin {bin}) should be mostly removed at t={mid_t}, got {}",
+                w[bin]
+            );
+        }
+        assert!(
+            w[0] > 0.9,
+            "violet bin 0 should still be near 1.0 at t={mid_t}, got {}",
+            w[0]
+        );
+    }
+
+    #[test]
+    fn test_decomp_negative_t_clamped() {
+        let mut w = [0.0; NUM_BINS];
+        weights_for_decomp_t(&mut w, -5.0, TEST_ACTIVE, TEST_INTERVAL);
+        for &val in &w {
+            assert!((val - 1.0).abs() < 1e-6, "negative t should clamp to 0 => all 1.0");
+        }
+    }
+
+    #[test]
+    fn test_smoothstep_boundaries() {
+        assert!((smoothstep(0.0) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(1.0) - 1.0).abs() < 1e-10);
+    }
 }

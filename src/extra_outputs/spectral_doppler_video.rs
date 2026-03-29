@@ -97,14 +97,13 @@ pub fn render_spectral_doppler_video(
                         let mut g = 0.0f64;
                         let mut b = 0.0f64;
 
-                        for bin in 0..NUM_BINS {
+                        for (bin, &(tr, tg, tb)) in tint_lut.iter().enumerate() {
                             let src_f = (bin as f64 - shift).rem_euclid(NUM_BINS as f64);
                             let lo = src_f.floor() as usize;
                             let hi = (lo + 1) % NUM_BINS;
                             let frac = src_f - src_f.floor();
                             let val = spd[lo] * (1.0 - frac) + spd[hi] * frac;
 
-                            let (tr, tg, tb) = tint_lut[bin];
                             r += val * tr;
                             g += val * tg;
                             b += val * tb;

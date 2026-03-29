@@ -211,3 +211,58 @@ pub fn render_spectral_ripple_video(
     info!("   Saved spectral ripple video => {}", output_path);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smoothstep_boundaries() {
+        assert!((smoothstep(0.0) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(1.0) - 1.0).abs() < 1e-10);
+        assert!((smoothstep(0.5) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_clamps() {
+        assert!((smoothstep(-1.0) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(2.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_dominant_colors_zero_energy_is_black() {
+        let spd = vec![[0.0; NUM_BINS]; 4];
+        let colors = dominant_colors_from_shifted_spd(&spd);
+        assert_eq!(colors.len(), 4);
+        for c in &colors {
+            assert_eq!(*c, [0.0, 0.0, 0.0], "zero energy should be black");
+        }
+    }
+
+    #[test]
+    fn test_dominant_colors_single_bin_hot() {
+        let mut spd = vec![[0.0; NUM_BINS]; 1];
+        spd[0][32] = 1.0;
+        let colors = dominant_colors_from_shifted_spd(&spd);
+        assert_eq!(colors.len(), 1);
+        let has_color = colors[0][0] > 0.0 || colors[0][1] > 0.0 || colors[0][2] > 0.0;
+        assert!(has_color, "single-bin-hot pixel should have non-zero color");
+    }
+
+    #[test]
+    fn test_dominant_colors_values_in_unit_range() {
+        let mut spd = vec![[0.0; NUM_BINS]; 4];
+        spd[0][10] = 5.0;
+        spd[1][30] = 0.5;
+        spd[2][50] = 100.0;
+        let colors = dominant_colors_from_shifted_spd(&spd);
+        for (i, c) in colors.iter().enumerate() {
+            for (ch, &val) in c.iter().enumerate() {
+                assert!(
+                    (0.0..=1.0).contains(&val),
+                    "pixel {i} channel {ch} = {val} out of [0,1]"
+                );
+            }
+        }
+    }
+}

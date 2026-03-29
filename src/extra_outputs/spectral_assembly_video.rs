@@ -87,9 +87,9 @@ pub fn render_spectral_assembly_video(
                     let current_group = current_group.min(NUM_GROUPS - 1);
                     let group_start = current_group as f64 * wave_interval;
 
-                    for bin in 0..NUM_BINS {
+                    for (bin, w) in weights.iter_mut().enumerate() {
                         let g = bin / BINS_PER_GROUP;
-                        weights[bin] = if g < current_group {
+                        *w = if g < current_group {
                             1.0
                         } else if g > current_group {
                             0.0
@@ -113,4 +113,42 @@ pub fn render_spectral_assembly_video(
 
     info!("   Saved spectral assembly video => {}", output_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smoothstep_boundaries() {
+        assert!((smoothstep(0.0) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(1.0) - 1.0).abs() < 1e-10);
+        assert!((smoothstep(0.5) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_clamps_out_of_range() {
+        assert!((smoothstep(-1.0) - 0.0).abs() < 1e-10);
+        assert!((smoothstep(2.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_smoothstep_monotonic() {
+        let mut prev = 0.0f64;
+        for i in 0..=100 {
+            let t = i as f64 / 100.0;
+            let val = smoothstep(t);
+            assert!(val >= prev - 1e-10, "not monotonic at t={t}: {val} < {prev}");
+            prev = val;
+        }
+    }
+
+    #[test]
+    fn test_smoothstep_output_in_unit_range() {
+        for i in -10..=110 {
+            let t = i as f64 / 100.0;
+            let val = smoothstep(t);
+            assert!((0.0..=1.0).contains(&val), "smoothstep({t}) = {val} out of [0,1]");
+        }
+    }
 }
