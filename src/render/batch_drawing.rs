@@ -15,6 +15,7 @@ pub type TriangleVertex = LineVertex;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_triangle_batch_spectral_rows(
     accum: &mut [[f64; NUM_BINS]],
+    depth_weight: &mut [f64],
     width: u32,
     height: u32,
     row_start: usize,
@@ -28,6 +29,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
 
     draw_line_segment_aa_spectral_rows(
         accum,
+        depth_weight,
         width,
         height,
         row_start,
@@ -37,6 +39,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
 
     draw_line_segment_aa_spectral_rows(
         accum,
+        depth_weight,
         width,
         height,
         row_start,
@@ -46,6 +49,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
 
     draw_line_segment_aa_spectral_rows(
         accum,
+        depth_weight,
         width,
         height,
         row_start,

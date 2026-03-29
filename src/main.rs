@@ -112,6 +112,10 @@ struct Args {
     #[arg(long, default_value_t = false, help = "Disable the 3D perspective camera and use flat 2D orthographic projection")]
     no_camera_3d: bool,
 
+    #[cfg(feature = "gpu")]
+    #[arg(long, default_value_t = false, help = "Use GPU-accelerated rendering via wgpu (Metal on macOS, Vulkan on Linux)")]
+    gpu: bool,
+
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
 }
@@ -300,6 +304,7 @@ fn main() -> Result<()> {
 
     // ── 3D Camera Projection ──
     let projected_storage;
+    let camera_storage: Option<render::camera::Camera3D>;
     let render_positions: &[Vec<nalgebra::Vector3<f64>>] = if enhancements.camera_3d {
         let timer = StageTimer::start("3D Camera Projection");
         let camera = render::camera::Camera3D::new(
@@ -307,10 +312,12 @@ fn main() -> Result<()> {
             &positions,
         );
         projected_storage = camera.project_all_positions(&positions);
+        camera_storage = Some(camera);
         profile.push(timer.finish_with_throughput(Some(format!("{} steps", args.steps))));
         &projected_storage
     } else {
         projected_storage = vec![];
+        camera_storage = None;
         let _ = &projected_storage;
         &positions
     };
@@ -362,6 +369,17 @@ fn main() -> Result<()> {
 
     let mut spd_buffer: Option<Vec<[f64; render::NUM_BINS]>> = None;
     let timer = StageTimer::start("Video Render");
+    let original_pos_for_camera: Option<&[Vec<nalgebra::Vector3<f64>>]> =
+        if camera_storage.is_some() { Some(&positions) } else { None };
+
+    #[cfg(feature = "gpu")]
+    let gpu_ctx = if args.gpu && camera_storage.is_some() {
+        info!("Initializing GPU rendering backend...");
+        Some(render::gpu::GpuContext::new())
+    } else {
+        None
+    };
+
     app::render_video(
         render::SpectralScene::new(render_positions, &colors, &body_alphas),
         &levels,
@@ -375,6 +393,10 @@ fn main() -> Result<()> {
         args.fast_encode,
         true,
         &mut spd_buffer,
+        camera_storage.as_ref(),
+        original_pos_for_camera,
+        #[cfg(feature = "gpu")]
+        gpu_ctx.as_ref(),
     )?;
     profile.push(timer.finish_with_throughput(Some(format!(
         "{} target frames at {}x{}",

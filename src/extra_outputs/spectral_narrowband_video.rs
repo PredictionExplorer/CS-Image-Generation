@@ -40,6 +40,7 @@ pub fn render_spectral_narrowband_video(
     let total_steps = scene.step_count();
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

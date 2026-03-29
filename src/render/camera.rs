@@ -13,6 +13,8 @@ use nalgebra::Vector3;
 use std::f64::consts::PI;
 use tracing::info;
 
+use super::context::BoundingBox;
+
 // ─── Configuration ───────────────────────────────────────────
 
 /// Tuning knobs for the Gauss-map camera.
@@ -228,6 +230,159 @@ impl Camera3D {
 
         info!(bodies = num_bodies, steps = total_steps, "Positions projected through Gauss-map camera");
         out
+    }
+
+    /// Number of poses (one per simulation step).
+    pub fn step_count(&self) -> usize {
+        self.poses.len()
+    }
+
+    /// Project a single world-space point through the camera at a given step.
+    pub fn project_point(&self, world_pos: &Vector3<f64>, step: usize) -> Vector3<f64> {
+        let p = &self.poses[step];
+        let fwd = (p.target - p.eye).normalize();
+        let right = fwd.cross(&p.up).normalize();
+        let true_up = right.cross(&fwd);
+        let focus_dist = (p.target - p.eye).norm();
+        let z_floor = focus_dist * 0.05;
+
+        let d = world_pos - p.eye;
+        let z_cam = d.dot(&fwd).max(z_floor);
+        let x_cam = d.dot(&right);
+        let y_cam = d.dot(&true_up);
+
+        Vector3::new(
+            x_cam / (z_cam * self.half_fov_tan),
+            y_cam / (z_cam * self.half_fov_tan),
+            (z_cam - focus_dist) * self.depth_scale,
+        )
+    }
+
+    /// Extract raw camera pose data at a given step for GPU upload.
+    #[cfg(feature = "gpu")]
+    pub fn camera_uniforms_at_step(
+        &self,
+        step: usize,
+    ) -> super::gpu::CameraRawUniforms {
+        let p = &self.poses[step];
+        let fwd = (p.target - p.eye).normalize();
+        let right = fwd.cross(&p.up).normalize();
+        let true_up = right.cross(&fwd);
+        let focus_dist = (p.target - p.eye).norm();
+
+        super::gpu::CameraRawUniforms {
+            eye: [p.eye[0] as f32, p.eye[1] as f32, p.eye[2] as f32],
+            fwd: [fwd[0] as f32, fwd[1] as f32, fwd[2] as f32],
+            right: [right[0] as f32, right[1] as f32, right[2] as f32],
+            true_up: [true_up[0] as f32, true_up[1] as f32, true_up[2] as f32],
+            half_fov_tan: self.half_fov_tan as f32,
+            focus_dist: focus_dist as f32,
+            z_floor: (focus_dist * 0.05) as f32,
+            depth_scale: self.depth_scale as f32,
+        }
+    }
+
+    /// Project ALL body positions through a single camera pose (Option A).
+    ///
+    /// Unlike `project_all_positions` which uses per-step cameras, this projects
+    /// every step's positions through the camera at `camera_step`, giving a
+    /// consistent viewpoint for the entire trajectory.
+    pub fn project_all_positions_at_step(
+        &self,
+        positions: &[Vec<Vector3<f64>>],
+        camera_step: usize,
+    ) -> Vec<Vec<Vector3<f64>>> {
+        let num_bodies = positions.len();
+        let total_steps = positions[0].len();
+        let mut out = vec![vec![Vector3::zeros(); total_steps]; num_bodies];
+
+        let p = &self.poses[camera_step];
+        let fwd = (p.target - p.eye).normalize();
+        let right = fwd.cross(&p.up).normalize();
+        let true_up = right.cross(&fwd);
+        let focus_dist = (p.target - p.eye).norm();
+        let z_floor = focus_dist * 0.05;
+
+        for step in 0..total_steps {
+            for body in 0..num_bodies {
+                let d = positions[body][step] - p.eye;
+                let z_cam = d.dot(&fwd).max(z_floor);
+                let x_cam = d.dot(&right);
+                let y_cam = d.dot(&true_up);
+
+                out[body][step] = Vector3::new(
+                    x_cam / (z_cam * self.half_fov_tan),
+                    y_cam / (z_cam * self.half_fov_tan),
+                    (z_cam - focus_dist) * self.depth_scale,
+                );
+            }
+        }
+        out
+    }
+
+    /// Compute a global bounding box that covers projections from all sampled
+    /// camera poses, ensuring stable image scale across video frames.
+    pub fn compute_global_bounds(
+        &self,
+        positions: &[Vec<Vector3<f64>>],
+        checkpoints: &[usize],
+    ) -> BoundingBox {
+        let num_bodies = positions.len();
+        let total_steps = positions[0].len();
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut min_y = f64::MAX;
+        let mut max_y = f64::MIN;
+
+        let sample_interval = (checkpoints.len() / 50).max(1);
+        let sampled: Vec<usize> = checkpoints
+            .iter()
+            .step_by(sample_interval)
+            .copied()
+            .chain(std::iter::once(*checkpoints.last().unwrap_or(&0)))
+            .collect();
+
+        for &cam_step in &sampled {
+            let p = &self.poses[cam_step];
+            let fwd = (p.target - p.eye).normalize();
+            let right = fwd.cross(&p.up).normalize();
+            let true_up = right.cross(&fwd);
+            let focus_dist = (p.target - p.eye).norm();
+            let z_floor = focus_dist * 0.05;
+
+            for step in (0..total_steps).step_by((total_steps / 500).max(1)) {
+                for body in 0..num_bodies {
+                    let d = positions[body][step] - p.eye;
+                    let z_cam = d.dot(&fwd).max(z_floor);
+                    let x_cam = d.dot(&right);
+                    let y_cam = d.dot(&true_up);
+
+                    let proj_x = x_cam / (z_cam * self.half_fov_tan);
+                    let proj_y = y_cam / (z_cam * self.half_fov_tan);
+
+                    min_x = min_x.min(proj_x);
+                    max_x = max_x.max(proj_x);
+                    min_y = min_y.min(proj_y);
+                    max_y = max_y.max(proj_y);
+                }
+            }
+        }
+
+        let pad_x = (max_x - min_x) * 0.05;
+        let pad_y = (max_y - min_y) * 0.05;
+        min_x -= pad_x;
+        max_x += pad_x;
+        min_y -= pad_y;
+        max_y += pad_y;
+
+        BoundingBox {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            width: (max_x - min_x).max(1e-12),
+            height: (max_y - min_y).max(1e-12),
+        }
     }
 }
 

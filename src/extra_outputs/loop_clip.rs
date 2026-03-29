@@ -91,6 +91,7 @@ fn render_display_frames(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,
@@ -107,6 +108,7 @@ fn render_display_frames(
         let next_step = (step + frame_interval).min(scene.step_count());
         accumulate_spectral_steps(
             &mut accum_spd,
+            None,
             scene,
             &ctx,
             &velocity_calc,

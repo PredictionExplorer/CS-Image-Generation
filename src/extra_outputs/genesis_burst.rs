@@ -42,6 +42,7 @@ pub fn render_genesis_burst(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

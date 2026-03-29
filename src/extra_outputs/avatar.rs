@@ -57,6 +57,7 @@ pub fn render_animated_avatar(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,
@@ -74,6 +75,7 @@ pub fn render_animated_avatar(
         let next_step = (step + frame_interval).min(total_steps);
         accumulate_spectral_steps(
             &mut accum_spd,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -135,6 +137,7 @@ fn find_energy_center(
     let sample_steps = scene.step_count() / 10;
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

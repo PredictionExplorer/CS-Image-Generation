@@ -31,6 +31,7 @@ pub fn render_spectral_gallery(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

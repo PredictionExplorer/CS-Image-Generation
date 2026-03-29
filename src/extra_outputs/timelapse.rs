@@ -62,6 +62,7 @@ pub fn render_timelapse(
                 if step_cursor < target_step {
                     accumulate_spectral_steps(
                         &mut accum_spd,
+                        None,
                         scene,
                         &ctx,
                         &velocity_calc,

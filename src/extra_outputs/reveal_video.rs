@@ -63,6 +63,7 @@ pub fn render_reveal_video(
                 if step_cursor < target_step {
                     accumulate_spectral_steps(
                         &mut accum_spd,
+                        None,
                         scene,
                         &ctx,
                         &velocity_calc,

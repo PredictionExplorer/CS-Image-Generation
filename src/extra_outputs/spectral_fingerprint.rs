@@ -41,6 +41,7 @@ fn compute_bin_energies(scene: SpectralScene<'_>, settings: SpectralRenderSettin
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

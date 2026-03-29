@@ -64,6 +64,7 @@ pub fn render_phase_portrait(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,

@@ -26,11 +26,16 @@ import sys
 import time
 from pathlib import Path
 
-CONCURRENT_SIMS = 3
+CONCURRENT_SIMS = 1
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
 REPORT_EVERY = 3     # print a status line every N completions
+
+# GPU mode: set via --gpu flag on this script.
+# Requires: cargo build --release --features gpu
+GPU_MODE = False
+GPU_RESOLUTION = "800x600"
 
 # ---------------------------------------------------------------------------
 # Logging setup: file gets everything, console gets one-liners
@@ -61,7 +66,8 @@ logger.addHandler(_console_handler)
 def check_prerequisites() -> None:
     if not os.path.isfile(BINARY):
         print(f"Error: binary not found at {BINARY}")
-        print("Build it first:  cargo build --release")
+        build_hint = "cargo build --release --features gpu" if GPU_MODE else "cargo build --release"
+        print(f"Build it first:  {build_hint}")
         sys.exit(1)
     if not os.access(BINARY, os.X_OK):
         print(f"Error: {BINARY} is not executable")
@@ -91,6 +97,8 @@ def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
     cmd = [BINARY, "--seed", seed, "--output", filename, "--fast-encode"]
+    if GPU_MODE:
+        cmd.extend(["--gpu", "--resolution", GPU_RESOLUTION])
 
     logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()
@@ -140,13 +148,27 @@ def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global GPU_MODE, GPU_RESOLUTION, CONCURRENT_SIMS
+
+    import argparse
+    parser = argparse.ArgumentParser(description="Batch runner for Three Body Problem")
+    parser.add_argument("--no-gpu", action="store_true", help="Disable GPU mode and use CPU-only rendering")
+    parser.add_argument("--resolution", default="800x600", help="Resolution for GPU mode (default: 800x600)")
+    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent simulations (default: 1 for GPU)")
+    script_args = parser.parse_args()
+
+    GPU_MODE = not script_args.no_gpu
+    GPU_RESOLUTION = script_args.resolution
+    CONCURRENT_SIMS = script_args.concurrent
+
     check_prerequisites()
 
+    mode_str = f"GPU {GPU_RESOLUTION}" if GPU_MODE else "CPU"
     logger.info(f"{'=' * 60}")
-    logger.info(f"Session started  concurrency={CONCURRENT_SIMS}")
+    logger.info(f"Session started  concurrency={CONCURRENT_SIMS}  mode={mode_str}")
     logger.info(f"{'=' * 60}")
 
-    print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
+    print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent, {mode_str})")
     print(f"Detailed logs -> {LOG_FILE}")
     print(f"Performance log -> generation_log.json")
     print("Ctrl+C to stop gracefully (twice to force)\n")

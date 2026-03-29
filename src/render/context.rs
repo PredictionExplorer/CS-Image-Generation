@@ -33,6 +33,12 @@ impl RenderContext {
         Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
     }
 
+    /// Creates a render context with a pre-computed bounding box (for Option A
+    /// where the global bounds are computed across all camera poses up-front).
+    pub fn new_with_bounds(width: u32, height: u32, bounds: BoundingBox) -> Self {
+        Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
+    }
+
     /// Convert world coordinates to pixel coordinates
     #[inline]
     pub fn to_pixel(&self, x: f64, y: f64) -> (f32, f32) {
@@ -92,6 +98,14 @@ impl BoundingBox {
         let px = nx * (width as f64);
         let py = ny * (height as f64);
         (px as f32, py as f32)
+    }
+
+    /// Convert pixel coordinates back to world (projected) coordinates
+    #[inline]
+    pub fn pixel_to_world(&self, px: f64, py: f64, width: u32, height: u32) -> (f64, f64) {
+        let x = (px / width as f64) * self.width + self.min_x;
+        let y = (py / height as f64) * self.height + self.min_y;
+        (x, y)
     }
 
     /// Pad the bounding box so its aspect ratio matches the target output dimensions.

@@ -48,6 +48,7 @@ pub fn render_cinemagraph(
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,
@@ -65,6 +66,7 @@ pub fn render_cinemagraph(
         if step < next_step {
             accumulate_spectral_steps(
                 &mut accum_spd,
+                None,
                 scene,
                 &ctx,
                 &velocity_calc,

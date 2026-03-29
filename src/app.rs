@@ -262,6 +262,9 @@ pub fn render_video(
     fast_encode: bool,
     enable_temporal_smoothing: bool,
     spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
+    camera: Option<&render::camera::Camera3D>,
+    original_positions: Option<&[Vec<nalgebra::Vector3<f64>>]>,
+    #[cfg(feature = "gpu")] gpu_context: Option<&render::gpu::GpuContext>,
 ) -> Result<()> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -297,6 +300,10 @@ pub fn render_video(
                 &mut last_frame_png,
                 spd_out,
                 enable_temporal_smoothing,
+                camera,
+                original_positions,
+                #[cfg(feature = "gpu")]
+                gpu_context,
             )?;
             Ok(())
         },

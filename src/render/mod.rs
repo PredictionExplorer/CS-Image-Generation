@@ -23,6 +23,8 @@ pub mod drawing;
 pub mod effect_randomizer;
 pub mod effects;
 pub mod error;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
@@ -618,6 +620,7 @@ pub(crate) fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec
 #[allow(clippy::too_many_arguments)]
 fn accumulate_spectral_steps_into_rows(
     accum_spd: &mut [[f64; NUM_BINS]],
+    depth_weight: &mut [f64],
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
     velocity_calc: &velocity_hdr::VelocityHdrCalculator<'_>,
@@ -642,6 +645,7 @@ fn accumulate_spectral_steps_into_rows(
 
         draw_triangle_batch_spectral_rows(
             accum_spd,
+            depth_weight,
             ctx.width,
             ctx.height,
             row_start,
@@ -662,10 +666,20 @@ fn merge_partial_into(dest: &mut [[f64; NUM_BINS]], src: &[[f64; NUM_BINS]]) {
     });
 }
 
+/// Merge a partial depth-weight buffer into the main accumulator.
+#[allow(dead_code)]
+fn merge_depth_into(dest: &mut [f64], src: &[f64]) {
+    dest.par_iter_mut().zip(src.par_iter()).for_each(|(d, s)| {
+        *d += *s;
+    });
+}
+
 /// Accumulate steps using scanline-band parallelism (original approach).
 /// Used as the inner kernel for both the legacy path and within each step-chunk.
+#[allow(clippy::too_many_arguments)]
 fn accumulate_with_scanline_bands(
     accum_spd: &mut [[f64; NUM_BINS]],
+    depth_weight: Option<&mut [f64]>,
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
     velocity_calc: &velocity_hdr::VelocityHdrCalculator<'_>,
@@ -676,7 +690,8 @@ fn accumulate_with_scanline_bands(
     let band_count = ctx.height_usize;
     if band_count <= 1 {
         accumulate_spectral_steps_into_rows(
-            accum_spd, scene, ctx, velocity_calc, step_start, step_end, 0, ctx.height_usize,
+            accum_spd, depth_weight.unwrap_or(&mut []),
+            scene, ctx, velocity_calc, step_start, step_end, 0, ctx.height_usize,
             hdr_scale,
         );
         return;
@@ -684,18 +699,39 @@ fn accumulate_with_scanline_bands(
 
     let rows_per_band = ctx.height_usize.div_ceil(band_count);
     let pixels_per_band = ctx.width_usize * rows_per_band;
-    accum_spd.par_chunks_mut(pixels_per_band).enumerate().for_each(|(band_idx, band)| {
-        let row_start = band_idx * rows_per_band;
-        let row_end = row_start + band.len() / ctx.width_usize;
-        accumulate_spectral_steps_into_rows(
-            band, scene, ctx, velocity_calc, step_start, step_end, row_start, row_end, hdr_scale,
-        );
-    });
+
+    match depth_weight {
+        Some(dw) => {
+            accum_spd
+                .par_chunks_mut(pixels_per_band)
+                .zip(dw.par_chunks_mut(pixels_per_band))
+                .enumerate()
+                .for_each(|(band_idx, (spd_band, dw_band))| {
+                    let row_start = band_idx * rows_per_band;
+                    let row_end = row_start + spd_band.len() / ctx.width_usize;
+                    accumulate_spectral_steps_into_rows(
+                        spd_band, dw_band, scene, ctx, velocity_calc,
+                        step_start, step_end, row_start, row_end, hdr_scale,
+                    );
+                });
+        }
+        None => {
+            accum_spd.par_chunks_mut(pixels_per_band).enumerate().for_each(|(band_idx, band)| {
+                let row_start = band_idx * rows_per_band;
+                let row_end = row_start + band.len() / ctx.width_usize;
+                accumulate_spectral_steps_into_rows(
+                    band, &mut [], scene, ctx, velocity_calc,
+                    step_start, step_end, row_start, row_end, hdr_scale,
+                );
+            });
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
+    depth_weight: Option<&mut [f64]>,
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
     velocity_calc: &velocity_hdr::VelocityHdrCalculator<'_>,
@@ -713,7 +749,11 @@ pub(crate) fn accumulate_spectral_steps(
             let step_count = step_end - step_start;
             let num_threads = rayon::current_num_threads().max(1);
 
-            if step_count >= MIN_STEPS_FOR_CHUNKING && num_threads > 1 {
+            let use_chunking = step_count >= MIN_STEPS_FOR_CHUNKING
+                && num_threads > 1
+                && depth_weight.is_none();
+
+            if use_chunking {
                 let num_chunks = num_threads.min(MAX_STEP_CHUNKS).min(step_count);
                 let steps_per_chunk = step_count.div_ceil(num_chunks);
                 let pixel_count = accum_spd.len();
@@ -728,8 +768,8 @@ pub(crate) fn accumulate_spectral_steps(
                         }
                         let mut local = vec![[0.0f64; NUM_BINS]; pixel_count];
                         accumulate_spectral_steps_into_rows(
-                            &mut local, scene, ctx, velocity_calc, cs, ce, 0, ctx.height_usize,
-                            hdr_scale,
+                            &mut local, &mut [], scene, ctx, velocity_calc, cs, ce, 0,
+                            ctx.height_usize, hdr_scale,
                         );
                         local
                     })
@@ -742,7 +782,8 @@ pub(crate) fn accumulate_spectral_steps(
                 }
             } else {
                 accumulate_with_scanline_bands(
-                    accum_spd, scene, ctx, velocity_calc, step_start, step_end, hdr_scale,
+                    accum_spd, depth_weight, scene, ctx, velocity_calc,
+                    step_start, step_end, hdr_scale,
                 );
             }
         }
@@ -750,6 +791,7 @@ pub(crate) fn accumulate_spectral_steps(
         AccumulationBackend::SerialReference => {
             accumulate_spectral_steps_into_rows(
                 accum_spd,
+                depth_weight.unwrap_or(&mut []),
                 scene,
                 ctx,
                 velocity_calc,
@@ -795,6 +837,7 @@ fn pass_1_build_histogram_spectral_with_backend(
 
         accumulate_spectral_steps(
             &mut accum_spd,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -881,11 +924,19 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
         spd_out,
         enable_temporal_smoothing,
         AccumulationBackend::SerialReference,
+        None,
+        None,
+        #[cfg(feature = "gpu")]
+        None,
     )
 }
 
 // ====================== PASS 2 (SPECTRAL) ===========================
 /// Pass 2: final frames => color mapping => write frames (spectral, 16-bit output)
+///
+/// When `camera` and `original_positions` are provided, uses Option A: for each
+/// frame, projects ALL accumulated geometry through the current camera and
+/// re-rasterizes from scratch, giving true 3D-coherent camera movement.
 #[allow(clippy::too_many_arguments)]
 fn pass_2_write_frames_spectral_with_backend(
     scene: SpectralScene<'_>,
@@ -897,11 +948,35 @@ fn pass_2_write_frames_spectral_with_backend(
     spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
     backend: AccumulationBackend,
+    camera: Option<&camera::Camera3D>,
+    original_positions: Option<&[Vec<Vector3<f64>>]>,
+    #[cfg(feature = "gpu")] gpu_context: Option<&gpu::GpuContext>,
 ) -> Result<()> {
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+
+    let total_steps = scene.step_count();
+    let checkpoints = checkpoint_steps(total_steps, frame_interval);
+
+    let use_3d_camera = camera.is_some() && original_positions.is_some();
+
+    let global_bounds = if let (Some(cam), Some(orig)) = (camera, original_positions) {
+        Some(cam.compute_global_bounds(orig, &checkpoints))
+    } else {
+        None
+    };
+
+    let ctx = if let Some(ref gb) = global_bounds {
+        let mut bounds = *gb;
+        if aspect_correction {
+            bounds.apply_aspect_correction(width, height);
+        }
+        RenderContext::new_with_bounds(width, height, bounds)
+    } else {
+        RenderContext::new(width, height, scene.positions, aspect_correction)
+    };
+
     let pixel_count = ctx.pixel_count();
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
@@ -911,11 +986,8 @@ fn pass_2_write_frames_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let total_steps = scene.step_count();
-    let checkpoints = checkpoint_steps(total_steps, frame_interval);
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
     use crate::post_effects::{TemporalSmoothing, TemporalSmoothingConfig};
     let temporal_smoother = if enable_temporal_smoothing {
@@ -936,16 +1008,75 @@ fn pass_2_write_frames_spectral_with_backend(
             debug!(progress = pct, pass = 2, mode = "spectral", "Render pass progress");
         }
 
-        accumulate_spectral_steps(
-            &mut accum_spd,
-            scene,
-            &ctx,
-            &velocity_calc,
-            step_start,
-            checkpoint_step + 1,
-            render_config.hdr_scale,
-            backend,
-        );
+        #[cfg(feature = "gpu")]
+        let used_gpu = if let (Some(gpu), Some(cam), Some(orig)) =
+            (gpu_context, camera, original_positions)
+        {
+            let frame_spd = gpu.accumulate_frame(
+                orig,
+                scene.colors,
+                scene.body_alphas,
+                cam,
+                checkpoint_step,
+                checkpoint_step + 1,
+                render_config.hdr_scale as f64,
+                width,
+                height,
+                ctx.bounds(),
+                orig,
+                dt,
+            );
+            accum_spd.copy_from_slice(&frame_spd);
+            true
+        } else {
+            false
+        };
+
+        #[cfg(not(feature = "gpu"))]
+        let used_gpu = false;
+
+        if !used_gpu && use_3d_camera {
+            let cam = camera.unwrap();
+            let orig = original_positions.unwrap();
+
+            let frame_positions = cam.project_all_positions_at_step(orig, checkpoint_step);
+
+            let frame_scene = SpectralScene::new(
+                &frame_positions,
+                scene.colors,
+                scene.body_alphas,
+            );
+            let frame_velocity = velocity_hdr::VelocityHdrCalculator::new(
+                &frame_positions, dt,
+            );
+
+            accum_spd.iter_mut().for_each(|px| *px = [0.0; NUM_BINS]);
+
+            accumulate_spectral_steps(
+                &mut accum_spd,
+                None,
+                frame_scene,
+                &ctx,
+                &frame_velocity,
+                0,
+                checkpoint_step + 1,
+                render_config.hdr_scale,
+                backend,
+            );
+        } else if !used_gpu {
+            let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
+            accumulate_spectral_steps(
+                &mut accum_spd,
+                None,
+                scene,
+                &ctx,
+                &velocity_calc,
+                step_start,
+                checkpoint_step + 1,
+                render_config.hdr_scale,
+                backend,
+            );
+        }
 
         convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
@@ -977,7 +1108,6 @@ fn pass_2_write_frames_spectral_with_backend(
         }
 
         display_buf = final_display;
-
         step_start = checkpoint_step + 1;
     }
 
@@ -996,6 +1126,9 @@ pub fn pass_2_write_frames_spectral(
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
     spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
+    camera: Option<&camera::Camera3D>,
+    original_positions: Option<&[Vec<Vector3<f64>>]>,
+    #[cfg(feature = "gpu")] gpu_context: Option<&gpu::GpuContext>,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
         scene,
@@ -1007,6 +1140,10 @@ pub fn pass_2_write_frames_spectral(
         spd_out,
         enable_temporal_smoothing,
         default_accumulation_backend(),
+        camera,
+        original_positions,
+        #[cfg(feature = "gpu")]
+        gpu_context,
     )
 }
 
@@ -1066,6 +1203,7 @@ fn render_final_frame_spectral_with_backend(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,
@@ -1154,6 +1292,7 @@ fn render_single_frame_spectral_with_backend(
 
     accumulate_spectral_steps(
         &mut accum_spd,
+        None,
         scene,
         &ctx,
         &velocity_calc,
@@ -1467,6 +1606,10 @@ mod tests {
                         &mut last_frame,
                         &mut None,
                         enable_temporal_smoothing,
+                        None,
+                        None,
+                        #[cfg(feature = "gpu")]
+                        None,
                     )
                 }
             })
@@ -1688,6 +1831,7 @@ mod tests {
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut serial,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -1706,6 +1850,7 @@ mod tests {
                 .install(|| {
                     accumulate_spectral_steps(
                         &mut parallel,
+                        None,
                         scene,
                         &ctx,
                         &velocity_calc,
@@ -1977,6 +2122,7 @@ mod tests {
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut serial,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -1995,6 +2141,7 @@ mod tests {
                 .install(|| {
                     accumulate_spectral_steps(
                         &mut parallel,
+                        None,
                         scene,
                         &ctx,
                         &velocity_calc,
@@ -2072,7 +2219,7 @@ mod tests {
 
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
-            &mut serial, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+            &mut serial, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
             AccumulationBackend::SerialReference,
         );
 
@@ -2084,7 +2231,7 @@ mod tests {
                 .expect("thread pool should build")
                 .install(|| {
                     accumulate_spectral_steps(
-                        &mut parallel, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+                        &mut parallel, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
                         AccumulationBackend::ParallelScanlines,
                     );
                 });
@@ -2112,7 +2259,7 @@ mod tests {
             .unwrap()
             .install(|| {
                 accumulate_spectral_steps(
-                    &mut reference, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+                    &mut reference, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
                     AccumulationBackend::ParallelScanlines,
                 );
             });
@@ -2125,7 +2272,7 @@ mod tests {
                 .unwrap()
                 .install(|| {
                     accumulate_spectral_steps(
-                        &mut repeated, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+                        &mut repeated, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
                         AccumulationBackend::ParallelScanlines,
                     );
                 });
@@ -2180,6 +2327,7 @@ mod tests {
         let mut small_range = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut small_range,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -2192,6 +2340,7 @@ mod tests {
         let mut serial_ref = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut serial_ref,
+            None,
             scene,
             &ctx,
             &velocity_calc,
@@ -2252,13 +2401,13 @@ mod tests {
 
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
-            &mut serial, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
+            &mut serial, None, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
             AccumulationBackend::SerialReference,
         );
 
         let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
-            &mut parallel, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
+            &mut parallel, None, scene, &ctx, &velocity_calc, 0, scene.step_count(), 2.0,
             AccumulationBackend::ParallelScanlines,
         );
 
@@ -2276,13 +2425,13 @@ mod tests {
 
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
-            &mut serial, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+            &mut serial, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
             AccumulationBackend::SerialReference,
         );
 
         let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
-            &mut parallel, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
+            &mut parallel, None, scene, &ctx, &velocity_calc, 0, n_steps, 2.5,
             AccumulationBackend::ParallelScanlines,
         );
 

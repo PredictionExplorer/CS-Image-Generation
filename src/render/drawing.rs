@@ -162,12 +162,16 @@ pub fn draw_line_segment_aa_spectral(
     height: u32,
     segment: SpectralLineSegment,
 ) {
-    draw_line_segment_aa_spectral_rows(accum, width, height, 0, height as usize, segment);
+    draw_line_segment_aa_spectral_rows(accum, &mut [], width, height, 0, height as usize, segment);
 }
 
 /// Draw anti-aliased line segment into an owned row band of the destination buffer.
+///
+/// When `depth_weight` is non-empty, accumulates `depth * energy` per pixel for
+/// image-space reprojection.
 pub(crate) fn draw_line_segment_aa_spectral_rows(
     accum: &mut [[f64; NUM_BINS]],
+    depth_weight: &mut [f64],
     width: u32,
     height: u32,
     row_start: usize,
@@ -262,6 +266,11 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
                 accum[idx][bin_left] += final_energy * (1.0 - w_right);
                 accum[idx][bin_right] += final_energy * w_right;
             }
+
+            if !depth_weight.is_empty() {
+                let z_at_h = z0 as f64 * (1.0 - h as f64) + z1 as f64 * h as f64;
+                depth_weight[idx] += z_at_h * final_energy;
+            }
         }
     }
 }
@@ -331,6 +340,7 @@ mod tests {
             let end = row_end * width;
             draw_line_segment_aa_spectral_rows(
                 &mut accum[start..end],
+                &mut [],
                 width as u32,
                 height as u32,
                 row_start,
