@@ -202,7 +202,7 @@ footer{{
   <button class="audio-toggle" onclick="toggleAudio()">
     <span id="audioIcon">&#9654;</span> Listen to this orbit
   </button>
-  <audio id="orbitAudio" src="../audio/sonification.wav" preload="none"></audio>
+  <audio id="orbitAudio" src="../video.mp4" preload="none"></audio>
 </section>
 
 <section class="fade-in">

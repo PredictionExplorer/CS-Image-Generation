@@ -76,20 +76,23 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
 }
 
-/// Initialize all per-seed output directories under the given base path.
-///
-/// Creates `output/{name}/` and every subdirectory so each NFT's assets
-/// live together in one self-contained folder.
+/// Create the base output directory for default mode (image + videos).
 pub fn setup_output_directories(base: &str) -> Result<()> {
+    fs::create_dir_all(base).map_err(|e| ConfigError::FileSystem {
+        operation: "create directory".to_string(),
+        path: base.to_string(),
+        error: e,
+    })?;
+    Ok(())
+}
+
+/// Create the additional subdirectories needed by extra outputs.
+pub fn setup_extras_directories(base: &str) -> Result<()> {
     for sub in [
-        "", "stills", "videos", "audio", "spectral",
+        "stills", "videos", "spectral",
         "data", "social", "wallpapers", "print", "web", "3d",
     ] {
-        let path = if sub.is_empty() {
-            base.to_string()
-        } else {
-            format!("{}/{}", base, sub)
-        };
+        let path = format!("{}/{}", base, sub);
         fs::create_dir_all(&path).map_err(|e| ConfigError::FileSystem {
             operation: "create directory".to_string(),
             path,

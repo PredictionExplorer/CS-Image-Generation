@@ -22,7 +22,7 @@ pub fn wavelength_nm_for_bin(bin: usize) -> f64 {
 
 /// Approximate (linear-sRGB) colour corresponding to a given wavelength.
 /// Formula adapted from Dan Bruton's reference (gamma removed → stay linear).
-fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
+pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
     let (r, g, b) = if (380.0..440.0).contains(&lambda) {
         (-(lambda - 440.0) / (440.0 - 380.0), 0.0, 1.0)
     } else if (440.0..490.0).contains(&lambda) {

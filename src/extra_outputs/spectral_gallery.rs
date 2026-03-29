@@ -7,7 +7,7 @@ use crate::render::{
     SpectralRenderSettings, SpectralScene, accumulate_spectral_steps,
     apply_energy_density_shift, constants, default_accumulation_backend, save_image_as_png_16bit,
 };
-use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin};
+use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin, wavelength_to_rgb};
 use image::ImageBuffer;
 use rayon::prelude::*;
 use tracing::info;
@@ -44,6 +44,7 @@ pub fn render_spectral_gallery(
 
     for bin in 0..NUM_BINS {
         let wavelength = wavelength_nm_for_bin(bin);
+        let (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength);
 
         let max_val: f64 = accum_spd
             .par_iter()
@@ -54,11 +55,9 @@ pub fn render_spectral_gallery(
         let mut buf_16bit = vec![0u16; ctx.pixel_count() * 3];
         buf_16bit.par_chunks_mut(3).zip(accum_spd.par_iter()).for_each(|(chunk, spd)| {
             let normalized = (spd[bin] / max_val).clamp(0.0, 1.0);
-            let gamma_corrected = normalized.powf(1.0 / 2.2);
-            let val = (gamma_corrected * 65535.0).round() as u16;
-            chunk[0] = val;
-            chunk[1] = val;
-            chunk[2] = val;
+            chunk[0] = ((normalized * tint_r).powf(1.0 / 2.2) * 65535.0).round() as u16;
+            chunk[1] = ((normalized * tint_g).powf(1.0 / 2.2) * 65535.0).round() as u16;
+            chunk[2] = ((normalized * tint_b).powf(1.0 / 2.2) * 65535.0).round() as u16;
         });
 
         let image = ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {

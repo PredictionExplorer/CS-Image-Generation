@@ -6,14 +6,14 @@ Continuously generates images with random seeds using the production
 configuration. Uses a rolling pool to keep exactly CONCURRENT_SIMS
 slots busy at all times. Runs forever until Ctrl+C.
 
-Generates all extra outputs including the new luxury gallery formats
-(spectral fingerprint, color palette, light variant, timelapse,
-cinemagraph, social kit, rarity report, orbit comparison, exhibition
-page, dossier, extended audio, AR export) while skipping the most
-compute-heavy outputs (museum 8K prints, cinematic zoom video).
+Generates in default mode: still image + 3 video files with
+different audio styles (celestial pad, crystal resonance, orbital
+choir). Pass --extras to the binary for additional outputs.
 
 Screen: compact progress line every few completions.
 File:   full subprocess output written to run.log for debugging.
+Perf:   the Rust binary writes generation_log.json with per-stage
+        timing, memory, and throughput data for every generation.
 """
 
 import concurrent.futures
@@ -83,9 +83,7 @@ def fmt_duration(seconds: float) -> str:
 def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
     """Returns (success, seed, elapsed_secs)."""
     filename = seed[2:]
-    cmd = [BINARY, "--seed", seed, "--output", filename,
-           "--extras", "--no-wallpapers", "--no-museum-prints",
-           "--no-cinematic-zoom", "--fast-encode"]
+    cmd = [BINARY, "--seed", seed, "--output", filename, "--fast-encode"]
 
     logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
     t0 = time.monotonic()
@@ -135,6 +133,7 @@ def main() -> None:
 
     print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
     print(f"Detailed logs -> {LOG_FILE}")
+    print(f"Performance log -> generation_log.json")
     print("Ctrl+C to stop gracefully (twice to force)\n")
 
     run_id = 0

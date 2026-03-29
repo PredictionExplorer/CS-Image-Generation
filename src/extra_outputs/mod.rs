@@ -14,7 +14,6 @@ pub mod cinemagraph;
 pub mod color_palette;
 pub mod dossier;
 pub mod exhibition_page;
-pub mod extended_audio;
 pub mod gallery_variants;
 pub mod genesis_burst;
 pub mod gltf_export;
