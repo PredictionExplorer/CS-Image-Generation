@@ -33,6 +33,7 @@ pub struct Enhancements {
     pub alpha_variation: bool,
     pub aspect_correction: bool,
     pub dispersion_boost: bool,
+    pub camera_3d: bool,
 }
 
 impl Default for Enhancements {
@@ -44,6 +45,7 @@ impl Default for Enhancements {
             alpha_variation: true,
             aspect_correction: false,
             dispersion_boost: true,
+            camera_3d: true,
         }
     }
 }
@@ -427,6 +429,7 @@ mod tests {
         assert!(e.alpha_variation);
         assert!(!e.aspect_correction);
         assert!(e.dispersion_boost);
+        assert!(e.camera_3d);
     }
 
     #[test]
@@ -438,6 +441,7 @@ mod tests {
             alpha_variation: true,
             aspect_correction: false,
             dispersion_boost: true,
+            camera_3d: false,
         };
         assert!(!e.chroma_boost);
         assert!(e.sat_boost);
@@ -445,6 +449,7 @@ mod tests {
         assert!(e.alpha_variation);
         assert!(!e.aspect_correction);
         assert!(e.dispersion_boost);
+        assert!(!e.camera_3d);
     }
 
     #[test]
@@ -544,6 +549,7 @@ mod tests {
             alpha_variation: false,
             aspect_correction: false,
             dispersion_boost: false,
+            camera_3d: false,
         };
         let (colors, body_alphas) = generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
 

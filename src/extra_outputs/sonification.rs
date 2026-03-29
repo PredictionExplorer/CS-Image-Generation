@@ -15,6 +15,7 @@
 //! - **Crystal Resonance**: FM bell tones triggered by gravitational slingshots
 //! - **Orbital Choir**: Formant-filtered choral texture with just intonation
 
+use crate::utils::{angular_momentum_at, plane_normal_at, triangle_area_at};
 use nalgebra::Vector3;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -587,14 +588,6 @@ struct OrbitStats {
     max_tumble_rate: f64,
 }
 
-fn plane_normal_at(positions: &[Vec<Vector3<f64>>], step: usize) -> Vector3<f64> {
-    let edge1 = positions[1][step] - positions[0][step];
-    let edge2 = positions[2][step] - positions[0][step];
-    let normal = edge1.cross(&edge2);
-    let len = normal.norm();
-    if len > 1e-14 { normal / len } else { Vector3::new(0.0, 0.0, 1.0) }
-}
-
 fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
     let nb = 3.min(positions.len());
     let steps = positions[0].len();
@@ -652,26 +645,6 @@ fn compute_orbit_stats(positions: &[Vec<Vector3<f64>>]) -> OrbitStats {
         max_ang_mom: max_ang_mom.max(1e-10),
         max_tumble_rate: max_tumble_rate.max(1e-14),
     }
-}
-
-fn triangle_area_at(positions: &[Vec<Vector3<f64>>], step: usize) -> f64 {
-    let a = (positions[0][step] - positions[1][step]).norm();
-    let b = (positions[1][step] - positions[2][step]).norm();
-    let c = (positions[2][step] - positions[0][step]).norm();
-    let s = (a + b + c) * 0.5;
-    (s * (s - a) * (s - b) * (s - c)).max(0.0).sqrt()
-}
-
-fn angular_momentum_at(positions: &[Vec<Vector3<f64>>], step: usize) -> f64 {
-    let nb = 3.min(positions.len());
-    let cm = (positions[0][step] + positions[1][step] + positions[2][step]) / 3.0;
-    let mut ang = Vector3::zeros();
-    for body_pos in positions.iter().take(nb) {
-        let r: Vector3<f64> = body_pos[step] - cm;
-        let v = body_pos[step] - body_pos[step.saturating_sub(1)];
-        ang += r.cross(&v);
-    }
-    ang.norm()
 }
 
 // ─── Algorithm F: Gravitational Strings ──────────────────────

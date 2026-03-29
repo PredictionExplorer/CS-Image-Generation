@@ -91,7 +91,7 @@ struct Args {
     #[arg(short = 'r', long, default_value = DEFAULT_RESOLUTION, value_parser = parse_resolution)]
     resolution: OutputResolution,
 
-    #[arg(long, value_enum, default_value_t = DriftModeArg::Elliptical)]
+    #[arg(long, value_enum, default_value_t = DriftModeArg::None)]
     drift: DriftModeArg,
 
     #[arg(long, default_value_t = false)]
@@ -108,6 +108,9 @@ struct Args {
 
     #[arg(long, default_value_t = false, help = "Skip cinematic zoom video (renders 4x hi-res base frame)")]
     no_cinematic_zoom: bool,
+
+    #[arg(long, default_value_t = false, help = "Disable the 3D perspective camera and use flat 2D orthographic projection")]
+    no_camera_3d: bool,
 
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
@@ -197,7 +200,7 @@ fn main() -> Result<()> {
 
     let mut profile = PerformanceProfile::new();
 
-    let enhancements = app::Enhancements::default();
+    let enhancements = app::Enhancements { camera_3d: !args.no_camera_3d, ..Default::default() };
     spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
     render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
@@ -267,7 +270,14 @@ fn main() -> Result<()> {
 
     // ── Drift Transform ──
     let timer = StageTimer::start("Drift Transform");
-    let drift_config = if args.drift != DriftModeArg::None {
+    let drift_config = if enhancements.camera_3d {
+        if args.drift != DriftModeArg::None {
+            warn!("STAGE 2.5/7: Drift skipped (incompatible with 3D camera)");
+        } else {
+            info!("STAGE 2.5/7: Drift disabled");
+        }
+        None
+    } else if args.drift != DriftModeArg::None {
         app::apply_drift_transformation(
             &mut positions,
             args.drift.as_str(),
@@ -280,7 +290,30 @@ fn main() -> Result<()> {
         info!("STAGE 2.5/7: Drift disabled");
         None
     };
-    profile.push(timer.finish_with_throughput(Some(args.drift.as_str())));
+    profile.push(timer.finish_with_throughput(Some(
+        if enhancements.camera_3d && args.drift != DriftModeArg::None {
+            "skipped (3D camera)"
+        } else {
+            args.drift.as_str()
+        },
+    )));
+
+    // ── 3D Camera Projection ──
+    let projected_storage;
+    let render_positions: &[Vec<nalgebra::Vector3<f64>>] = if enhancements.camera_3d {
+        let timer = StageTimer::start("3D Camera Projection");
+        let camera = render::camera::Camera3D::new(
+            &render::camera::Camera3DConfig::default(),
+            &positions,
+        );
+        projected_storage = camera.project_all_positions(&positions);
+        profile.push(timer.finish_with_throughput(Some(format!("{} steps", args.steps))));
+        &projected_storage
+    } else {
+        projected_storage = vec![];
+        let _ = &projected_storage;
+        &positions
+    };
 
     // ── Color Generation ──
     let timer = StageTimer::start("Color Generation");
@@ -294,7 +327,7 @@ fn main() -> Result<()> {
     let render_ctx = render::context::RenderContext::new(
         args.resolution.width,
         args.resolution.height,
-        &positions,
+        render_positions,
         enhancements.aspect_correction,
     );
     let bbox = render_ctx.bounds();
@@ -311,7 +344,7 @@ fn main() -> Result<()> {
     // ── Histogram Pass ──
     let timer = StageTimer::start("Histogram Pass");
     let levels = app::build_histogram_and_levels(
-        &positions,
+        render_positions,
         &colors,
         &body_alphas,
         &resolved_effect_config,
@@ -330,7 +363,7 @@ fn main() -> Result<()> {
     let mut spd_buffer: Option<Vec<[f64; render::NUM_BINS]>> = None;
     let timer = StageTimer::start("Video Render");
     app::render_video(
-        render::SpectralScene::new(&positions, &colors, &body_alphas),
+        render::SpectralScene::new(render_positions, &colors, &body_alphas),
         &levels,
         render::SpectralRenderSettings::new(
             &resolved_effect_config,
@@ -376,7 +409,7 @@ fn main() -> Result<()> {
         )
     } else {
         extra_outputs::spectral_gallery::render_spectral_gallery(
-            render::SpectralScene::new(&positions, &colors, &body_alphas),
+            render::SpectralScene::new(render_positions, &colors, &body_alphas),
             render::SpectralRenderSettings::new(&resolved_effect_config, &render_config, false),
             &spectral_dir,
         )

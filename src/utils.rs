@@ -127,6 +127,43 @@ pub fn build_gaussian_kernel(radius: usize) -> SmallVec<[f64; 32]> {
     kernel
 }
 
+// ─── Orbital geometry helpers (shared by camera + sonification) ───
+
+/// Unit normal of the triangle formed by three bodies at the given step.
+pub fn plane_normal_at(positions: &[Vec<Vector3<f64>>], step: usize) -> Vector3<f64> {
+    let e1 = positions[1][step] - positions[0][step];
+    let e2 = positions[2][step] - positions[0][step];
+    let n = e1.cross(&e2);
+    let len = n.norm();
+    if len > 1e-14 { n / len } else { Vector3::new(0.0, 0.0, 1.0) }
+}
+
+/// Heron-formula area of the triangle formed by three bodies at the given step.
+pub fn triangle_area_at(positions: &[Vec<Vector3<f64>>], step: usize) -> f64 {
+    let a = (positions[0][step] - positions[1][step]).norm();
+    let b = (positions[1][step] - positions[2][step]).norm();
+    let c = (positions[2][step] - positions[0][step]).norm();
+    let s = (a + b + c) * 0.5;
+    (s * (s - a) * (s - b) * (s - c)).max(0.0).sqrt()
+}
+
+/// Angular momentum vector (finite-difference velocity) at the given step.
+pub fn angular_momentum_vec(positions: &[Vec<Vector3<f64>>], step: usize) -> Vector3<f64> {
+    let cm = (positions[0][step] + positions[1][step] + positions[2][step]) / 3.0;
+    let mut ang = Vector3::zeros();
+    for body_pos in positions.iter().take(3) {
+        let r = body_pos[step] - cm;
+        let v = body_pos[step] - body_pos[step.saturating_sub(1)];
+        ang += r.cross(&v);
+    }
+    ang
+}
+
+/// Scalar angular momentum magnitude at the given step.
+pub fn angular_momentum_at(positions: &[Vec<Vector3<f64>>], step: usize) -> f64 {
+    angular_momentum_vec(positions, step).norm()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

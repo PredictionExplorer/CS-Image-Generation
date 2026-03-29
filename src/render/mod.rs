@@ -15,6 +15,7 @@ pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
 pub mod batch_drawing;
+pub mod camera;
 pub mod color;
 pub mod constants;
 pub mod context;
