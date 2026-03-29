@@ -17,6 +17,7 @@ use crate::render::{
     generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
     save_image_as_png_16bit,
 };
+use crate::spectrum::NUM_BINS;
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
 use nalgebra::Vector3;
@@ -76,13 +77,16 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
 }
 
-/// Create the base output directory for default mode (image + videos).
+/// Create the base output directory and default subdirectories (spectral gallery, etc.).
 pub fn setup_output_directories(base: &str) -> Result<()> {
-    fs::create_dir_all(base).map_err(|e| ConfigError::FileSystem {
-        operation: "create directory".to_string(),
-        path: base.to_string(),
-        error: e,
-    })?;
+    for sub in ["", "spectral"] {
+        let path = if sub.is_empty() { base.to_string() } else { format!("{}/{}", base, sub) };
+        fs::create_dir_all(&path).map_err(|e| ConfigError::FileSystem {
+            operation: "create directory".to_string(),
+            path,
+            error: e,
+        })?;
+    }
     Ok(())
 }
 
@@ -246,6 +250,7 @@ pub fn build_histogram_and_levels(
 }
 
 /// Render full video
+#[allow(clippy::too_many_arguments)]
 pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -254,6 +259,7 @@ pub fn render_video(
     output_png: &str,
     fast_encode: bool,
     enable_temporal_smoothing: bool,
+    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
 ) -> Result<()> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -287,6 +293,7 @@ pub fn render_video(
                     Ok(())
                 },
                 &mut last_frame_png,
+                spd_out,
                 enable_temporal_smoothing,
             )?;
             Ok(())

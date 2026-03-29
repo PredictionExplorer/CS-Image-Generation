@@ -6,7 +6,6 @@
 use crate::post_effects::{
     ChromaticBloomConfig, GradientMapConfig, LuxuryPalette, PerceptualBlurConfig,
 };
-use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +46,7 @@ pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 
 // Re-export types from dependencies used in public API
+pub use crate::spectrum::NUM_BINS;
 pub use image::{DynamicImage, ImageBuffer, Rgb};
 
 /// Rendering configuration parameters
@@ -859,6 +859,7 @@ pub(crate) fn pass_1_build_histogram_spectral_serial_reference(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     scene: SpectralScene<'_>,
     frame_interval: usize,
@@ -866,6 +867,7 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     settings: SpectralRenderSettings<'_>,
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
+    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
@@ -875,6 +877,7 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
         settings,
         frame_sink,
         last_frame_out,
+        spd_out,
         enable_temporal_smoothing,
         AccumulationBackend::SerialReference,
     )
@@ -890,6 +893,7 @@ fn pass_2_write_frames_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
+    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
     backend: AccumulationBackend,
 ) -> Result<()> {
@@ -977,9 +981,11 @@ fn pass_2_write_frames_spectral_with_backend(
     }
 
     info!("   pass 2 (spectral render): 100% done");
+    *spd_out = Some(accum_spd);
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pass_2_write_frames_spectral(
     scene: SpectralScene<'_>,
     frame_interval: usize,
@@ -987,6 +993,7 @@ pub fn pass_2_write_frames_spectral(
     settings: SpectralRenderSettings<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
+    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
@@ -996,6 +1003,7 @@ pub fn pass_2_write_frames_spectral(
         settings,
         &mut frame_sink,
         last_frame_out,
+        spd_out,
         enable_temporal_smoothing,
         default_accumulation_backend(),
     )
@@ -1445,6 +1453,7 @@ mod tests {
                         settings,
                         frame_sink,
                         &mut last_frame,
+                        &mut None,
                         enable_temporal_smoothing,
                     )
                 } else {
@@ -1455,6 +1464,7 @@ mod tests {
                         settings,
                         frame_sink,
                         &mut last_frame,
+                        &mut None,
                         enable_temporal_smoothing,
                     )
                 }

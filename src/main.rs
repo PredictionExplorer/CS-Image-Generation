@@ -97,7 +97,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     fast_encode: bool,
 
-    #[arg(long, default_value_t = false, help = "Also generate extra outputs (loop clip, genesis burst, spectral gallery, phase portrait, avatar, wallpapers, stats card, reveal video, 3D model)")]
+    #[arg(long, default_value_t = false, help = "Also generate extra outputs (loop clip, genesis burst, phase portrait, avatar, wallpapers, stats card, reveal video, 3D model)")]
     extras: bool,
 
     #[arg(long, default_value_t = false, help = "Skip wallpaper pack when generating extras")]
@@ -327,6 +327,7 @@ fn main() -> Result<()> {
     let output_png = format!("{}/still.png", output_base);
     let output_vid = format!("{}/video.mp4", output_base);
 
+    let mut spd_buffer: Option<Vec<[f64; render::NUM_BINS]>> = None;
     let timer = StageTimer::start("Video Render");
     app::render_video(
         render::SpectralScene::new(&positions, &colors, &body_alphas),
@@ -340,6 +341,7 @@ fn main() -> Result<()> {
         &output_png,
         args.fast_encode,
         true,
+        &mut spd_buffer,
     )?;
     profile.push(timer.finish_with_throughput(Some(format!(
         "{} target frames at {}x{}",
@@ -359,6 +361,28 @@ fn main() -> Result<()> {
         &positions, 30.0, &output_vid, &audio_ctx,
     ) {
         warn!("Sonification failed: {}", e);
+    }
+    profile.push(timer.finish());
+
+    // ── Spectral Gallery (always runs, reuses video render buffer when available) ──
+    let timer = StageTimer::start("Spectral Gallery");
+    let spectral_dir = format!("{}/spectral", output_base);
+    let gallery_result = if let Some(spd) = spd_buffer.take() {
+        extra_outputs::spectral_gallery::render_spectral_gallery_from_buffer(
+            spd,
+            args.resolution.width,
+            args.resolution.height,
+            &spectral_dir,
+        )
+    } else {
+        extra_outputs::spectral_gallery::render_spectral_gallery(
+            render::SpectralScene::new(&positions, &colors, &body_alphas),
+            render::SpectralRenderSettings::new(&resolved_effect_config, &render_config, false),
+            &spectral_dir,
+        )
+    };
+    if let Err(e) = gallery_result {
+        warn!("Spectral gallery failed: {}", e);
     }
     profile.push(timer.finish());
 
@@ -465,16 +489,6 @@ fn generate_extras(
                 &format!("{base}/stills/genesis.png"),
             ) {
                 warn!("Genesis burst failed: {}", e);
-            }
-        });
-
-        timed_spawn!(s, "spectral_gallery", {
-            if let Err(e) = extra_outputs::spectral_gallery::render_spectral_gallery(
-                scene,
-                settings,
-                &format!("{base}/spectral"),
-            ) {
-                warn!("Spectral gallery failed: {}", e);
             }
         });
 
