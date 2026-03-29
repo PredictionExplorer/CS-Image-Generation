@@ -160,11 +160,11 @@ impl Default for SimulationConfig {
             num_steps_sim: 1_000_000,
             location: 300.0,
             velocity: 1.0,
-            min_mass: 100.0,
-            max_mass: 300.0,
+            min_mass: 1000.0,
+            max_mass: 3000.0,
             chaos_weight: 0.75,
             equil_weight: 11.0,
-            escape_threshold: -0.3,
+            escape_threshold: -3.0,
         }
     }
 }

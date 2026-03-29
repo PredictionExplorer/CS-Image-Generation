@@ -12,9 +12,6 @@ use sha3::{Digest, Sha3_256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::info;
 
-/// Gravitational constant
-pub const G: f64 = 9.8;
-
 /// SHA3 hash output length in bytes.
 const SHA3_HASH_LEN: usize = 32;
 
@@ -197,7 +194,7 @@ fn compute_accelerations_unrolled(bodies: &mut [Body], mass: &[f64; 3]) {
     let r01_sq = d01.norm_squared();
     if r01_sq > 1e-20 {
         let r01 = r01_sq.sqrt();
-        let inv_r3 = G / (r01 * r01_sq);
+        let inv_r3 = 1.0 / (r01 * r01_sq);
         a0 -= d01 * (mass[1] * inv_r3);
         a1 += d01 * (mass[0] * inv_r3);
     }
@@ -207,7 +204,7 @@ fn compute_accelerations_unrolled(bodies: &mut [Body], mass: &[f64; 3]) {
     let r02_sq = d02.norm_squared();
     if r02_sq > 1e-20 {
         let r02 = r02_sq.sqrt();
-        let inv_r3 = G / (r02 * r02_sq);
+        let inv_r3 = 1.0 / (r02 * r02_sq);
         a0 -= d02 * (mass[2] * inv_r3);
         a2 += d02 * (mass[0] * inv_r3);
     }
@@ -217,7 +214,7 @@ fn compute_accelerations_unrolled(bodies: &mut [Body], mass: &[f64; 3]) {
     let r12_sq = d12.norm_squared();
     if r12_sq > 1e-20 {
         let r12 = r12_sq.sqrt();
-        let inv_r3 = G / (r12 * r12_sq);
+        let inv_r3 = 1.0 / (r12 * r12_sq);
         a1 -= d12 * (mass[2] * inv_r3);
         a2 += d12 * (mass[1] * inv_r3);
     }
@@ -346,7 +343,7 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
             if i != j {
                 let d = (pi - (bj.position - rc)).norm();
                 if d > 1e-12 {
-                    pot += -G * bi.mass * bj.mass / d;
+                    pot += -bi.mass * bj.mass / d;
                 }
             }
         }
@@ -447,7 +444,7 @@ pub fn select_best_trajectory(
             }
             let e = calculate_total_energy(b);
             let ang = calculate_total_angular_momentum(b).norm();
-            if e > 10.0 || ang < 10.0 {
+            if e > 100.0 || ang < 100.0 {
                 dc.fetch_add(1, Ordering::Relaxed);
                 return None;
             }

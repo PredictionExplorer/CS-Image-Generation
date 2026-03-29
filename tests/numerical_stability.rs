@@ -4,7 +4,7 @@
 //! acceptable precision across a wide range of inputs and conditions.
 
 use nalgebra::Vector3;
-use three_body_problem::sim::{Body, Sha3RandomByteStream, get_positions, G};
+use three_body_problem::sim::{Body, Sha3RandomByteStream, get_positions};
 use three_body_problem::spectrum::NUM_BINS;
 use three_body_problem::spectrum_simd;
 
@@ -28,7 +28,7 @@ fn potential_energy(bodies: &[Body]) -> f64 {
         for j in (i + 1)..bodies.len() {
             let r = (bodies[i].position - bodies[j].position).norm();
             if r > 1e-10 {
-                pe -= G * bodies[i].mass * bodies[j].mass / r;
+                pe -= bodies[i].mass * bodies[j].mass / r;
             }
         }
     }

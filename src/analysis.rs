@@ -1,4 +1,4 @@
-use crate::sim::{Body, G};
+use crate::sim::Body;
 use crate::utils::FftCache;
 #[cfg(test)]
 use crate::utils::fourier_transform;
@@ -34,7 +34,7 @@ pub fn calculate_total_energy(bodies: &[Body]) -> f64 {
         for j in (i + 1)..n {
             let r = (bodies[i].position - bodies[j].position).norm();
             if r > 1e-10 {
-                pot += -G * bodies[i].mass * bodies[j].mass / r;
+                pot += -bodies[i].mass * bodies[j].mass / r;
             }
         }
     }
