@@ -382,6 +382,8 @@ impl WaveTerrain {
         let ry = (max_y - min_y).max(1e-10);
 
         let stride = (step_count / 2000).max(1);
+        let splat_radius: isize = 2;
+        let splat_weights: [f64; 5] = [0.05, 0.25, 0.40, 0.25, 0.05];
         for step in (0..step_count).step_by(stride) {
             for pair in [(0, 1), (1, 2), (2, 0)] {
                 let (a, b) = pair;
@@ -389,11 +391,18 @@ impl WaveTerrain {
                     let mid_x = (positions[a][step].x + positions[b][step].x) * 0.5;
                     let mid_y = (positions[a][step].y + positions[b][step].y) * 0.5;
                     let dist = (positions[a][step] - positions[b][step]).norm();
-                    let xi = ((mid_x - min_x) / rx * (size - 1) as f64) as usize;
-                    let yi = ((mid_y - min_y) / ry * (size - 1) as f64) as usize;
-                    let xi = xi.min(size - 1);
-                    let yi = yi.min(size - 1);
-                    terrain[yi * size + xi] += 1.0 / (1.0 + dist);
+                    let cx = ((mid_x - min_x) / rx * (size - 1) as f64) as isize;
+                    let cy = ((mid_y - min_y) / ry * (size - 1) as f64) as isize;
+                    let energy = 1.0 / (1.0 + dist);
+                    for dy in -splat_radius..=splat_radius {
+                        for dx in -splat_radius..=splat_radius {
+                            let xi = (cx + dx).clamp(0, size as isize - 1) as usize;
+                            let yi = (cy + dy).clamp(0, size as isize - 1) as usize;
+                            let w = splat_weights[(dx + splat_radius) as usize]
+                                * splat_weights[(dy + splat_radius) as usize];
+                            terrain[yi * size + xi] += energy * w;
+                        }
+                    }
                 }
             }
         }
@@ -557,22 +566,22 @@ fn world_tuning(world: SonicWorld) -> WorldTuning {
     match world {
         SonicWorld::Obsidian => WorldTuning {
             damping: 0.35, brightness: 0.9, reverb_size: 0.65,
-            reverb_damp: 0.6, reverb_wet: 0.30, pluck_threshold: 0.55,
+            reverb_damp: 0.6, reverb_wet: 0.30, pluck_threshold: 0.25,
             terrain_drive: 2.5, freeze_density: 0.4,
         },
         SonicWorld::Aurora => WorldTuning {
             damping: 0.15, brightness: 0.95, reverb_size: 0.85,
-            reverb_damp: 0.3, reverb_wet: 0.40, pluck_threshold: 0.45,
+            reverb_damp: 0.3, reverb_wet: 0.40, pluck_threshold: 0.20,
             terrain_drive: 1.8, freeze_density: 0.6,
         },
         SonicWorld::Meridian => WorldTuning {
             damping: 0.45, brightness: 0.6, reverb_size: 0.75,
-            reverb_damp: 0.5, reverb_wet: 0.35, pluck_threshold: 0.50,
+            reverb_damp: 0.5, reverb_wet: 0.35, pluck_threshold: 0.22,
             terrain_drive: 1.5, freeze_density: 0.5,
         },
         SonicWorld::Liminal => WorldTuning {
             damping: 0.20, brightness: 0.4, reverb_size: 0.95,
-            reverb_damp: 0.2, reverb_wet: 0.50, pluck_threshold: 0.40,
+            reverb_damp: 0.2, reverb_wet: 0.50, pluck_threshold: 0.18,
             terrain_drive: 1.2, freeze_density: 0.8,
         },
     }
@@ -684,6 +693,8 @@ fn synthesize_gravitational_strings(
     let mut prev_normal = plane_normal_at(positions, 0);
     let mut sm_plane_az = 0.0f64;
     let plane_az_a = 1.0 - (-1.0 / (0.3 * SR)).exp();
+    let periodic_pluck_interval = (2.0 * SR) as usize;
+    let mut last_any_pluck = [0usize; 3];
 
     for si in 0..total_samples {
         let t = si as f64 / total_samples as f64;
@@ -731,6 +742,7 @@ fn synthesize_gravitational_strings(
                 let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
                 let bright = tuning.brightness * (0.5 + 0.5 * ns) * (0.8 + 0.4 * norm_tumble);
                 strings[b].pluck(&mut rng, intensity * 0.7, bright);
+                last_any_pluck[b] = si;
 
                 for other in 0..nb {
                     if other != b {
@@ -738,6 +750,13 @@ fn synthesize_gravitational_strings(
                         strings[other].pluck(&mut rng, intensity * coupling, bright * 0.7);
                     }
                 }
+            } else if si.saturating_sub(last_any_pluck[b]) > periodic_pluck_interval {
+                last_any_pluck[b] = si;
+                let spd = body_speed(positions, b, step, frac, step_count);
+                let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
+                let close = body_closeness(positions, b, s, nb, stats.max_distance);
+                let bright = tuning.brightness * (0.3 + 0.4 * ns);
+                strings[b].pluck(&mut rng, 0.3 + 0.2 * close, bright);
             }
         }
 
@@ -746,7 +765,7 @@ fn synthesize_gravitational_strings(
             let close = body_closeness(positions, b, s, nb, stats.max_distance);
             let spd = body_speed(positions, b, step, frac, step_count);
             let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
-            *bn = rng.next_f64() * 0.008 * ns * close;
+            *bn = rng.next_f64() * 0.06 * ns * close;
         }
 
         let mut left = 0.0f64;
@@ -896,7 +915,7 @@ fn synthesize_orbital_terrain(
             let raw = terrain.sample(tx, ty);
 
             let close = body_closeness(positions, b, s, nb, stats.max_distance);
-            let amp = 0.2 * (0.3 + 0.7 * close);
+            let amp = 0.4 * (0.4 + 0.6 * close);
             let dynamic_drive = tuning.terrain_drive + norm_tumble * 1.5;
             let driven = soft_saturate(raw * amp, dynamic_drive);
 
@@ -1013,6 +1032,8 @@ fn synthesize_void_resonance(
     let mut prev_normal = plane_normal_at(positions, 0);
     let mut sm_plane_az = 0.0f64;
     let plane_az_a = 1.0 - (-1.0 / (0.3 * SR)).exp();
+    let periodic_pluck_interval = (3.0 * SR) as usize;
+    let mut last_any_pluck = [0usize; 3];
 
     for si in 0..total_samples {
         let t = si as f64 / total_samples as f64;
@@ -1033,6 +1054,7 @@ fn synthesize_void_resonance(
         let plane_az = cur_normal.x.atan2(cur_normal.y);
         sm_plane_az += plane_az_a * (plane_az - sm_plane_az);
 
+        let mut plucked = [false; 3];
         for b in 0..nb {
             for other in 0..nb {
                 if other == b { continue; }
@@ -1046,7 +1068,16 @@ fn synthesize_void_resonance(
                     let spd = body_speed(positions, b, step, frac, step_count);
                     let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
                     strings[b].pluck(&mut rng, 0.4 * sm_close[b][other], 0.3 + 0.3 * ns);
+                    plucked[b] = true;
+                    last_any_pluck[b] = si;
                 }
+            }
+            if !plucked[b] && si.saturating_sub(last_any_pluck[b]) > periodic_pluck_interval {
+                last_any_pluck[b] = si;
+                let spd = body_speed(positions, b, step, frac, step_count);
+                let ns = (spd / stats.max_speed).clamp(0.0, 1.0);
+                let close = body_closeness(positions, b, s, nb, stats.max_distance);
+                strings[b].pluck(&mut rng, 0.2 + 0.15 * close, 0.2 + 0.3 * ns);
             }
         }
 
@@ -1200,7 +1231,7 @@ fn apply_stereo_reverb(buf: &mut [f64], n: usize, p: &ReverbParams) {
 
 fn normalize_peak(buf: &mut [f64], target: f64) {
     let peak = buf.iter().copied().fold(0.0f64, |a, s| a.max(s.abs()));
-    if peak > target {
+    if peak > 1e-10 {
         let s = target / peak;
         for v in buf.iter_mut() { *v *= s; }
     }
