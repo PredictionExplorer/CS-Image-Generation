@@ -262,6 +262,24 @@ impl Camera3D {
         self.poses.len()
     }
 
+    /// Extract the camera basis vectors at a given simulation step.
+    pub fn camera_basis_at_step(
+        &self,
+        step: usize,
+    ) -> crate::post_effects::CameraOrientation {
+        let p = &self.poses[step];
+        let fwd = (p.target - p.eye).normalize();
+        let right = fwd.cross(&p.up).normalize();
+        let true_up = right.cross(&fwd);
+
+        crate::post_effects::CameraOrientation {
+            right: [right.x, right.y, right.z],
+            up: [true_up.x, true_up.y, true_up.z],
+            fwd: [fwd.x, fwd.y, fwd.z],
+            half_fov_tan: self.half_fov_tan,
+        }
+    }
+
     /// Project a single world-space point through the camera at a given step.
     pub fn project_point(&self, world_pos: &Vector3<f64>, step: usize) -> Vector3<f64> {
         let p = &self.poses[step];

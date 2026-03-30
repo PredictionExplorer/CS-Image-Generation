@@ -5,7 +5,7 @@
 //! dichroic glass, or butterfly wings. It adds subtle, sophisticated color shifts
 //! that enhance the perception of depth and material quality.
 
-use super::{PixelBuffer, PostEffect};
+use super::{EffectContext, PixelBuffer, PostEffect};
 use rayon::prelude::*;
 use std::error::Error;
 
@@ -134,16 +134,13 @@ impl Opalescence {
     }
 }
 
-impl PostEffect for Opalescence {
-    fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    fn process(
+impl Opalescence {
+    fn process_with_ctx(
         &self,
         input: &PixelBuffer,
         width: usize,
-        _height: usize,
+        height: usize,
+        ctx: &EffectContext,
     ) -> Result<PixelBuffer, Box<dyn Error>> {
         if !self.is_enabled() {
             return Ok(input.clone());
@@ -157,37 +154,30 @@ impl PostEffect for Opalescence {
                     return (r, g, b, a);
                 }
 
-                // Convert to straight alpha
                 let sr = r / a;
                 let sg = g / a;
                 let sb = b / a;
 
-                // Calculate luminance
                 let lum = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
 
-                // Pixel coordinates
-                let x = (idx % width) as f64;
-                let y = (idx / width) as f64;
+                let (x, y) = super::utils::stable_pattern_coords(
+                    idx % width, idx / width, width, height, ctx,
+                );
 
-                // Get opalescent color shift
                 let (shift_r, shift_g, shift_b) = self.interference_color(x, y, lum);
 
-                // Apply color shift with strength control
                 let strength = self.config.strength;
                 let mut final_r = sr * (1.0 - strength) + (sr * shift_r * 1.3) * strength;
                 let mut final_g = sg * (1.0 - strength) + (sg * shift_g * 1.3) * strength;
                 let mut final_b = sb * (1.0 - strength) + (sb * shift_b * 1.3) * strength;
 
-                // Add pearl sheen to highlights
                 let sheen = self.pearl_sheen(lum);
                 if sheen > 0.0 {
-                    // Pearl sheen has a slight cool tint
                     final_r += sheen * 0.95;
                     final_g += sheen * 0.98;
                     final_b += sheen * 1.00;
                 }
 
-                // Preserve relative color relationships (avoid over-saturation)
                 let max_out = final_r.max(final_g).max(final_b);
                 if max_out > 1.2 {
                     let scale = 1.2 / max_out;
@@ -196,7 +186,6 @@ impl PostEffect for Opalescence {
                     final_b *= scale;
                 }
 
-                // Convert back to premultiplied alpha
                 (
                     (final_r * a).max(0.0).min(a * 1.2),
                     (final_g * a).max(0.0).min(a * 1.2),
@@ -207,6 +196,33 @@ impl PostEffect for Opalescence {
             .collect();
 
         Ok(output)
+    }
+}
+
+impl PostEffect for Opalescence {
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn process(
+        &self,
+        input: &PixelBuffer,
+        width: usize,
+        height: usize,
+    ) -> Result<PixelBuffer, Box<dyn Error>> {
+        self.process_with_ctx(input, width, height, &EffectContext::default())
+    }
+
+    fn process_in_place_with_context(
+        &self,
+        buffer: &mut PixelBuffer,
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+    ) -> Result<(), Box<dyn Error>> {
+        let result = self.process_with_ctx(buffer, width, height, ctx)?;
+        *buffer = result;
+        Ok(())
     }
 }
 
@@ -265,5 +281,105 @@ mod tests {
                 || (orig.2 - proc.2).abs() > 0.001
         });
         assert!(has_shift, "Opalescence should modify colors");
+    }
+
+    // ── Camera-context tests ─────────────────────────────────────
+
+    fn test_camera() -> crate::post_effects::CameraOrientation {
+        crate::post_effects::CameraOrientation {
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fwd: [0.0, 0.0, 1.0],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn rotated_camera() -> crate::post_effects::CameraOrientation {
+        let c = 30.0_f64.to_radians().cos();
+        let s = 30.0_f64.to_radians().sin();
+        crate::post_effects::CameraOrientation {
+            right: [-c, 0.0, s],
+            up: [0.0, 1.0, 0.0],
+            fwd: [s, 0.0, c],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn varying_buffer(w: usize, h: usize) -> PixelBuffer {
+        (0..w * h)
+            .map(|i| {
+                let t = i as f64 / (w * h) as f64;
+                (t * 0.6, (1.0 - t) * 0.4, 0.3, 0.9)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_opalescence_process_in_place_with_context_works() {
+        let config = OpalescenceConfig::default();
+        let opal = Opalescence::new(config);
+        let mut buf = varying_buffer(32, 24);
+        let original = buf.clone();
+        let ctx = EffectContext::default();
+        opal.process_in_place_with_context(&mut buf, 32, 24, &ctx).unwrap();
+        let changed = buf.iter().zip(original.iter()).filter(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-12
+        }).count();
+        assert!(changed > 0, "process_in_place_with_context should modify pixels");
+    }
+
+    #[test]
+    fn test_opalescence_rotated_camera_differs() {
+        let config = OpalescenceConfig::default();
+        let opal = Opalescence::new(config);
+
+        let default_ctx = EffectContext::default();
+        let rotated_ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+
+        let mut buf_default = varying_buffer(32, 24);
+        let mut buf_rot = buf_default.clone();
+
+        opal.process_in_place_with_context(&mut buf_default, 32, 24, &default_ctx).unwrap();
+        opal.process_in_place_with_context(&mut buf_rot, 32, 24, &rotated_ctx).unwrap();
+
+        let differs = buf_default.iter().zip(buf_rot.iter()).any(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-10 || (a.1 - b.1).abs() > 1e-10
+        });
+        assert!(differs, "rotated camera should produce different opalescence pattern");
+    }
+
+    #[test]
+    fn test_opalescence_no_nan_with_rotated_camera() {
+        let config = OpalescenceConfig::default();
+        let opal = Opalescence::new(config);
+        let ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let mut buf = varying_buffer(48, 32);
+        opal.process_in_place_with_context(&mut buf, 48, 32, &ctx).unwrap();
+        for (i, &(r, g, b, a)) in buf.iter().enumerate() {
+            assert!(!r.is_nan(), "R NaN at pixel {i}");
+            assert!(!g.is_nan(), "G NaN at pixel {i}");
+            assert!(!b.is_nan(), "B NaN at pixel {i}");
+            assert!(!a.is_nan(), "A NaN at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_opalescence_disabled_ignores_context() {
+        let config = OpalescenceConfig { strength: 0.0, ..OpalescenceConfig::default() };
+        let opal = Opalescence::new(config);
+        let ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let buf = varying_buffer(16, 16);
+        let mut processed = buf.clone();
+        opal.process_in_place_with_context(&mut processed, 16, 16, &ctx).unwrap();
+        assert_eq!(buf, processed, "disabled effect should be identity regardless of context");
     }
 }

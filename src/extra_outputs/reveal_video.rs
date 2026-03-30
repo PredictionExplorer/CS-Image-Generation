@@ -86,15 +86,16 @@ pub fn render_reveal_video(
                 );
 
                 let fp = FrameParams { frame_number: frame_idx, density: None };
+                let default_ctx = crate::post_effects::EffectContext::default();
                 let rgba_buf = std::mem::take(&mut accum_rgba);
                 let trajectory = finish_pipeline
-                    .process_trajectory(rgba_buf, width as usize, height as usize, &fp)
+                    .process_trajectory(rgba_buf, width as usize, height as usize, &fp, &default_ctx)
                     .expect("reveal frame trajectory processing failed");
                 accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
                 let display = tonemap_to_display_buffer(&trajectory, levels);
                 let final_display = finish_pipeline
-                    .process_image(display, width as usize, height as usize, &fp)
+                    .process_image(display, width as usize, height as usize, &fp, &default_ctx)
                     .expect("reveal frame image processing failed");
 
                 let envelope = reveal_envelope(frame_idx, total_frames, fps);

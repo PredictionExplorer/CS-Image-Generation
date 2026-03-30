@@ -10,10 +10,11 @@ use super::error::{RenderError, Result};
 use crate::post_effects::{
     AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
     ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
-    EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
-    GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
-    Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    EdgeLuminanceConfig, EffectContext, FineTexture, FineTextureConfig, GaussianBloom,
+    GlowEnhancement, GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast,
+    MicroContrastConfig, Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig,
+    PostEffect, PostEffectChain, aether::AetherConfig, apply_aether_weave,
+    apply_champleve_iridescence,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba};
 use rayon::prelude::*;
@@ -219,9 +220,10 @@ impl FinishEffectPipeline {
         width: usize,
         height: usize,
         _params: &FrameParams,
+        ctx: &EffectContext,
     ) -> Result<PixelBuffer> {
         self.trajectory_chain
-            .process(buffer, width, height)
+            .process(buffer, width, height, ctx)
             .map_err(|e| RenderError::EffectChain(e.to_string()))
     }
 
@@ -232,9 +234,10 @@ impl FinishEffectPipeline {
         width: usize,
         height: usize,
         _params: &FrameParams,
+        ctx: &EffectContext,
     ) -> Result<PixelBuffer> {
         self.image_chain
-            .process(buffer, width, height)
+            .process(buffer, width, height, ctx)
             .map_err(|e| RenderError::EffectChain(e.to_string()))
     }
 
@@ -567,8 +570,19 @@ impl PostEffect for ChampleveFinish {
         height: usize,
     ) -> std::result::Result<PixelBuffer, Box<dyn std::error::Error>> {
         let mut buffer = input.clone();
-        apply_champleve_iridescence(&mut buffer, width, height, &self.config);
+        apply_champleve_iridescence(&mut buffer, width, height, &self.config, None);
         Ok(buffer)
+    }
+
+    fn process_in_place_with_context(
+        &self,
+        buffer: &mut PixelBuffer,
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        apply_champleve_iridescence(buffer, width, height, &self.config, Some(ctx));
+        Ok(())
     }
 }
 
@@ -590,8 +604,19 @@ impl PostEffect for AetherFinish {
         height: usize,
     ) -> std::result::Result<PixelBuffer, Box<dyn std::error::Error>> {
         let mut buffer = input.clone();
-        apply_aether_weave(&mut buffer, width, height, &self.config);
+        apply_aether_weave(&mut buffer, width, height, &self.config, None);
         Ok(buffer)
+    }
+
+    fn process_in_place_with_context(
+        &self,
+        buffer: &mut PixelBuffer,
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        apply_aether_weave(buffer, width, height, &self.config, Some(ctx));
+        Ok(())
     }
 }
 

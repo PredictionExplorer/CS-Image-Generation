@@ -93,12 +93,13 @@ pub fn render_animated_avatar(
         convert_spd_buffer_to_rgba(&spd_snap, &mut rgba, orig_width, orig_height);
 
         let frame_params = FrameParams { frame_number: frame_idx, density: None };
+        let default_ctx = crate::post_effects::EffectContext::default();
         let processed = finish_pipeline
-            .process_trajectory(rgba, orig_width, orig_height, &frame_params)
+            .process_trajectory(rgba, orig_width, orig_height, &frame_params, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
         let display = tonemap_to_display_buffer(&processed, levels);
         let final_display = finish_pipeline
-            .process_image(display, orig_width, orig_height, &frame_params)
+            .process_image(display, orig_width, orig_height, &frame_params, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 

@@ -85,13 +85,14 @@ pub fn render_cinemagraph(
         convert_spd_buffer_to_rgba(&spd_snap, &mut rgba, width as usize, height as usize);
 
         let fp = FrameParams { frame_number: frame_idx, density: None };
+        let default_ctx = crate::post_effects::EffectContext::default();
         let trajectory = finish_pipeline
-            .process_trajectory(rgba, width as usize, height as usize, &fp)
+            .process_trajectory(rgba, width as usize, height as usize, &fp, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
 
         let display = tonemap_to_display_buffer(&trajectory, levels);
         let final_display = finish_pipeline
-            .process_image(display, width as usize, height as usize, &fp)
+            .process_image(display, width as usize, height as usize, &fp, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
 
         raw_frames.push(quantize_display_buffer_to_16bit(&final_display));

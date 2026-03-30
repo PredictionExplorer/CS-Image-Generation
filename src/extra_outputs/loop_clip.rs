@@ -126,13 +126,14 @@ fn render_display_frames(
         convert_spd_buffer_to_rgba(&spd_snapshot, &mut rgba, width as usize, height as usize);
 
         let frame_params = FrameParams { frame_number: frame_idx, density: None };
+        let default_ctx = crate::post_effects::EffectContext::default();
         let trajectory_pixels = finish_pipeline
-            .process_trajectory(rgba, width as usize, height as usize, &frame_params)
+            .process_trajectory(rgba, width as usize, height as usize, &frame_params, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
 
         let display = tonemap_to_display_buffer(&trajectory_pixels, levels);
         let final_display = finish_pipeline
-            .process_image(display, width as usize, height as usize, &frame_params)
+            .process_image(display, width as usize, height as usize, &frame_params, &default_ctx)
             .map_err(|e| crate::render::error::RenderError::EffectChain(e.to_string()))?;
 
         frames.push(quantize_display_buffer_to_16bit(&final_display));

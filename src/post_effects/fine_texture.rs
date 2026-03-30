@@ -8,7 +8,7 @@
 //!
 //! These textures add a sense of physicality and craftsmanship to digital renders.
 
-use super::{PixelBuffer, PostEffect};
+use super::{EffectContext, PixelBuffer, PostEffect};
 use rayon::prelude::*;
 use std::error::Error;
 
@@ -123,16 +123,13 @@ impl FineTexture {
     }
 }
 
-impl PostEffect for FineTexture {
-    fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    fn process(
+impl FineTexture {
+    fn process_with_ctx(
         &self,
         input: &PixelBuffer,
         width: usize,
-        _height: usize,
+        height: usize,
+        ctx: &EffectContext,
     ) -> Result<PixelBuffer, Box<dyn Error>> {
         if !self.is_enabled() {
             return Ok(input.clone());
@@ -146,14 +143,13 @@ impl PostEffect for FineTexture {
                     return (r, g, b, a);
                 }
 
-                let x = (idx % width) as f64;
-                let y = (idx / width) as f64;
+                let (x, y) = super::utils::stable_pattern_coords(
+                    idx % width, idx / width, width, height, ctx,
+                );
 
-                // Get texture modulation
                 let texture = self.get_texture_value(x, y);
                 let modulation = 1.0 + texture * self.config.strength;
 
-                // Apply texture modulation (multiplicative for natural look)
                 let final_r = (r * modulation).max(0.0);
                 let final_g = (g * modulation).max(0.0);
                 let final_b = (b * modulation).max(0.0);
@@ -163,6 +159,33 @@ impl PostEffect for FineTexture {
             .collect();
 
         Ok(output)
+    }
+}
+
+impl PostEffect for FineTexture {
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn process(
+        &self,
+        input: &PixelBuffer,
+        width: usize,
+        height: usize,
+    ) -> Result<PixelBuffer, Box<dyn Error>> {
+        self.process_with_ctx(input, width, height, &EffectContext::default())
+    }
+
+    fn process_in_place_with_context(
+        &self,
+        buffer: &mut PixelBuffer,
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+    ) -> Result<(), Box<dyn Error>> {
+        let result = self.process_with_ctx(buffer, width, height, ctx)?;
+        *buffer = result;
+        Ok(())
     }
 }
 
@@ -222,5 +245,115 @@ mod tests {
         let v1 = texture.get_texture_value(0.0, 0.0);
         let v2 = texture.get_texture_value(10.0, 10.0);
         assert_ne!(v1, v2);
+    }
+
+    // ── Camera-context tests ─────────────────────────────────────
+
+    fn test_camera() -> crate::post_effects::CameraOrientation {
+        crate::post_effects::CameraOrientation {
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fwd: [0.0, 0.0, 1.0],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn rotated_camera() -> crate::post_effects::CameraOrientation {
+        let c = 30.0_f64.to_radians().cos();
+        let s = 30.0_f64.to_radians().sin();
+        crate::post_effects::CameraOrientation {
+            right: [-c, 0.0, s],
+            up: [0.0, 1.0, 0.0],
+            fwd: [s, 0.0, c],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    #[test]
+    fn test_fine_texture_process_in_place_with_context_works() {
+        let config = FineTextureConfig::default();
+        let tex = FineTexture::new(config);
+        let mut buf: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 32 * 24];
+        let original = buf.clone();
+        let ctx = EffectContext::default();
+        tex.process_in_place_with_context(&mut buf, 32, 24, &ctx).unwrap();
+        let changed = buf.iter().zip(original.iter()).any(|(a, b)| (a.0 - b.0).abs() > 1e-12);
+        assert!(changed, "process_in_place_with_context should modify pixels");
+    }
+
+    #[test]
+    fn test_fine_texture_rotated_camera_differs() {
+        let config = FineTextureConfig::default();
+        let tex = FineTexture::new(config);
+
+        let default_ctx = EffectContext::default();
+        let rotated_ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+
+        let mut buf_default: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 32 * 24];
+        let mut buf_rot = buf_default.clone();
+
+        tex.process_in_place_with_context(&mut buf_default, 32, 24, &default_ctx).unwrap();
+        tex.process_in_place_with_context(&mut buf_rot, 32, 24, &rotated_ctx).unwrap();
+
+        let differs = buf_default.iter().zip(buf_rot.iter()).any(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-10
+        });
+        assert!(differs, "rotated camera should produce different texture pattern");
+    }
+
+    #[test]
+    fn test_fine_texture_no_nan_with_rotated_camera() {
+        let config = FineTextureConfig::default();
+        let tex = FineTexture::new(config);
+        let ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let mut buf: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 48 * 32];
+        tex.process_in_place_with_context(&mut buf, 48, 32, &ctx).unwrap();
+        for (i, &(r, g, b, a)) in buf.iter().enumerate() {
+            assert!(!r.is_nan(), "R NaN at pixel {i}");
+            assert!(!g.is_nan(), "G NaN at pixel {i}");
+            assert!(!b.is_nan(), "B NaN at pixel {i}");
+            assert!(!a.is_nan(), "A NaN at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_fine_texture_disabled_ignores_context() {
+        let config = FineTextureConfig { strength: 0.0, ..FineTextureConfig::default() };
+        let tex = FineTexture::new(config);
+        let ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let buf: PixelBuffer = vec![(0.4, 0.4, 0.4, 1.0); 16 * 16];
+        let mut processed = buf.clone();
+        tex.process_in_place_with_context(&mut processed, 16, 16, &ctx).unwrap();
+        assert_eq!(buf, processed, "disabled effect should be identity regardless of context");
+    }
+
+    #[test]
+    fn test_fine_texture_alpha_preserved_with_context() {
+        let config = FineTextureConfig::default();
+        let tex = FineTexture::new(config);
+        let ctx = EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let buf: PixelBuffer = (0..16 * 16)
+            .map(|i| {
+                let t = i as f64 / 256.0;
+                (t * 0.5, t * 0.3, t * 0.2, 0.8)
+            })
+            .collect();
+        let mut processed = buf.clone();
+        tex.process_in_place_with_context(&mut processed, 16, 16, &ctx).unwrap();
+        for (i, (orig, proc_px)) in buf.iter().zip(processed.iter()).enumerate() {
+            assert_eq!(orig.3, proc_px.3, "alpha changed at pixel {i}");
+        }
     }
 }

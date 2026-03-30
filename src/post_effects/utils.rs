@@ -1,7 +1,64 @@
 //! Shared utilities for post-processing effects.
 
-use super::PixelBuffer;
+use super::{CameraOrientation, EffectContext, PixelBuffer};
 use rayon::prelude::*;
+
+/// Map a screen pixel to world-stable coordinates via inverse camera projection.
+///
+/// When the `EffectContext` carries both a current and reference camera, the
+/// pixel is unprojected through the current camera into a world-space direction,
+/// then re-projected through the reference camera to yield coordinates that are
+/// stable under camera rotation. When camera data is absent, returns the raw
+/// pixel position unchanged.
+#[inline]
+pub fn stable_pattern_coords(
+    px: usize,
+    py: usize,
+    width: usize,
+    height: usize,
+    ctx: &EffectContext,
+) -> (f64, f64) {
+    match (&ctx.current_camera, &ctx.reference_camera) {
+        (Some(cur), Some(ref_cam)) => {
+            reproject_pixel(px, py, width, height, cur, ref_cam)
+        }
+        _ => (px as f64, py as f64),
+    }
+}
+
+fn reproject_pixel(
+    px: usize,
+    py: usize,
+    width: usize,
+    height: usize,
+    cur: &CameraOrientation,
+    ref_cam: &CameraOrientation,
+) -> (f64, f64) {
+    let aspect = width as f64 / height as f64;
+    let ndc_x = ((px as f64 + 0.5) / width as f64 * 2.0 - 1.0) * aspect * cur.half_fov_tan;
+    let ndc_y = ((py as f64 + 0.5) / height as f64 * 2.0 - 1.0) * cur.half_fov_tan;
+
+    let wx = cur.fwd[0] + cur.right[0] * ndc_x + cur.up[0] * ndc_y;
+    let wy = cur.fwd[1] + cur.right[1] * ndc_x + cur.up[1] * ndc_y;
+    let wz = cur.fwd[2] + cur.right[2] * ndc_x + cur.up[2] * ndc_y;
+
+    let ref_z = wx * ref_cam.fwd[0] + wy * ref_cam.fwd[1] + wz * ref_cam.fwd[2];
+
+    if ref_z.abs() < 1e-8 {
+        return (px as f64, py as f64);
+    }
+
+    let ref_x = wx * ref_cam.right[0] + wy * ref_cam.right[1] + wz * ref_cam.right[2];
+    let ref_y = wx * ref_cam.up[0] + wy * ref_cam.up[1] + wz * ref_cam.up[2];
+
+    let ref_ndc_x = ref_x / ref_z;
+    let ref_ndc_y = ref_y / ref_z;
+
+    let stable_x = (ref_ndc_x / (aspect * ref_cam.half_fov_tan) + 1.0) * 0.5 * width as f64;
+    let stable_y = (ref_ndc_y / ref_cam.half_fov_tan + 1.0) * 0.5 * height as f64;
+
+    (stable_x, stable_y)
+}
 
 /// A simple 2D hash to generate pseudo-random points for distance fields.
 #[inline]
@@ -60,6 +117,192 @@ pub fn calculate_gradients(buffer: &PixelBuffer, width: usize, height: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity_camera() -> CameraOrientation {
+        CameraOrientation {
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fwd: [0.0, 0.0, 1.0],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn yaw_30_camera() -> CameraOrientation {
+        let c = 30.0_f64.to_radians().cos();
+        let s = 30.0_f64.to_radians().sin();
+        CameraOrientation {
+            right: [-c, 0.0, s],
+            up: [0.0, 1.0, 0.0],
+            fwd: [s, 0.0, c],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn identity_ctx() -> EffectContext {
+        EffectContext {
+            current_camera: Some(identity_camera()),
+            reference_camera: Some(identity_camera()),
+        }
+    }
+
+    fn rotated_ctx() -> EffectContext {
+        EffectContext {
+            current_camera: Some(yaw_30_camera()),
+            reference_camera: Some(identity_camera()),
+        }
+    }
+
+    // ── stable_pattern_coords ────────────────────────────────────
+
+    #[test]
+    fn test_stable_coords_no_camera_returns_raw_pixel() {
+        let ctx = EffectContext::default();
+        let (x, y) = stable_pattern_coords(42, 17, 200, 100, &ctx);
+        assert_eq!(x, 42.0);
+        assert_eq!(y, 17.0);
+    }
+
+    #[test]
+    fn test_stable_coords_only_current_camera_returns_raw_pixel() {
+        let ctx = EffectContext {
+            current_camera: Some(identity_camera()),
+            reference_camera: None,
+        };
+        let (x, y) = stable_pattern_coords(10, 20, 100, 100, &ctx);
+        assert_eq!(x, 10.0);
+        assert_eq!(y, 20.0);
+    }
+
+    #[test]
+    fn test_stable_coords_only_reference_camera_returns_raw_pixel() {
+        let ctx = EffectContext {
+            current_camera: None,
+            reference_camera: Some(identity_camera()),
+        };
+        let (x, y) = stable_pattern_coords(10, 20, 100, 100, &ctx);
+        assert_eq!(x, 10.0);
+        assert_eq!(y, 20.0);
+    }
+
+    #[test]
+    fn test_stable_coords_identity_is_near_pixel_center() {
+        let ctx = identity_ctx();
+        for py in [0, 25, 49, 50, 99] {
+            for px in [0, 25, 49, 50, 99] {
+                let (sx, sy) = stable_pattern_coords(px, py, 100, 100, &ctx);
+                assert!(
+                    (sx - (px as f64 + 0.5)).abs() < 1e-8,
+                    "px={px}: expected ~{}, got {sx}",
+                    px as f64 + 0.5
+                );
+                assert!(
+                    (sy - (py as f64 + 0.5)).abs() < 1e-8,
+                    "py={py}: expected ~{}, got {sy}",
+                    py as f64 + 0.5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_stable_coords_identity_non_square() {
+        let ctx = EffectContext {
+            current_camera: Some(identity_camera()),
+            reference_camera: Some(identity_camera()),
+        };
+        for py in [0, 54, 107] {
+            for px in [0, 96, 191] {
+                let (sx, sy) = stable_pattern_coords(px, py, 192, 108, &ctx);
+                assert!(
+                    (sx - (px as f64 + 0.5)).abs() < 1e-7,
+                    "non-square px={px}: expected ~{}, got {sx}",
+                    px as f64 + 0.5
+                );
+                assert!(
+                    (sy - (py as f64 + 0.5)).abs() < 1e-7,
+                    "non-square py={py}: expected ~{}, got {sy}",
+                    py as f64 + 0.5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_stable_coords_rotated_differs_from_identity() {
+        let id_ctx = identity_ctx();
+        let rot_ctx = rotated_ctx();
+
+        let (ix, _iy) = stable_pattern_coords(30, 50, 100, 100, &id_ctx);
+        let (rx, ry) = stable_pattern_coords(30, 50, 100, 100, &rot_ctx);
+
+        assert!(
+            (ix - rx).abs() > 1.0,
+            "30° yaw should shift x significantly: id={ix}, rot={rx}"
+        );
+        assert!(
+            ry.is_finite(),
+            "y should remain finite under yaw rotation"
+        );
+    }
+
+    #[test]
+    fn test_stable_coords_center_pixel_stays_centered_for_identity() {
+        let ctx = identity_ctx();
+        let (cx, cy) = stable_pattern_coords(50, 50, 101, 101, &ctx);
+        assert!((cx - 50.5).abs() < 1e-7, "center x: {cx}");
+        assert!((cy - 50.5).abs() < 1e-7, "center y: {cy}");
+    }
+
+    #[test]
+    fn test_stable_coords_all_pixels_finite() {
+        let ctx = rotated_ctx();
+        let w = 64;
+        let h = 48;
+        for py in 0..h {
+            for px in 0..w {
+                let (sx, sy) = stable_pattern_coords(px, py, w, h, &ctx);
+                assert!(sx.is_finite(), "NaN/Inf at ({px},{py}): sx={sx}");
+                assert!(sy.is_finite(), "NaN/Inf at ({px},{py}): sy={sy}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_stable_coords_deterministic() {
+        let ctx = rotated_ctx();
+        let (a1, b1) = stable_pattern_coords(33, 44, 100, 100, &ctx);
+        let (a2, b2) = stable_pattern_coords(33, 44, 100, 100, &ctx);
+        assert_eq!(a1.to_bits(), a2.to_bits());
+        assert_eq!(b1.to_bits(), b2.to_bits());
+    }
+
+    #[test]
+    fn test_stable_coords_symmetric_around_center() {
+        let ctx = identity_ctx();
+        let w = 100;
+        let h = 100;
+        let (lx, _) = stable_pattern_coords(20, 50, w, h, &ctx);
+        let (rx, _) = stable_pattern_coords(79, 50, w, h, &ctx);
+        assert!(
+            ((lx + rx) / 2.0 - 50.0).abs() < 0.6,
+            "mirror pixels should average to center: lx={lx}, rx={rx}"
+        );
+    }
+
+    #[test]
+    fn test_reproject_pixel_near_singularity_falls_back() {
+        let cur = CameraOrientation {
+            right: [0.0, 0.0, -1.0],
+            up: [0.0, 1.0, 0.0],
+            fwd: [1.0, 0.0, 0.0],
+            half_fov_tan: 0.4663,
+        };
+        let ref_cam = identity_camera();
+        let (sx, sy) = reproject_pixel(50, 50, 100, 100, &cur, &ref_cam);
+        assert!(sx.is_finite() && sy.is_finite(), "should not produce NaN at singularity");
+    }
+
+    // ── existing tests below ─────────────────────────────────────
 
     #[test]
     fn test_hash2_returns_finite_values() {

@@ -852,8 +852,9 @@ fn pass_1_build_histogram_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_input = std::mem::take(&mut accum_rgba);
+        let default_ctx = crate::post_effects::EffectContext::default();
         let trajectory_proxy = finish_pipeline
-            .process_trajectory(rgba_input, width as usize, height as usize, &frame_params)
+            .process_trajectory(rgba_input, width as usize, height as usize, &frame_params, &default_ctx)
             .expect("Failed to process frame during spectral histogram pass");
 
         let new_samples: Vec<[f64; 3]> = trajectory_proxy
@@ -1084,9 +1085,19 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
+
+        let effect_ctx = if let Some(cam) = camera {
+            crate::post_effects::EffectContext {
+                current_camera: Some(cam.camera_basis_at_step(checkpoint_step)),
+                reference_camera: Some(cam.camera_basis_at_step(0)),
+            }
+        } else {
+            crate::post_effects::EffectContext::default()
+        };
+
         std::mem::swap(&mut accum_rgba, &mut spare_rgba);
         let trajectory_pixels = finish_pipeline
-            .process_trajectory(spare_rgba, width as usize, height as usize, &frame_params)
+            .process_trajectory(spare_rgba, width as usize, height as usize, &frame_params, &effect_ctx)
             .expect("Failed to process frame during spectral render pass");
         accum_rgba.par_iter_mut().for_each(|px| *px = (0.0, 0.0, 0.0, 0.0));
         spare_rgba = trajectory_pixels;
@@ -1099,7 +1110,7 @@ fn pass_2_write_frames_spectral_with_backend(
         };
 
         let final_display = finish_pipeline
-            .process_image(smoothed_display, width as usize, height as usize, &frame_params)
+            .process_image(smoothed_display, width as usize, height as usize, &frame_params, &effect_ctx)
             .expect("Failed to process final image finish during spectral render pass");
         quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
         let buf_bytes = crate::utils::u16_slice_as_bytes(&quant_buf);
@@ -1220,13 +1231,14 @@ fn render_final_frame_spectral_with_backend(
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
+    let default_ctx = crate::post_effects::EffectContext::default();
     let trajectory_pixels = finish_pipeline
-        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
+        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params, &default_ctx)
         .expect("Failed to process final preview frame");
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
-        .process_image(display_buffer, width as usize, height as usize, &frame_params)
+        .process_image(display_buffer, width as usize, height as usize, &frame_params, &default_ctx)
         .expect("Failed to process final image finish for preview frame");
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
@@ -1307,13 +1319,14 @@ fn render_single_frame_spectral_with_backend(
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { frame_number: 0, density: None };
+    let default_ctx = crate::post_effects::EffectContext::default();
     let trajectory_pixels = finish_pipeline
-        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
+        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params, &default_ctx)
         .expect("Failed to process test frame");
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
-        .process_image(display_buffer, width as usize, height as usize, &frame_params)
+        .process_image(display_buffer, width as usize, height as usize, &frame_params, &default_ctx)
         .expect("Failed to process final image finish");
 
     // Quantize display buffer to 16-bit
@@ -2531,7 +2544,8 @@ mod tests {
             .map(|i| (i as f64 / 64.0, 0.5, 0.3, 0.9))
             .collect();
         let frame_params = FrameParams { frame_number: 0, density: None };
-        let output = pipeline.process_trajectory(input.clone(), 8, 8, &frame_params).unwrap();
+        let default_ctx = crate::post_effects::EffectContext::default();
+        let output = pipeline.process_trajectory(input.clone(), 8, 8, &frame_params, &default_ctx).unwrap();
         assert_eq!(input, output, "empty chain should be identity");
     }
 

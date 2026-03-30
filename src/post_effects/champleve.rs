@@ -78,12 +78,15 @@ pub fn apply_champleve_iridescence(
     width: usize,
     height: usize,
     config: &ChampleveConfig,
+    ctx: Option<&super::EffectContext>,
 ) {
     if buffer.is_empty() {
         return;
     }
 
     let gradients = super::utils::calculate_gradients(buffer, width, height);
+    let default_ctx = super::EffectContext::default();
+    let ctx = ctx.unwrap_or(&default_ctx);
 
     let cell_scale = (width as f64 * height as f64).sqrt() / config.cell_density.max(1.0);
     let inv_cell_scale = 1.0 / cell_scale;
@@ -95,8 +98,11 @@ pub fn apply_champleve_iridescence(
             return;
         }
 
-        let u = (idx % width) as f64 * inv_cell_scale;
-        let v = (idx / width) as f64 * inv_cell_scale;
+        let (sx, sy) = super::utils::stable_pattern_coords(
+            idx % width, idx / width, width, height, ctx,
+        );
+        let u = sx * inv_cell_scale;
+        let v = sy * inv_cell_scale;
 
         let (d1, d2) = voronoi_distances((u, v));
         let rim_dist = (d2.sqrt() - d1.sqrt()).abs();
@@ -157,7 +163,7 @@ mod tests {
         let config = ChampleveConfig::default();
         let mut buf = gradient_buffer(64, 48);
         let original_len = buf.len();
-        apply_champleve_iridescence(&mut buf, 64, 48, &config);
+        apply_champleve_iridescence(&mut buf, 64, 48, &config, None);
         assert_eq!(buf.len(), original_len);
     }
 
@@ -166,7 +172,7 @@ mod tests {
         let config = ChampleveConfig::default();
         let original = gradient_buffer(32, 24);
         let mut buf = original.clone();
-        apply_champleve_iridescence(&mut buf, 32, 24, &config);
+        apply_champleve_iridescence(&mut buf, 32, 24, &config, None);
         let changed = buf.iter().zip(original.iter()).filter(|(a, b)| {
             (a.0 - b.0).abs() > 1e-12 || (a.1 - b.1).abs() > 1e-12 || (a.2 - b.2).abs() > 1e-12
         }).count();
@@ -177,7 +183,7 @@ mod tests {
     fn test_champleve_all_black_stays_black() {
         let config = ChampleveConfig::default();
         let mut buf = vec![(0.0, 0.0, 0.0, 0.0); 16 * 16];
-        apply_champleve_iridescence(&mut buf, 16, 16, &config);
+        apply_champleve_iridescence(&mut buf, 16, 16, &config, None);
         for &(r, g, b, a) in &buf {
             assert_eq!(r, 0.0);
             assert_eq!(g, 0.0);
@@ -190,12 +196,98 @@ mod tests {
     fn test_champleve_no_nan_in_output() {
         let config = ChampleveConfig::default();
         let mut buf = gradient_buffer(48, 32);
-        apply_champleve_iridescence(&mut buf, 48, 32, &config);
+        apply_champleve_iridescence(&mut buf, 48, 32, &config, None);
         for &(r, g, b, a) in &buf {
             assert!(!r.is_nan(), "R is NaN");
             assert!(!g.is_nan(), "G is NaN");
             assert!(!b.is_nan(), "B is NaN");
             assert!(!a.is_nan(), "A is NaN");
+        }
+    }
+
+    // ── Camera-context tests ─────────────────────────────────────
+
+    fn test_camera() -> crate::post_effects::CameraOrientation {
+        crate::post_effects::CameraOrientation {
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fwd: [0.0, 0.0, 1.0],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    fn rotated_camera() -> crate::post_effects::CameraOrientation {
+        let c = 30.0_f64.to_radians().cos();
+        let s = 30.0_f64.to_radians().sin();
+        crate::post_effects::CameraOrientation {
+            right: [-c, 0.0, s],
+            up: [0.0, 1.0, 0.0],
+            fwd: [s, 0.0, c],
+            half_fov_tan: 0.4663,
+        }
+    }
+
+    #[test]
+    fn test_champleve_none_ctx_matches_default_ctx() {
+        let config = ChampleveConfig::default();
+        let mut buf_none = gradient_buffer(32, 24);
+        let mut buf_default = buf_none.clone();
+
+        apply_champleve_iridescence(&mut buf_none, 32, 24, &config, None);
+        let default_ctx = crate::post_effects::EffectContext::default();
+        apply_champleve_iridescence(&mut buf_default, 32, 24, &config, Some(&default_ctx));
+
+        assert_eq!(buf_none, buf_default, "None and default context should produce identical output");
+    }
+
+    #[test]
+    fn test_champleve_rotated_camera_differs() {
+        let config = ChampleveConfig::default();
+        let ctx = crate::post_effects::EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let mut buf_none = gradient_buffer(32, 24);
+        let mut buf_rot = buf_none.clone();
+
+        apply_champleve_iridescence(&mut buf_none, 32, 24, &config, None);
+        apply_champleve_iridescence(&mut buf_rot, 32, 24, &config, Some(&ctx));
+
+        let differs = buf_none.iter().zip(buf_rot.iter()).any(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-10 || (a.1 - b.1).abs() > 1e-10 || (a.2 - b.2).abs() > 1e-10
+        });
+        assert!(differs, "rotated camera should produce different pattern coords");
+    }
+
+    #[test]
+    fn test_champleve_no_nan_with_rotated_camera() {
+        let config = ChampleveConfig::default();
+        let ctx = crate::post_effects::EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let mut buf = gradient_buffer(48, 32);
+        apply_champleve_iridescence(&mut buf, 48, 32, &config, Some(&ctx));
+        for (i, &(r, g, b, a)) in buf.iter().enumerate() {
+            assert!(!r.is_nan(), "R NaN at pixel {i}");
+            assert!(!g.is_nan(), "G NaN at pixel {i}");
+            assert!(!b.is_nan(), "B NaN at pixel {i}");
+            assert!(!a.is_nan(), "A NaN at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_champleve_alpha_preserved_with_context() {
+        let config = ChampleveConfig::default();
+        let ctx = crate::post_effects::EffectContext {
+            current_camera: Some(rotated_camera()),
+            reference_camera: Some(test_camera()),
+        };
+        let original = gradient_buffer(16, 16);
+        let mut buf = original.clone();
+        apply_champleve_iridescence(&mut buf, 16, 16, &config, Some(&ctx));
+        for (i, (orig, processed)) in original.iter().zip(buf.iter()).enumerate() {
+            assert_eq!(orig.3, processed.3, "alpha changed at pixel {i}");
         }
     }
 }
