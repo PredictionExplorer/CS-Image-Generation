@@ -40,20 +40,26 @@ pub struct Camera3DConfig {
     pub distance_tau_frac: f64,
     /// Base distance as a multiple of the system's max pairwise extent.
     pub distance_scale: f64,
+    /// Master inertia multiplier for all smoothing time constants.
+    /// Higher values produce heavier, more viscous camera movement (like a
+    /// Steadicam on rails); lower values make the camera more responsive.
+    /// 1.0 = default cinematic feel, 0.1–10.0 is the useful range.
+    pub inertia: f64,
 }
 
 impl Default for Camera3DConfig {
     fn default() -> Self {
         Self {
             view_offset_angle: 1.13,
-            drift_revolutions: 0.5,
+            drift_revolutions: 0.3,
             fov_degrees: 50.0,
-            zoom_burst_strength: 0.50,
-            focus_wander_strength: 0.30,
-            normal_tau_frac: 0.015,
-            target_tau_frac: 0.005,
-            distance_tau_frac: 0.008,
+            zoom_burst_strength: 0.25,
+            focus_wander_strength: 0.15,
+            normal_tau_frac: 0.08,
+            target_tau_frac: 0.04,
+            distance_tau_frac: 0.05,
             distance_scale: 3.0,
+            inertia: 1.0,
         }
     }
 }
@@ -108,8 +114,8 @@ impl Camera3D {
             normals.push(oriented_normal(positions, s, &l_hat));
         }
 
-        // Smooth the normal vectors
-        let n_alpha = ema_alpha(config.normal_tau_frac, total_steps);
+        // Smooth the normal vectors (inertia scales all time constants)
+        let n_alpha = ema_alpha(config.normal_tau_frac * config.inertia, total_steps);
         ema_smooth_vec(&mut normals, n_alpha);
         // Re-normalize after smoothing (EMA of unit vectors isn't unit)
         for n in &mut normals {
@@ -139,16 +145,16 @@ impl Camera3D {
             focus[step] = centroid * (1.0 - wander) + closest_mid * wander;
         }
 
-        // Smooth distance and focus
-        let dist_a = ema_alpha(config.distance_tau_frac, total_steps);
-        let tgt_a = ema_alpha(config.target_tau_frac, total_steps);
+        // Smooth distance and focus (inertia scales all time constants)
+        let dist_a = ema_alpha(config.distance_tau_frac * config.inertia, total_steps);
+        let tgt_a = ema_alpha(config.target_tau_frac * config.inertia, total_steps);
         ema_smooth(&mut dist, dist_a);
         ema_smooth_vec(&mut focus, tgt_a);
 
         // ── Build camera poses ──
         let drift_rate = 2.0 * PI * config.drift_revolutions / total_steps.max(1) as f64;
 
-        let poses: Vec<CameraPose> = (0..total_steps)
+        let mut poses: Vec<CameraPose> = (0..total_steps)
             .map(|s| {
                 let n = normals[s];
 
@@ -183,10 +189,29 @@ impl Camera3D {
             })
             .collect();
 
+        // ── Final-pass pose smoothing ──
+        // Catches residual jitter from geometric construction (Rodrigues
+        // rotations, perpendicular fallbacks) that component-level EMA
+        // cannot fully eliminate.
+        let pose_alpha = ema_alpha(0.02 * config.inertia, total_steps);
+        for i in 1..poses.len() {
+            poses[i].eye = pose_alpha * poses[i].eye
+                + (1.0 - pose_alpha) * poses[i - 1].eye;
+            poses[i].target = pose_alpha * poses[i].target
+                + (1.0 - pose_alpha) * poses[i - 1].target;
+            poses[i].up = pose_alpha * poses[i].up
+                + (1.0 - pose_alpha) * poses[i - 1].up;
+            let up_len = poses[i].up.norm();
+            if up_len > 1e-14 {
+                poses[i].up /= up_len;
+            }
+        }
+
         info!(
             steps = total_steps,
             max_extent,
             base_distance,
+            inertia = config.inertia,
             "Gauss-map camera trajectory built"
         );
 

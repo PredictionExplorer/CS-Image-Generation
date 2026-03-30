@@ -112,6 +112,9 @@ struct Args {
     #[arg(long, default_value_t = false, help = "Disable the 3D perspective camera and use flat 2D orthographic projection")]
     no_camera_3d: bool,
 
+    #[arg(long, default_value_t = 1.0, help = "Camera inertia multiplier — higher values produce smoother, more viscous camera movement (default 1.0, useful range 0.1–10.0)")]
+    camera_inertia: f64,
+
     #[cfg(feature = "gpu")]
     #[arg(long, default_value_t = false, help = "Use GPU-accelerated rendering via wgpu (Metal on macOS, Vulkan on Linux)")]
     gpu: bool,
@@ -308,7 +311,10 @@ fn main() -> Result<()> {
     let render_positions: &[Vec<nalgebra::Vector3<f64>>] = if enhancements.camera_3d {
         let timer = StageTimer::start("3D Camera Projection");
         let camera = render::camera::Camera3D::new(
-            &render::camera::Camera3DConfig::default(),
+            &render::camera::Camera3DConfig {
+                inertia: args.camera_inertia,
+                ..Default::default()
+            },
             &positions,
         );
         projected_storage = camera.project_all_positions(&positions);
