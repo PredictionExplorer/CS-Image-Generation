@@ -1353,7 +1353,7 @@ fn synthesize_orbital_choir(
 fn write_wav(samples: &[i16], path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let data_size = (samples.len() * 2) as u32;
     let file_size = 36 + data_size;
-    let mut file = std::fs::File::create(path)?;
+    let mut file = std::io::BufWriter::with_capacity(64 * 1024, std::fs::File::create(path)?);
     file.write_all(b"RIFF")?; file.write_all(&file_size.to_le_bytes())?;
     file.write_all(b"WAVE")?; file.write_all(b"fmt ")?;
     file.write_all(&16u32.to_le_bytes())?; file.write_all(&1u16.to_le_bytes())?;
@@ -1364,6 +1364,7 @@ fn write_wav(samples: &[i16], path: &str) -> Result<(), Box<dyn std::error::Erro
     file.write_all(&block_align.to_le_bytes())?; file.write_all(&BITS_PER_SAMPLE.to_le_bytes())?;
     file.write_all(b"data")?; file.write_all(&data_size.to_le_bytes())?;
     for &sample in samples { file.write_all(&sample.to_le_bytes())?; }
+    file.flush()?;
     Ok(())
 }
 
@@ -1409,16 +1410,20 @@ pub fn generate_gallery_sonification(
     let wt = world_tuning(world);
     info!("   Sonic world: {:?}  (chaos={:.4}, equil={:.4})", world, context.chaos, context.equilateralness);
 
-    info!("   Synthesizing: Gravitational Strings (Karplus-Strong waveguide)...");
-    let sf = synthesize_gravitational_strings(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds);
-    info!("   Synthesizing: Orbital Terrain (wave terrain + granular)...");
-    let sg = synthesize_orbital_terrain(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds);
-    info!("   Synthesizing: Void Resonance (spectral freeze + breath)...");
-    let sh = synthesize_void_resonance(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds);
-    info!("   Synthesizing: Crystal Resonance (legacy)...");
-    let sb = synthesize_crystal_resonance(positions, &legacy_stats, total_samples, step_count, duration_seconds);
-    info!("   Synthesizing: Orbital Choir (legacy)...");
-    let sc = synthesize_orbital_choir(positions, &legacy_stats, total_samples, step_count, duration_seconds);
+    info!("   Synthesizing 5 audio tracks in parallel...");
+    let ((sf, sg), (sh, (sb, sc))) = rayon::join(
+        || rayon::join(
+            || synthesize_gravitational_strings(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds),
+            || synthesize_orbital_terrain(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds),
+        ),
+        || rayon::join(
+            || synthesize_void_resonance(positions, &orbit_stats, context, &wt, total_samples, step_count, duration_seconds),
+            || rayon::join(
+                || synthesize_crystal_resonance(positions, &legacy_stats, total_samples, step_count, duration_seconds),
+                || synthesize_orbital_choir(positions, &legacy_stats, total_samples, step_count, duration_seconds),
+            ),
+        ),
+    );
 
     let wf = format!("{}.strings.wav", video_path);
     let wg = format!("{}.terrain.wav", video_path);
@@ -1752,5 +1757,45 @@ mod tests {
         let rr = left * sin_r + right * cos_r;
         assert!((rl - left).abs() < 1e-14);
         assert!((rr - right).abs() < 1e-14);
+    }
+
+    #[test]
+    fn test_write_wav_produces_valid_riff_header() {
+        let samples: Vec<i16> = (0..1000).map(|i| (i % 256) as i16).collect();
+        let path = std::env::temp_dir().join("test_wav_header.wav");
+        let path_str = path.to_str().unwrap();
+        write_wav(&samples, path_str).unwrap();
+
+        let data = std::fs::read(&path).unwrap();
+        assert!(data.len() >= 44, "WAV file too small for header");
+        assert_eq!(&data[0..4], b"RIFF", "missing RIFF marker");
+        assert_eq!(&data[8..12], b"WAVE", "missing WAVE marker");
+        assert_eq!(&data[12..16], b"fmt ", "missing fmt chunk");
+        assert_eq!(&data[36..40], b"data", "missing data chunk");
+
+        let data_size = u32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+        assert_eq!(data_size as usize, samples.len() * 2, "data size mismatch");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_f64_to_i16_clamps_extremes() {
+        let buf = vec![2.0, -2.0, 0.0, 0.5, -0.5];
+        let i16s = f64_to_i16(&buf);
+        assert_eq!(i16s.len(), buf.len());
+        assert_eq!(i16s[0], 32000);
+        assert_eq!(i16s[1], -32000);
+        assert_eq!(i16s[2], 0);
+        assert!(i16s[3] > 0);
+        assert!(i16s[4] < 0);
+    }
+
+    #[test]
+    fn test_normalize_peak_scales_to_target() {
+        let mut buf = vec![0.5, -0.25, 0.1, -0.5, 0.3];
+        normalize_peak(&mut buf, 0.9);
+        let max_abs = buf.iter().map(|v| v.abs()).fold(0.0f64, f64::max);
+        assert!((max_abs - 0.9).abs() < 1e-10, "peak should be 0.9, got {max_abs}");
     }
 }

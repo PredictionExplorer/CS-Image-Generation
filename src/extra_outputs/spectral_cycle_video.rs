@@ -324,7 +324,7 @@ mod tests {
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let ctx = RenderContext::new(64, 36, scene.positions, settings.aspect_correction);
         let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, constants::DEFAULT_DT);
-        let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+        let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut accum_spd, None, scene, &ctx, &velocity_calc,
             0, scene.step_count(), settings.render_config.hdr_scale,

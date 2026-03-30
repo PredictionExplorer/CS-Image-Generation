@@ -45,7 +45,7 @@ pub fn render_cinemagraph(
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     accumulate_spectral_steps(
         &mut accum_spd,
         None,

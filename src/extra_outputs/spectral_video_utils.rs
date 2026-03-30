@@ -26,7 +26,7 @@ impl BinBuffers {
     /// Build all 64 bin buffers from the accumulated SPD.
     /// Applies energy-density shift, then normalizes + tints each bin.
     pub fn from_spd(
-        mut accum_spd: Vec<[f64; NUM_BINS]>,
+        mut accum_spd: Vec<[f32; NUM_BINS]>,
         width: u32,
         height: u32,
     ) -> Self {
@@ -38,7 +38,7 @@ impl BinBuffers {
     /// applied.  Use this when the shift was done externally (e.g. shared
     /// accumulation in main.rs).
     pub fn from_shifted_spd(
-        accum_spd: &[[f64; NUM_BINS]],
+        accum_spd: &[[f32; NUM_BINS]],
         width: u32,
         height: u32,
     ) -> Self {
@@ -50,18 +50,18 @@ impl BinBuffers {
                 let wavelength = wavelength_nm_for_bin(bin);
                 let (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength);
 
-                let max_val: f64 = accum_spd
+                let max_val: f32 = accum_spd
                     .iter()
                     .map(|spd| spd[bin])
-                    .fold(0.0f64, f64::max)
-                    .max(1e-10);
+                    .fold(0.0f32, f32::max)
+                    .max(1e-10f32);
 
                 let mut buf = vec![[0.0f64; 3]; pixel_count];
                 for (px, spd) in buf.iter_mut().zip(accum_spd.iter()) {
                     let normalized = (spd[bin] / max_val).clamp(0.0, 1.0);
-                    px[0] = (normalized * tint_r).powf(1.0 / DISPLAY_GAMMA);
-                    px[1] = (normalized * tint_g).powf(1.0 / DISPLAY_GAMMA);
-                    px[2] = (normalized * tint_b).powf(1.0 / DISPLAY_GAMMA);
+                    px[0] = (normalized as f64 * tint_r).powf(1.0 / DISPLAY_GAMMA);
+                    px[1] = (normalized as f64 * tint_g).powf(1.0 / DISPLAY_GAMMA);
+                    px[2] = (normalized as f64 * tint_b).powf(1.0 / DISPLAY_GAMMA);
                 }
                 buf
             })
@@ -95,7 +95,7 @@ impl BinBuffers {
     }
 
     /// Blend multiple bins with a weight vector, writing 16-bit output into `dest`.
-    pub fn weighted_blend(&self, weights: &[f64; NUM_BINS], dest: &mut Vec<u16>) {
+    pub fn weighted_blend(&self, weights: &[f32; NUM_BINS], dest: &mut Vec<u16>) {
         dest.resize(self.pixel_count * 3, 0u16);
 
         dest.par_chunks_mut(3)
@@ -106,7 +106,7 @@ impl BinBuffers {
                 let mut b = 0.0f64;
                 #[allow(clippy::needless_range_loop)]
                 for bin in 0..NUM_BINS {
-                    let w = weights[bin];
+                    let w = weights[bin] as f64;
                     if w > 0.0 {
                         r += self.buffers[bin][i][0] * w;
                         g += self.buffers[bin][i][1] * w;
@@ -143,13 +143,13 @@ impl BinBuffers {
 
     /// Build a full-composite buffer by summing all bins equally.
     pub fn full_composite(&self, dest: &mut Vec<u16>) {
-        let mut weights = [0.0f64; NUM_BINS];
-        weights.fill(1.0 / NUM_BINS as f64);
+        let mut weights = [0.0f32; NUM_BINS];
+        weights.fill(1.0 / NUM_BINS as f32);
         self.weighted_blend(&weights, dest);
     }
 
     /// Per-pixel dominant bin index and tinted color (for heatmap/ripple effects).
-    pub fn dominant_bin_colors(&self, accum_spd: &[[f64; NUM_BINS]]) -> Vec<([f64; 3], usize)> {
+    pub fn dominant_bin_colors(&self, accum_spd: &[[f32; NUM_BINS]]) -> Vec<([f64; 3], usize)> {
         accum_spd
             .par_iter()
             .map(|spd| {
@@ -195,18 +195,18 @@ const DOMINANT_GAMMA: f64 = 2.2;
 ///
 /// Returns gamma-corrected `[R, G, B]` tinted by the dominant bin's wavelength,
 /// with logarithmic brightness scaling so dim pixels stay visible.
-pub fn dominant_colors_from_shifted_spd(shifted_spd: &[[f64; NUM_BINS]]) -> Vec<[f64; 3]> {
+pub fn dominant_colors_from_shifted_spd(shifted_spd: &[[f32; NUM_BINS]]) -> Vec<[f64; 3]> {
     let max_total_energy = shifted_spd
         .par_iter()
-        .map(|spd| spd.iter().sum::<f64>())
-        .reduce(|| 0.0f64, f64::max)
-        .max(1e-10);
-    let log_denom = (1.0 + max_total_energy).ln();
+        .map(|spd| spd.iter().copied().sum::<f32>())
+        .reduce(|| 0.0f32, f32::max)
+        .max(1e-10f32);
+    let log_denom = (1.0f32 + max_total_energy).ln();
 
     shifted_spd
         .par_iter()
         .map(|spd| {
-            let total_energy: f64 = spd.iter().sum();
+            let total_energy: f32 = spd.iter().copied().sum();
             let dominant = spd
                 .iter()
                 .enumerate()
@@ -215,10 +215,10 @@ pub fn dominant_colors_from_shifted_spd(shifted_spd: &[[f64; NUM_BINS]]) -> Vec<
                 .unwrap_or(0);
             let wl = wavelength_nm_for_bin(dominant);
             let (tr, tg, tb) = wavelength_to_rgb(wl);
-            let brightness = (1.0 + total_energy).ln() / log_denom;
-            let r = (tr * brightness).powf(1.0 / DOMINANT_GAMMA);
-            let g = (tg * brightness).powf(1.0 / DOMINANT_GAMMA);
-            let b = (tb * brightness).powf(1.0 / DOMINANT_GAMMA);
+            let brightness = (1.0f32 + total_energy).ln() / log_denom;
+            let r = (tr * brightness as f64).powf(1.0 / DOMINANT_GAMMA);
+            let g = (tg * brightness as f64).powf(1.0 / DOMINANT_GAMMA);
+            let b = (tb * brightness as f64).powf(1.0 / DOMINANT_GAMMA);
             [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]
         })
         .collect()
@@ -371,12 +371,12 @@ mod tests {
         assert_eq!(bin_group(NUM_BINS + 100), NUM_GROUPS - 1);
     }
 
-    fn make_test_spd(width: u32, height: u32) -> Vec<[f64; NUM_BINS]> {
+    fn make_test_spd(width: u32, height: u32) -> Vec<[f32; NUM_BINS]> {
         let pixel_count = (width * height) as usize;
         let mut spd = vec![[0.0; NUM_BINS]; pixel_count];
         for (i, px) in spd.iter_mut().enumerate() {
             let bin = i % NUM_BINS;
-            px[bin] = 1.0 + i as f64 * 0.1;
+            px[bin] = 1.0 + i as f32 * 0.1;
         }
         spd
     }
@@ -483,7 +483,7 @@ mod tests {
         let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
         let mut dest_uniform = Vec::new();
         let mut dest_composite = Vec::new();
-        let w = 1.0 / NUM_BINS as f64;
+        let w = 1.0 / NUM_BINS as f32;
         let weights = [w; NUM_BINS];
         bins.weighted_blend(&weights, &mut dest_uniform);
         bins.full_composite(&mut dest_composite);

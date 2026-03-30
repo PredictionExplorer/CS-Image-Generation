@@ -49,7 +49,7 @@ pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 
 // Re-export types from dependencies used in public API
-pub use crate::spectrum::NUM_BINS;
+pub use crate::spectrum::{NUM_BINS, SpectralBins, ZERO_BINS};
 pub use image::{DynamicImage, ImageBuffer, Rgb};
 
 /// Rendering configuration parameters
@@ -539,21 +539,22 @@ pub(crate) fn build_effect_config_from_resolved(
 
 /// Apply energy density wavelength shift to spectral buffer
 /// Hot regions (high energy) shift toward red, cool regions stay blue
-pub fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
+pub fn apply_energy_density_shift(accum_spd: &mut [[f32; NUM_BINS]]) {
     use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
 
     accum_spd.par_iter_mut().for_each(|spd| {
         // Calculate total energy in this pixel
-        let total_energy: f64 = spd.iter().sum();
+        let total_energy: f32 = spd.iter().copied().sum();
 
         // If energy is below threshold, no shift needed
-        if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD {
+        if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD as f32 {
             return;
         }
 
         // Calculate shift amount (excess energy above threshold)
-        let excess_energy = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD;
-        let shift_amount = (excess_energy * ENERGY_DENSITY_SHIFT_STRENGTH).min(1.0);
+        let excess_energy = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD as f32;
+        let shift_amount =
+            (excess_energy * ENERGY_DENSITY_SHIFT_STRENGTH as f32).min(1.0);
 
         // Apply redshift: move energy from lower bins (blue) to higher bins (red)
         // We blur the spectrum toward the red end
@@ -619,7 +620,7 @@ pub(crate) fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec
 
 #[allow(clippy::too_many_arguments)]
 fn accumulate_spectral_steps_into_rows(
-    accum_spd: &mut [[f64; NUM_BINS]],
+    accum_spd: &mut [[f32; NUM_BINS]],
     depth_weight: &mut [f64],
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
@@ -658,7 +659,7 @@ fn accumulate_spectral_steps_into_rows(
 }
 
 /// Merge a partial SPD buffer into the main accumulator using parallel iteration.
-fn merge_partial_into(dest: &mut [[f64; NUM_BINS]], src: &[[f64; NUM_BINS]]) {
+fn merge_partial_into(dest: &mut [[f32; NUM_BINS]], src: &[[f32; NUM_BINS]]) {
     dest.par_iter_mut().zip(src.par_iter()).for_each(|(d, s)| {
         for bin in 0..NUM_BINS {
             d[bin] += s[bin];
@@ -678,7 +679,7 @@ fn merge_depth_into(dest: &mut [f64], src: &[f64]) {
 /// Used as the inner kernel for both the legacy path and within each step-chunk.
 #[allow(clippy::too_many_arguments)]
 fn accumulate_with_scanline_bands(
-    accum_spd: &mut [[f64; NUM_BINS]],
+    accum_spd: &mut [[f32; NUM_BINS]],
     depth_weight: Option<&mut [f64]>,
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
@@ -687,7 +688,8 @@ fn accumulate_with_scanline_bands(
     step_end: usize,
     hdr_scale: f64,
 ) {
-    let band_count = ctx.height_usize;
+    let num_threads = rayon::current_num_threads().max(1);
+    let band_count = (num_threads * 2).min(ctx.height_usize).max(1);
     if band_count <= 1 {
         accumulate_spectral_steps_into_rows(
             accum_spd, depth_weight.unwrap_or(&mut []),
@@ -730,7 +732,7 @@ fn accumulate_with_scanline_bands(
 
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_spectral_steps(
-    accum_spd: &mut [[f64; NUM_BINS]],
+    accum_spd: &mut [[f32; NUM_BINS]],
     depth_weight: Option<&mut [f64]>,
     scene: SpectralScene<'_>,
     ctx: &RenderContext,
@@ -758,7 +760,7 @@ pub fn accumulate_spectral_steps(
                 let steps_per_chunk = step_count.div_ceil(num_chunks);
                 let pixel_count = accum_spd.len();
 
-                let partials: Vec<Vec<[f64; NUM_BINS]>> = (0..num_chunks)
+                let partials: Vec<Vec<[f32; NUM_BINS]>> = (0..num_chunks)
                     .into_par_iter()
                     .map(|chunk_idx| {
                         let cs = step_start + chunk_idx * steps_per_chunk;
@@ -766,7 +768,7 @@ pub fn accumulate_spectral_steps(
                         if cs >= ce {
                             return Vec::new();
                         }
-                        let mut local = vec![[0.0f64; NUM_BINS]; pixel_count];
+                        let mut local = vec![[0.0f32; NUM_BINS]; pixel_count];
                         accumulate_spectral_steps_into_rows(
                             &mut local, &mut [], scene, ctx, velocity_calc, cs, ce, 0,
                             ctx.height_usize, hdr_scale,
@@ -815,7 +817,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
@@ -912,7 +914,7 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     settings: SpectralRenderSettings<'_>,
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
+    spd_out: &mut Option<Vec<[f32; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
@@ -946,7 +948,7 @@ fn pass_2_write_frames_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
+    spd_out: &mut Option<Vec<[f32; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
     backend: AccumulationBackend,
     camera: Option<&camera::Camera3D>,
@@ -979,7 +981,7 @@ fn pass_2_write_frames_spectral_with_backend(
     };
 
     let pixel_count = ctx.pixel_count();
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; pixel_count];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
     let mut spare_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
@@ -1018,114 +1020,298 @@ fn pass_2_write_frames_spectral_with_backend(
     let mut display_buf: PixelBuffer = Vec::with_capacity(pixel_count);
     let mut quant_buf: Vec<u16> = Vec::with_capacity(pixel_count * 3);
 
-    for &checkpoint_step in &checkpoints {
-        if step_start < total_steps && step_start % chunk_line == 0 {
-            let pct = (step_start as f64 / total_steps as f64) * constants::PERCENT_FACTOR;
-            debug!(progress = pct, pass = 2, mode = "spectral", "Render pass progress");
+    #[cfg(feature = "gpu")]
+    let gpu_handles_3d = gpu_context.is_some() && use_3d_camera;
+    #[cfg(not(feature = "gpu"))]
+    let gpu_handles_3d = false;
+
+    let use_parallel_camera = use_3d_camera && !gpu_handles_3d;
+
+    if use_parallel_camera {
+        // ── Parallel 3D-camera rendering ────────────────────────────────
+        // Each frame re-rasterises from scratch (camera moves), so frames
+        // are fully independent.  Render N frames in parallel, then apply
+        // temporal-smoothing and final image effects sequentially.
+        let cam = camera.unwrap();
+        let orig = original_positions.unwrap();
+
+        info!(
+            "   pass 2: parallel 3D-camera path ({} frames, pre-computing projections)",
+            checkpoints.len()
+        );
+
+        let all_projections: Vec<Vec<Vec<Vector3<f64>>>> = checkpoints
+            .par_iter()
+            .map(|&cp| cam.project_all_positions_at_step(orig, cp))
+            .collect();
+
+        let num_threads = rayon::current_num_threads().max(1);
+        let batch_size = (num_threads / 4).clamp(2, 16).min(checkpoints.len().max(1));
+
+        struct SlotBuffers {
+            spd: Vec<[f32; NUM_BINS]>,
+            rgba: Vec<(f64, f64, f64, f64)>,
+            spare: Vec<(f64, f64, f64, f64)>,
         }
+        let mut slots: Vec<SlotBuffers> = (0..batch_size)
+            .map(|_| SlotBuffers {
+                spd: vec![[0.0f32; NUM_BINS]; pixel_count],
+                rgba: vec![(0.0, 0.0, 0.0, 0.0); pixel_count],
+                spare: vec![(0.0, 0.0, 0.0, 0.0); pixel_count],
+            })
+            .collect();
 
-        #[cfg(feature = "gpu")]
-        let used_gpu = if let (Some(ref gpu), Some(cam), Some(orig)) =
-            (gpu_context.as_deref(), camera, original_positions)
-        {
-            let frame_spd = gpu.render_frame(cam, orig, checkpoint_step, checkpoint_step + 1);
-            accum_spd.copy_from_slice(&frame_spd);
-            true
-        } else {
-            false
-        };
+        let progress_interval = (checkpoints.len() / 10).max(1);
+        let mut frames_written = 0usize;
+        let mut last_batch_len = 0usize;
 
-        #[cfg(not(feature = "gpu"))]
-        let used_gpu = false;
+        for batch_start in (0..checkpoints.len()).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(checkpoints.len());
+            let batch_cps = &checkpoints[batch_start..batch_end];
+            let batch_projs = &all_projections[batch_start..batch_end];
+            let batch_len = batch_cps.len();
+            last_batch_len = batch_len;
 
-        if !used_gpu && use_3d_camera {
-            let cam = camera.unwrap();
-            let orig = original_positions.unwrap();
-
-            let frame_positions = cam.project_all_positions_at_step(orig, checkpoint_step);
-
-            let frame_scene = SpectralScene::new(
-                &frame_positions,
-                scene.colors,
-                scene.body_alphas,
-            );
-            let frame_velocity = velocity_hdr::VelocityHdrCalculator::new(
-                &frame_positions, dt,
-            );
-
-            accum_spd.iter_mut().for_each(|px| *px = [0.0; NUM_BINS]);
-
-            accumulate_spectral_steps(
-                &mut accum_spd,
-                None,
-                frame_scene,
-                &ctx,
-                &frame_velocity,
-                0,
-                checkpoint_step + 1,
-                render_config.hdr_scale,
-                backend,
-            );
-        } else if !used_gpu {
-            let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-            accumulate_spectral_steps(
-                &mut accum_spd,
-                None,
-                scene,
-                &ctx,
-                &velocity_calc,
-                step_start,
-                checkpoint_step + 1,
-                render_config.hdr_scale,
-                backend,
-            );
-        }
-
-        convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
-
-        let frame_params =
-            FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
-
-        let effect_ctx = if let Some(cam) = camera {
-            crate::post_effects::EffectContext {
-                current_camera: Some(cam.camera_basis_at_step(checkpoint_step)),
-                reference_camera: Some(cam.camera_basis_at_step(0)),
+            if frames_written.is_multiple_of(progress_interval) {
+                let pct = (frames_written as f64 / checkpoints.len() as f64)
+                    * constants::PERCENT_FACTOR;
+                debug!(progress = pct, pass = 2, mode = "spectral-parallel", "Render pass progress");
             }
-        } else {
-            crate::post_effects::EffectContext::default()
-        };
 
-        std::mem::swap(&mut accum_rgba, &mut spare_rgba);
-        let trajectory_pixels = finish_pipeline
-            .process_trajectory(spare_rgba, width as usize, height as usize, &frame_params, &effect_ctx)
-            .expect("Failed to process frame during spectral render pass");
-        accum_rgba.par_iter_mut().for_each(|px| *px = (0.0, 0.0, 0.0, 0.0));
-        spare_rgba = trajectory_pixels;
+            let rendered: Vec<(PixelBuffer, usize)> = slots[..batch_len]
+                .par_iter_mut()
+                .zip(batch_cps.par_iter())
+                .zip(batch_projs.par_iter())
+                .map(|((slot, &cp), frame_positions)| {
+                    slot.spd.par_iter_mut().for_each(|px| *px = [0.0; NUM_BINS]);
 
-        tonemap_to_display_buffer_into(&spare_rgba, levels, &mut display_buf);
+                    let frame_scene =
+                        SpectralScene::new(frame_positions, scene.colors, scene.body_alphas);
+                    let frame_velocity =
+                        velocity_hdr::VelocityHdrCalculator::new(frame_positions, dt);
 
-        let smoothed_display = match &temporal_smoother {
-            Some(smoother) => smoother.process_frame(std::mem::take(&mut display_buf)),
-            None => std::mem::take(&mut display_buf),
-        };
+                    accumulate_spectral_steps(
+                        &mut slot.spd,
+                        None,
+                        frame_scene,
+                        &ctx,
+                        &frame_velocity,
+                        0,
+                        cp + 1,
+                        render_config.hdr_scale,
+                        backend,
+                    );
 
-        let final_display = finish_pipeline
-            .process_image(smoothed_display, width as usize, height as usize, &frame_params, &effect_ctx)
-            .expect("Failed to process final image finish during spectral render pass");
-        quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
-        let buf_bytes = crate::utils::u16_slice_as_bytes(&quant_buf);
+                    convert_spd_buffer_to_rgba(
+                        &slot.spd,
+                        &mut slot.rgba,
+                        width as usize,
+                        height as usize,
+                    );
 
-        frame_sink(buf_bytes)?;
-        if checkpoint_step + 1 == total_steps {
-            *last_frame_out = ImageBuffer::from_raw(width, height, quant_buf.clone());
+                    let effect_ctx = crate::post_effects::EffectContext {
+                        current_camera: Some(cam.camera_basis_at_step(cp)),
+                        reference_camera: Some(cam.camera_basis_at_step(0)),
+                    };
+                    let frame_params =
+                        FrameParams { frame_number: cp / frame_interval, density: None };
+
+                    std::mem::swap(&mut slot.rgba, &mut slot.spare);
+                    let traj_result = finish_pipeline
+                        .process_trajectory(
+                            std::mem::take(&mut slot.spare),
+                            width as usize,
+                            height as usize,
+                            &frame_params,
+                            &effect_ctx,
+                        )
+                        .expect("Failed to process frame during parallel spectral render");
+
+                    let mut disp = Vec::with_capacity(pixel_count);
+                    tonemap_to_display_buffer_into(&traj_result, levels, &mut disp);
+                    slot.spare = traj_result;
+
+                    (disp, cp)
+                })
+                .collect();
+
+            for (frame_display, cp) in rendered {
+                let smoothed = match &temporal_smoother {
+                    Some(smoother) => smoother.process_frame(frame_display),
+                    None => frame_display,
+                };
+
+                let effect_ctx = crate::post_effects::EffectContext {
+                    current_camera: Some(cam.camera_basis_at_step(cp)),
+                    reference_camera: Some(cam.camera_basis_at_step(0)),
+                };
+                let frame_params =
+                    FrameParams { frame_number: cp / frame_interval, density: None };
+
+                let final_display = finish_pipeline
+                    .process_image(
+                        smoothed,
+                        width as usize,
+                        height as usize,
+                        &frame_params,
+                        &effect_ctx,
+                    )
+                    .expect("Failed to process final image in parallel render");
+
+                quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
+                let buf_bytes = crate::utils::u16_slice_as_bytes(&quant_buf);
+                frame_sink(buf_bytes)?;
+
+                if cp + 1 == total_steps {
+                    *last_frame_out = ImageBuffer::from_raw(width, height, quant_buf.clone());
+                }
+
+                drop(final_display);
+                frames_written += 1;
+            }
         }
 
-        display_buf = final_display;
-        step_start = checkpoint_step + 1;
+        if last_batch_len > 0 && !slots.is_empty() {
+            *spd_out = Some(std::mem::take(&mut slots[last_batch_len - 1].spd));
+        } else {
+            *spd_out = Some(accum_spd);
+        }
+    } else {
+        // ── Sequential rendering (GPU, non-camera, or GPU+camera) ───────
+        for &checkpoint_step in &checkpoints {
+            if step_start < total_steps && step_start % chunk_line == 0 {
+                let pct =
+                    (step_start as f64 / total_steps as f64) * constants::PERCENT_FACTOR;
+                debug!(progress = pct, pass = 2, mode = "spectral", "Render pass progress");
+            }
+
+            #[cfg(feature = "gpu")]
+            let used_gpu = if let (Some(ref gpu), Some(cam), Some(orig)) =
+                (gpu_context.as_deref(), camera, original_positions)
+            {
+                let frame_spd =
+                    gpu.render_frame(cam, orig, checkpoint_step, checkpoint_step + 1);
+                accum_spd.copy_from_slice(&frame_spd);
+                true
+            } else {
+                false
+            };
+
+            #[cfg(not(feature = "gpu"))]
+            let used_gpu = false;
+
+            if !used_gpu && use_3d_camera {
+                let cam = camera.unwrap();
+                let orig = original_positions.unwrap();
+
+                let frame_positions =
+                    cam.project_all_positions_at_step(orig, checkpoint_step);
+
+                let frame_scene = SpectralScene::new(
+                    &frame_positions,
+                    scene.colors,
+                    scene.body_alphas,
+                );
+                let frame_velocity =
+                    velocity_hdr::VelocityHdrCalculator::new(&frame_positions, dt);
+
+                accum_spd.par_iter_mut().for_each(|px| *px = [0.0; NUM_BINS]);
+
+                accumulate_spectral_steps(
+                    &mut accum_spd,
+                    None,
+                    frame_scene,
+                    &ctx,
+                    &frame_velocity,
+                    0,
+                    checkpoint_step + 1,
+                    render_config.hdr_scale,
+                    backend,
+                );
+            } else if !used_gpu {
+                let velocity_calc =
+                    velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
+                accumulate_spectral_steps(
+                    &mut accum_spd,
+                    None,
+                    scene,
+                    &ctx,
+                    &velocity_calc,
+                    step_start,
+                    checkpoint_step + 1,
+                    render_config.hdr_scale,
+                    backend,
+                );
+            }
+
+            convert_spd_buffer_to_rgba(
+                &accum_spd,
+                &mut accum_rgba,
+                width as usize,
+                height as usize,
+            );
+
+            let frame_params = FrameParams {
+                frame_number: checkpoint_step / frame_interval,
+                density: None,
+            };
+
+            let effect_ctx = if let Some(cam) = camera {
+                crate::post_effects::EffectContext {
+                    current_camera: Some(cam.camera_basis_at_step(checkpoint_step)),
+                    reference_camera: Some(cam.camera_basis_at_step(0)),
+                }
+            } else {
+                crate::post_effects::EffectContext::default()
+            };
+
+            std::mem::swap(&mut accum_rgba, &mut spare_rgba);
+            let trajectory_pixels = finish_pipeline
+                .process_trajectory(
+                    spare_rgba,
+                    width as usize,
+                    height as usize,
+                    &frame_params,
+                    &effect_ctx,
+                )
+                .expect("Failed to process frame during spectral render pass");
+            accum_rgba
+                .par_iter_mut()
+                .for_each(|px| *px = (0.0, 0.0, 0.0, 0.0));
+            spare_rgba = trajectory_pixels;
+
+            tonemap_to_display_buffer_into(&spare_rgba, levels, &mut display_buf);
+
+            let smoothed_display = match &temporal_smoother {
+                Some(smoother) => smoother.process_frame(std::mem::take(&mut display_buf)),
+                None => std::mem::take(&mut display_buf),
+            };
+
+            let final_display = finish_pipeline
+                .process_image(
+                    smoothed_display,
+                    width as usize,
+                    height as usize,
+                    &frame_params,
+                    &effect_ctx,
+                )
+                .expect("Failed to process final image finish during spectral render pass");
+            quantize_display_buffer_to_16bit_into(&final_display, &mut quant_buf);
+            let buf_bytes = crate::utils::u16_slice_as_bytes(&quant_buf);
+
+            frame_sink(buf_bytes)?;
+            if checkpoint_step + 1 == total_steps {
+                *last_frame_out = ImageBuffer::from_raw(width, height, quant_buf.clone());
+            }
+
+            display_buf = final_display;
+            step_start = checkpoint_step + 1;
+        }
+
+        *spd_out = Some(accum_spd);
     }
 
     info!("   pass 2 (spectral render): 100% done");
-    *spd_out = Some(accum_spd);
     Ok(())
 }
 
@@ -1137,7 +1323,7 @@ pub fn pass_2_write_frames_spectral(
     settings: SpectralRenderSettings<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
+    spd_out: &mut Option<Vec<[f32; NUM_BINS]>>,
     enable_temporal_smoothing: bool,
     camera: Option<&camera::Camera3D>,
     original_positions: Option<&[Vec<Vector3<f64>>]>,
@@ -1203,7 +1389,7 @@ fn render_final_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     let effect_config =
@@ -1290,7 +1476,7 @@ fn render_single_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     let effect_config =
@@ -1444,8 +1630,8 @@ mod tests {
     }
 
     fn assert_spd_buffers_bits_eq(
-        actual: &[[f64; NUM_BINS]],
-        expected: &[[f64; NUM_BINS]],
+        actual: &[[f32; NUM_BINS]],
+        expected: &[[f32; NUM_BINS]],
         label: &str,
     ) {
         assert_eq!(actual.len(), expected.len(), "{label}: SPD buffer lengths differ");
@@ -2202,8 +2388,8 @@ mod tests {
     }
 
     fn assert_spd_buffers_approx_eq(
-        actual: &[[f64; NUM_BINS]],
-        expected: &[[f64; NUM_BINS]],
+        actual: &[[f32; NUM_BINS]],
+        expected: &[[f32; NUM_BINS]],
         label: &str,
         max_relative_err: f64,
     ) {
@@ -2213,8 +2399,10 @@ mod tests {
                 if a == b {
                     continue;
                 }
-                let denom = a.abs().max(b.abs()).max(1e-30);
-                let rel = (a - b).abs() / denom;
+                let af = a as f64;
+                let bf = b as f64;
+                let denom = af.abs().max(bf.abs()).max(1e-30);
+                let rel = (af - bf).abs() / denom;
                 assert!(
                     rel <= max_relative_err,
                     "{label}: pixel {pixel_idx} bin {bin_idx}: {a} vs {b} (rel err {rel:.2e})"
@@ -2253,7 +2441,7 @@ mod tests {
             assert_spd_buffers_approx_eq(
                 &parallel, &serial,
                 &format!("step-chunked-large-approx/threads={thread_count}"),
-                1e-12,
+                1e-5,
             );
         }
     }
@@ -2321,12 +2509,12 @@ mod tests {
 
     #[test]
     fn test_merge_partial_is_additive() {
-        let mut dest = vec![[1.0f64; NUM_BINS]; 10];
-        let src = vec![[2.0f64; NUM_BINS]; 10];
+        let mut dest = vec![[1.0f32; NUM_BINS]; 10];
+        let src = vec![[2.0f32; NUM_BINS]; 10];
         merge_partial_into(&mut dest, &src);
         for pixel in &dest {
             for &bin in pixel {
-                assert_eq!(bin, 3.0);
+                assert_eq!(bin, 3.0f32);
             }
         }
     }
@@ -2453,7 +2641,7 @@ mod tests {
         assert_spd_buffers_approx_eq(
             &parallel, &serial,
             "large-step-chunking",
-            1e-12,
+            1e-5,
         );
     }
 
@@ -2551,9 +2739,9 @@ mod tests {
 
     #[test]
     fn test_merge_partial_is_commutative() {
-        let a = vec![[1.0f64; NUM_BINS]; 5];
-        let b = vec![[2.0f64; NUM_BINS]; 5];
-        let c = vec![[3.0f64; NUM_BINS]; 5];
+        let a = vec![[1.0f32; NUM_BINS]; 5];
+        let b = vec![[2.0f32; NUM_BINS]; 5];
+        let c = vec![[3.0f32; NUM_BINS]; 5];
 
         let mut path1 = a.clone();
         merge_partial_into(&mut path1, &b);
@@ -2576,8 +2764,8 @@ mod tests {
 
     #[test]
     fn test_merge_partial_preserves_zeros() {
-        let original = vec![[7.5f64; NUM_BINS]; 4];
-        let zeros = vec![[0.0f64; NUM_BINS]; 4];
+        let original = vec![[7.5f32; NUM_BINS]; 4];
+        let zeros = vec![[0.0f32; NUM_BINS]; 4];
         let mut dest = original.clone();
         merge_partial_into(&mut dest, &zeros);
 
@@ -2595,7 +2783,8 @@ mod tests {
     #[test]
     fn test_energy_density_shift_idempotent_below_threshold() {
         use constants::ENERGY_DENSITY_SHIFT_THRESHOLD;
-        let energy_per_bin = ENERGY_DENSITY_SHIFT_THRESHOLD / (NUM_BINS as f64 * 2.0);
+        let energy_per_bin =
+            (ENERGY_DENSITY_SHIFT_THRESHOLD / (NUM_BINS as f64 * 2.0)) as f32;
         let original = vec![[energy_per_bin; NUM_BINS]; 4];
 
         let mut once = original.clone();
@@ -2703,7 +2892,7 @@ mod tests {
         let h = 36u32;
         let ctx = context::RenderContext::new_with_bounds(w, h, bounds);
         let pixel_count = ctx.pixel_count();
-        let mut accum = vec![[0.0f64; NUM_BINS]; pixel_count];
+        let mut accum = vec![[0.0f32; NUM_BINS]; pixel_count];
 
         let scene = SpectralScene::new(&frame_positions, &colors, &body_alphas);
         let dt = constants::DEFAULT_DT;
@@ -2721,10 +2910,117 @@ mod tests {
             AccumulationBackend::ParallelScanlines,
         );
 
-        let total_energy: f64 = accum.iter().flat_map(|px| px.iter()).sum();
+        let total_energy: f32 = accum.iter().flat_map(|px| px.iter().copied()).sum();
         assert!(
             total_energy > 0.0,
             "Option A accumulation should produce non-zero energy"
         );
+    }
+
+    #[test]
+    fn test_band_count_scales_with_threads() {
+        let num_threads = rayon::current_num_threads().max(1);
+        let height = 1080usize;
+        let expected_bands = (num_threads * 2).min(height).max(1);
+        assert!(
+            expected_bands >= 2 && expected_bands <= height,
+            "band count {expected_bands} should be in [2, {height}]"
+        );
+        let rows_per_band = height.div_ceil(expected_bands);
+        assert!(
+            rows_per_band >= 1,
+            "each band should have at least 1 row"
+        );
+        assert!(
+            rows_per_band * expected_bands >= height,
+            "bands should cover all rows"
+        );
+    }
+
+    #[test]
+    fn test_f32_spd_buffer_zero_init() {
+        let pixel_count = 100;
+        let buf = vec![[0.0f32; NUM_BINS]; pixel_count];
+        for (i, pixel) in buf.iter().enumerate() {
+            for (bin, &val) in pixel.iter().enumerate() {
+                assert_eq!(val, 0.0f32, "pixel {i} bin {bin} should be 0.0");
+            }
+        }
+    }
+
+    #[test]
+    fn test_f32_accumulation_no_overflow_at_high_energy() {
+        let pixel_count = 10;
+        let mut buf = vec![[0.0f32; NUM_BINS]; pixel_count];
+        for _ in 0..10000 {
+            for px in buf.iter_mut() {
+                for bin in px.iter_mut() {
+                    *bin += 0.01f32;
+                }
+            }
+        }
+        for (i, px) in buf.iter().enumerate() {
+            for (b, &val) in px.iter().enumerate() {
+                assert!(val.is_finite(), "pixel {i} bin {b} overflowed: {val}");
+                let expected = 100.0f32;
+                assert!(
+                    (val - expected).abs() < 0.1,
+                    "pixel {i} bin {b}: expected ~{expected}, got {val}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_parallel_spd_clear_produces_zeros() {
+        use rayon::prelude::*;
+        let pixel_count = 1000;
+        let mut buf: Vec<[f32; NUM_BINS]> = vec![[1.0f32; NUM_BINS]; pixel_count];
+        buf.par_iter_mut().for_each(|px| *px = [0.0; NUM_BINS]);
+        for (i, px) in buf.iter().enumerate() {
+            for (b, &val) in px.iter().enumerate() {
+                assert_eq!(val, 0.0f32, "par clear failed at pixel {i} bin {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_checkpoint_steps_covers_all_frames() {
+        let total_steps = 10000;
+        let frame_interval = 556;
+        let checkpoints = checkpoint_steps(total_steps, frame_interval);
+        assert!(!checkpoints.is_empty());
+        assert_eq!(*checkpoints.last().unwrap(), total_steps - 1);
+        for window in checkpoints.windows(2) {
+            assert!(window[1] > window[0], "checkpoints must be monotonically increasing");
+        }
+    }
+
+    #[test]
+    fn test_merge_partial_into_commutative() {
+        let n = 50;
+        let a_data: Vec<[f32; NUM_BINS]> = (0..n).map(|i| {
+            let mut arr = [0.0f32; NUM_BINS];
+            arr[0] = i as f32;
+            arr
+        }).collect();
+        let b_data: Vec<[f32; NUM_BINS]> = (0..n).map(|i| {
+            let mut arr = [0.0f32; NUM_BINS];
+            arr[0] = (i * 2) as f32;
+            arr
+        }).collect();
+
+        let mut dest1 = a_data.clone();
+        merge_partial_into(&mut dest1, &b_data);
+
+        let mut dest2 = b_data.clone();
+        merge_partial_into(&mut dest2, &a_data);
+
+        for i in 0..n {
+            assert_eq!(
+                dest1[i][0].to_bits(), dest2[i][0].to_bits(),
+                "merge should be commutative at pixel {i}"
+            );
+        }
     }
 }

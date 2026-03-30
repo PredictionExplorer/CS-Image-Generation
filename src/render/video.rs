@@ -17,17 +17,24 @@ use tracing::info;
 /// "plenty of memory".
 const FRAME_CHANNEL_CAPACITY: usize = 32;
 
-/// Adapter that buffers `write_all` calls and sends complete frames through
-/// a bounded channel to a dedicated writer thread. This decouples frame
-/// production from FFmpeg's encoding throughput.
+/// Adapter that sends frame data through a bounded channel to a dedicated
+/// writer thread, recycling heap-allocated buffers to avoid per-frame
+/// allocation of the ~12 MB rgb48le payload.
 struct ChannelFrameWriter {
     tx: Option<mpsc::SyncSender<Vec<u8>>>,
+    recycle_rx: Option<mpsc::Receiver<Vec<u8>>>,
 }
 
 impl Write for ChannelFrameWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Some(tx) = &self.tx {
-            tx.send(buf.to_vec())
+            let mut frame = self.recycle_rx
+                .as_ref()
+                .and_then(|rx| rx.try_recv().ok())
+                .unwrap_or_default();
+            frame.clear();
+            frame.extend_from_slice(buf);
+            tx.send(frame)
                 .map_err(|_| std::io::Error::other("FFmpeg writer channel closed"))?;
         }
         Ok(buf.len())
@@ -320,21 +327,25 @@ pub fn create_video_from_frames_singlepass(
         .take()
         .ok_or_else(|| RenderError::InvalidConfig("Failed to capture FFmpeg stdin".to_string()))?;
 
-    // Bounded channel decouples the renderer from FFmpeg's encoding speed:
-    // the renderer can push up to FRAME_CHANNEL_CAPACITY frames ahead while
-    // the writer thread drains them into FFmpeg's stdin pipe.
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+    let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
 
     let writer_handle = std::thread::spawn(move || -> std::io::Result<()> {
         let mut stdin = stdin;
         for frame_bytes in rx {
             stdin.write_all(&frame_bytes)?;
+            let mut buf = frame_bytes;
+            buf.clear();
+            let _ = recycle_tx.try_send(buf);
         }
         stdin.flush()?;
         Ok(())
     });
 
-    let mut channel_writer = ChannelFrameWriter { tx: Some(tx) };
+    let mut channel_writer = ChannelFrameWriter {
+        tx: Some(tx),
+        recycle_rx: Some(recycle_rx),
+    };
     let render_result = frames_iter(&mut channel_writer);
     // Drop sender so the writer thread sees EOF
     drop(channel_writer);
@@ -504,7 +515,7 @@ mod tests {
     #[test]
     fn test_channel_frame_writer_sends_data() {
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
-        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        let mut writer = ChannelFrameWriter { tx: Some(tx), recycle_rx: None };
 
         let data = vec![1u8, 2, 3, 4, 5];
         writer.write_all(&data).unwrap();
@@ -516,7 +527,7 @@ mod tests {
     #[test]
     fn test_channel_frame_writer_multiple_writes() {
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
-        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        let mut writer = ChannelFrameWriter { tx: Some(tx), recycle_rx: None };
 
         for i in 0..4 {
             let data = vec![i as u8; 100];
@@ -633,7 +644,7 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
         drop(rx);
 
-        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        let mut writer = ChannelFrameWriter { tx: Some(tx), recycle_rx: None };
         let result = writer.write_all(&[1, 2, 3]);
         assert!(result.is_err(), "writing to closed channel should fail");
     }
@@ -641,7 +652,7 @@ mod tests {
     #[test]
     fn test_channel_writer_flush_succeeds() {
         let (tx, _rx) = mpsc::sync_channel::<Vec<u8>>(1);
-        let mut writer = ChannelFrameWriter { tx: Some(tx) };
+        let mut writer = ChannelFrameWriter { tx: Some(tx), recycle_rx: None };
         assert!(writer.flush().is_ok());
     }
 
@@ -661,5 +672,87 @@ mod tests {
             opts.extra_args.contains(&"-colorspace".to_string()),
             "fast encode should include color metadata"
         );
+    }
+
+    #[test]
+    fn test_buffer_recycling_reuses_allocations() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+        let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+
+        let writer_handle = std::thread::spawn(move || {
+            let mut count = 0usize;
+            for frame in rx {
+                assert!(!frame.is_empty(), "received empty frame");
+                let mut buf = frame;
+                buf.clear();
+                let _ = recycle_tx.try_send(buf);
+                count += 1;
+            }
+            count
+        });
+
+        let mut writer = ChannelFrameWriter {
+            tx: Some(tx),
+            recycle_rx: Some(recycle_rx),
+        };
+
+        for i in 0..10 {
+            let data = vec![(i as u8).wrapping_mul(37); 1024];
+            writer.write_all(&data).unwrap();
+        }
+        drop(writer);
+
+        let count = writer_handle.join().unwrap();
+        assert_eq!(count, 10, "all 10 frames should be received");
+    }
+
+    #[test]
+    fn test_recycled_buffers_contain_correct_data() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(4);
+        let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<u8>>(4);
+
+        let reader_handle = std::thread::spawn(move || {
+            let mut frames = Vec::new();
+            for frame in rx {
+                let mut buf = frame.clone();
+                frames.push(frame);
+                buf.clear();
+                let _ = recycle_tx.try_send(buf);
+            }
+            frames
+        });
+
+        let mut writer = ChannelFrameWriter {
+            tx: Some(tx),
+            recycle_rx: Some(recycle_rx),
+        };
+
+        let expected: Vec<Vec<u8>> = (0..8).map(|i| vec![i as u8; 512]).collect();
+        for data in &expected {
+            writer.write_all(data).unwrap();
+        }
+        drop(writer);
+
+        let received = reader_handle.join().unwrap();
+        assert_eq!(received.len(), expected.len());
+        for (i, (got, want)) in received.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(got, want, "frame {i} data mismatch");
+        }
+    }
+
+    #[test]
+    fn test_writer_works_without_recycle_channel() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(FRAME_CHANNEL_CAPACITY);
+        let mut writer = ChannelFrameWriter { tx: Some(tx), recycle_rx: None };
+
+        writer.write_all(&[10, 20, 30]).unwrap();
+        writer.write_all(&[40, 50]).unwrap();
+        drop(writer);
+
+        let first = rx.recv().unwrap();
+        let second = rx.recv().unwrap();
+        assert_eq!(first, vec![10, 20, 30]);
+        assert_eq!(second, vec![40, 50]);
+        assert!(rx.recv().is_err());
     }
 }

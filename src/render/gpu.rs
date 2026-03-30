@@ -255,7 +255,7 @@ impl GpuContext {
         original_positions: &[Vec<Vector3<f64>>],
         camera_step: usize,
         step_end: usize,
-    ) -> Vec<[f64; NUM_BINS]> {
+    ) -> Vec<[f32; NUM_BINS]> {
         let world_buf = self.world_buf.as_ref().expect("call prepare() first");
         let projected_buf = self.projected_buf.as_ref().unwrap();
         let seg_buf = self.seg_buf.as_ref().unwrap();
@@ -359,11 +359,11 @@ impl GpuContext {
         let data = slice.get_mapped_range();
         let f32_data: &[f32] = bytemuck::cast_slice(&data);
 
-        let inv_prescale = 1.0 / ENERGY_PRESCALE as f64;
-        let mut result = vec![[0.0f64; NUM_BINS]; self.pixel_count];
+        let inv_prescale = 1.0f32 / ENERGY_PRESCALE as f32;
+        let mut result = vec![[0.0f32; NUM_BINS]; self.pixel_count];
         for (px_idx, pixel) in result.iter_mut().enumerate() {
             for bin in 0..NUM_BINS {
-                pixel[bin] = f32_data[px_idx * NUM_BINS + bin] as f64 * inv_prescale;
+                pixel[bin] = f32_data[px_idx * NUM_BINS + bin] * inv_prescale;
             }
         }
 

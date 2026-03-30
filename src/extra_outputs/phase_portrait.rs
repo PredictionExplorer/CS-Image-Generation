@@ -51,7 +51,7 @@ pub fn render_phase_portrait(
     let width = resolved.width;
     let height = resolved.height;
     let ctx = RenderContext::new(width, height, &phase_positions, settings.aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     let effect_config =

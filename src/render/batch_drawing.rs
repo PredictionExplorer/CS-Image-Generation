@@ -14,7 +14,7 @@ pub type TriangleVertex = LineVertex;
 /// Draw a complete triangle into an owned row band of the destination buffer.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_triangle_batch_spectral_rows(
-    accum: &mut [[f64; NUM_BINS]],
+    accum: &mut [[f32; NUM_BINS]],
     depth_weight: &mut [f64],
     width: u32,
     height: u32,

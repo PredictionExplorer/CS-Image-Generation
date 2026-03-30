@@ -467,7 +467,7 @@ pub fn apply_dog_bloom(
 /// The shift is applied per-pixel *after* dispersion sampling and *before*
 /// the SPD-to-RGBA conversion, preserving identical output.
 pub(crate) fn convert_spd_buffer_to_rgba(
-    src: &[[f64; NUM_BINS]],
+    src: &[[f32; NUM_BINS]],
     dest: &mut [(f64, f64, f64, f64)],
     width: usize,
     height: usize,
@@ -525,11 +525,11 @@ pub(crate) fn convert_spd_buffer_to_rgba(
 
                         if sx >= 0 && sx < width as isize && sy >= 0 && sy < height as isize {
                             let s_idx = sy as usize * width + sx as usize;
-                            local_spd[bin] = src[s_idx][bin];
+                            local_spd[bin] = src[s_idx][bin] as f64;
                         }
                     }
                 } else {
-                    local_spd = src[global_idx];
+                    local_spd = std::array::from_fn(|i| src[global_idx][i] as f64);
                 }
 
                 // Fused energy-density redshift (was apply_energy_density_shift)
@@ -631,7 +631,7 @@ mod spectral_tests {
     fn test_dispersion_center_pixel_unshifted() {
         let width = 5;
         let height = 5;
-        let mut src = vec![[0.0f64; NUM_BINS]; width * height];
+        let mut src = vec![[0.0f32; NUM_BINS]; width * height];
         let center_idx = (height / 2) * width + (width / 2);
         src[center_idx][NUM_BINS / 2] = 0.01;
 
@@ -642,7 +642,7 @@ mod spectral_tests {
         let prev_strength = crate::render::constants::SPECTRAL_DISPERSION_STRENGTH;
         let _ = prev_strength;
 
-        let direct = spd_to_rgba(&src[center_idx]);
+        let direct = spd_to_rgba(&std::array::from_fn(|i| src[center_idx][i] as f64));
         DISPERSION_BOOST_ENABLED.store(true, Ordering::SeqCst);
 
         assert!(
@@ -655,7 +655,7 @@ mod spectral_tests {
     fn test_dispersion_oob_bins_produce_zero_contribution() {
         let width = 3;
         let height = 3;
-        let mut src = vec![[0.0f64; NUM_BINS]; width * height];
+        let mut src = vec![[0.0f32; NUM_BINS]; width * height];
         src[4][0] = 1.0;
 
         let mut dest = vec![(0.0, 0.0, 0.0, 0.0); width * height];
@@ -673,7 +673,8 @@ mod spectral_tests {
     #[test]
     fn test_energy_density_shift_below_threshold_is_identity() {
         let energy_per_bin = ENERGY_DENSITY_SHIFT_THRESHOLD / (NUM_BINS as f64 * 2.0);
-        let mut spd = vec![[energy_per_bin; NUM_BINS]; 4];
+        let eb = energy_per_bin as f32;
+        let mut spd = vec![[eb; NUM_BINS]; 4];
         let original = spd.clone();
 
         crate::render::apply_energy_density_shift(&mut spd);
@@ -691,10 +692,10 @@ mod spectral_tests {
 
     #[test]
     fn test_energy_density_shift_preserves_nonnegativity() {
-        let mut spd = vec![[0.0f64; NUM_BINS]; 8];
+        let mut spd = vec![[0.0f32; NUM_BINS]; 8];
         for pixel in spd.iter_mut() {
             for (i, v) in pixel.iter_mut().enumerate() {
-                *v = (i as f64 + 1.0) * 0.1;
+                *v = (i as f32 + 1.0) * 0.1;
             }
         }
         crate::render::apply_energy_density_shift(&mut spd);
@@ -711,7 +712,7 @@ mod spectral_tests {
 
     #[test]
     fn test_energy_density_shift_moves_energy_toward_red() {
-        let mut spd = vec![[0.0f64; NUM_BINS]; 1];
+        let mut spd = vec![[0.0f32; NUM_BINS]; 1];
         spd[0][0] = 5.0;
         let original = spd.clone();
 
@@ -733,7 +734,7 @@ mod spectral_tests {
     fn test_fused_shift_matches_standalone_at_center() {
         let width = 6;
         let height = 6;
-        let mut src = vec![[0.0f64; NUM_BINS]; width * height];
+        let mut src = vec![[0.0f32; NUM_BINS]; width * height];
         for pixel in src.iter_mut() {
             pixel[NUM_BINS / 4] = 2.0;
             pixel[NUM_BINS / 2] = 1.5;
@@ -741,7 +742,7 @@ mod spectral_tests {
 
         let center_idx = (height / 2) * width + (width / 2);
 
-        let mut standalone_pixel = src[center_idx];
+        let mut standalone_pixel = std::array::from_fn(|i| src[center_idx][i] as f64);
         let total: f64 = standalone_pixel.iter().sum();
         if total >= ENERGY_DENSITY_SHIFT_THRESHOLD {
             let excess = total - ENERGY_DENSITY_SHIFT_THRESHOLD;
@@ -776,7 +777,7 @@ mod spectral_tests {
     fn test_convert_spd_buffer_all_zeros_is_black() {
         let width = 8;
         let height = 8;
-        let src = vec![[0.0f64; NUM_BINS]; width * height];
+        let src = vec![[0.0f32; NUM_BINS]; width * height];
         let mut dest = vec![(0.0, 0.0, 0.0, 0.0); width * height];
         convert_spd_buffer_to_rgba(&src, &mut dest, width, height);
 
@@ -845,5 +846,47 @@ mod tests {
 
         assert!(pipeline.trajectory_len() >= 1);
         assert_eq!(pipeline.image_len(), 1);
+    }
+
+    #[test]
+    fn test_convert_spd_f32_to_rgba_deterministic() {
+        let width = 16;
+        let height = 16;
+        let mut src = vec![[0.0f32; NUM_BINS]; width * height];
+        src[8 * width + 8] = {
+            let mut spd = [0.0f32; NUM_BINS];
+            for (i, v) in spd.iter_mut().enumerate() {
+                *v = (i as f32 + 1.0) * 0.05;
+            }
+            spd
+        };
+        let mut dest1 = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+        let mut dest2 = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+        convert_spd_buffer_to_rgba(&src, &mut dest1, width, height);
+        convert_spd_buffer_to_rgba(&src, &mut dest2, width, height);
+        for (i, (a, b)) in dest1.iter().zip(dest2.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "pixel {i} R not deterministic");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "pixel {i} G not deterministic");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "pixel {i} B not deterministic");
+            assert_eq!(a.3.to_bits(), b.3.to_bits(), "pixel {i} A not deterministic");
+        }
+    }
+
+    #[test]
+    fn test_convert_spd_nonzero_produces_nonzero_rgba() {
+        let width = 4;
+        let height = 4;
+        let mut src = vec![[0.0f32; NUM_BINS]; width * height];
+        for px in src.iter_mut() {
+            for v in px.iter_mut() {
+                *v = 1.0;
+            }
+        }
+        let mut dest = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+        convert_spd_buffer_to_rgba(&src, &mut dest, width, height);
+        for (i, &(r, g, b, a)) in dest.iter().enumerate() {
+            assert!(r > 0.0 || g > 0.0 || b > 0.0, "pixel {i} should be non-black for uniform SPD");
+            assert!(a > 0.0, "pixel {i} alpha should be positive");
+        }
     }
 }

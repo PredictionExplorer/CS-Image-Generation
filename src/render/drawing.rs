@@ -157,7 +157,7 @@ pub fn parallel_blur_2d_rgba(
 
 /// Draw anti-aliased line segment for spectral rendering using Z-depth aware SDF Splatting
 pub fn draw_line_segment_aa_spectral(
-    accum: &mut [[f64; NUM_BINS]],
+    accum: &mut [[f32; NUM_BINS]],
     width: u32,
     height: u32,
     segment: SpectralLineSegment,
@@ -170,7 +170,7 @@ pub fn draw_line_segment_aa_spectral(
 /// When `depth_weight` is non-empty, accumulates `depth * energy` per pixel for
 /// image-space reprojection.
 pub(crate) fn draw_line_segment_aa_spectral_rows(
-    accum: &mut [[f64; NUM_BINS]],
+    accum: &mut [[f32; NUM_BINS]],
     depth_weight: &mut [f64],
     width: u32,
     height: u32,
@@ -261,10 +261,10 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             let idx = (py as usize - row_start) * width as usize + px as usize;
 
             if bin_right == bin_left {
-                accum[idx][bin_left] += final_energy;
+                accum[idx][bin_left] += final_energy as f32;
             } else {
-                accum[idx][bin_left] += final_energy * (1.0 - w_right);
-                accum[idx][bin_right] += final_energy * w_right;
+                accum[idx][bin_left] += (final_energy * (1.0 - w_right)) as f32;
+                accum[idx][bin_right] += (final_energy * w_right) as f32;
             }
 
             if !depth_weight.is_empty() {
@@ -324,7 +324,7 @@ mod tests {
         width: usize,
         height: usize,
         band_count: usize,
-    ) -> Vec<[f64; NUM_BINS]> {
+    ) -> Vec<[f32; NUM_BINS]> {
         let mut accum = vec![[0.0; NUM_BINS]; width * height];
         let band_count = band_count.max(1).min(height.max(1));
         let rows_per_band = height.div_ceil(band_count);
@@ -353,8 +353,8 @@ mod tests {
     }
 
     fn assert_spd_buffers_bits_eq(
-        actual: &[[f64; NUM_BINS]],
-        expected: &[[f64; NUM_BINS]],
+        actual: &[[f32; NUM_BINS]],
+        expected: &[[f32; NUM_BINS]],
         label: &str,
     ) {
         assert_eq!(actual.len(), expected.len(), "{label}: buffer lengths differ");
@@ -464,8 +464,8 @@ mod tests {
         let mut accum = vec![[0.0; NUM_BINS]; width * height];
         draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
 
-        let mut active_bins: Vec<(usize, f64)> = Vec::new();
-        let mut per_bin_total = [0.0f64; NUM_BINS];
+        let mut active_bins: Vec<(usize, f32)> = Vec::new();
+        let mut per_bin_total = [0.0f32; NUM_BINS];
         for pixel in &accum {
             for (bin, &val) in pixel.iter().enumerate() {
                 per_bin_total[bin] += val;
@@ -505,7 +505,7 @@ mod tests {
         draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
 
         let mut max_bin = 0;
-        let mut max_energy = 0.0;
+        let mut max_energy = 0.0f32;
         for pixel in &accum {
             for (bin, &val) in pixel.iter().enumerate() {
                 if val > max_energy {
@@ -533,7 +533,7 @@ mod tests {
         draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
 
         let mut max_bin = NUM_BINS;
-        let mut max_energy = 0.0;
+        let mut max_energy = 0.0f32;
         for pixel in &accum {
             for (bin, &val) in pixel.iter().enumerate() {
                 if val > max_energy {
@@ -560,7 +560,7 @@ mod tests {
         let mut accum = vec![[0.0; NUM_BINS]; width * height];
         draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
 
-        let total: f64 = accum.iter().flat_map(|p| p.iter()).sum();
+        let total: f32 = accum.iter().flat_map(|p| p.iter()).sum();
         assert!(total > 0.0, "zero-length segment should still deposit energy as a dot");
     }
 
@@ -575,7 +575,7 @@ mod tests {
         let mut accum = vec![[0.0; NUM_BINS]; width * height];
         draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, seg);
 
-        let total: f64 = accum.iter().flat_map(|p| p.iter()).sum();
+        let total: f32 = accum.iter().flat_map(|p| p.iter()).sum();
         assert_eq!(total, 0.0, "offscreen segment should deposit no energy");
     }
 

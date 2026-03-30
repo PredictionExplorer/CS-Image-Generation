@@ -81,7 +81,7 @@ fn render_display_frames(
     let width = resolved.width;
     let height = resolved.height;
     let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let effect_config =
         build_effect_config_from_resolved(resolved, settings.render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);

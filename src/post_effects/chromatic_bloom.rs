@@ -180,7 +180,8 @@ impl ChromaticBloom {
         (red_buffer, green_buffer, blue_buffer)
     }
 
-    /// Apply box blur (separable) for efficient Gaussian approximation
+    /// Apply box blur (separable) for efficient Gaussian approximation.
+    /// Both passes are parallelised over rows via rayon.
     fn box_blur_channel(&self, buffer: &mut PixelBuffer, width: usize, height: usize) {
         if self.config.radius == 0 {
             return;
@@ -188,10 +189,9 @@ impl ChromaticBloom {
 
         let radius = self.config.radius;
 
-        // Horizontal pass
-        let mut temp = buffer.clone();
-        for y in 0..height {
-            for x in 0..width {
+        let mut temp = vec![(0.0, 0.0, 0.0, 0.0); buffer.len()];
+        temp.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+            for (x, pixel_out) in row.iter_mut().enumerate() {
                 let mut sum = (0.0, 0.0, 0.0, 0.0);
                 let mut count = 0;
 
@@ -206,14 +206,13 @@ impl ChromaticBloom {
                 }
 
                 let inv_count = 1.0 / count as f64;
-                temp[y * width + x] =
+                *pixel_out =
                     (sum.0 * inv_count, sum.1 * inv_count, sum.2 * inv_count, sum.3 * inv_count);
             }
-        }
+        });
 
-        // Vertical pass
-        for y in 0..height {
-            for x in 0..width {
+        buffer.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+            for (x, pixel_out) in row.iter_mut().enumerate() {
                 let mut sum = (0.0, 0.0, 0.0, 0.0);
                 let mut count = 0;
 
@@ -228,10 +227,10 @@ impl ChromaticBloom {
                 }
 
                 let inv_count = 1.0 / count as f64;
-                buffer[y * width + x] =
+                *pixel_out =
                     (sum.0 * inv_count, sum.1 * inv_count, sum.2 * inv_count, sum.3 * inv_count);
             }
-        }
+        });
     }
 }
 
@@ -250,16 +249,18 @@ impl PostEffect for ChromaticBloom {
             return Ok(input.clone());
         }
 
-        // Extract bright pixels
         let bright = self.extract_bright_pixels(input);
-
-        // Separate into RGB channels with spatial offsets
         let (mut red, mut green, mut blue) = self.create_separated_channels(&bright, width, height);
 
-        // Blur each channel independently
-        self.box_blur_channel(&mut red, width, height);
-        self.box_blur_channel(&mut green, width, height);
-        self.box_blur_channel(&mut blue, width, height);
+        rayon::join(
+            || self.box_blur_channel(&mut red, width, height),
+            || {
+                rayon::join(
+                    || self.box_blur_channel(&mut green, width, height),
+                    || self.box_blur_channel(&mut blue, width, height),
+                );
+            },
+        );
 
         // Composite back with additive blending
         let output: PixelBuffer = input
@@ -347,5 +348,66 @@ mod tests {
         let small = ChromaticBloomConfig::from_resolution(640, 360);
         let large = ChromaticBloomConfig::from_resolution(3840, 2160);
         assert!(large.radius >= small.radius);
+    }
+
+    #[test]
+    fn test_parallel_blur_no_nan_or_inf() {
+        let config = ChromaticBloomConfig { radius: 5, strength: 1.0, separation: 4.0, threshold: 0.0 };
+        let bloom = ChromaticBloom::new(config);
+        let mut input = uniform_buffer(64, 48, 0.0);
+        for i in (0..input.len()).step_by(17) {
+            input[i] = (3.0, 1.5, 2.0, 1.0);
+        }
+        let output = bloom.process(&input, 64, 48).unwrap();
+        for (i, &(r, g, b, a)) in output.iter().enumerate() {
+            assert!(r.is_finite(), "pixel {i} R is not finite: {r}");
+            assert!(g.is_finite(), "pixel {i} G is not finite: {g}");
+            assert!(b.is_finite(), "pixel {i} B is not finite: {b}");
+            assert!(a.is_finite(), "pixel {i} A is not finite: {a}");
+        }
+    }
+
+    #[test]
+    fn test_parallel_blur_deterministic() {
+        let config = ChromaticBloomConfig { radius: 4, strength: 0.8, separation: 3.0, threshold: 0.05 };
+        let bloom = ChromaticBloom::new(config);
+        let mut input = uniform_buffer(48, 36, 0.2);
+        input[18 * 48 + 24] = (5.0, 4.0, 3.0, 1.0);
+
+        let output1 = bloom.process(&input, 48, 36).unwrap();
+        let output2 = bloom.process(&input, 48, 36).unwrap();
+        for (i, (a, b)) in output1.iter().zip(output2.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "pixel {i} R not deterministic");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "pixel {i} G not deterministic");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "pixel {i} B not deterministic");
+        }
+    }
+
+    #[test]
+    fn test_blur_smooths_sharp_edge() {
+        let config = ChromaticBloomConfig { radius: 3, strength: 1.0, separation: 0.0, threshold: 0.0 };
+        let bloom = ChromaticBloom::new(config);
+        let w = 32;
+        let h = 32;
+        let mut input: PixelBuffer = vec![(0.0, 0.0, 0.0, 1.0); w * h];
+        for y in 0..h {
+            for x in 0..w {
+                if x >= w / 2 {
+                    input[y * w + x] = (2.0, 2.0, 2.0, 1.0);
+                }
+            }
+        }
+        let output = bloom.process(&input, w, h).unwrap();
+        let mid_y = h / 2;
+        let left_of_edge = output[mid_y * w + (w / 2 - 2)].0;
+        let right_of_edge = output[mid_y * w + (w / 2 + 2)].0;
+        assert!(
+            left_of_edge > 0.0,
+            "bloom should spread light leftward from edge: {left_of_edge}"
+        );
+        assert!(
+            right_of_edge > 1.5,
+            "right side should retain most energy: {right_of_edge}"
+        );
     }
 }

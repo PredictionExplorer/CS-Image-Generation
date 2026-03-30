@@ -54,7 +54,7 @@ pub fn render_reveal_video(
         height,
         fps,
         |out| {
-            let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+            let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
             let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
             let mut step_cursor = 0usize;
 

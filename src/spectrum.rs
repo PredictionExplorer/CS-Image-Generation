@@ -10,6 +10,14 @@ use once_cell::sync::Lazy;
 
 /// Number of wavelength buckets in the SPD.
 pub const NUM_BINS: usize = 64;
+
+/// Per-pixel spectral accumulation array.  Using f32 halves memory from
+/// ~1 GB to ~500 MB at 1080p and doubles SIMD throughput on the accumulation
+/// path while keeping full f64 precision inside the tone-mapping kernel.
+pub type SpectralBins = [f32; NUM_BINS];
+
+/// Zero-initialised bin array, usable in `vec![ZERO_BINS; n]`.
+pub const ZERO_BINS: SpectralBins = [0.0f32; NUM_BINS];
 /// Start / end wavelengths in nanometres.
 const LAMBDA_START: f64 = 380.0;
 const LAMBDA_END: f64 = 700.0;

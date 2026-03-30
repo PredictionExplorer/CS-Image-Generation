@@ -51,7 +51,7 @@ pub fn render_timelapse(
         height,
         fps,
         |out| {
-            let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+            let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
             let mut step_cursor = 0usize;
 
             for frame_idx in 0..total_frames {

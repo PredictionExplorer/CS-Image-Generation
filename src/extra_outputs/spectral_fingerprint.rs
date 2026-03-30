@@ -29,12 +29,12 @@ pub fn generate_spectral_fingerprint(
     Ok(())
 }
 
-fn compute_bin_energies(scene: SpectralScene<'_>, settings: SpectralRenderSettings<'_>) -> [f64; NUM_BINS] {
+fn compute_bin_energies(scene: SpectralScene<'_>, settings: SpectralRenderSettings<'_>) -> [f32; NUM_BINS] {
     let resolved = settings.resolved_config;
     let width = resolved.width;
     let height = resolved.height;
     let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
 
     let dt = crate::render::constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
@@ -53,7 +53,7 @@ fn compute_bin_energies(scene: SpectralScene<'_>, settings: SpectralRenderSettin
 
     apply_energy_density_shift(&mut accum_spd);
 
-    let mut totals = [0.0f64; NUM_BINS];
+    let mut totals = [0.0f32; NUM_BINS];
     for pixel_spd in &accum_spd {
         for (bin, &energy) in pixel_spd.iter().enumerate() {
             totals[bin] += energy;
@@ -98,8 +98,12 @@ fn wavelength_to_rgb_approx(lambda: f64) -> (f64, f64, f64) {
     (gamma(r * factor), gamma(g * factor), gamma(b * factor))
 }
 
-fn build_fingerprint_svg(energies: &[f64; NUM_BINS], seed: &str) -> String {
-    let max_energy = energies.iter().cloned().fold(0.0f64, f64::max).max(1e-10);
+fn build_fingerprint_svg(energies: &[f32; NUM_BINS], seed: &str) -> String {
+    let max_energy = energies
+        .iter()
+        .map(|&e| e as f64)
+        .fold(0.0f64, f64::max)
+        .max(1e-10);
 
     let cx = 300.0f64;
     let cy = 300.0f64;
@@ -113,7 +117,7 @@ fn build_fingerprint_svg(energies: &[f64; NUM_BINS], seed: &str) -> String {
     for (bin, &energy) in energies.iter().enumerate().take(NUM_BINS) {
         let nm = wavelength_nm_for_bin(bin);
         let color = wavelength_to_hex(nm);
-        let normalized = energy / max_energy;
+        let normalized = energy as f64 / max_energy;
         let outer_r = inner_radius + (max_radius - inner_radius) * normalized;
 
         let start_angle = bin as f64 * angle_per_bin - std::f64::consts::FRAC_PI_2;
@@ -203,7 +207,7 @@ mod tests {
     fn test_build_fingerprint_svg_contains_structure() {
         let mut energies = [0.0; NUM_BINS];
         for (i, v) in energies.iter_mut().enumerate() {
-            *v = (i + 1) as f64;
+            *v = (i + 1) as f32;
         }
         let svg = build_fingerprint_svg(&energies, "0xCAFEBABE");
         assert!(svg.contains("<svg"));

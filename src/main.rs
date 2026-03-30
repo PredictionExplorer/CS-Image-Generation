@@ -395,7 +395,7 @@ fn main() -> Result<()> {
     let output_png = format!("{}/still.png", output_base);
     let output_vid = format!("{}/video.mp4", output_base);
 
-    let mut spd_buffer: Option<Vec<[f64; render::NUM_BINS]>> = None;
+    let mut spd_buffer: Option<Vec<[f32; render::NUM_BINS]>> = None;
     let timer = StageTimer::start("Video Render");
     let original_pos_for_camera: Option<&[Vec<nalgebra::Vector3<f64>>]> =
         if camera_storage.is_some() {
@@ -491,7 +491,7 @@ fn main() -> Result<()> {
         let velocity_calc = render::velocity_hdr::VelocityHdrCalculator::new(
             sv_scene.positions, render::constants::DEFAULT_DT,
         );
-        let mut accum_spd = vec![[0.0f64; three_body_problem::spectrum::NUM_BINS]; ctx.pixel_count()];
+        let mut accum_spd = vec![[0.0f32; three_body_problem::spectrum::NUM_BINS]; ctx.pixel_count()];
         let total_steps = sv_scene.step_count();
         render::accumulate_spectral_steps(
             &mut accum_spd, None, sv_scene, &ctx, &velocity_calc,

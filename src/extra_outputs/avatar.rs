@@ -46,7 +46,7 @@ pub fn render_animated_avatar(
         scene.positions,
         settings.aspect_correction,
     );
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
 
     let effect_config =
         build_effect_config_from_resolved(resolved, settings.render_config, FinishOutputMode::Video);
@@ -131,7 +131,7 @@ fn find_energy_center(
         settings.aspect_correction,
     );
 
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
@@ -153,7 +153,7 @@ fn find_energy_center(
     let mut cy = 0.0f64;
 
     for (idx, spd) in accum_spd.iter().enumerate() {
-        let energy: f64 = spd.iter().sum();
+        let energy: f64 = spd.iter().copied().sum::<f32>() as f64;
         let x = (idx % width) as f64;
         let y = (idx / width) as f64;
         cx += x * energy;

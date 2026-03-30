@@ -23,7 +23,7 @@ pub fn render_spectral_gallery(
     let width = resolved.width;
     let height = resolved.height;
     let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    let mut accum_spd = vec![[0.0f32; NUM_BINS]; ctx.pixel_count()];
 
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
@@ -50,7 +50,7 @@ pub fn render_spectral_gallery(
 /// plus a dominant-wavelength heatmap. Accepts the raw (pre-shift) buffer
 /// produced by the main video render pass, avoiding a redundant accumulation.
 pub fn render_spectral_gallery_from_buffer(
-    mut accum_spd: Vec<[f64; NUM_BINS]>,
+    mut accum_spd: Vec<[f32; NUM_BINS]>,
     width: u32,
     height: u32,
     output_dir: &str,
@@ -64,18 +64,18 @@ pub fn render_spectral_gallery_from_buffer(
         let wavelength = wavelength_nm_for_bin(bin);
         let (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength);
 
-        let max_val: f64 = accum_spd
+        let max_val: f32 = accum_spd
             .par_iter()
             .map(|spd| spd[bin])
-            .reduce(|| 0.0f64, f64::max)
-            .max(1e-10);
+            .reduce(|| 0.0f32, f32::max)
+            .max(1e-10f32);
 
         let mut buf_16bit = vec![0u16; pixel_count * 3];
         buf_16bit.par_chunks_mut(3).zip(accum_spd.par_iter()).for_each(|(chunk, spd)| {
             let normalized = (spd[bin] / max_val).clamp(0.0, 1.0);
-            chunk[0] = ((normalized * tint_r).powf(1.0 / 2.2) * 65535.0).round() as u16;
-            chunk[1] = ((normalized * tint_g).powf(1.0 / 2.2) * 65535.0).round() as u16;
-            chunk[2] = ((normalized * tint_b).powf(1.0 / 2.2) * 65535.0).round() as u16;
+            chunk[0] = ((normalized as f64 * tint_r).powf(1.0 / 2.2) * 65535.0).round() as u16;
+            chunk[1] = ((normalized as f64 * tint_g).powf(1.0 / 2.2) * 65535.0).round() as u16;
+            chunk[2] = ((normalized as f64 * tint_b).powf(1.0 / 2.2) * 65535.0).round() as u16;
         });
 
         let image = ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
@@ -96,7 +96,7 @@ pub fn render_spectral_gallery_from_buffer(
 }
 
 fn render_dominant_wavelength_map(
-    accum_spd: &[[f64; NUM_BINS]],
+    accum_spd: &[[f32; NUM_BINS]],
     width: u32,
     height: u32,
     output_dir: &str,
@@ -106,13 +106,13 @@ fn render_dominant_wavelength_map(
 
     let max_total: f64 = accum_spd
         .par_iter()
-        .map(|spd| spd.iter().sum::<f64>())
+        .map(|spd| spd.iter().copied().sum::<f32>() as f64)
         .reduce(|| 0.0f64, f64::max)
         .max(1e-10);
     let log_max = (1.0 + max_total).ln();
 
     buf_16bit.par_chunks_mut(3).zip(accum_spd.par_iter()).for_each(|(chunk, spd)| {
-        let total: f64 = spd.iter().sum();
+        let total: f64 = spd.iter().copied().sum::<f32>() as f64;
         if total < 1e-10 {
             return;
         }
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_heatmap_nonblack_for_sub_unit_energy() {
-        let mut spd_data: Vec<[f64; NUM_BINS]> = vec![[0.0; NUM_BINS]; 4];
+        let mut spd_data: Vec<[f32; NUM_BINS]> = vec![[0.0; NUM_BINS]; 4];
         spd_data[0][3] = 0.05;
         spd_data[0][4] = 0.02;
         spd_data[1][10] = 0.3;

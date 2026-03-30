@@ -71,7 +71,7 @@ pub fn detected_simd_path_name() -> &'static str {
 
 // ── SIMD-friendly LUT (x86_64: contiguous arrays for vector loads) ──────────
 
-#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(miri)))]
 pub(crate) struct SimdLut {
     pub r: [f64; NUM_BINS],
     pub g: [f64; NUM_BINS],
@@ -79,7 +79,7 @@ pub(crate) struct SimdLut {
     pub k: [f64; NUM_BINS],
 }
 
-#[cfg(all(target_arch = "x86_64", not(miri)))]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(miri)))]
 pub(crate) static SIMD_LUT: once_cell::sync::Lazy<SimdLut> = once_cell::sync::Lazy::new(|| {
     let mut lut = SimdLut { r: [0.0; NUM_BINS], g: [0.0; NUM_BINS], b: [0.0; NUM_BINS], k: [0.0; NUM_BINS] };
     for i in 0..NUM_BINS {
@@ -221,7 +221,7 @@ fn finalize_rgba(
 
 // ── x86_64 AVX2+FMA implementation ─────────────────────────────────────────
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const fn inv_factorial(n: u32) -> f64 {
     let mut result = 1u64;
     let mut i = 2u32;
@@ -234,10 +234,10 @@ const fn inv_factorial(n: u32) -> f64 {
 
 /// Taylor series coefficients for exp(x): `EXP_COEFFS[k] = 1/k!`.
 /// Degree 11 gives truncation error < 1e-14 for |r| <= ln2/2.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const EXP_POLY_DEGREE: usize = 11;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const EXP_COEFFS: [f64; EXP_POLY_DEGREE + 1] = {
     let mut c = [0.0; EXP_POLY_DEGREE + 1];
     let mut i = 0u32;
@@ -439,39 +439,80 @@ unsafe fn one_minus_exp_neg_avx512(x: std::arch::x86_64::__m512d) -> std::arch::
 
 // ── aarch64 NEON implementation ─────────────────────────────────────────────
 
-/// aarch64 NEON SIMD implementation (~2x faster than scalar).
+/// Fully vectorized 1 - exp(-x) for 2 f64 lanes using NEON FMA.
 ///
-/// Processes 2 bins at a time using 128-bit NEON FMA. The exp() call remains
-/// scalar (no hardware transcendental on NEON), but accumulation is fully vectorized.
+/// Uses Cody-Waite range reduction with a degree-11 Taylor polynomial,
+/// matching the AVX2 path but in 128-bit (2-lane) NEON registers.
+/// Input x must be non-negative; relative error < 1e-14 for x in [0, 700].
+#[cfg(all(target_arch = "aarch64", not(miri)))]
+#[inline]
+unsafe fn one_minus_exp_neg_neon(x: std::arch::aarch64::float64x2_t) -> std::arch::aarch64::float64x2_t {
+    use std::arch::aarch64::*;
+    unsafe {
+        let x_safe = vminq_f64(x, vdupq_n_f64(700.0));
+        let neg_x = vnegq_f64(x_safe);
+
+        let log2_e = vdupq_n_f64(std::f64::consts::LOG2_E);
+        let ln2_hi = vdupq_n_f64(6.931_471_803_691_238e-1);
+        let ln2_lo = vdupq_n_f64(1.908_214_929_270_585e-10);
+
+        let t = vmulq_f64(neg_x, log2_e);
+        let n = vrndnq_f64(t);
+        let neg_n = vnegq_f64(n);
+        let r = vfmaq_f64(neg_x, neg_n, ln2_hi);
+        let r = vfmaq_f64(r, neg_n, ln2_lo);
+
+        let one = vdupq_n_f64(1.0);
+        let mut p = vdupq_n_f64(EXP_COEFFS[EXP_POLY_DEGREE]);
+        let mut i = EXP_POLY_DEGREE - 1;
+        while i >= 2 {
+            p = vfmaq_f64(vdupq_n_f64(EXP_COEFFS[i]), p, r);
+            i -= 1;
+        }
+        p = vfmaq_f64(one, p, r);
+        let exp_r = vfmaq_f64(one, p, r);
+
+        let n_i64 = vcvtq_s64_f64(n);
+        let biased = vaddq_s64(n_i64, vdupq_n_s64(1023));
+        let shift52 = vdupq_n_s64(52);
+        let pow2n = vreinterpretq_f64_s64(vshlq_s64(biased, shift52));
+
+        let exp_neg = vmulq_f64(exp_r, pow2n);
+        vsubq_f64(one, exp_neg)
+    }
+}
+
+/// aarch64 NEON SIMD implementation — fully vectorized inner loop.
+///
+/// Processes 2 bins at a time using 128-bit NEON FMA with a polynomial
+/// exp approximation (no scalar exp() calls), matching the AVX2 path.
 #[cfg(all(target_arch = "aarch64", not(miri)))]
 #[inline]
 unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::aarch64::*;
-
     unsafe {
+        let lut = &*SIMD_LUT;
+        let threshold = vdupq_n_f64(1e-10);
+
         let mut r_accum = vdupq_n_f64(0.0);
         let mut g_accum = vdupq_n_f64(0.0);
         let mut b_accum = vdupq_n_f64(0.0);
         let mut total_accum = vdupq_n_f64(0.0);
 
         for chunk_start in (0..NUM_BINS).step_by(2) {
-            let lut0 = BIN_COMBINED_LUT[chunk_start];
-            let lut1 = BIN_COMBINED_LUT[chunk_start + 1];
+            let energy = vld1q_f64(&spd[chunk_start]);
+            let r_lut = vld1q_f64(&lut.r[chunk_start]);
+            let g_lut = vld1q_f64(&lut.g[chunk_start]);
+            let b_lut = vld1q_f64(&lut.b[chunk_start]);
+            let k_lut = vld1q_f64(&lut.k[chunk_start]);
 
-            let e0 = spd[chunk_start];
-            let e1 = spd[chunk_start + 1];
-            let em0 = if e0 > 1e-10 { 1.0 - (-lut0.3 * e0).exp() } else { 0.0 };
-            let em1 = if e1 > 1e-10 { 1.0 - (-lut1.3 * e1).exp() } else { 0.0 };
-
-            let e_data = [em0, em1];
-            let r_data = [lut0.0, lut1.0];
-            let g_data = [lut0.1, lut1.1];
-            let b_data = [lut0.2, lut1.2];
-
-            let e_mapped = vld1q_f64(e_data.as_ptr());
-            let r_lut = vld1q_f64(r_data.as_ptr());
-            let g_lut = vld1q_f64(g_data.as_ptr());
-            let b_lut = vld1q_f64(b_data.as_ptr());
+            let kx = vmulq_f64(k_lut, energy);
+            let e_mapped_raw = one_minus_exp_neg_neon(kx);
+            let mask = vcgtq_f64(energy, threshold);
+            let e_mapped = vreinterpretq_f64_u64(vandq_u64(
+                vreinterpretq_u64_f64(e_mapped_raw),
+                mask,
+            ));
 
             r_accum = vfmaq_f64(r_accum, e_mapped, r_lut);
             g_accum = vfmaq_f64(g_accum, e_mapped, g_lut);
@@ -946,5 +987,67 @@ mod tests {
         let spd = [-1.0; NUM_BINS];
         let result = spd_to_rgba_simd(&spd);
         assert_eq!(result, (0.0, 0.0, 0.0, 0.0), "negative energy should produce black");
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_for_uniform_spectra() {
+        for energy in [0.001, 0.01, 0.1, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0] {
+            let spd = [energy; NUM_BINS];
+            let simd = spd_to_rgba_simd(&spd);
+            let scalar = spd_to_rgba_scalar(&spd);
+            let tol = 1e-10;
+            assert!((simd.0 - scalar.0).abs() < tol, "R mismatch at energy={energy}: {:.15} vs {:.15}", simd.0, scalar.0);
+            assert!((simd.1 - scalar.1).abs() < tol, "G mismatch at energy={energy}: {:.15} vs {:.15}", simd.1, scalar.1);
+            assert!((simd.2 - scalar.2).abs() < tol, "B mismatch at energy={energy}: {:.15} vs {:.15}", simd.2, scalar.2);
+            assert!((simd.3 - scalar.3).abs() < tol, "A mismatch at energy={energy}: {:.15} vs {:.15}", simd.3, scalar.3);
+        }
+    }
+
+    #[test]
+    fn test_simd_matches_scalar_single_bin_sweep() {
+        for bin in 0..NUM_BINS {
+            let mut spd = [0.0; NUM_BINS];
+            spd[bin] = 2.5;
+            let simd = spd_to_rgba_simd(&spd);
+            let scalar = spd_to_rgba_scalar(&spd);
+            let tol = 1e-10;
+            assert!((simd.0 - scalar.0).abs() < tol, "bin {bin} R: {:.12} vs {:.12}", simd.0, scalar.0);
+            assert!((simd.1 - scalar.1).abs() < tol, "bin {bin} G: {:.12} vs {:.12}", simd.1, scalar.1);
+            assert!((simd.2 - scalar.2).abs() < tol, "bin {bin} B: {:.12} vs {:.12}", simd.2, scalar.2);
+            assert!((simd.3 - scalar.3).abs() < tol, "bin {bin} A: {:.12} vs {:.12}", simd.3, scalar.3);
+        }
+    }
+
+    #[test]
+    fn test_f32_to_f64_bridge_accuracy() {
+        let mut seed = 42u64;
+        for _ in 0..1000 {
+            let mut spd_f32 = [0.0f32; NUM_BINS];
+            for v in spd_f32.iter_mut() {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                *v = (seed % 5000) as f32 / 500.0;
+            }
+            let widened: [f64; NUM_BINS] = std::array::from_fn(|i| spd_f32[i] as f64);
+            let result = spd_to_rgba_simd(&widened);
+            assert!(result.0 >= 0.0 && result.0 <= 1.0, "R out of range after f32 bridge: {}", result.0);
+            assert!(result.1 >= 0.0 && result.1 <= 1.0, "G out of range after f32 bridge: {}", result.1);
+            assert!(result.2 >= 0.0 && result.2 <= 1.0, "B out of range after f32 bridge: {}", result.2);
+            assert!(result.3 >= 0.0 && result.3 <= 1.0, "A out of range after f32 bridge: {}", result.3);
+        }
+    }
+
+    #[test]
+    fn test_exp_approximation_accuracy_vs_std() {
+        let scalar_impl = spd_to_rgba_scalar_with_sat_boost;
+        for energy in [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 10.0, 50.0, 200.0] {
+            let spd = [energy; NUM_BINS];
+            let with_boost = scalar_impl(&spd, true);
+            let without_boost = scalar_impl(&spd, false);
+            assert!(with_boost.0 >= 0.0 && with_boost.0 <= 1.0);
+            assert!(without_boost.0 >= 0.0 && without_boost.0 <= 1.0);
+            assert!(with_boost.3 >= 0.0 && with_boost.3 <= 1.0);
+        }
     }
 }

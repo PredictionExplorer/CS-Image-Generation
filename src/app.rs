@@ -261,7 +261,7 @@ pub fn render_video(
     output_png: &str,
     fast_encode: bool,
     enable_temporal_smoothing: bool,
-    spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
+    spd_out: &mut Option<Vec<[f32; NUM_BINS]>>,
     camera: Option<&render::camera::Camera3D>,
     original_positions: Option<&[Vec<nalgebra::Vector3<f64>>]>,
     #[cfg(feature = "gpu")] mut gpu_context: Option<&mut render::gpu::GpuContext>,

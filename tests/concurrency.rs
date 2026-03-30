@@ -346,7 +346,7 @@ fn test_line_drawing_deterministic_across_threads() {
     let width = 64u32;
     let height = 48u32;
 
-    let mut ref_buf = vec![[0.0f64; NUM_BINS]; (width * height) as usize];
+    let mut ref_buf = vec![[0.0f32; NUM_BINS]; (width * height) as usize];
     draw_line_segment_aa_spectral(&mut ref_buf, width, height, segment);
 
     for num_threads in [1, 2, 4] {
@@ -355,7 +355,7 @@ fn test_line_drawing_deterministic_across_threads() {
             .build()
             .unwrap();
 
-        let mut test_buf = vec![[0.0f64; NUM_BINS]; (width * height) as usize];
+        let mut test_buf = vec![[0.0f32; NUM_BINS]; (width * height) as usize];
         pool.install(|| draw_line_segment_aa_spectral(&mut test_buf, width, height, segment));
 
         for (i, (r, t)) in ref_buf.iter().zip(test_buf.iter()).enumerate() {
