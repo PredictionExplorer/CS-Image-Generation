@@ -28,6 +28,7 @@ pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
 pub mod types;
+pub mod spectral_output;
 pub mod velocity_hdr;
 pub mod video;
 
@@ -609,6 +610,7 @@ fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     checkpoints
 }
 
+#[allow(clippy::too_many_arguments)]
 fn accumulate_spectral_steps_into_rows(
     accum_spd: &mut [[f64; NUM_BINS]],
     scene: SpectralScene<'_>,
@@ -646,6 +648,7 @@ fn accumulate_spectral_steps_into_rows(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
     scene: SpectralScene<'_>,
@@ -808,6 +811,7 @@ pub(crate) fn pass_1_build_histogram_spectral_serial_reference(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     scene: SpectralScene<'_>,
     frame_interval: usize,
@@ -816,6 +820,7 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
     enable_temporal_smoothing: bool,
+    accum_spd: &mut Vec<[f64; NUM_BINS]>,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
         scene,
@@ -826,11 +831,16 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
         last_frame_out,
         enable_temporal_smoothing,
         AccumulationBackend::SerialReference,
+        accum_spd,
     )
 }
 
 // ====================== PASS 2 (SPECTRAL) ===========================
 /// Pass 2: final frames => color mapping => write frames (spectral, 16-bit output)
+///
+/// The caller-provided `accum_spd` buffer is populated incrementally and contains
+/// the fully accumulated spectral data when this function returns.
+#[allow(clippy::too_many_arguments)]
 fn pass_2_write_frames_spectral_with_backend(
     scene: SpectralScene<'_>,
     frame_interval: usize,
@@ -840,13 +850,15 @@ fn pass_2_write_frames_spectral_with_backend(
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
     enable_temporal_smoothing: bool,
     backend: AccumulationBackend,
+    accum_spd: &mut Vec<[f64; NUM_BINS]>,
 ) -> Result<()> {
     let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
         settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+    accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
+    accum_spd.iter_mut().for_each(|s| *s = [0.0; NUM_BINS]);
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     let effect_config =
@@ -890,7 +902,7 @@ fn pass_2_write_frames_spectral_with_backend(
         }
 
         accumulate_spectral_steps(
-            &mut accum_spd,
+            accum_spd,
             scene,
             &ctx,
             &velocity_calc,
@@ -900,8 +912,8 @@ fn pass_2_write_frames_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(&mut accum_spd);
-        convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
+        apply_energy_density_shift(accum_spd);
+        convert_spd_buffer_to_rgba(accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
@@ -950,6 +962,7 @@ fn pass_2_write_frames_spectral_with_backend(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pass_2_write_frames_spectral(
     scene: SpectralScene<'_>,
     frame_interval: usize,
@@ -958,6 +971,7 @@ pub fn pass_2_write_frames_spectral(
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
     enable_temporal_smoothing: bool,
+    accum_spd: &mut Vec<[f64; NUM_BINS]>,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
         scene,
@@ -968,6 +982,7 @@ pub fn pass_2_write_frames_spectral(
         last_frame_out,
         enable_temporal_smoothing,
         default_accumulation_backend(),
+        accum_spd,
     )
 }
 
@@ -1353,6 +1368,7 @@ mod tests {
         assert_eq!(actual.as_raw(), expected.as_raw(), "{label}: 16-bit image buffers differed");
     }
 
+    #[allow(clippy::type_complexity)]
     fn sample_scene() -> (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>) {
         let positions = vec![
             vec![
@@ -1460,6 +1476,7 @@ mod tests {
         serial_reference: bool,
         thread_count: usize,
     ) -> (Vec<u8>, Option<ImageBuffer<Rgb<u16>, Vec<u16>>>) {
+        #![allow(clippy::type_complexity)]
         let mut frame_bytes = Vec::new();
         let mut last_frame = None;
 
@@ -1472,6 +1489,7 @@ mod tests {
                     frame_bytes.extend_from_slice(bytes);
                     Ok(())
                 };
+                let mut spd_buf = Vec::new();
 
                 if serial_reference {
                     pass_2_write_frames_spectral_serial_reference(
@@ -1482,6 +1500,7 @@ mod tests {
                         frame_sink,
                         &mut last_frame,
                         enable_temporal_smoothing,
+                        &mut spd_buf,
                     )
                 } else {
                     pass_2_write_frames_spectral(
@@ -1492,6 +1511,7 @@ mod tests {
                         frame_sink,
                         &mut last_frame,
                         enable_temporal_smoothing,
+                        &mut spd_buf,
                     )
                 }
             })

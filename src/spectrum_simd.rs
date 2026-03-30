@@ -359,14 +359,22 @@ mod tests {
         assert!((0.0..=1.0).contains(&val), "{name} out of [0,1]: {val}");
     }
 
+    fn make_spd(values: &[f64]) -> [f64; NUM_BINS] {
+        let mut spd = [0.0; NUM_BINS];
+        for (i, &v) in values.iter().enumerate().take(NUM_BINS) {
+            spd[i] = v;
+        }
+        spd
+    }
+
     // ── original tests (preserved) ──────────────────────────────────
 
     #[test]
     fn test_simd_matches_scalar() {
         let test_cases = vec![
-            [1.0, 0.5, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.1; 16],
+            make_spd(&[1.0, 0.5, 0.2]),
+            make_spd(&[0.0, 0.0, 0.0, 0.5, 1.0, 0.5]),
+            [0.1; NUM_BINS],
         ];
         for spd in test_cases {
             assert_simd_scalar_match(&spd, "basic");
@@ -433,61 +441,54 @@ mod tests {
             [1.0; NUM_BINS],
             [0.001; NUM_BINS],
             [100.0; NUM_BINS],
-            // single-bin patterns at first, middle, last
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 s[0] = 1.0;
                 s
             },
             {
-                let mut s = [0.0; 16];
-                s[7] = 1.0;
+                let mut s = [0.0; NUM_BINS];
+                s[NUM_BINS / 2] = 1.0;
                 s
             },
             {
-                let mut s = [0.0; 16];
-                s[15] = 1.0;
+                let mut s = [0.0; NUM_BINS];
+                s[NUM_BINS - 1] = 1.0;
                 s
             },
-            // two isolated peaks (red + blue)
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 s[0] = 0.8;
-                s[14] = 0.8;
+                s[NUM_BINS - 2] = 0.8;
                 s
             },
-            // descending ramp
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 for (i, value) in s.iter_mut().enumerate() {
-                    *value = (16 - i) as f64 / 16.0;
+                    *value = (NUM_BINS - i) as f64 / NUM_BINS as f64;
                 }
                 s
             },
-            // ascending ramp
             {
-                let mut s = [0.0; 16];
+                let mut s = [0.0; NUM_BINS];
                 for (i, value) in s.iter_mut().enumerate() {
-                    *value = (i + 1) as f64 / 16.0;
+                    *value = (i + 1) as f64 / NUM_BINS as f64;
                 }
                 s
             },
-            // alternating zero / nonzero
             {
-                let mut s = [0.0; 16];
-                for i in (0..16).step_by(2) {
+                let mut s = [0.0; NUM_BINS];
+                for i in (0..NUM_BINS).step_by(2) {
                     s[i] = 0.5;
                 }
                 s
             },
-            // one very large, rest small
             {
-                let mut s = [0.01; 16];
+                let mut s = [0.01; NUM_BINS];
                 s[5] = 500.0;
                 s
             },
-            // realistic multi-peak spectrum
-            [0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1, 0.0, 0.0],
+            make_spd(&[0.0, 0.0, 0.1, 0.4, 0.9, 1.0, 0.7, 0.3, 0.1, 0.2, 0.6, 0.8, 0.5, 0.1]),
         ];
 
         for (i, spd) in cases.iter().enumerate() {
@@ -512,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_simd_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = spd_to_rgba_simd_with_sat_boost(&spd, true);
         for _ in 0..200 {
             let r = spd_to_rgba_simd_with_sat_boost(&spd, true);
@@ -526,7 +527,7 @@ mod tests {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     #[test]
     fn test_avx2_kernel_is_bitwise_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = unsafe { spd_to_rgba_avx2(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_avx2(&spd, true) };
@@ -566,7 +567,7 @@ mod tests {
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
     #[test]
     fn test_neon_kernel_is_bitwise_deterministic() {
-        let spd = [0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3, 0.0];
+        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = unsafe { spd_to_rgba_neon(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_neon(&spd, true) };
@@ -656,7 +657,7 @@ mod tests {
 
     #[test]
     fn test_sat_boost_affects_output() {
-        let spd = [0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2, 0.0];
+        let spd = make_spd(&[0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2]);
 
         let boosted = spd_to_rgba_simd_with_sat_boost(&spd, true);
         let unboosted = spd_to_rgba_simd_with_sat_boost(&spd, false);

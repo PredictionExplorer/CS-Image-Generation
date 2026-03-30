@@ -76,21 +76,26 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
 }
 
-/// Initialize application directories
-pub fn setup_directories() -> Result<()> {
-    fs::create_dir_all("pics").map_err(|e| ConfigError::FileSystem {
+/// Initialize per-seed output directory structure:
+///   output/{seed}/
+///   output/{seed}/spectral/
+pub fn setup_seed_directory(seed: &str) -> Result<String> {
+    let seed_dir = format!("output/{seed}");
+    let spectral_dir = format!("{seed_dir}/spectral");
+
+    fs::create_dir_all(&seed_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
-        path: "pics".to_string(),
+        path: seed_dir.clone(),
         error: e,
     })?;
 
-    fs::create_dir_all("vids").map_err(|e| ConfigError::FileSystem {
+    fs::create_dir_all(&spectral_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
-        path: "vids".to_string(),
+        path: spectral_dir,
         error: e,
     })?;
 
-    Ok(())
+    Ok(seed_dir)
 }
 
 /// Parse and validate hex seed
@@ -239,7 +244,7 @@ pub fn build_histogram_and_levels(
     ))
 }
 
-/// Render full video
+/// Render full video, returning the fully accumulated SPD buffer for spectral outputs.
 pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -248,7 +253,7 @@ pub fn render_video(
     output_png: &str,
     fast_encode: bool,
     enable_temporal_smoothing: bool,
-) -> Result<()> {
+) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
     } else {
@@ -266,6 +271,8 @@ pub fn render_video(
         VideoEncodingOptions::default()
     };
 
+    let mut accum_spd = Vec::new();
+
     create_video_from_frames_singlepass(
         settings.resolved_config.width,
         settings.resolved_config.height,
@@ -282,6 +289,7 @@ pub fn render_video(
                 },
                 &mut last_frame_png,
                 enable_temporal_smoothing,
+                &mut accum_spd,
             )?;
             Ok(())
         },
@@ -297,7 +305,34 @@ pub fn render_video(
         warn!("Warning: No final frame was generated to save as PNG.");
     }
 
-    Ok(())
+    Ok(accum_spd)
+}
+
+/// Generate the spectral gallery (64 per-bin images + dominant wavelength heatmap).
+pub fn generate_spectral_gallery(
+    accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
+    width: u32,
+    height: u32,
+    spectral_dir: &str,
+) -> Result<()> {
+    Ok(render::spectral_output::generate_spectral_gallery(accum_spd, width, height, spectral_dir)?)
+}
+
+/// Generate six spectral cycle video variants.
+pub fn generate_spectral_cycle_videos(
+    accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
+    width: u32,
+    height: u32,
+    spectral_dir: &str,
+    fast_encode: bool,
+) -> Result<()> {
+    Ok(render::spectral_output::generate_spectral_cycle_videos(
+        accum_spd,
+        width,
+        height,
+        spectral_dir,
+        fast_encode,
+    )?)
 }
 
 /// Log generation parameters for reproducibility
@@ -599,6 +634,26 @@ mod tests {
             let pixels_b = run_full_pipeline(&seed, PipelineRenderMode::DefaultParallel);
             assert_pixel_buffers_eq(&pixels_a, &pixels_b, &format!("default_parallel/{seed:02X?}"));
         }
+    }
+
+    #[test]
+    fn test_setup_seed_directory_returns_correct_path() {
+        let result = setup_seed_directory("test_seed_42");
+        assert!(result.is_ok());
+        let seed_dir = result.unwrap();
+        assert_eq!(seed_dir, "output/test_seed_42");
+        assert!(std::path::Path::new("output/test_seed_42").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/spectral").is_dir());
+        let _ = fs::remove_dir_all("output/test_seed_42");
+    }
+
+    #[test]
+    fn test_setup_seed_directory_idempotent() {
+        let r1 = setup_seed_directory("seed_idem");
+        let r2 = setup_seed_directory("seed_idem");
+        assert!(r1.is_ok());
+        assert!(r2.is_ok());
+        let _ = fs::remove_dir_all("output/seed_idem");
     }
 
     #[test]

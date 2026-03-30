@@ -216,6 +216,20 @@ pub const DEFAULT_TARGET_FRAMES: u32 = 1800;
 /// only needs representative luminance coverage, not full video temporal density.
 pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
 
+// ========== Spectral Cycle Video Constants ==========
+
+/// Duration of each spectral cycle video in seconds
+pub const CYCLE_DURATION_SECONDS: f64 = 12.0;
+
+/// Total frames per spectral cycle video (12s * 60fps)
+pub const CYCLE_TOTAL_FRAMES: u32 = 720;
+
+/// Bin offset range for the radial spectral cycle variant
+pub const RADIAL_SPREAD: f64 = 24.0;
+
+/// Display gamma used for spectral gallery and bin image output
+pub const DISPLAY_GAMMA: f64 = 2.2;
+
 // ========== Simulation Constants ==========
 
 /// Default simulation timestep

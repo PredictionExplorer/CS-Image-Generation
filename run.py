@@ -41,8 +41,7 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT = 86400  # 24 hours
 
-LOCAL_IMG_DIR = Path("pics")
-LOCAL_VID_DIR = Path("vids")
+LOCAL_OUTPUT_DIR = Path("output")
 LOG_FILE = "imgcheck.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 LOG_BACKUP_COUNT = 5
@@ -354,15 +353,16 @@ def generate(exec_cmd: str, seed: str, timeout: int) -> bool:
 
 
 def find_local_files(seed: str) -> tuple[Path | None, Path | None]:
-    """Search for generated image and video files using the canonical seed-based output name."""
-    img_path = LOCAL_IMG_DIR / f"0x{seed}.png"
+    """Search for generated image and video files in the per-seed output directory."""
+    seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
+    img_path = seed_dir / "image.png"
     if img_path.is_file():
         log.debug("Found image: %s (%d bytes)", img_path, img_path.stat().st_size)
     else:
         log.error("Image NOT FOUND for 0x%s. Tried: %s", seed, img_path)
         img_path = None
 
-    vid_path = LOCAL_VID_DIR / f"0x{seed}.mp4"
+    vid_path = seed_dir / "video.mp4"
     if vid_path.is_file():
         log.debug("Found video: %s (%d bytes)", vid_path, vid_path.stat().st_size)
     else:
@@ -622,8 +622,7 @@ def main() -> int:
         log.error("No generator available and not in dry-run mode. Exiting.")
         return 1
 
-    LOCAL_IMG_DIR.mkdir(exist_ok=True)
-    LOCAL_VID_DIR.mkdir(exist_ok=True)
+    LOCAL_OUTPUT_DIR.mkdir(exist_ok=True)
 
     # --- Phase 1: discover what's missing ---
 

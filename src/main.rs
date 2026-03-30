@@ -186,11 +186,12 @@ fn main() -> Result<()> {
     render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
-    app::setup_directories()?;
     error::validation::validate_dimensions(args.resolution.width, args.resolution.height)?;
 
     let seed_bytes = app::parse_seed(&args.seed)?;
     let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
+
+    let seed_dir = app::setup_seed_directory(&args.output)?;
     let noise_seed = app::derive_noise_seed(&seed_bytes);
 
     let mut rng = Sha3RandomByteStream::new(
@@ -277,10 +278,10 @@ fn main() -> Result<()> {
         enhancements.aspect_correction,
     )?;
 
-    let output_png = format!("pics/{}.png", args.output);
-    let output_vid = format!("vids/{}.mp4", args.output);
+    let output_png = format!("{seed_dir}/image.png");
+    let output_vid = format!("{seed_dir}/video.mp4");
 
-    app::render_video(
+    let accum_spd = app::render_video(
         render::SpectralScene::new(&positions, &colors, &body_alphas),
         &levels,
         render::SpectralRenderSettings::new(
@@ -293,6 +294,23 @@ fn main() -> Result<()> {
         &output_png,
         args.fast_encode,
         true,
+    )?;
+
+    let spectral_dir = format!("{seed_dir}/spectral");
+
+    app::generate_spectral_gallery(
+        &accum_spd,
+        args.resolution.width,
+        args.resolution.height,
+        &spectral_dir,
+    )?;
+
+    app::generate_spectral_cycle_videos(
+        &accum_spd,
+        args.resolution.width,
+        args.resolution.height,
+        &spectral_dir,
+        args.fast_encode,
     )?;
 
     info!(

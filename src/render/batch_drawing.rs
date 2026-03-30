@@ -34,6 +34,7 @@ pub fn draw_triangle_batch_spectral(
 }
 
 /// Draw a complete triangle into an owned row band of the destination buffer.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_triangle_batch_spectral_rows(
     accum: &mut [[f64; NUM_BINS]],
     width: u32,

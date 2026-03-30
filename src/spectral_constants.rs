@@ -73,12 +73,58 @@ mod tests {
 
     #[test]
     fn test_roundtrip_conversion() {
-        // Test that converting bin -> wavelength -> bin gives consistent results
         for bin in 0..NUM_BINS {
             let wavelength = bin_to_wavelength(bin);
             let bin_f = wavelength_to_bin(wavelength);
-            // Should be within 0.5 bins (since we use bin center)
             assert!((bin_f - bin as f64).abs() < 0.51);
+        }
+    }
+
+    #[test]
+    fn test_bin_width_is_5nm_for_64_bins() {
+        assert!(
+            (BIN_WIDTH - 5.0).abs() < 1e-10,
+            "BIN_WIDTH should be 5.0nm for 64 bins, got {BIN_WIDTH}"
+        );
+    }
+
+    #[test]
+    fn test_lambda_range_is_320() {
+        assert!((LAMBDA_RANGE - 320.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_wavelength_to_bin_clamped_below() {
+        assert_eq!(wavelength_to_bin(100.0), 0.0);
+    }
+
+    #[test]
+    fn test_wavelength_to_bin_clamped_above() {
+        assert_eq!(wavelength_to_bin(1000.0), (NUM_BINS - 1) as f64);
+    }
+
+    #[test]
+    fn test_wavelength_to_bin_monotonic() {
+        let mut prev = -1.0;
+        for wl in (380..=700).step_by(1) {
+            let bin = wavelength_to_bin(wl as f64);
+            assert!(bin >= prev, "wavelength_to_bin should be monotonic");
+            prev = bin;
+        }
+    }
+
+    #[test]
+    fn test_all_64_bins_reachable() {
+        let mut reached = [false; NUM_BINS];
+        for wl_x10 in 3800..=7000 {
+            let wl = wl_x10 as f64 / 10.0;
+            let bin = wavelength_to_bin(wl).round() as usize;
+            if bin < NUM_BINS {
+                reached[bin] = true;
+            }
+        }
+        for (i, &r) in reached.iter().enumerate() {
+            assert!(r, "bin {i} should be reachable by some wavelength");
         }
     }
 }
