@@ -2,11 +2,8 @@
 //! creating a flowing rainbow curtain as the mapping scrolls vertically.
 
 use crate::extra_outputs::spectral_video_utils::BinBuffers;
-use crate::render::context::RenderContext;
-use crate::render::velocity_hdr;
 use crate::render::{
-    SpectralRenderSettings, SpectralScene, VideoEncodingOptions, accumulate_spectral_steps,
-    constants, create_video_from_frames_singlepass, default_accumulation_backend,
+    VideoEncodingOptions, constants, create_video_from_frames_singlepass,
 };
 use crate::spectrum::NUM_BINS;
 use tracing::info;
@@ -14,41 +11,20 @@ use tracing::info;
 const SLIT_SCAN_DURATION_SECONDS: f64 = 8.0;
 
 pub fn render_spectral_slit_scan_video(
-    scene: SpectralScene<'_>,
-    settings: SpectralRenderSettings<'_>,
+    bins: &BinBuffers,
     output_path: &str,
     fast_encode: bool,
 ) -> crate::render::error::Result<()> {
+    let width = bins.width;
+    let height = bins.height;
+    let fps = constants::DEFAULT_VIDEO_FPS;
+    let total_frames = (SLIT_SCAN_DURATION_SECONDS * fps as f64).max(1.0) as usize;
+
     info!(
         "Rendering spectral slit-scan video ({:.0}s, vertical scroll)...",
         SLIT_SCAN_DURATION_SECONDS
     );
 
-    let resolved = settings.resolved_config;
-    let width = resolved.width;
-    let height = resolved.height;
-    let fps = constants::DEFAULT_VIDEO_FPS;
-    let total_frames = (SLIT_SCAN_DURATION_SECONDS * fps as f64).max(1.0) as usize;
-
-    let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
-    let dt = constants::DEFAULT_DT;
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
-    let total_steps = scene.step_count();
-    accumulate_spectral_steps(
-        &mut accum_spd,
-        None,
-        scene,
-        &ctx,
-        &velocity_calc,
-        0,
-        total_steps,
-        settings.render_config.hdr_scale,
-        default_accumulation_backend(),
-    );
-
-    let bins = BinBuffers::from_spd(accum_spd, width, height);
     let pixel_count = bins.pixel_count;
     let w = width as usize;
     let h = height as usize;
@@ -89,4 +65,41 @@ pub fn render_spectral_slit_scan_video(
 
     info!("   Saved spectral slit-scan video => {}", output_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extra_outputs::spectral_video_utils::test_helpers::*;
+    use crate::render::{
+        SpectralRenderSettings, SpectralScene, accumulate_spectral_steps,
+        apply_energy_density_shift, constants, default_accumulation_backend,
+    };
+    use crate::render::context::RenderContext;
+    use crate::render::velocity_hdr;
+    use crate::spectrum::NUM_BINS;
+
+    #[test]
+    fn test_slit_scan_video_smoke() {
+        let (positions, colors, body_alphas) = make_test_scene(200);
+        let resolved = make_test_resolved_config(64, 36);
+        let render_config = make_test_render_config(resolved.hdr_scale);
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let ctx = RenderContext::new(64, 36, scene.positions, settings.aspect_correction);
+        let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, constants::DEFAULT_DT);
+        let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut accum_spd, None, scene, &ctx, &velocity_calc,
+            0, scene.step_count(), settings.render_config.hdr_scale,
+            default_accumulation_backend(),
+        );
+        apply_energy_density_shift(&mut accum_spd);
+        let bins = BinBuffers::from_shifted_spd(&accum_spd, 64, 36);
+        let dir = std::env::temp_dir().join("spectral_test_slit_scan");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("slit_scan.mp4");
+        let result = render_spectral_slit_scan_video(&bins, path.to_str().unwrap(), true);
+        assert!(result.is_ok(), "slit scan video render failed: {:?}", result.err());
+    }
 }

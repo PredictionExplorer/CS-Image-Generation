@@ -30,8 +30,19 @@ impl BinBuffers {
         width: u32,
         height: u32,
     ) -> Self {
-        let pixel_count = (width * height) as usize;
         apply_energy_density_shift(&mut accum_spd);
+        Self::from_shifted_spd(&accum_spd, width, height)
+    }
+
+    /// Build all 64 bin buffers from SPD that already has energy-density shift
+    /// applied.  Use this when the shift was done externally (e.g. shared
+    /// accumulation in main.rs).
+    pub fn from_shifted_spd(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let pixel_count = (width * height) as usize;
 
         let buffers: Vec<Vec<[f64; 3]>> = (0..NUM_BINS)
             .into_par_iter()
@@ -175,6 +186,166 @@ pub const GROUP_NAMES: [&str; NUM_GROUPS] = [
 #[inline]
 pub fn bin_group(bin: usize) -> usize {
     (bin / BINS_PER_GROUP).min(NUM_GROUPS - 1)
+}
+
+/// Gamma value used for the dominant-color helper (same as bin visualizations).
+const DOMINANT_GAMMA: f64 = 2.2;
+
+/// Per-pixel dominant-wavelength color from an energy-density-shifted SPD.
+///
+/// Returns gamma-corrected `[R, G, B]` tinted by the dominant bin's wavelength,
+/// with logarithmic brightness scaling so dim pixels stay visible.
+pub fn dominant_colors_from_shifted_spd(shifted_spd: &[[f64; NUM_BINS]]) -> Vec<[f64; 3]> {
+    let max_total_energy = shifted_spd
+        .par_iter()
+        .map(|spd| spd.iter().sum::<f64>())
+        .reduce(|| 0.0f64, f64::max)
+        .max(1e-10);
+    let log_denom = (1.0 + max_total_energy).ln();
+
+    shifted_spd
+        .par_iter()
+        .map(|spd| {
+            let total_energy: f64 = spd.iter().sum();
+            let dominant = spd
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let wl = wavelength_nm_for_bin(dominant);
+            let (tr, tg, tb) = wavelength_to_rgb(wl);
+            let brightness = (1.0 + total_energy).ln() / log_denom;
+            let r = (tr * brightness).powf(1.0 / DOMINANT_GAMMA);
+            let g = (tg * brightness).powf(1.0 / DOMINANT_GAMMA);
+            let b = (tb * brightness).powf(1.0 / DOMINANT_GAMMA);
+            [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]
+        })
+        .collect()
+}
+
+/// Test helpers for spectral video modules.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod test_helpers {
+    use crate::render::randomizable_config::ResolvedEffectConfig;
+    use crate::render::{BloomMode, RenderConfig};
+    use crate::render::color::OklabColor;
+    use nalgebra::Vector3;
+
+    pub type SceneData = (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>);
+
+    pub fn make_test_scene(steps: usize) -> SceneData {
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                let phase = body as f64 * std::f64::consts::TAU / 3.0;
+                (0..steps)
+                    .map(|s| {
+                        let t = s as f64 * 0.02;
+                        Vector3::new(
+                            (t + phase).cos(),
+                            (t + phase).sin(),
+                            (t * 0.1).sin() * 0.2,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let colors: Vec<Vec<OklabColor>> = (0..3)
+            .map(|body| {
+                let a_base = [0.15, -0.12, 0.05][body];
+                let b_base = [0.08, 0.14, -0.16][body];
+                (0..steps)
+                    .map(|s| {
+                        let t = s as f64 * 0.001;
+                        (0.72, a_base + t * 0.01, b_base - t * 0.005)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let body_alphas = vec![0.65, 0.85, 0.95];
+        (positions, colors, body_alphas)
+    }
+
+    pub fn make_test_resolved_config(width: u32, height: u32) -> ResolvedEffectConfig {
+        ResolvedEffectConfig {
+            width,
+            height,
+            enable_bloom: false,
+            enable_glow: false,
+            enable_chromatic_bloom: false,
+            enable_perceptual_blur: false,
+            enable_micro_contrast: false,
+            enable_gradient_map: false,
+            enable_color_grade: false,
+            enable_champleve: false,
+            enable_aether: false,
+            enable_opalescence: false,
+            enable_edge_luminance: false,
+            enable_atmospheric_depth: false,
+            enable_fine_texture: false,
+            blur_strength: 4.0,
+            blur_radius_scale: 0.006,
+            blur_core_brightness: 10.0,
+            dog_strength: 0.3,
+            dog_sigma_scale: 0.005,
+            dog_ratio: 2.6,
+            glow_strength: 0.25,
+            glow_threshold: 0.7,
+            glow_radius_scale: 0.003,
+            glow_sharpness: 2.6,
+            glow_saturation_boost: 0.2,
+            chromatic_bloom_strength: 0.4,
+            chromatic_bloom_radius_scale: 0.005,
+            chromatic_bloom_separation_scale: 0.001,
+            chromatic_bloom_threshold: 0.2,
+            perceptual_blur_strength: 0.45,
+            color_grade_strength: 0.55,
+            vignette_strength: 0.35,
+            vignette_softness: 2.5,
+            vibrance: 1.2,
+            clarity_strength: 0.3,
+            tone_curve_strength: 0.6,
+            gradient_map_strength: 0.25,
+            gradient_map_hue_preservation: 0.6,
+            gradient_map_palette: 0,
+            opalescence_strength: 0.08,
+            opalescence_scale: 0.01,
+            opalescence_layers: 2,
+            champleve_flow_alignment: 0.6,
+            champleve_interference_amplitude: 0.5,
+            champleve_rim_intensity: 1.8,
+            champleve_rim_warmth: 0.6,
+            champleve_interior_lift: 0.65,
+            aether_flow_alignment: 0.7,
+            aether_scattering_strength: 0.9,
+            aether_iridescence_amplitude: 0.6,
+            aether_caustic_strength: 0.3,
+            micro_contrast_strength: 0.25,
+            micro_contrast_radius: 4,
+            edge_luminance_strength: 0.3,
+            edge_luminance_threshold: 0.2,
+            edge_luminance_brightness_boost: 0.4,
+            atmospheric_depth_strength: 0.1,
+            atmospheric_desaturation: 0.12,
+            atmospheric_darkening: 0.06,
+            atmospheric_fog_color_r: 0.04,
+            atmospheric_fog_color_g: 0.07,
+            atmospheric_fog_color_b: 0.12,
+            fine_texture_strength: 0.12,
+            fine_texture_scale: 0.0018,
+            fine_texture_contrast: 0.35,
+            hdr_scale: 3.0,
+            clip_black: 0.01,
+            clip_white: 0.99,
+        }
+    }
+
+    pub fn make_test_render_config(hdr_scale: f64) -> RenderConfig {
+        RenderConfig { hdr_scale, bloom_mode: BloomMode::None }
+    }
 }
 
 #[cfg(test)]
@@ -367,5 +538,89 @@ mod tests {
         let result = bins.dominant_bin_colors(&spd);
         assert_eq!(result.len(), 2);
         assert!(result[0].1 < NUM_BINS, "dominant bin should be a valid index");
+    }
+
+    // ── rem_euclid boundary tests ──────────────────────────────
+
+    #[test]
+    fn test_lerp_bins_at_exact_num_bins_boundary() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest = Vec::new();
+        bins.lerp_bins(NUM_BINS as f64 - 1e-15, &mut dest);
+        assert_eq!(dest.len(), 4 * 3, "boundary bin should produce valid output");
+        assert!(!dest.is_empty(), "boundary bin should produce valid output");
+    }
+
+    #[test]
+    fn test_lerp_bins_exactly_at_num_bins() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut dest_at = Vec::new();
+        let mut dest_zero = Vec::new();
+        bins.lerp_bins(NUM_BINS as f64, &mut dest_at);
+        bins.lerp_bins(0.0, &mut dest_zero);
+        assert_eq!(dest_at, dest_zero, "bin exactly at NUM_BINS should wrap to 0");
+    }
+
+    #[test]
+    fn test_per_pixel_bin_select_at_boundary() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let edge_vals = vec![NUM_BINS as f64 - 1e-15; 4];
+        let mut dest = Vec::new();
+        bins.per_pixel_bin_select(&edge_vals, &mut dest);
+        assert_eq!(dest.len(), 4 * 3);
+    }
+
+    #[test]
+    fn test_per_pixel_bin_select_large_values() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let large = vec![1000.5; 4];
+        let mut dest = Vec::new();
+        bins.per_pixel_bin_select(&large, &mut dest);
+        assert_eq!(dest.len(), 4 * 3, "large bin values should wrap safely");
+    }
+
+    // ── Edge-case tests ────────────────────────────────────────
+
+    #[test]
+    fn test_from_spd_all_zeros_produces_valid_structure() {
+        let spd = vec![[0.0; NUM_BINS]; 9];
+        let bins = BinBuffers::from_spd(spd, 3, 3);
+        assert_eq!(bins.buffers.len(), NUM_BINS);
+        assert_eq!(bins.pixel_count, 9);
+        let mut dest = Vec::new();
+        bins.full_composite(&mut dest);
+        assert!(dest.iter().all(|&v| v == 0), "all-zero SPD should produce black");
+    }
+
+    #[test]
+    fn test_from_spd_uniform_energy_produces_visible_output() {
+        let spd = vec![[10.0; NUM_BINS]; 4];
+        let bins = BinBuffers::from_spd(spd, 2, 2);
+        let mut dest = Vec::new();
+        bins.full_composite(&mut dest);
+        let any_nonzero = dest.iter().any(|&v| v > 0);
+        assert!(any_nonzero, "uniform non-zero SPD should produce visible composite");
+    }
+
+    #[test]
+    fn test_weighted_blend_single_bin_weight() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        let mut weights = [0.0; NUM_BINS];
+        weights[10] = 1.0;
+        let mut dest_blend = Vec::new();
+        let mut dest_lerp = Vec::new();
+        bins.weighted_blend(&weights, &mut dest_blend);
+        bins.lerp_bins(10.0, &mut dest_lerp);
+        assert_eq!(dest_blend, dest_lerp, "single-bin blend should match lerp at that bin");
+    }
+
+    #[test]
+    fn test_lerp_bins_all_valid_integer_positions() {
+        let bins = BinBuffers::from_spd(make_test_spd(2, 2), 2, 2);
+        for i in 0..NUM_BINS {
+            let mut dest = Vec::new();
+            bins.lerp_bins(i as f64, &mut dest);
+            assert_eq!(dest.len(), 4 * 3, "bin {i} should produce valid output");
+        }
     }
 }

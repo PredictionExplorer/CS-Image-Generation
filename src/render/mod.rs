@@ -539,7 +539,7 @@ pub(crate) fn build_effect_config_from_resolved(
 
 /// Apply energy density wavelength shift to spectral buffer
 /// Hot regions (high energy) shift toward red, cool regions stay blue
-pub(crate) fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
+pub fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
     use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
 
     accum_spd.par_iter_mut().for_each(|spd| {
@@ -584,14 +584,14 @@ const MAX_STEP_CHUNKS: usize = 64;
 const MIN_STEPS_FOR_CHUNKING: usize = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AccumulationBackend {
+pub enum AccumulationBackend {
     ParallelScanlines,
     #[cfg(test)]
     SerialReference,
 }
 
 #[inline]
-pub(crate) fn default_accumulation_backend() -> AccumulationBackend {
+pub fn default_accumulation_backend() -> AccumulationBackend {
     AccumulationBackend::ParallelScanlines
 }
 
@@ -729,7 +729,7 @@ fn accumulate_with_scanline_bands(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn accumulate_spectral_steps(
+pub fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
     depth_weight: Option<&mut [f64]>,
     scene: SpectralScene<'_>,
@@ -950,7 +950,7 @@ fn pass_2_write_frames_spectral_with_backend(
     backend: AccumulationBackend,
     camera: Option<&camera::Camera3D>,
     original_positions: Option<&[Vec<Vector3<f64>>]>,
-    #[cfg(feature = "gpu")] gpu_context: Option<&gpu::GpuContext>,
+    #[cfg(feature = "gpu")] mut gpu_context: Option<&mut gpu::GpuContext>,
 ) -> Result<()> {
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     let width = resolved_config.width;
@@ -982,6 +982,21 @@ fn pass_2_write_frames_spectral_with_backend(
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
     let mut spare_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
+    #[cfg(feature = "gpu")]
+    if let (Some(gpu), Some(orig)) = (gpu_context.as_deref_mut(), original_positions) {
+        gpu.prepare(
+            orig,
+            scene.colors,
+            scene.body_alphas,
+            total_steps,
+            render_config.hdr_scale as f64,
+            width,
+            height,
+            ctx.bounds(),
+            constants::DEFAULT_DT,
+        );
+    }
+
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
@@ -1009,23 +1024,10 @@ fn pass_2_write_frames_spectral_with_backend(
         }
 
         #[cfg(feature = "gpu")]
-        let used_gpu = if let (Some(gpu), Some(cam), Some(orig)) =
-            (gpu_context, camera, original_positions)
+        let used_gpu = if let (Some(ref gpu), Some(cam), Some(orig)) =
+            (gpu_context.as_deref(), camera, original_positions)
         {
-            let frame_spd = gpu.accumulate_frame(
-                orig,
-                scene.colors,
-                scene.body_alphas,
-                cam,
-                checkpoint_step,
-                checkpoint_step + 1,
-                render_config.hdr_scale as f64,
-                width,
-                height,
-                ctx.bounds(),
-                orig,
-                dt,
-            );
+            let frame_spd = gpu.render_frame(cam, orig, checkpoint_step, checkpoint_step + 1);
             accum_spd.copy_from_slice(&frame_spd);
             true
         } else {
@@ -1128,7 +1130,7 @@ pub fn pass_2_write_frames_spectral(
     enable_temporal_smoothing: bool,
     camera: Option<&camera::Camera3D>,
     original_positions: Option<&[Vec<Vector3<f64>>]>,
-    #[cfg(feature = "gpu")] gpu_context: Option<&gpu::GpuContext>,
+    #[cfg(feature = "gpu")] gpu_context: Option<&mut gpu::GpuContext>,
 ) -> Result<()> {
     pass_2_write_frames_spectral_with_backend(
         scene,
@@ -2598,5 +2600,117 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Option A camera tests ──────────────────────────────────
+
+    #[test]
+    fn test_option_a_single_camera_projection_is_finite() {
+        let scene_data = make_circular_scene(500);
+        let cam = camera::Camera3D::new(
+            &camera::Camera3DConfig::default(),
+            &scene_data.0,
+        );
+        let projected = cam.project_all_positions_at_step(&scene_data.0, 250);
+        assert_eq!(projected.len(), 3);
+        assert_eq!(projected[0].len(), 500);
+        for body in &projected {
+            for v in body {
+                assert!(v[0].is_finite(), "proj_x not finite: {:?}", v);
+                assert!(v[1].is_finite(), "proj_y not finite: {:?}", v);
+                assert!(v[2].is_finite(), "depth not finite: {:?}", v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_option_a_different_cameras_produce_different_projections() {
+        let scene_data = make_circular_scene(500);
+        let cam = camera::Camera3D::new(
+            &camera::Camera3DConfig::default(),
+            &scene_data.0,
+        );
+        let proj_early = cam.project_all_positions_at_step(&scene_data.0, 0);
+        let proj_late = cam.project_all_positions_at_step(&scene_data.0, 499);
+
+        let diff: f64 = proj_early[0]
+            .iter()
+            .zip(proj_late[0].iter())
+            .map(|(a, b)| (a - b).norm())
+            .sum();
+
+        assert!(
+            diff > 0.1,
+            "early and late camera projections should differ significantly (diff={diff})"
+        );
+    }
+
+    #[test]
+    fn test_option_a_global_bounds_covers_all_cameras() {
+        let scene_data = make_circular_scene(500);
+        let cam = camera::Camera3D::new(
+            &camera::Camera3DConfig::default(),
+            &scene_data.0,
+        );
+        let checkpoints: Vec<usize> = (0..500).step_by(50).collect();
+        let bounds = cam.compute_global_bounds(&scene_data.0, &checkpoints);
+
+        for &step in &checkpoints {
+            let proj = cam.project_all_positions_at_step(&scene_data.0, step);
+            for body in &proj {
+                for v in body {
+                    assert!(
+                        v[0] >= bounds.min_x && v[0] <= bounds.max_x,
+                        "x={} outside bounds [{}, {}] at step {step}",
+                        v[0], bounds.min_x, bounds.max_x
+                    );
+                    assert!(
+                        v[1] >= bounds.min_y && v[1] <= bounds.max_y,
+                        "y={} outside bounds [{}, {}] at step {step}",
+                        v[1], bounds.min_y, bounds.max_y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_option_a_accumulation_produces_nonzero_spd() {
+        let (positions, colors, body_alphas) = make_circular_scene(200);
+        let cam = camera::Camera3D::new(
+            &camera::Camera3DConfig::default(),
+            &positions,
+        );
+        let checkpoints = vec![199usize];
+        let bounds = cam.compute_global_bounds(&positions, &checkpoints);
+        let frame_positions = cam.project_all_positions_at_step(&positions, 199);
+
+        let w = 64u32;
+        let h = 36u32;
+        let ctx = context::RenderContext::new_with_bounds(w, h, bounds);
+        let pixel_count = ctx.pixel_count();
+        let mut accum = vec![[0.0f64; NUM_BINS]; pixel_count];
+
+        let scene = SpectralScene::new(&frame_positions, &colors, &body_alphas);
+        let dt = constants::DEFAULT_DT;
+        let velocity = velocity_hdr::VelocityHdrCalculator::new(&frame_positions, dt);
+
+        accumulate_spectral_steps(
+            &mut accum,
+            None,
+            scene,
+            &ctx,
+            &velocity,
+            0,
+            200,
+            3.0,
+            AccumulationBackend::ParallelScanlines,
+        );
+
+        let total_energy: f64 = accum.iter().flat_map(|px| px.iter()).sum();
+        assert!(
+            total_energy > 0.0,
+            "Option A accumulation should produce non-zero energy"
+        );
     }
 }

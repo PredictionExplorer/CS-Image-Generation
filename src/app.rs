@@ -264,7 +264,7 @@ pub fn render_video(
     spd_out: &mut Option<Vec<[f64; NUM_BINS]>>,
     camera: Option<&render::camera::Camera3D>,
     original_positions: Option<&[Vec<nalgebra::Vector3<f64>>]>,
-    #[cfg(feature = "gpu")] gpu_context: Option<&render::gpu::GpuContext>,
+    #[cfg(feature = "gpu")] mut gpu_context: Option<&mut render::gpu::GpuContext>,
 ) -> Result<()> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -303,7 +303,7 @@ pub fn render_video(
                 camera,
                 original_positions,
                 #[cfg(feature = "gpu")]
-                gpu_context,
+                gpu_context.as_deref_mut(),
             )?;
             Ok(())
         },

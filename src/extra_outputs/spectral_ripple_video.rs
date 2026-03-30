@@ -1,23 +1,17 @@
 //! Spectral ripple video — radial waves expand from the center, momentarily
 //! revealing each pixel's dominant wavelength as a monochromatic flash.
 
-use crate::extra_outputs::spectral_video_utils::BinBuffers;
-use crate::render::apply_energy_density_shift;
-use crate::render::context::RenderContext;
-use crate::render::velocity_hdr;
+use crate::extra_outputs::spectral_video_utils::{BinBuffers, dominant_colors_from_shifted_spd};
 use crate::render::{
-    SpectralRenderSettings, SpectralScene, VideoEncodingOptions,
-    accumulate_spectral_steps, constants, create_video_from_frames_singlepass,
-    default_accumulation_backend,
+    VideoEncodingOptions, constants, create_video_from_frames_singlepass,
 };
-use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin, wavelength_to_rgb};
+use crate::spectrum::NUM_BINS;
 use rayon::prelude::*;
 use tracing::info;
 
 const RIPPLE_DURATION_SECONDS: f64 = 6.0;
 const NUM_WAVES: usize = 3;
 const WAVE_WIDTH: f64 = 0.08;
-const DISPLAY_GAMMA: f64 = 2.2;
 
 #[inline]
 fn smoothstep(t: f64) -> f64 {
@@ -25,110 +19,24 @@ fn smoothstep(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Same as [`BinBuffers::from_spd`], but `accum_spd` already has
-/// [`apply_energy_density_shift`] applied (avoids double-shifting).
-fn bin_buffers_from_shifted_spd(
-    accum_spd: Vec<[f64; NUM_BINS]>,
-    width: u32,
-    height: u32,
-) -> BinBuffers {
-    let pixel_count = (width * height) as usize;
-    let buffers: Vec<Vec<[f64; 3]>> = (0..NUM_BINS)
-        .into_par_iter()
-        .map(|bin| {
-            let wavelength = wavelength_nm_for_bin(bin);
-            let (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength);
-
-            let max_val: f64 = accum_spd
-                .iter()
-                .map(|spd| spd[bin])
-                .fold(0.0f64, f64::max)
-                .max(1e-10);
-
-            let mut buf = vec![[0.0f64; 3]; pixel_count];
-            for (px, spd) in buf.iter_mut().zip(accum_spd.iter()) {
-                let normalized = (spd[bin] / max_val).clamp(0.0, 1.0);
-                px[0] = (normalized * tint_r).powf(1.0 / DISPLAY_GAMMA);
-                px[1] = (normalized * tint_g).powf(1.0 / DISPLAY_GAMMA);
-                px[2] = (normalized * tint_b).powf(1.0 / DISPLAY_GAMMA);
-            }
-            buf
-        })
-        .collect();
-
-    BinBuffers { buffers, pixel_count, width, height }
-}
-
-fn dominant_colors_from_shifted_spd(shifted_spd: &[[f64; NUM_BINS]]) -> Vec<[f64; 3]> {
-    let max_total_energy = shifted_spd
-        .par_iter()
-        .map(|spd| spd.iter().sum::<f64>())
-        .reduce(|| 0.0f64, f64::max)
-        .max(1e-10);
-    let log_denom = (1.0 + max_total_energy).ln();
-
-    shifted_spd
-        .par_iter()
-        .map(|spd| {
-            let total_energy: f64 = spd.iter().sum();
-            let dominant = spd
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let wl = wavelength_nm_for_bin(dominant);
-            let (tr, tg, tb) = wavelength_to_rgb(wl);
-            let brightness = (1.0 + total_energy).ln() / log_denom;
-            let r = (tr * brightness).powf(1.0 / DISPLAY_GAMMA);
-            let g = (tg * brightness).powf(1.0 / DISPLAY_GAMMA);
-            let b = (tb * brightness).powf(1.0 / DISPLAY_GAMMA);
-            [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]
-        })
-        .collect()
-}
-
 pub fn render_spectral_ripple_video(
-    scene: SpectralScene<'_>,
-    settings: SpectralRenderSettings<'_>,
+    bins: &BinBuffers,
+    shifted_spd: &[[f64; NUM_BINS]],
     output_path: &str,
     fast_encode: bool,
 ) -> crate::render::error::Result<()> {
+    let width = bins.width;
+    let height = bins.height;
+    let fps = constants::DEFAULT_VIDEO_FPS;
+    let total_frames = (RIPPLE_DURATION_SECONDS * fps as f64) as usize;
+    let tf = total_frames as f64;
+
     info!(
         "Rendering spectral ripple video ({:.0}s, {} waves)...",
         RIPPLE_DURATION_SECONDS, NUM_WAVES
     );
 
-    let resolved = settings.resolved_config;
-    let width = resolved.width;
-    let height = resolved.height;
-    let fps = constants::DEFAULT_VIDEO_FPS;
-    let total_frames = (RIPPLE_DURATION_SECONDS * fps as f64) as usize;
-    let tf = total_frames as f64;
-
-    let ctx = RenderContext::new(width, height, scene.positions, settings.aspect_correction);
-    let dt = constants::DEFAULT_DT;
-    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
-    let total_steps = scene.step_count();
-    accumulate_spectral_steps(
-        &mut accum_spd,
-        None,
-        scene,
-        &ctx,
-        &velocity_calc,
-        0,
-        total_steps,
-        settings.render_config.hdr_scale,
-        default_accumulation_backend(),
-    );
-
-    let mut shifted_spd = accum_spd.clone();
-    apply_energy_density_shift(&mut shifted_spd);
-
-    let dominant_colors = dominant_colors_from_shifted_spd(&shifted_spd);
-    let bins = bin_buffers_from_shifted_spd(shifted_spd, width, height);
+    let dominant_colors = dominant_colors_from_shifted_spd(shifted_spd);
 
     let mut composite_u16 = Vec::<u16>::new();
     bins.full_composite(&mut composite_u16);
@@ -153,6 +61,7 @@ pub fn render_spectral_ripple_video(
         VideoEncodingOptions::default()
     };
 
+    let pixel_count = bins.pixel_count;
     let width_usize = width as usize;
 
     create_video_from_frames_singlepass(
@@ -160,7 +69,7 @@ pub fn render_spectral_ripple_video(
         height,
         fps,
         |out| {
-            let mut frame_buf = vec![0u16; ctx.pixel_count() * 3];
+            let mut frame_buf = vec![0u16; pixel_count * 3];
             for frame in 0..total_frames {
                 let t = frame as f64 / tf;
                 frame_buf
@@ -216,6 +125,7 @@ pub fn render_spectral_ripple_video(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extra_outputs::spectral_video_utils::dominant_colors_from_shifted_spd;
 
     #[test]
     fn test_smoothstep_boundaries() {
@@ -265,5 +175,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_ripple_video_smoke() {
+        use crate::extra_outputs::spectral_video_utils::test_helpers::*;
+        use crate::render::{
+            SpectralRenderSettings, SpectralScene, accumulate_spectral_steps,
+            apply_energy_density_shift, constants, default_accumulation_backend,
+        };
+        use crate::render::context::RenderContext;
+        use crate::render::velocity_hdr;
+        let (positions, colors, body_alphas) = make_test_scene(200);
+        let resolved = make_test_resolved_config(64, 36);
+        let render_config = make_test_render_config(resolved.hdr_scale);
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let ctx = RenderContext::new(64, 36, scene.positions, settings.aspect_correction);
+        let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, constants::DEFAULT_DT);
+        let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut accum_spd, None, scene, &ctx, &velocity_calc,
+            0, scene.step_count(), settings.render_config.hdr_scale,
+            default_accumulation_backend(),
+        );
+        apply_energy_density_shift(&mut accum_spd);
+        let bins = BinBuffers::from_shifted_spd(&accum_spd, 64, 36);
+        let dir = std::env::temp_dir().join("spectral_test_ripple");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("ripple.mp4");
+        let result = render_spectral_ripple_video(&bins, &accum_spd, path.to_str().unwrap(), true);
+        assert!(result.is_ok(), "ripple video render failed: {:?}", result.err());
     }
 }

@@ -1,5 +1,6 @@
 // SDF line splatting -- one invocation per line segment (3 per timestep).
 // Matches the CPU draw_line_segment_aa_spectral_rows algorithm.
+// Uses atomic CAS loop to accumulate f32 energy without fixed-point truncation.
 
 struct SplatUniforms {
     width: u32,
@@ -10,28 +11,33 @@ struct SplatUniforms {
     bbox_min_y: f32,
     bbox_width: f32,
     bbox_height: f32,
+    energy_prescale: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
-// Per-segment data packed: (bin0_f, bin1_f, alpha0, alpha1, hdr_mult)
 @group(0) @binding(0) var<uniform> params: SplatUniforms;
 @group(0) @binding(1) var<storage, read> projected: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> seg_data: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> spd: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> hdr_mults: array<vec4<f32>>;
 
-fn float_to_fixed(v: f32) -> u32 {
-    return bitcast<u32>(i32(v * 65536.0));
-}
-
-fn fixed_to_float(v: u32) -> f32 {
-    return f32(bitcast<i32>(v)) / 65536.0;
-}
-
-fn atomic_add_fixed(idx: u32, value: f32) {
-    let fixed_val = bitcast<u32>(i32(value * 65536.0));
-    if fixed_val == 0u {
+fn atomic_add_f32(idx: u32, value: f32) {
+    if abs(value) < 1e-15 {
         return;
     }
-    atomicAdd(&spd[idx], fixed_val);
+    var old = atomicLoad(&spd[idx]);
+    loop {
+        let old_f = bitcast<f32>(old);
+        let new_f = old_f + value;
+        let new_u = bitcast<u32>(new_f);
+        let result = atomicCompareExchangeWeak(&spd[idx], old, new_u);
+        if result.exchanged {
+            break;
+        }
+        old = result.old_value;
+    }
 }
 
 fn world_to_pixel(proj_x: f32, proj_y: f32) -> vec2<f32> {
@@ -41,8 +47,6 @@ fn world_to_pixel(proj_x: f32, proj_y: f32) -> vec2<f32> {
 }
 
 const NUM_BINS: u32 = 64u;
-const LAMBDA_START: f32 = 380.0;
-const BIN_WIDTH: f32 = 5.0; // (700-380)/64 = 5.0
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -94,11 +98,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bin1_f = sd.y;
     let alpha0 = sd.z;
     let alpha1 = sd.w;
-    let hdr_mult = seg_data[params.num_segments + seg_idx].x;
+    let hdr_mult = hdr_mults[seg_idx].x;
 
     let energy_conservation = thickness / effective_thickness;
     let depth_fade = clamp(exp(-abs(avg_z) * 0.002), 0.05, 1.0);
-    let base_energy_mult = params.hdr_scale * hdr_mult * depth_fade * energy_conservation;
+    let base_energy_mult = params.hdr_scale * hdr_mult * depth_fade * energy_conservation * params.energy_prescale;
 
     let inv_thick_sq = 1.0 / (effective_thickness * effective_thickness);
 
@@ -135,10 +139,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let base = pixel_idx * NUM_BINS;
 
             if bin_right == bin_left {
-                atomic_add_fixed(base + bin_left, final_energy);
+                atomic_add_f32(base + bin_left, final_energy);
             } else {
-                atomic_add_fixed(base + bin_left, final_energy * (1.0 - w_right));
-                atomic_add_fixed(base + bin_right, final_energy * w_right);
+                atomic_add_f32(base + bin_left, final_energy * (1.0 - w_right));
+                atomic_add_f32(base + bin_right, final_energy * w_right);
             }
         }
     }
