@@ -376,8 +376,8 @@ impl Camera3D {
             let z_floor = focus_dist * 0.05;
 
             for step in (0..total_steps).step_by((total_steps / 500).max(1)) {
-                for body in 0..num_bodies {
-                    let d = positions[body][step] - p.eye;
+                for body_pos in positions.iter().take(num_bodies) {
+                    let d = body_pos[step] - p.eye;
                     let z_cam = d.dot(&fwd).max(z_floor);
                     let x_cam = d.dot(&right);
                     let y_cam = d.dot(&true_up);
@@ -722,5 +722,196 @@ mod tests {
             "average depth should be moderate (got {})",
             avg_depth
         );
+    }
+
+    // ─── Drift + 3D camera integration tests ────────────────────
+
+    /// Apply a uniform translation drift to positions for testing.
+    fn apply_test_drift(positions: &mut [Vec<Vector3<f64>>], offset: Vector3<f64>) {
+        for body in positions.iter_mut() {
+            let len = body.len().max(1) as f64;
+            for (step, pos) in body.iter_mut().enumerate() {
+                let t = step as f64 / len;
+                *pos += offset * t;
+            }
+        }
+    }
+
+    #[test]
+    fn drift_with_3d_camera_produces_finite_projections() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(5.0, 3.0, 1.0));
+
+        let cam = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let proj = cam.project_all_positions(&drifted);
+
+        assert_eq!(proj.len(), 3);
+        assert_eq!(proj[0].len(), 200);
+        for body in &proj {
+            for v in body {
+                assert!(v[0].is_finite(), "drifted proj_x not finite: {:?}", v);
+                assert!(v[1].is_finite(), "drifted proj_y not finite: {:?}", v);
+                assert!(v[2].is_finite(), "drifted depth not finite: {:?}", v);
+            }
+        }
+    }
+
+    #[test]
+    fn drift_with_3d_camera_differs_from_no_drift() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(5.0, 3.0, 1.0));
+
+        let cam = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+
+        let proj_no_drift = cam.project_all_positions(&undrifted);
+        let proj_with_drift = cam.project_all_positions(&drifted);
+
+        let diff: f64 = proj_no_drift[0]
+            .iter()
+            .zip(proj_with_drift[0].iter())
+            .map(|(a, b)| (a - b).norm())
+            .sum();
+
+        assert!(
+            diff > 0.1,
+            "drifted projection should differ significantly from un-drifted (diff={:.6})",
+            diff
+        );
+    }
+
+    #[test]
+    fn decoupled_camera_tracks_original_orbit_center() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(10.0, 0.0, 0.0));
+
+        let cam_from_undrifted = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let cam_from_drifted = Camera3D::new(&Camera3DConfig::default(), &drifted);
+
+        let mid = 100;
+        let target_undrifted = cam_from_undrifted.poses[mid].target;
+        let target_drifted = cam_from_drifted.poses[mid].target;
+
+        let target_diff = (target_undrifted - target_drifted).norm();
+        assert!(
+            target_diff > 0.1,
+            "camera targets should differ when built from different positions (diff={:.6})",
+            target_diff
+        );
+    }
+
+    #[test]
+    fn coupled_camera_interpolates_tracking() {
+        use crate::drift::lerp_positions;
+
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(10.0, 0.0, 0.0));
+
+        let cam_0 = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let cam_1 = Camera3D::new(&Camera3DConfig::default(), &drifted);
+
+        let coupled_half = lerp_positions(&undrifted, &drifted, 0.5);
+        let cam_half = Camera3D::new(&Camera3DConfig::default(), &coupled_half);
+
+        let mid = 100;
+        let t0 = cam_0.poses[mid].target;
+        let t1 = cam_1.poses[mid].target;
+        let th = cam_half.poses[mid].target;
+
+        let d_to_0 = (th - t0).norm();
+        let d_to_1 = (th - t1).norm();
+
+        assert!(
+            d_to_0 > 0.01 && d_to_1 > 0.01,
+            "half-coupled camera target should be between extremes \
+             (d_to_0={:.6}, d_to_1={:.6})",
+            d_to_0,
+            d_to_1,
+        );
+    }
+
+    #[test]
+    fn global_bounds_encompass_drifted_positions() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(5.0, 3.0, 1.0));
+
+        let cam = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let checkpoints: Vec<usize> = (0..200).step_by(10).collect();
+
+        let bounds = cam.compute_global_bounds(&drifted, &checkpoints);
+
+        assert!(bounds.width > 0.0, "bounds width should be positive");
+        assert!(bounds.height > 0.0, "bounds height should be positive");
+        assert!(bounds.min_x.is_finite());
+        assert!(bounds.max_x.is_finite());
+        assert!(bounds.min_y.is_finite());
+        assert!(bounds.max_y.is_finite());
+
+        let proj = cam.project_all_positions(&drifted);
+        for body in &proj {
+            for v in body {
+                assert!(
+                    v[0] >= bounds.min_x - bounds.width * 0.1
+                        && v[0] <= bounds.max_x + bounds.width * 0.1,
+                    "projected x={:.3} outside padded bounds [{:.3}, {:.3}]",
+                    v[0],
+                    bounds.min_x,
+                    bounds.max_x,
+                );
+                assert!(
+                    v[1] >= bounds.min_y - bounds.height * 0.1
+                        && v[1] <= bounds.max_y + bounds.height * 0.1,
+                    "projected y={:.3} outside padded bounds [{:.3}, {:.3}]",
+                    v[1],
+                    bounds.min_y,
+                    bounds.max_y,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn drifted_bounds_wider_than_undrifted() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(8.0, 4.0, 2.0));
+
+        let cam = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let checkpoints: Vec<usize> = (0..200).step_by(10).collect();
+
+        let bounds_no_drift = cam.compute_global_bounds(&undrifted, &checkpoints);
+        let bounds_with_drift = cam.compute_global_bounds(&drifted, &checkpoints);
+
+        let area_no_drift = bounds_no_drift.width * bounds_no_drift.height;
+        let area_with_drift = bounds_with_drift.width * bounds_with_drift.height;
+
+        assert!(
+            area_with_drift > area_no_drift,
+            "drifted bounds area ({:.3}) should exceed un-drifted ({:.3})",
+            area_with_drift,
+            area_no_drift,
+        );
+    }
+
+    #[test]
+    fn project_at_step_with_drifted_positions_is_finite() {
+        let undrifted = equilateral_orbit(200);
+        let mut drifted = undrifted.clone();
+        apply_test_drift(&mut drifted, Vector3::new(5.0, 3.0, 1.0));
+
+        let cam = Camera3D::new(&Camera3DConfig::default(), &undrifted);
+        let proj = cam.project_all_positions_at_step(&drifted, 100);
+
+        for body in &proj {
+            for v in body {
+                assert!(v[0].is_finite(), "at_step proj_x not finite: {:?}", v);
+                assert!(v[1].is_finite(), "at_step proj_y not finite: {:?}", v);
+                assert!(v[2].is_finite(), "at_step depth not finite: {:?}", v);
+            }
+        }
     }
 }

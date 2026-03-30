@@ -216,6 +216,30 @@ impl DriftTransform for EllipticalDrift {
     }
 }
 
+/// Linearly interpolate between two position sets.
+///
+/// At `t = 0.0` the result equals `a`; at `t = 1.0` it equals `b`.
+/// Used to control how much the 3D camera tracks drift motion
+/// (`drift_camera_coupling`).
+pub fn lerp_positions(
+    a: &[Vec<Vector3<f64>>],
+    b: &[Vec<Vector3<f64>>],
+    t: f64,
+) -> Vec<Vec<Vector3<f64>>> {
+    let t = t.clamp(0.0, 1.0);
+    let one_minus_t = 1.0 - t;
+    a.iter()
+        .zip(b.iter())
+        .map(|(body_a, body_b)| {
+            body_a
+                .iter()
+                .zip(body_b.iter())
+                .map(|(pa, pb)| pa * one_minus_t + pb * t)
+                .collect()
+        })
+        .collect()
+}
+
 /// Parse drift mode from string
 pub fn parse_drift_mode(
     mode: &str,
@@ -423,6 +447,49 @@ mod tests {
             drift.apply(&mut positions, 0.001);
             assert_ne!(positions, original, "drift mode {mode} should move bodies");
         }
+    }
+
+    #[test]
+    fn lerp_positions_at_zero_returns_a() {
+        let a = test_bodies();
+        let b = vec![
+            vec![Vector3::new(10.0, 10.0, 10.0); 3],
+            vec![Vector3::new(20.0, 20.0, 20.0); 3],
+            vec![Vector3::new(30.0, 30.0, 30.0); 3],
+        ];
+        let result = super::lerp_positions(&a, &b, 0.0);
+        assert_eq!(result, a);
+    }
+
+    #[test]
+    fn lerp_positions_at_one_returns_b() {
+        let a = test_bodies();
+        let b = vec![
+            vec![Vector3::new(10.0, 10.0, 10.0); 3],
+            vec![Vector3::new(20.0, 20.0, 20.0); 3],
+            vec![Vector3::new(30.0, 30.0, 30.0); 3],
+        ];
+        let result = super::lerp_positions(&a, &b, 1.0);
+        assert_eq!(result, b);
+    }
+
+    #[test]
+    fn lerp_positions_at_half_is_midpoint() {
+        let a = vec![vec![Vector3::new(0.0, 0.0, 0.0); 1]];
+        let b = vec![vec![Vector3::new(10.0, 20.0, 30.0); 1]];
+        let result = super::lerp_positions(&a, &b, 0.5);
+        let expected = Vector3::new(5.0, 10.0, 15.0);
+        assert!((result[0][0] - expected).norm() < 1e-12);
+    }
+
+    #[test]
+    fn lerp_positions_clamps_out_of_range() {
+        let a = vec![vec![Vector3::new(0.0, 0.0, 0.0); 1]];
+        let b = vec![vec![Vector3::new(10.0, 10.0, 10.0); 1]];
+        let below = super::lerp_positions(&a, &b, -0.5);
+        let above = super::lerp_positions(&a, &b, 1.5);
+        assert_eq!(below, a, "t < 0 should clamp to a");
+        assert_eq!(above, b, "t > 1 should clamp to b");
     }
 
     #[test]

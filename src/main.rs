@@ -115,6 +115,9 @@ struct Args {
     #[arg(long, default_value_t = 1.0, help = "Camera inertia multiplier — higher values produce smoother, more viscous camera movement (default 1.0, useful range 0.1–10.0)")]
     camera_inertia: f64,
 
+    #[arg(long, default_value_t = 0.0, help = "How much the 3D camera tracks drift motion (0.0 = camera ignores drift for maximum sweep, 1.0 = camera fully follows drift)")]
+    drift_camera_coupling: f64,
+
     #[cfg(feature = "gpu")]
     #[arg(long, default_value_t = false, help = "Use GPU-accelerated rendering via wgpu (Metal on macOS, Vulkan on Linux)")]
     gpu: bool,
@@ -276,15 +279,16 @@ fn main() -> Result<()> {
     profile.push(timer.finish_with_throughput(Some(format!("{} steps", args.steps))));
 
     // ── Drift Transform ──
-    let timer = StageTimer::start("Drift Transform");
-    let drift_config = if enhancements.camera_3d {
-        if args.drift != DriftModeArg::None {
-            warn!("STAGE 2.5/7: Drift skipped (incompatible with 3D camera)");
-        } else {
-            info!("STAGE 2.5/7: Drift disabled");
-        }
+    // Save un-drifted positions so the 3D camera can track the intrinsic
+    // orbit dynamics while the bodies themselves sweep along the drift arc.
+    let undrifted_positions = if enhancements.camera_3d && args.drift != DriftModeArg::None {
+        Some(positions.clone())
+    } else {
         None
-    } else if args.drift != DriftModeArg::None {
+    };
+
+    let timer = StageTimer::start("Drift Transform");
+    let drift_config = if args.drift != DriftModeArg::None {
         app::apply_drift_transformation(
             &mut positions,
             args.drift.as_str(),
@@ -297,25 +301,43 @@ fn main() -> Result<()> {
         info!("STAGE 2.5/7: Drift disabled");
         None
     };
-    profile.push(timer.finish_with_throughput(Some(
-        if enhancements.camera_3d && args.drift != DriftModeArg::None {
-            "skipped (3D camera)"
-        } else {
-            args.drift.as_str()
-        },
-    )));
+    profile.push(timer.finish_with_throughput(Some(args.drift.as_str())));
 
     // ── 3D Camera Projection ──
+    // When drift is active with the 3D camera, the camera is built from
+    // un-drifted (or partially-coupled) positions so it follows the natural
+    // three-body dynamics. The drifted positions are then projected through
+    // that camera, making the drift arc visible in the final image.
     let projected_storage;
     let camera_storage: Option<render::camera::Camera3D>;
     let render_positions: &[Vec<nalgebra::Vector3<f64>>] = if enhancements.camera_3d {
         let timer = StageTimer::start("3D Camera Projection");
+
+        let camera_input_positions = match &undrifted_positions {
+            Some(undrifted) => {
+                let coupling = args.drift_camera_coupling.clamp(0.0, 1.0);
+                if coupling > 0.0 {
+                    info!(
+                        "   => Drift camera coupling: {:.2} (camera partially tracks drift)",
+                        coupling
+                    );
+                    std::borrow::Cow::Owned(
+                        three_body_problem::drift::lerp_positions(undrifted, &positions, coupling),
+                    )
+                } else {
+                    info!("   => Camera decoupled from drift (tracks intrinsic orbit only)");
+                    std::borrow::Cow::Borrowed(undrifted.as_slice())
+                }
+            }
+            None => std::borrow::Cow::Borrowed(positions.as_slice()),
+        };
+
         let camera = render::camera::Camera3D::new(
             &render::camera::Camera3DConfig {
                 inertia: args.camera_inertia,
                 ..Default::default()
             },
-            &positions,
+            &camera_input_positions,
         );
         projected_storage = camera.project_all_positions(&positions);
         camera_storage = Some(camera);
@@ -376,7 +398,11 @@ fn main() -> Result<()> {
     let mut spd_buffer: Option<Vec<[f64; render::NUM_BINS]>> = None;
     let timer = StageTimer::start("Video Render");
     let original_pos_for_camera: Option<&[Vec<nalgebra::Vector3<f64>>]> =
-        if camera_storage.is_some() { Some(&positions) } else { None };
+        if camera_storage.is_some() {
+            Some(&positions)
+        } else {
+            None
+        };
 
     #[cfg(feature = "gpu")]
     let mut gpu_ctx = if args.gpu && camera_storage.is_some() {
@@ -914,6 +940,7 @@ mod tests {
         assert!(!args.fast_encode);
         assert!(!args.extras);
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);
+        assert_eq!(args.drift_camera_coupling, 0.0);
     }
 
     #[test]
@@ -970,5 +997,41 @@ mod tests {
         assert!(args.extras);
         assert!(args.fast_encode);
         assert!(args.no_wallpapers);
+    }
+
+    #[test]
+    fn test_drift_camera_coupling_default() {
+        let args = Args::parse_from(["three_body_problem"]);
+        assert!(
+            (args.drift_camera_coupling - 0.0).abs() < f64::EPSILON,
+            "drift_camera_coupling should default to 0.0"
+        );
+    }
+
+    #[test]
+    fn test_drift_camera_coupling_custom() {
+        let args = Args::parse_from([
+            "three_body_problem",
+            "--drift-camera-coupling",
+            "0.5",
+        ]);
+        assert!(
+            (args.drift_camera_coupling - 0.5).abs() < f64::EPSILON,
+            "drift_camera_coupling should be 0.5"
+        );
+    }
+
+    #[test]
+    fn test_drift_with_3d_camera_flags() {
+        let args = Args::parse_from([
+            "three_body_problem",
+            "--drift",
+            "elliptical",
+            "--drift-camera-coupling",
+            "0.3",
+        ]);
+        assert_eq!(args.drift, DriftModeArg::Elliptical);
+        assert!((args.drift_camera_coupling - 0.3).abs() < f64::EPSILON);
+        assert!(!args.no_camera_3d, "3D camera should be on by default");
     }
 }
