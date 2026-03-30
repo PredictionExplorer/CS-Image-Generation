@@ -308,25 +308,17 @@ pub fn render_video(
     Ok(accum_spd)
 }
 
-/// Generate the spectral gallery (64 per-bin images + dominant wavelength heatmap).
-pub fn generate_spectral_gallery(
-    accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
-    width: u32,
-    height: u32,
-    spectral_dir: &str,
-) -> Result<()> {
-    Ok(render::spectral_output::generate_spectral_gallery(accum_spd, width, height, spectral_dir)?)
-}
-
-/// Generate six spectral cycle video variants.
-pub fn generate_spectral_cycle_videos(
+/// Generate all spectral outputs: gallery (64 PNGs + heatmap) and 6 cycle videos.
+///
+/// Builds `BinBuffers` once and shares them between gallery and cycle video generation.
+pub fn generate_spectral_outputs(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
     spectral_dir: &str,
     fast_encode: bool,
 ) -> Result<()> {
-    Ok(render::spectral_output::generate_spectral_cycle_videos(
+    Ok(render::spectral_output::generate_all_spectral_outputs(
         accum_spd,
         width,
         height,

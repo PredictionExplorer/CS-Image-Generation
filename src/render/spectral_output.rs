@@ -66,6 +66,32 @@ impl BinBuffers {
 // Spectral Gallery (Section 9)
 // ---------------------------------------------------------------------------
 
+/// Generate all spectral outputs: gallery (64 PNGs + heatmap) and 6 cycle videos.
+///
+/// Builds `BinBuffers` once and shares them between gallery and cycle video generation,
+/// avoiding the cost of a redundant second build.
+pub fn generate_all_spectral_outputs(
+    accum_spd: &[[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    output_dir: &str,
+    fast_encode: bool,
+) -> Result<()> {
+    info!("Building shared BinBuffers ({NUM_BINS} bins)...");
+    let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+
+    generate_spectral_gallery_with_buffers(accum_spd, &bin_buffers, width, height, output_dir)?;
+    generate_spectral_cycle_videos_with_buffers(
+        &bin_buffers,
+        width,
+        height,
+        output_dir,
+        fast_encode,
+    )?;
+
+    Ok(())
+}
+
 /// Generate 64 per-bin 16-bit PNGs and a dominant-wavelength heatmap.
 pub fn generate_spectral_gallery(
     accum_spd: &[[f64; NUM_BINS]],
@@ -73,9 +99,18 @@ pub fn generate_spectral_gallery(
     height: u32,
     output_dir: &str,
 ) -> Result<()> {
-    info!("Generating spectral gallery ({NUM_BINS} bin images)...");
-
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+    generate_spectral_gallery_with_buffers(accum_spd, &bin_buffers, width, height, output_dir)
+}
+
+fn generate_spectral_gallery_with_buffers(
+    accum_spd: &[[f64; NUM_BINS]],
+    bin_buffers: &BinBuffers,
+    width: u32,
+    height: u32,
+    output_dir: &str,
+) -> Result<()> {
+    info!("Generating spectral gallery ({NUM_BINS} bin images)...");
 
     // Write per-bin PNGs in parallel
     (0..NUM_BINS).into_par_iter().try_for_each(|bin| {
@@ -194,12 +229,22 @@ pub fn generate_spectral_cycle_videos(
     output_dir: &str,
     fast_encode: bool,
 ) -> Result<()> {
-    info!("Generating spectral cycle videos (6 variants)...");
-
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+    generate_spectral_cycle_videos_with_buffers(&bin_buffers, width, height, output_dir, fast_encode)
+}
+
+fn generate_spectral_cycle_videos_with_buffers(
+    bin_buffers: &BinBuffers,
+    width: u32,
+    height: u32,
+    output_dir: &str,
+    fast_encode: bool,
+) -> Result<()> {
+    info!("Generating spectral cycle videos (6 variants in parallel)...");
+
     let total_frames = constants::CYCLE_TOTAL_FRAMES;
 
-    let variants: Vec<(&str, CycleVariant)> = vec![
+    let variants: [(&str, CycleVariant); 6] = [
         ("forward", CycleVariant::Forward),
         ("reverse", CycleVariant::Reverse),
         ("pingpong", CycleVariant::PingPong),
@@ -208,22 +253,38 @@ pub fn generate_spectral_cycle_videos(
         ("complementary", CycleVariant::Complementary),
     ];
 
-    // Pre-compute distance map for radial variant
     let dist_map = build_distance_map(width as usize, height as usize);
 
-    for (name, variant) in &variants {
-        let output_path = format!("{output_dir}/{name}.mp4");
-        info!("   Encoding {name} cycle...");
-        encode_cycle_video(
-            &bin_buffers,
-            variant,
-            &dist_map,
-            total_frames,
-            width,
-            height,
-            &output_path,
-            fast_encode,
-        )?;
+    let errors: std::sync::Mutex<Vec<RenderError>> = std::sync::Mutex::new(Vec::new());
+
+    std::thread::scope(|s| {
+        for &(name, variant) in &variants {
+            let output_path = format!("{output_dir}/{name}.mp4");
+            let bb = &bin_buffers;
+            let dm = &dist_map;
+            let errs = &errors;
+
+            s.spawn(move || {
+                info!("   Encoding {name} cycle...");
+                if let Err(e) = encode_cycle_video(
+                    bb,
+                    &variant,
+                    dm,
+                    total_frames,
+                    width,
+                    height,
+                    &output_path,
+                    fast_encode,
+                ) {
+                    errs.lock().unwrap().push(e);
+                }
+            });
+        }
+    });
+
+    let errs = errors.into_inner().unwrap();
+    if let Some(first_err) = errs.into_iter().next() {
+        return Err(first_err);
     }
 
     info!("   Spectral cycle videos complete (6 variants)");
@@ -272,14 +333,14 @@ fn lerp_bins_frame(
     let lo_buf = &bin_buffers.buffers[lo];
     let hi_buf = &bin_buffers.buffers[hi];
 
-    for i in 0..pixel_count {
+    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
         let r = lo_buf[i][0] * one_minus_t + hi_buf[i][0] * t;
         let g = lo_buf[i][1] * one_minus_t + hi_buf[i][1] * t;
         let b = lo_buf[i][2] * one_minus_t + hi_buf[i][2] * t;
-        output[i * 3] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        output[i * 3 + 1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        output[i * 3 + 2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
-    }
+        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    });
 }
 
 /// Per-pixel bin selection for the radial variant.
@@ -292,7 +353,7 @@ fn radial_frame(
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count * 3, 0);
 
-    for i in 0..pixel_count {
+    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
         let bin_f = base_bin - dist_map[i] * constants::RADIAL_SPREAD;
         let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
         let lo = wrapped.floor() as usize % NUM_BINS;
@@ -303,10 +364,10 @@ fn radial_frame(
         let r = bin_buffers.buffers[lo][i][0] * one_minus_t + bin_buffers.buffers[hi][i][0] * t;
         let g = bin_buffers.buffers[lo][i][1] * one_minus_t + bin_buffers.buffers[hi][i][1] * t;
         let b = bin_buffers.buffers[lo][i][2] * one_minus_t + bin_buffers.buffers[hi][i][2] * t;
-        output[i * 3] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        output[i * 3 + 1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        output[i * 3 + 2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
-    }
+        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    });
 }
 
 /// Complementary: average two cursors 32 bins apart.
@@ -330,7 +391,7 @@ fn complementary_frame(
     let hi_b = (lo_b + 1) % NUM_BINS;
     let t_b = bin_b.fract() as f32;
 
-    for i in 0..pixel_count {
+    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
         let ra = bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
         let ga = bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
         let ba = bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
@@ -343,10 +404,10 @@ fn complementary_frame(
         let g = ((ga + gb) * 0.5).clamp(0.0, 1.0);
         let b = ((ba + bb) * 0.5).clamp(0.0, 1.0);
 
-        output[i * 3] = (r * 65535.0).round() as u16;
-        output[i * 3 + 1] = (g * 65535.0).round() as u16;
-        output[i * 3 + 2] = (b * 65535.0).round() as u16;
-    }
+        chunk[0] = (r * 65535.0).round() as u16;
+        chunk[1] = (g * 65535.0).round() as u16;
+        chunk[2] = (b * 65535.0).round() as u16;
+    });
 }
 
 /// Compute the fractional bin index for a given frame and variant.
@@ -896,6 +957,355 @@ mod tests {
         let spd = vec![[1e6; NUM_BINS]; TEST_W * TEST_H];
         let result = generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir);
         assert!(result.is_ok(), "gallery with extreme energy should succeed: {result:?}");
+    }
+
+    // ── BinBuffers (extended) ───────────────────────────────────────
+
+    #[test]
+    fn test_bin_buffers_non_square_image() {
+        let w = 6;
+        let h = 3;
+        let spd = vec![[0.5f64; NUM_BINS]; w * h];
+        let bb = BinBuffers::new(&spd, w, h);
+        assert_eq!(bb.width, w);
+        assert_eq!(bb.height, h);
+        assert_eq!(bb.pixel_count(), w * h);
+        for buf in &bb.buffers {
+            assert_eq!(buf.len(), w * h);
+        }
+    }
+
+    #[test]
+    fn test_bin_buffers_normalization_respects_max_pixel() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        spd[0][10] = 10.0;
+        spd[1][10] = 5.0;
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let p0_max = bb.buffers[10][0][0].max(bb.buffers[10][0][1]).max(bb.buffers[10][0][2]);
+        let p1_max = bb.buffers[10][1][0].max(bb.buffers[10][1][1]).max(bb.buffers[10][1][2]);
+        assert!(
+            p0_max > p1_max,
+            "pixel with more energy should be brighter after normalization: {p0_max} vs {p1_max}"
+        );
+    }
+
+    #[test]
+    fn test_bin_buffers_different_bins_get_different_tints() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        for pixel in &mut spd {
+            pixel[2] = 1.0;
+            pixel[NUM_BINS - 3] = 1.0;
+        }
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let blue_pixel = bb.buffers[2][0];
+        let red_pixel = bb.buffers[NUM_BINS - 3][0];
+        assert!(
+            blue_pixel[2] > blue_pixel[0],
+            "bin 2 (~violet/blue) should be blue-dominant: {:?}",
+            blue_pixel
+        );
+        assert!(
+            red_pixel[0] > red_pixel[2],
+            "bin {} (~red) should be red-dominant: {:?}",
+            NUM_BINS - 3,
+            red_pixel
+        );
+    }
+
+    // ── lerp_bins_frame (interpolation accuracy) ────────────────────
+
+    #[test]
+    fn test_lerp_bins_midpoint_is_average() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        for pixel in &mut spd {
+            pixel[5] = 2.0;
+            pixel[6] = 2.0;
+        }
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+
+        let mut out_lo = Vec::new();
+        let mut out_hi = Vec::new();
+        let mut out_mid = Vec::new();
+        lerp_bins_frame(&bb, 5.0, &mut out_lo);
+        lerp_bins_frame(&bb, 6.0, &mut out_hi);
+        lerp_bins_frame(&bb, 5.5, &mut out_mid);
+
+        for i in 0..out_lo.len() {
+            let expected = ((out_lo[i] as f64 + out_hi[i] as f64) / 2.0).round() as u16;
+            let diff = (out_mid[i] as i32 - expected as i32).unsigned_abs();
+            assert!(
+                diff <= 1,
+                "lerp at 0.5 should be average of endpoints: pixel {i}: mid={}, expected={expected}",
+                out_mid[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_lerp_bins_deterministic_under_parallelism() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let mut out1 = Vec::new();
+        let mut out2 = Vec::new();
+        for _ in 0..5 {
+            lerp_bins_frame(&bb, 17.3, &mut out1);
+            lerp_bins_frame(&bb, 17.3, &mut out2);
+            assert_eq!(out1, out2, "par_chunks_mut lerp should be deterministic");
+        }
+    }
+
+    // ── radial_frame (extended) ─────────────────────────────────────
+
+    #[test]
+    fn test_radial_frame_different_base_bins_differ() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let dist_map = build_distance_map(TEST_W, TEST_H);
+        let mut out_a = Vec::new();
+        let mut out_b = Vec::new();
+        radial_frame(&bb, 0.0, &dist_map, &mut out_a);
+        radial_frame(&bb, 32.0, &dist_map, &mut out_b);
+        assert_ne!(out_a, out_b, "different base bins should produce different radial frames");
+    }
+
+    // ── complementary_frame (extended) ──────────────────────────────
+
+    #[test]
+    fn test_complementary_uses_opposite_bins() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        for pixel in &mut spd {
+            pixel[0] = 1.0;
+            pixel[NUM_BINS / 2] = 1.0;
+        }
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let mut output = Vec::new();
+        complementary_frame(&bb, 0.0, &mut output);
+        let nonzero_count = output.iter().filter(|&&v| v > 0).count();
+        assert!(
+            nonzero_count > 0,
+            "complementary frame at bin 0 should pick up energy from bins 0 and {}", NUM_BINS / 2
+        );
+    }
+
+    // ── heatmap_color (extended) ────────────────────────────────────
+
+    #[test]
+    fn test_heatmap_color_continuous_at_segment_boundaries() {
+        let boundaries = [0.2, 0.4, 0.6, 0.8];
+        let eps = 1e-6;
+        for &b in &boundaries {
+            let (r1, g1, b1) = heatmap_color(b - eps);
+            let (r2, g2, b2) = heatmap_color(b + eps);
+            assert!(
+                (r1 - r2).abs() < 0.01,
+                "R discontinuity at t={b}: {r1} vs {r2}"
+            );
+            assert!(
+                (g1 - g2).abs() < 0.01,
+                "G discontinuity at t={b}: {g1} vs {g2}"
+            );
+            assert!(
+                (b1 - b2).abs() < 0.01,
+                "B discontinuity at t={b}: {b1} vs {b2}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_heatmap_color_at_each_segment_center() {
+        let (_, _, b) = heatmap_color(0.1);
+        assert!(b > 0.5, "t=0.1 should be in blue region");
+        let (_, _, b) = heatmap_color(0.3);
+        assert!(b > 0.5, "t=0.3 should still have strong blue");
+        let (_, g, _) = heatmap_color(0.5);
+        assert!(g > 0.9, "t=0.5 should be pure green");
+        let (r, g, _) = heatmap_color(0.7);
+        assert!(r > 0.0 && g > 0.5, "t=0.7 should be yellow region");
+        let (r, _, _) = heatmap_color(0.9);
+        assert!(r > 0.9, "t=0.9 should be strong red");
+    }
+
+    // ── build_distance_map (extended) ───────────────────────────────
+
+    #[test]
+    fn test_distance_map_1x1() {
+        let map = build_distance_map(1, 1);
+        assert_eq!(map.len(), 1);
+        // 1x1: center is (0,0), max_dist is 0, so distance/max_dist = 0/0 = NaN.
+        // This is a degenerate case that won't occur in practice (minimum useful
+        // resolution is much larger), but the map should still have the right length.
+    }
+
+    #[test]
+    fn test_distance_map_wide_rectangle() {
+        let w = 20;
+        let h = 3;
+        let map = build_distance_map(w, h);
+        assert_eq!(map.len(), w * h);
+        let center_row = 1;
+        let center_col = w / 2;
+        let center_dist = map[center_row * w + center_col];
+        let corner_dist = map[0];
+        assert!(
+            corner_dist > center_dist,
+            "corner should be farther than center: {corner_dist} vs {center_dist}"
+        );
+    }
+
+    #[test]
+    fn test_distance_map_monotonic_from_center() {
+        let w = 11;
+        let h = 11;
+        let map = build_distance_map(w, h);
+        let cx = w / 2;
+        let cy = h / 2;
+        let mut prev_dist = -1.0;
+        for dx in 0..=cx {
+            let idx = cy * w + (cx + dx);
+            assert!(
+                map[idx] >= prev_dist - 1e-10,
+                "distance should increase from center: dx={dx}, {} vs {}",
+                map[idx],
+                prev_dist
+            );
+            prev_dist = map[idx];
+        }
+    }
+
+    // ── Cycle variant math (extended) ───────────────────────────────
+
+    #[test]
+    fn test_forward_and_reverse_are_mirror() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        for frame in 0..total {
+            let fwd = cycle_bin_f(&CycleVariant::Forward, frame, total);
+            let rev = cycle_bin_f(&CycleVariant::Reverse, frame, total);
+            let sum = fwd + rev;
+            assert!(
+                (sum - NUM_BINS as f64).abs() < 1e-10,
+                "forward + reverse should equal NUM_BINS at frame {frame}: {fwd} + {rev} = {sum}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pingpong_is_symmetric() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        for frame in 0..total / 2 {
+            let first_half = cycle_bin_f(&CycleVariant::PingPong, frame, total);
+            let mirror_frame = total - 1 - frame;
+            let second_half = cycle_bin_f(&CycleVariant::PingPong, mirror_frame, total);
+            assert!(
+                (first_half - second_half).abs() < 1.0,
+                "ping-pong should be symmetric: frame {frame}={first_half}, mirror {mirror_frame}={second_half}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ease_cycle_is_symmetric() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        for frame in 1..total / 4 {
+            let val = cycle_bin_f(&CycleVariant::Ease, frame, total);
+            let mirror_val = cycle_bin_f(&CycleVariant::Ease, total - frame, total);
+            assert!(
+                (val - mirror_val).abs() < 0.5,
+                "ease should be symmetric: frame {frame}={val}, mirror {}={mirror_val}",
+                total - frame
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_cycle_variants_non_negative() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        let variants = [
+            CycleVariant::Forward,
+            CycleVariant::PingPong,
+            CycleVariant::Ease,
+            CycleVariant::Radial,
+            CycleVariant::Complementary,
+        ];
+        for variant in &variants {
+            for frame in 0..total {
+                let val = cycle_bin_f(variant, frame, total);
+                assert!(val >= 0.0, "cycle variant at frame {frame} should be non-negative: {val}");
+            }
+        }
+    }
+
+    // ── Gallery I/O (extended) ──────────────────────────────────────
+
+    #[test]
+    fn test_gallery_non_square_image() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let w = 6u32;
+        let h = 3u32;
+        let spd = vec![[0.5f64; NUM_BINS]; (w * h) as usize];
+        let result = generate_spectral_gallery(&spd, w, h, dir);
+        assert!(result.is_ok(), "gallery with non-square image should succeed: {result:?}");
+    }
+
+    #[test]
+    fn test_gallery_single_pixel() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = vec![[1.0f64; NUM_BINS]; 1];
+        let result = generate_spectral_gallery(&spd, 1, 1, dir);
+        assert!(result.is_ok(), "gallery with 1x1 image should succeed: {result:?}");
+    }
+
+    #[test]
+    fn test_combined_spectral_outputs_writes_gallery() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = make_single_bin_spd(20, 1.0);
+        // generate_all_spectral_outputs also tries to encode videos which needs ffmpeg,
+        // so we test the gallery path alone via the shared-buffers function.
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let result = generate_spectral_gallery_with_buffers(
+            &spd, &bb, TEST_W as u32, TEST_H as u32, dir,
+        );
+        assert!(result.is_ok(), "gallery with shared buffers: {result:?}");
+
+        for bin in 0..NUM_BINS {
+            let wl = wavelength_nm_for_bin(bin);
+            let file = format!("{dir}/{bin:02}_{wl:.0}nm.png");
+            assert!(std::path::Path::new(&file).exists(), "missing: {file}");
+        }
+    }
+
+    #[test]
+    fn test_shared_buffers_produce_same_gallery_as_standalone() {
+        let tmp1 = tempfile::tempdir().expect("tmpdir1");
+        let tmp2 = tempfile::tempdir().expect("tmpdir2");
+        let dir1 = tmp1.path().to_str().unwrap();
+        let dir2 = tmp2.path().to_str().unwrap();
+
+        let spd = make_single_bin_spd(30, 2.5);
+
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir1)
+            .expect("standalone gallery");
+
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        generate_spectral_gallery_with_buffers(&spd, &bb, TEST_W as u32, TEST_H as u32, dir2)
+            .expect("shared-buffers gallery");
+
+        for bin in 0..NUM_BINS {
+            let wl = wavelength_nm_for_bin(bin);
+            let f1 = format!("{dir1}/{bin:02}_{wl:.0}nm.png");
+            let f2 = format!("{dir2}/{bin:02}_{wl:.0}nm.png");
+            let bytes1 = std::fs::read(&f1).unwrap();
+            let bytes2 = std::fs::read(&f2).unwrap();
+            assert_eq!(
+                bytes1, bytes2,
+                "bin {bin} PNG should be identical between standalone and shared-buffers paths"
+            );
+        }
     }
 
     // ── Constants validation ────────────────────────────────────────

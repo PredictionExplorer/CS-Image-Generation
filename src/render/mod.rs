@@ -918,24 +918,31 @@ fn pass_2_write_frames_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
-        let trajectory_pixels = finish_pipeline
+        let mut trajectory_pixels = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
             .expect("Failed to process frame during spectral render pass");
-        accum_rgba.clear();
-        accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
-        let nebula_background = if resolved_config.nebula_strength > 0.0 {
-            generate_nebula_background(
+        let generated_nebula;
+        let nebula_ref = if resolved_config.nebula_strength > 0.0 {
+            generated_nebula = generate_nebula_background(
                 width as usize,
                 height as usize,
                 checkpoint_step / frame_interval,
                 &nebula_config,
-            )
+            );
+            &generated_nebula
         } else {
-            empty_background.clone()
+            &empty_background
         };
 
-        let composited = composite_buffers(&nebula_background, &trajectory_pixels);
+        let composited = composite_buffers(nebula_ref, &trajectory_pixels);
+
+        // Reclaim the trajectory buffer's allocation back into accum_rgba.
+        // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
+        // so we just need the capacity -- no need to clear or resize.
+        trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
+        accum_rgba = trajectory_pixels;
+
         let display_buffer = tonemap_to_display_buffer(&composited, levels);
         let smoothed_display = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(display_buffer),

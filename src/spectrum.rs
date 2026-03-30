@@ -260,4 +260,134 @@ mod tests {
             "380nm should be dimmer than 420nm due to edge rolloff: {b_380} vs {b_420}"
         );
     }
+
+    // ── Bin center exact values per algorithm doc ───────────────────
+
+    #[test]
+    fn test_bin_center_first_is_382_5nm() {
+        let center = wavelength_nm_for_bin(0);
+        assert!(
+            (center - 382.5).abs() < 1e-10,
+            "bin 0 center should be 382.5nm, got {center}"
+        );
+    }
+
+    #[test]
+    fn test_bin_center_last_is_697_5nm() {
+        let center = wavelength_nm_for_bin(63);
+        assert!(
+            (center - 697.5).abs() < 1e-10,
+            "bin 63 center should be 697.5nm, got {center}"
+        );
+    }
+
+    #[test]
+    fn test_bin_centers_evenly_spaced_at_5nm() {
+        for i in 1..NUM_BINS {
+            let prev = wavelength_nm_for_bin(i - 1);
+            let curr = wavelength_nm_for_bin(i);
+            assert!(
+                (curr - prev - 5.0).abs() < 1e-10,
+                "bin spacing should be 5nm: bin {i} - bin {} = {}",
+                i - 1,
+                curr - prev
+            );
+        }
+    }
+
+    // ── LUT spectral coverage ───────────────────────────────────────
+
+    #[test]
+    fn test_lut_deep_violet_bins_are_blue_dominant() {
+        for bin in 0..8 {
+            let (r, _g, b, _) = BIN_COMBINED_LUT[bin];
+            let wl = wavelength_nm_for_bin(bin);
+            if wl < 440.0 {
+                assert!(
+                    b > r || (r + b > 0.0),
+                    "bin {bin} ({wl:.0}nm) should have blue component: R={r}, B={b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lut_green_bins_are_green_dominant() {
+        for bin in 0..NUM_BINS {
+            let wl = wavelength_nm_for_bin(bin);
+            if (510.0..570.0).contains(&wl) {
+                let (r, g, b, _) = BIN_COMBINED_LUT[bin];
+                assert!(
+                    g >= r && g >= b,
+                    "bin {bin} ({wl:.0}nm) should be green-dominant: R={r}, G={g}, B={b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lut_deep_red_bins_are_red_dominant() {
+        for bin in (NUM_BINS - 8)..NUM_BINS {
+            let (r, g, b, _) = BIN_COMBINED_LUT[bin];
+            let wl = wavelength_nm_for_bin(bin);
+            if wl > 645.0 {
+                assert!(
+                    r >= g && r >= b,
+                    "bin {bin} ({wl:.0}nm) should be red-dominant: R={r}, G={g}, B={b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lut_tone_k_decreases_from_blue_to_red() {
+        let k_first = BIN_COMBINED_LUT[0].3;
+        let k_last = BIN_COMBINED_LUT[NUM_BINS - 1].3;
+        assert!(
+            k_first > k_last,
+            "tone k should decrease from violet to red: first={k_first}, last={k_last}"
+        );
+    }
+
+    #[test]
+    fn test_lut_all_entries_have_at_least_one_nonzero_channel() {
+        for (i, &(r, g, b, _)) in BIN_COMBINED_LUT.iter().enumerate() {
+            let wl = wavelength_nm_for_bin(i);
+            if (390.0..=690.0).contains(&wl) {
+                assert!(
+                    r > 0.0 || g > 0.0 || b > 0.0,
+                    "LUT bin {i} ({wl:.0}nm) should have at least one nonzero RGB channel"
+                );
+            }
+        }
+    }
+
+    // ── wavelength_to_rgb continuity ────────────────────────────────
+
+    #[test]
+    fn test_wavelength_to_rgb_continuous() {
+        let mut prev = wavelength_to_rgb(380.0);
+        for wl_x10 in 3810..=7000 {
+            let wl = wl_x10 as f64 / 10.0;
+            let curr = wavelength_to_rgb(wl);
+            let dr = (curr.0 - prev.0).abs();
+            let dg = (curr.1 - prev.1).abs();
+            let db = (curr.2 - prev.2).abs();
+            assert!(
+                dr < 0.05 && dg < 0.05 && db < 0.05,
+                "wavelength_to_rgb should be continuous: at {wl}nm delta=({dr:.4},{dg:.4},{db:.4})"
+            );
+            prev = curr;
+        }
+    }
+
+    #[test]
+    fn test_wavelength_to_rgb_red_rolloff_at_700nm() {
+        let (r_650, _, _) = wavelength_to_rgb(650.0);
+        let (r_700, _, _) = wavelength_to_rgb(700.0);
+        assert!(
+            r_700 < r_650,
+            "700nm should have edge rolloff vs 650nm: {r_700} vs {r_650}"
+        );
+    }
 }

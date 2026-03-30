@@ -298,14 +298,7 @@ fn main() -> Result<()> {
 
     let spectral_dir = format!("{seed_dir}/spectral");
 
-    app::generate_spectral_gallery(
-        &accum_spd,
-        args.resolution.width,
-        args.resolution.height,
-        &spectral_dir,
-    )?;
-
-    app::generate_spectral_cycle_videos(
+    app::generate_spectral_outputs(
         &accum_spd,
         args.resolution.width,
         args.resolution.height,
