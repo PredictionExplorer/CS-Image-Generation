@@ -912,7 +912,7 @@ pub fn generate_all_spectral_outputs_with_modes(
                 fast_encode,
             )?;
         } else {
-            let plans = plan_for_mode(mode, rng);
+            let plans = plan_for_mode(mode, rng, Some(base_config));
             generate_mode_gallery(
                 accum_spd,
                 &bin_buffers_linear,

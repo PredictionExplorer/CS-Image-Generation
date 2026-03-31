@@ -5,7 +5,12 @@
 //! distinct variants of the spectral gallery and cycle videos.
 
 use super::constants;
-use super::effects::{EffectConfig, FinishEffectPipeline, FrameParams};
+use super::effects::{DogBloomConfig, EffectConfig, FinishEffectPipeline, FrameParams};
+use crate::post_effects::{
+    AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig, ColorGradeParams,
+    EdgeLuminanceConfig, FineTextureConfig, GlowEnhancementConfig, GradientMapConfig,
+    LuxuryPalette, MicroContrastConfig, OpalescenceConfig, PerceptualBlurConfig,
+};
 use crate::sim::Sha3RandomByteStream;
 use crate::spectrum::NUM_BINS;
 use rayon::prelude::*;
@@ -15,7 +20,7 @@ use std::f64::consts::PI;
 // SpectralEffectMode
 // ---------------------------------------------------------------------------
 
-/// Identifies one of the nine spectral output variants.
+/// Identifies one of the ten spectral output variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpectralEffectMode {
     Default,
@@ -27,10 +32,11 @@ pub enum SpectralEffectMode {
     Cascade,
     Masking,
     Gravity,
+    Chaos,
 }
 
 impl SpectralEffectMode {
-    /// All nine modes in a fixed order (Default first).
+    /// All ten modes in a fixed order (Default first).
     pub const ALL: &'static [SpectralEffectMode] = &[
         Self::Default,
         Self::Dispersion,
@@ -41,6 +47,7 @@ impl SpectralEffectMode {
         Self::Cascade,
         Self::Masking,
         Self::Gravity,
+        Self::Chaos,
     ];
 
     /// Subdirectory name for this mode's outputs.
@@ -55,6 +62,7 @@ impl SpectralEffectMode {
             Self::Cascade => "cascade",
             Self::Masking => "masking",
             Self::Gravity => "gravity",
+            Self::Chaos => "chaos",
         }
     }
 
@@ -70,12 +78,13 @@ impl SpectralEffectMode {
             Self::Cascade => "Cascade Reveal",
             Self::Masking => "Cross-Spectral Masking",
             Self::Gravity => "Spectral Gravity Well",
+            Self::Chaos => "Maximum Chaos",
         }
     }
 
     /// Whether this mode requires an RNG for planning.
     pub fn needs_rng(self) -> bool {
-        matches!(self, Self::Resonance | Self::Fingerprint | Self::Gravity)
+        matches!(self, Self::Resonance | Self::Fingerprint | Self::Gravity | Self::Chaos)
     }
 }
 
@@ -235,15 +244,28 @@ pub struct BinEffectPlan {
     pub bloom_radius_scale: f64,
     /// Which effects are enabled for this bin.
     pub enabled_effects: EnabledEffects,
+    /// When set, used directly instead of modifying the base config.
+    /// Used by Chaos mode which fully randomizes every parameter.
+    pub custom_config: Option<Box<EffectConfig>>,
 }
 
 impl BinEffectPlan {
     pub fn raw() -> Self {
-        Self { strength: 0.0, bloom_radius_scale: 1.0, enabled_effects: EnabledEffects::none() }
+        Self {
+            strength: 0.0,
+            bloom_radius_scale: 1.0,
+            enabled_effects: EnabledEffects::none(),
+            custom_config: None,
+        }
     }
 
     pub fn full() -> Self {
-        Self { strength: 1.0, bloom_radius_scale: 1.0, enabled_effects: EnabledEffects::all() }
+        Self {
+            strength: 1.0,
+            bloom_radius_scale: 1.0,
+            enabled_effects: EnabledEffects::all(),
+            custom_config: None,
+        }
     }
 }
 
@@ -269,6 +291,7 @@ pub fn plan_dispersion() -> Vec<BinEffectPlan> {
                         - constants::SPECTRAL_DISPERSION_BLOOM_MIN)
                         * t,
                 enabled_effects: EnabledEffects::all(),
+                custom_config: None,
             }
         })
         .collect()
@@ -302,6 +325,7 @@ pub fn plan_resonance(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
                         edge_luminance: true,
                         ..EnabledEffects::none()
                     },
+                    custom_config: None,
                 }
             }
         })
@@ -320,7 +344,7 @@ pub fn plan_weathering() -> Vec<BinEffectPlan> {
             } else {
                 EnabledEffects::luminous()
             };
-            BinEffectPlan { strength: 1.0, bloom_radius_scale: 1.0, enabled_effects: enabled }
+            BinEffectPlan { strength: 1.0, bloom_radius_scale: 1.0, enabled_effects: enabled, custom_config: None }
         })
         .collect()
 }
@@ -341,7 +365,7 @@ pub fn plan_fingerprint(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
                 enabled.set_by_index(idx, true);
                 chosen = enabled.count();
             }
-            BinEffectPlan { strength: 0.85, bloom_radius_scale: 1.0, enabled_effects: enabled }
+            BinEffectPlan { strength: 0.85, bloom_radius_scale: 1.0, enabled_effects: enabled, custom_config: None }
         })
         .collect()
 }
@@ -357,6 +381,7 @@ pub fn plan_interference() -> Vec<BinEffectPlan> {
                 strength,
                 bloom_radius_scale: 1.0,
                 enabled_effects: EnabledEffects::all(),
+                custom_config: None,
             }
         })
         .collect()
@@ -372,6 +397,7 @@ pub fn plan_cascade() -> Vec<BinEffectPlan> {
                 strength,
                 bloom_radius_scale: 1.0,
                 enabled_effects: EnabledEffects::all(),
+                custom_config: None,
             }
         })
         .collect()
@@ -397,15 +423,323 @@ pub fn plan_gravity(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
                 strength,
                 bloom_radius_scale: 1.0,
                 enabled_effects: EnabledEffects::all(),
+                custom_config: None,
+            }
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Chaos mode: maximum per-bin randomization
+// ---------------------------------------------------------------------------
+
+/// RNG helper: random f64 in `[lo, hi]`.
+fn rand_range(rng: &mut Sha3RandomByteStream, lo: f64, hi: f64) -> f64 {
+    rng.next_f64() * (hi - lo) + lo
+}
+
+/// RNG helper: random usize in `[lo, hi]` inclusive.
+fn rand_usize(rng: &mut Sha3RandomByteStream, lo: usize, hi: usize) -> usize {
+    lo + (rng.next_byte() as usize % (hi - lo + 1))
+}
+
+fn randomize_dog_bloom(rng: &mut Sha3RandomByteStream, _base: &DogBloomConfig) -> DogBloomConfig {
+    DogBloomConfig {
+        inner_sigma: rand_range(rng, 2.0, 12.0),
+        outer_ratio: rand_range(rng, 1.5, 3.5),
+        strength: rand_range(rng, 0.1, 0.9),
+        threshold: rand_range(rng, 0.005, 0.04),
+    }
+}
+
+fn randomize_glow(
+    rng: &mut Sha3RandomByteStream,
+    _base: &GlowEnhancementConfig,
+) -> GlowEnhancementConfig {
+    GlowEnhancementConfig {
+        strength: rand_range(rng, 0.2, 0.8),
+        threshold: rand_range(rng, 0.3, 0.9),
+        radius: rand_usize(rng, 3, 18),
+        sharpness: rand_range(rng, 1.5, 4.0),
+        saturation_boost: rand_range(rng, 0.0, 0.6),
+    }
+}
+
+fn randomize_chromatic_bloom(
+    rng: &mut Sha3RandomByteStream,
+    base: &ChromaticBloomConfig,
+) -> ChromaticBloomConfig {
+    let scale = rand_range(rng, 0.5, 2.0);
+    ChromaticBloomConfig {
+        strength: rand_range(rng, 0.3, 1.0),
+        separation: base.separation * scale,
+        threshold: rand_range(rng, 0.05, 0.35),
+        radius: (base.radius as f64 * rand_range(rng, 0.5, 2.0)).round() as usize,
+    }
+}
+
+fn randomize_perceptual_blur(
+    rng: &mut Sha3RandomByteStream,
+    base: &PerceptualBlurConfig,
+) -> PerceptualBlurConfig {
+    PerceptualBlurConfig {
+        strength: rand_range(rng, 0.2, 0.9),
+        radius: (base.radius as f64 * rand_range(rng, 0.5, 2.0)).round().max(1.0) as usize,
+        ..*base
+    }
+}
+
+fn randomize_micro_contrast(
+    rng: &mut Sha3RandomByteStream,
+    _base: &MicroContrastConfig,
+) -> MicroContrastConfig {
+    MicroContrastConfig {
+        strength: rand_range(rng, 0.1, 0.7),
+        radius: rand_usize(rng, 1, 5),
+        edge_threshold: rand_range(rng, 0.05, 0.25),
+        luminance_weight: rand_range(rng, 0.3, 0.9),
+    }
+}
+
+fn randomize_gradient_map(
+    rng: &mut Sha3RandomByteStream,
+    _base: &GradientMapConfig,
+) -> GradientMapConfig {
+    GradientMapConfig {
+        palette: LuxuryPalette::from_index(rand_usize(rng, 0, 14)),
+        strength: rand_range(rng, 0.2, 0.9),
+        hue_preservation: rand_range(rng, 0.0, 0.6),
+    }
+}
+
+fn randomize_color_grade(
+    rng: &mut Sha3RandomByteStream,
+    base: &ColorGradeParams,
+) -> ColorGradeParams {
+    ColorGradeParams {
+        strength: rand_range(rng, 0.1, 0.6),
+        vignette_strength: rand_range(rng, 0.0, 0.6),
+        vignette_softness: rand_range(rng, 1.5, 3.5),
+        vibrance: rand_range(rng, 0.7, 1.4),
+        clarity_strength: rand_range(rng, 0.1, 0.5),
+        tone_curve: rand_range(rng, 0.2, 0.8),
+        shadow_tint: [
+            rand_range(rng, -0.12, 0.04),
+            rand_range(rng, -0.06, 0.04),
+            rand_range(rng, -0.04, 0.2),
+        ],
+        highlight_tint: [
+            rand_range(rng, -0.04, 0.15),
+            rand_range(rng, -0.04, 0.08),
+            rand_range(rng, -0.08, 0.04),
+        ],
+        ..*base
+    }
+}
+
+fn randomize_opalescence(
+    rng: &mut Sha3RandomByteStream,
+    base: &OpalescenceConfig,
+) -> OpalescenceConfig {
+    OpalescenceConfig {
+        strength: rand_range(rng, 0.05, 0.4),
+        layers: rand_usize(rng, 2, 4),
+        chromatic_shift: rand_range(rng, 0.1, 0.7),
+        pearl_sheen: rand_range(rng, 0.05, 0.5),
+        angle_sensitivity: rand_range(rng, 0.5, 1.5),
+        ..*base
+    }
+}
+
+fn randomize_champleve(
+    rng: &mut Sha3RandomByteStream,
+    base: &ChampleveConfig,
+) -> ChampleveConfig {
+    ChampleveConfig {
+        cell_density: rand_range(rng, 20.0, 100.0),
+        flow_alignment: rand_range(rng, 0.3, 1.0),
+        interference_amplitude: rand_range(rng, 0.2, 1.0),
+        interference_frequency: rand_range(rng, 10.0, 50.0),
+        rim_intensity: rand_range(rng, 0.5, 3.5),
+        rim_warmth: rand_range(rng, 0.3, 1.0),
+        interior_lift: rand_range(rng, 0.3, 1.0),
+        ..*base
+    }
+}
+
+fn randomize_aether(rng: &mut Sha3RandomByteStream, base: &AetherConfig) -> AetherConfig {
+    AetherConfig {
+        filament_density: rand_range(rng, 40.0, 150.0),
+        flow_alignment: rand_range(rng, 0.4, 1.0),
+        scattering_strength: rand_range(rng, 0.3, 2.0),
+        scattering_falloff: rand_range(rng, 1.5, 4.0),
+        iridescence_amplitude: rand_range(rng, 0.2, 1.0),
+        iridescence_frequency: rand_range(rng, 6.0, 20.0),
+        caustic_strength: rand_range(rng, 0.1, 0.7),
+        caustic_softness: rand_range(rng, 1.5, 5.0),
+        ..*base
+    }
+}
+
+fn randomize_edge_luminance(
+    rng: &mut Sha3RandomByteStream,
+    base: &EdgeLuminanceConfig,
+) -> EdgeLuminanceConfig {
+    EdgeLuminanceConfig {
+        strength: rand_range(rng, 0.1, 0.5),
+        threshold: rand_range(rng, 0.05, 0.35),
+        brightness_boost: rand_range(rng, 0.1, 0.6),
+        min_luminance: rand_range(rng, 0.1, 0.4),
+        ..*base
+    }
+}
+
+fn randomize_atmospheric_depth(
+    rng: &mut Sha3RandomByteStream,
+    base: &AtmosphericDepthConfig,
+) -> AtmosphericDepthConfig {
+    AtmosphericDepthConfig {
+        strength: rand_range(rng, 0.1, 0.5),
+        fog_color: (
+            rand_range(rng, 0.0, 0.3),
+            rand_range(rng, 0.0, 0.3),
+            rand_range(rng, 0.0, 0.3),
+        ),
+        desaturation: rand_range(rng, 0.1, 0.7),
+        darkening: rand_range(rng, 0.05, 0.4),
+        ..*base
+    }
+}
+
+fn randomize_fine_texture(
+    rng: &mut Sha3RandomByteStream,
+    base: &FineTextureConfig,
+) -> FineTextureConfig {
+    FineTextureConfig {
+        strength: rand_range(rng, 0.05, 0.3),
+        contrast: rand_range(rng, 0.1, 0.6),
+        anisotropy: rand_range(rng, 0.0, 0.5),
+        angle: rand_range(rng, 0.0, 180.0),
+        ..*base
+    }
+}
+
+/// Maximum chaos: every bin gets an independent coin-flip for each effect
+/// plus fully randomized numeric parameters.
+pub fn plan_chaos(
+    rng: &mut Sha3RandomByteStream,
+    base_config: &EffectConfig,
+) -> Vec<BinEffectPlan> {
+    (0..NUM_BINS)
+        .map(|_| {
+            let strength = rand_range(rng, constants::SPECTRAL_CHAOS_STRENGTH_MIN, constants::SPECTRAL_CHAOS_STRENGTH_MAX);
+            let bloom_radius_scale = rand_range(rng, constants::SPECTRAL_CHAOS_BLOOM_SCALE_MIN, constants::SPECTRAL_CHAOS_BLOOM_SCALE_MAX);
+
+            let mut enabled = EnabledEffects::none();
+            for idx in 0..EnabledEffects::TOTAL_EFFECTS {
+                enabled.set_by_index(idx, rng.next_byte() >= 128);
+            }
+
+            let mut cfg = base_config.clone();
+
+            if enabled.bloom {
+                cfg.blur_radius_px =
+                    (cfg.blur_radius_px as f64 * bloom_radius_scale).round() as usize;
+            } else {
+                cfg.blur_radius_px = 0;
+            }
+
+            if enabled.dog_bloom {
+                cfg.dog_config = randomize_dog_bloom(rng, &cfg.dog_config);
+                cfg.dog_config.inner_sigma *= bloom_radius_scale;
+            } else {
+                cfg.bloom_mode = "none".to_string();
+            }
+
+            cfg.glow_enhancement_enabled = enabled.glow;
+            if enabled.glow {
+                cfg.glow_enhancement_config = randomize_glow(rng, &cfg.glow_enhancement_config);
+            }
+
+            cfg.chromatic_bloom_enabled = enabled.chromatic_bloom;
+            if enabled.chromatic_bloom {
+                cfg.chromatic_bloom_config =
+                    randomize_chromatic_bloom(rng, &cfg.chromatic_bloom_config);
+            }
+
+            cfg.perceptual_blur_enabled = enabled.perceptual_blur;
+            if enabled.perceptual_blur
+                && let Some(ref blur_cfg) = cfg.perceptual_blur_config
+            {
+                cfg.perceptual_blur_config = Some(randomize_perceptual_blur(rng, blur_cfg));
+            }
+
+            cfg.micro_contrast_enabled = enabled.micro_contrast;
+            if enabled.micro_contrast {
+                cfg.micro_contrast_config =
+                    randomize_micro_contrast(rng, &cfg.micro_contrast_config);
+            }
+
+            cfg.gradient_map_enabled = enabled.gradient_map;
+            if enabled.gradient_map {
+                cfg.gradient_map_config = randomize_gradient_map(rng, &cfg.gradient_map_config);
+            }
+
+            cfg.color_grade_enabled = enabled.color_grade;
+            if enabled.color_grade {
+                cfg.color_grade_params = randomize_color_grade(rng, &cfg.color_grade_params);
+            }
+
+            cfg.opalescence_enabled = enabled.opalescence;
+            if enabled.opalescence {
+                cfg.opalescence_config = randomize_opalescence(rng, &cfg.opalescence_config);
+            }
+
+            cfg.champleve_enabled = enabled.champleve;
+            if enabled.champleve {
+                cfg.champleve_config = randomize_champleve(rng, &cfg.champleve_config);
+            }
+
+            cfg.aether_enabled = enabled.aether;
+            if enabled.aether {
+                cfg.aether_config = randomize_aether(rng, &cfg.aether_config);
+            }
+
+            cfg.edge_luminance_enabled = enabled.edge_luminance;
+            if enabled.edge_luminance {
+                cfg.edge_luminance_config =
+                    randomize_edge_luminance(rng, &cfg.edge_luminance_config);
+            }
+
+            cfg.atmospheric_depth_enabled = enabled.atmospheric_depth;
+            if enabled.atmospheric_depth {
+                cfg.atmospheric_depth_config =
+                    randomize_atmospheric_depth(rng, &cfg.atmospheric_depth_config);
+            }
+
+            cfg.fine_texture_enabled = enabled.fine_texture;
+            if enabled.fine_texture {
+                cfg.fine_texture_config = randomize_fine_texture(rng, &cfg.fine_texture_config);
+            }
+
+            BinEffectPlan {
+                strength,
+                bloom_radius_scale,
+                enabled_effects: enabled,
+                custom_config: Some(Box::new(cfg)),
             }
         })
         .collect()
 }
 
 /// Generate the full bin plan for any mode.
+///
+/// `base_config` is required only for `Chaos` mode which fully randomizes
+/// per-effect parameters; other modes ignore it.
 pub fn plan_for_mode(
     mode: SpectralEffectMode,
     rng: &mut Sha3RandomByteStream,
+    base_config: Option<&EffectConfig>,
 ) -> Vec<BinEffectPlan> {
     match mode {
         SpectralEffectMode::Default => plan_default(),
@@ -417,6 +751,10 @@ pub fn plan_for_mode(
         SpectralEffectMode::Cascade => plan_cascade(),
         SpectralEffectMode::Masking => plan_masking(),
         SpectralEffectMode::Gravity => plan_gravity(rng),
+        SpectralEffectMode::Chaos => {
+            let cfg = base_config.expect("Chaos mode requires a base EffectConfig");
+            plan_chaos(rng, cfg)
+        }
     }
 }
 
@@ -426,9 +764,14 @@ pub fn plan_for_mode(
 
 /// Build a per-bin `EffectConfig` from a base config and a `BinEffectPlan`.
 ///
-/// Toggles each effect's enable flag according to the plan, and scales the
-/// bloom / DoG radius by `plan.bloom_radius_scale`.
+/// When the plan carries a `custom_config` (Chaos mode), it is used directly.
+/// Otherwise, toggles each effect's enable flag according to the plan, and
+/// scales the bloom / DoG radius by `plan.bloom_radius_scale`.
 pub fn build_bin_effect_config(base: &EffectConfig, plan: &BinEffectPlan) -> EffectConfig {
+    if let Some(custom) = &plan.custom_config {
+        return *custom.clone();
+    }
+
     let mut cfg = base.clone();
     let fx = &plan.enabled_effects;
 
@@ -626,6 +969,7 @@ pub fn cycle_frame_plan(
                 strength,
                 bloom_radius_scale: 1.0,
                 enabled_effects: EnabledEffects::all(),
+                custom_config: None,
             }
         }
         _ => {
@@ -644,8 +988,8 @@ mod tests {
     // ── Mode enum ──────────────────────────────────────────────────
 
     #[test]
-    fn test_all_returns_nine_modes() {
-        assert_eq!(SpectralEffectMode::ALL.len(), 9);
+    fn test_all_returns_ten_modes() {
+        assert_eq!(SpectralEffectMode::ALL.len(), 10);
     }
 
     #[test]
@@ -681,6 +1025,7 @@ mod tests {
         assert!(!SpectralEffectMode::Cascade.needs_rng());
         assert!(!SpectralEffectMode::Masking.needs_rng());
         assert!(SpectralEffectMode::Gravity.needs_rng());
+        assert!(SpectralEffectMode::Chaos.needs_rng());
     }
 
     // ── EnabledEffects ─────────────────────────────────────────────
@@ -1053,11 +1398,47 @@ mod tests {
 
     // ── plan_for_mode ──────────────────────────────────────────────
 
+    fn make_base_config() -> EffectConfig {
+        use super::super::effects::DogBloomConfig;
+        EffectConfig {
+            bloom_mode: "dog".to_string(),
+            blur_radius_px: 10,
+            blur_strength: 0.5,
+            blur_core_brightness: 1.0,
+            dog_config: DogBloomConfig::default(),
+            perceptual_blur_enabled: true,
+            perceptual_blur_config: Some(Default::default()),
+            color_grade_enabled: true,
+            color_grade_params: Default::default(),
+            gradient_map_enabled: true,
+            gradient_map_config: Default::default(),
+            champleve_enabled: true,
+            champleve_config: Default::default(),
+            aether_enabled: true,
+            aether_config: Default::default(),
+            chromatic_bloom_enabled: true,
+            chromatic_bloom_config: Default::default(),
+            opalescence_enabled: true,
+            opalescence_config: Default::default(),
+            edge_luminance_enabled: true,
+            edge_luminance_config: Default::default(),
+            micro_contrast_enabled: true,
+            micro_contrast_config: Default::default(),
+            glow_enhancement_enabled: true,
+            glow_enhancement_config: Default::default(),
+            atmospheric_depth_enabled: true,
+            atmospheric_depth_config: Default::default(),
+            fine_texture_enabled: true,
+            fine_texture_config: Default::default(),
+        }
+    }
+
     #[test]
     fn test_plan_for_mode_all_return_64() {
         let mut rng = make_rng();
+        let base = make_base_config();
         for &mode in SpectralEffectMode::ALL {
-            let plans = plan_for_mode(mode, &mut rng);
+            let plans = plan_for_mode(mode, &mut rng, Some(&base));
             assert_eq!(plans.len(), NUM_BINS, "mode {:?} should return {NUM_BINS} plans", mode);
         }
     }
@@ -1065,8 +1446,9 @@ mod tests {
     #[test]
     fn test_plan_for_mode_strengths_in_range() {
         let mut rng = make_rng();
+        let base = make_base_config();
         for &mode in SpectralEffectMode::ALL {
-            for (i, plan) in plan_for_mode(mode, &mut rng).iter().enumerate() {
+            for (i, plan) in plan_for_mode(mode, &mut rng, Some(&base)).iter().enumerate() {
                 assert!(
                     plan.strength >= 0.0 && plan.strength <= 1.0,
                     "mode {:?} bin {i}: strength {} out of range",
@@ -1138,6 +1520,7 @@ mod tests {
                 atmospheric_depth: false,
                 fine_texture: false,
             },
+            custom_config: None,
         };
 
         let cfg = build_bin_effect_config(&base, &plan);
@@ -1196,6 +1579,7 @@ mod tests {
             strength: 1.0,
             bloom_radius_scale: 2.5,
             enabled_effects: EnabledEffects::all(),
+            custom_config: None,
         };
         let cfg = build_bin_effect_config(&base, &plan);
         assert_eq!(cfg.blur_radius_px, 25);
@@ -1270,5 +1654,211 @@ mod tests {
         plans[10] = BinEffectPlan::full();
         let p = cycle_frame_plan(SpectralEffectMode::Dispersion, &plans, 10.3, 5, 100);
         assert_eq!(p.strength, 1.0);
+    }
+
+    // ── Plan: Chaos ────────────────────────────────────────────────
+
+    #[test]
+    fn test_plan_chaos_length() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        assert_eq!(plans.len(), NUM_BINS);
+    }
+
+    #[test]
+    fn test_plan_chaos_strength_range() {
+        let base = make_base_config();
+        for (i, plan) in plan_chaos(&mut make_rng(), &base).iter().enumerate() {
+            assert!(
+                plan.strength >= constants::SPECTRAL_CHAOS_STRENGTH_MIN
+                    && plan.strength <= constants::SPECTRAL_CHAOS_STRENGTH_MAX,
+                "bin {i}: strength {} out of [{}, {}]",
+                plan.strength,
+                constants::SPECTRAL_CHAOS_STRENGTH_MIN,
+                constants::SPECTRAL_CHAOS_STRENGTH_MAX
+            );
+        }
+    }
+
+    #[test]
+    fn test_plan_chaos_bloom_scale_range() {
+        let base = make_base_config();
+        for (i, plan) in plan_chaos(&mut make_rng(), &base).iter().enumerate() {
+            assert!(
+                plan.bloom_radius_scale >= constants::SPECTRAL_CHAOS_BLOOM_SCALE_MIN
+                    && plan.bloom_radius_scale <= constants::SPECTRAL_CHAOS_BLOOM_SCALE_MAX,
+                "bin {i}: bloom_radius_scale {} out of [{}, {}]",
+                plan.bloom_radius_scale,
+                constants::SPECTRAL_CHAOS_BLOOM_SCALE_MIN,
+                constants::SPECTRAL_CHAOS_BLOOM_SCALE_MAX
+            );
+        }
+    }
+
+    #[test]
+    fn test_plan_chaos_all_have_custom_config() {
+        let base = make_base_config();
+        for (i, plan) in plan_chaos(&mut make_rng(), &base).iter().enumerate() {
+            assert!(plan.custom_config.is_some(), "bin {i} should have custom_config");
+        }
+    }
+
+    #[test]
+    fn test_plan_chaos_has_mixed_enables() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        let total_enabled: usize = plans.iter().map(|p| p.enabled_effects.count()).sum();
+        let total_possible = NUM_BINS * EnabledEffects::TOTAL_EFFECTS;
+        assert!(
+            total_enabled > total_possible / 8,
+            "chaos should enable a reasonable fraction of effects: {total_enabled}/{total_possible}"
+        );
+        assert!(
+            total_enabled < total_possible * 7 / 8,
+            "chaos should not enable nearly all effects: {total_enabled}/{total_possible}"
+        );
+    }
+
+    #[test]
+    fn test_plan_chaos_deterministic() {
+        let base = make_base_config();
+        let a = plan_chaos(&mut make_rng(), &base);
+        let b = plan_chaos(&mut make_rng(), &base);
+        for (i, (pa, pb)) in a.iter().zip(b.iter()).enumerate() {
+            assert_eq!(
+                pa.strength.to_bits(),
+                pb.strength.to_bits(),
+                "bin {i}: strength not deterministic"
+            );
+            assert_eq!(pa.enabled_effects, pb.enabled_effects, "bin {i}: effects differ");
+            assert!(
+                pa.custom_config.is_some() && pb.custom_config.is_some(),
+                "bin {i}: custom_config mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn test_plan_chaos_custom_config_respects_enables() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        for (i, plan) in plans.iter().enumerate() {
+            let cfg = plan.custom_config.as_ref().unwrap();
+            if !plan.enabled_effects.bloom {
+                assert_eq!(cfg.blur_radius_px, 0, "bin {i}: bloom disabled but radius > 0");
+            }
+            if !plan.enabled_effects.dog_bloom {
+                assert_eq!(cfg.bloom_mode, "none", "bin {i}: dog disabled but mode not none");
+            }
+            assert_eq!(
+                cfg.glow_enhancement_enabled,
+                plan.enabled_effects.glow,
+                "bin {i}: glow mismatch"
+            );
+            assert_eq!(
+                cfg.chromatic_bloom_enabled,
+                plan.enabled_effects.chromatic_bloom,
+                "bin {i}: chromatic_bloom mismatch"
+            );
+            assert_eq!(
+                cfg.micro_contrast_enabled,
+                plan.enabled_effects.micro_contrast,
+                "bin {i}: micro_contrast mismatch"
+            );
+            assert_eq!(
+                cfg.opalescence_enabled,
+                plan.enabled_effects.opalescence,
+                "bin {i}: opalescence mismatch"
+            );
+            assert_eq!(
+                cfg.champleve_enabled,
+                plan.enabled_effects.champleve,
+                "bin {i}: champleve mismatch"
+            );
+            assert_eq!(
+                cfg.aether_enabled,
+                plan.enabled_effects.aether,
+                "bin {i}: aether mismatch"
+            );
+            assert_eq!(
+                cfg.edge_luminance_enabled,
+                plan.enabled_effects.edge_luminance,
+                "bin {i}: edge_luminance mismatch"
+            );
+            assert_eq!(
+                cfg.atmospheric_depth_enabled,
+                plan.enabled_effects.atmospheric_depth,
+                "bin {i}: atmospheric_depth mismatch"
+            );
+            assert_eq!(
+                cfg.fine_texture_enabled,
+                plan.enabled_effects.fine_texture,
+                "bin {i}: fine_texture mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn test_plan_chaos_randomized_params_differ() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        let mut micro_strengths = std::collections::HashSet::new();
+        for plan in &plans {
+            if plan.enabled_effects.micro_contrast {
+                let cfg = plan.custom_config.as_ref().unwrap();
+                micro_strengths.insert(cfg.micro_contrast_config.strength.to_bits());
+            }
+        }
+        assert!(
+            micro_strengths.len() > 1,
+            "chaos should produce varied micro_contrast strengths"
+        );
+    }
+
+    #[test]
+    fn test_build_bin_effect_config_uses_custom_config() {
+        let base = make_base_config();
+        let mut custom = base.clone();
+        custom.blur_radius_px = 999;
+        custom.glow_enhancement_enabled = false;
+
+        let plan = BinEffectPlan {
+            strength: 1.0,
+            bloom_radius_scale: 1.0,
+            enabled_effects: EnabledEffects::all(),
+            custom_config: Some(Box::new(custom)),
+        };
+
+        let cfg = build_bin_effect_config(&base, &plan);
+        assert_eq!(cfg.blur_radius_px, 999, "should use custom_config directly");
+        assert!(!cfg.glow_enhancement_enabled, "should use custom_config directly");
+    }
+
+    #[test]
+    fn test_plan_chaos_dog_params_randomized() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        let mut sigmas = std::collections::HashSet::new();
+        for plan in &plans {
+            if plan.enabled_effects.dog_bloom {
+                let cfg = plan.custom_config.as_ref().unwrap();
+                sigmas.insert(cfg.dog_config.inner_sigma.to_bits());
+            }
+        }
+        assert!(sigmas.len() > 1, "chaos should produce varied DoG inner_sigma");
+    }
+
+    #[test]
+    fn test_plan_chaos_gradient_palettes_vary() {
+        let base = make_base_config();
+        let plans = plan_chaos(&mut make_rng(), &base);
+        let mut strengths = std::collections::HashSet::new();
+        for plan in &plans {
+            if plan.enabled_effects.gradient_map {
+                let cfg = plan.custom_config.as_ref().unwrap();
+                strengths.insert(cfg.gradient_map_config.strength.to_bits());
+            }
+        }
+        assert!(strengths.len() > 1, "chaos should produce varied gradient map strengths");
     }
 }

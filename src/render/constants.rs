@@ -259,6 +259,18 @@ pub const SPECTRAL_DISPERSION_BLOOM_MAX: f64 = 3.0;
 /// Min bloom radius scale for Dispersion mode (applied to red / bin 63)
 pub const SPECTRAL_DISPERSION_BLOOM_MIN: f64 = 1.0;
 
+/// Chaos mode: minimum per-bin overall strength
+pub const SPECTRAL_CHAOS_STRENGTH_MIN: f64 = 0.3;
+
+/// Chaos mode: maximum per-bin overall strength
+pub const SPECTRAL_CHAOS_STRENGTH_MAX: f64 = 1.0;
+
+/// Chaos mode: minimum bloom radius scale
+pub const SPECTRAL_CHAOS_BLOOM_SCALE_MIN: f64 = 0.5;
+
+/// Chaos mode: maximum bloom radius scale
+pub const SPECTRAL_CHAOS_BLOOM_SCALE_MAX: f64 = 3.0;
+
 // ========== Simulation Constants ==========
 
 /// Default simulation timestep
