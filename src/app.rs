@@ -327,6 +327,30 @@ pub fn generate_spectral_outputs(
     )?)
 }
 
+/// Generate spectral outputs for all nine effect modes.
+///
+/// Each mode gets its own subdirectory under `spectral_dir` with a full gallery
+/// (64 PNGs + heatmap) and six cycle videos.
+pub fn generate_spectral_outputs_with_modes(
+    accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
+    width: u32,
+    height: u32,
+    spectral_dir: &str,
+    fast_encode: bool,
+    base_config: &render::effects::EffectConfig,
+    rng: &mut crate::sim::Sha3RandomByteStream,
+) -> Result<()> {
+    Ok(render::spectral_output::generate_all_spectral_outputs_with_modes(
+        accum_spd,
+        width,
+        height,
+        spectral_dir,
+        fast_encode,
+        base_config,
+        rng,
+    )?)
+}
+
 /// Log generation parameters for reproducibility
 pub fn log_generation(
     config: &GenerationLogConfig,

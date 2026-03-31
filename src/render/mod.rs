@@ -28,6 +28,7 @@ pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
 pub mod types;
+pub mod spectral_effects;
 pub mod spectral_output;
 pub mod velocity_hdr;
 pub mod video;
@@ -91,7 +92,7 @@ impl Default for RenderConfig {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum FinishOutputMode {
+pub enum FinishOutputMode {
     #[default]
     Still,
     Video,
@@ -343,7 +344,7 @@ fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> Pixe
 ///
 /// Creates a fully configured EffectConfig from a ResolvedEffectConfig with all
 /// parameters determined (either explicitly set or randomized).
-fn build_effect_config_from_resolved(
+pub fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
     output_mode: FinishOutputMode,

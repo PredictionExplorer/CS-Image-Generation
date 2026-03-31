@@ -3,10 +3,20 @@
 //! After the main rendering pass accumulates the full SPD buffer, this module
 //! produces per-bin wavelength images (the "spectral gallery"), a dominant-wavelength
 //! heatmap, and six spectral cycle video variants.
+//!
+//! When spectral effect modes are enabled, each mode produces its own subfolder
+//! with effect-processed bin images and cycle videos.
 
 use super::constants;
+use super::effects::EffectConfig;
 use super::error::{RenderError, Result};
+use super::spectral_effects::{
+    BinEffectPlan, SpectralEffectMode, apply_effects_to_bin_linear,
+    apply_effects_to_cycle_frame, apply_gamma_and_save, apply_masking_blend, cycle_frame_plan,
+    plan_for_mode,
+};
 use super::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
+use crate::sim::Sha3RandomByteStream;
 use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin, wavelength_to_rgb};
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
@@ -15,9 +25,11 @@ use tracing::info;
 
 /// Pre-computed per-bin float RGB images used by both the gallery and cycle videos.
 pub struct BinBuffers {
-    buffers: Vec<Vec<[f32; 3]>>,
-    width: usize,
-    height: usize,
+    pub(crate) buffers: Vec<Vec<[f32; 3]>>,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    /// Whether the buffers store linear-space (true) or gamma-corrected (false) data.
+    linear: bool,
 }
 
 impl BinBuffers {
@@ -26,6 +38,22 @@ impl BinBuffers {
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
     /// bin's wavelength color, and applies display gamma.
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
+        Self::build(accum_spd, width, height, false)
+    }
+
+    /// Build 64 bin images in linear space (no gamma).
+    ///
+    /// Suitable for feeding into the post-effects pipeline which expects linear data.
+    pub fn new_linear(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
+        Self::build(accum_spd, width, height, true)
+    }
+
+    fn build(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: usize,
+        height: usize,
+        linear: bool,
+    ) -> Self {
         let pixel_count = width * height;
         assert_eq!(accum_spd.len(), pixel_count);
 
@@ -46,19 +74,29 @@ impl BinBuffers {
                 let mut buf = vec![[0.0f32; 3]; pixel_count];
                 for (i, pixel) in buf.iter_mut().enumerate() {
                     let normalized = (accum_spd[i][bin] / max_val).clamp(0.0, 1.0);
-                    pixel[0] = ((normalized * tint_r).powf(inv_gamma)) as f32;
-                    pixel[1] = ((normalized * tint_g).powf(inv_gamma)) as f32;
-                    pixel[2] = ((normalized * tint_b).powf(inv_gamma)) as f32;
+                    if linear {
+                        pixel[0] = (normalized * tint_r) as f32;
+                        pixel[1] = (normalized * tint_g) as f32;
+                        pixel[2] = (normalized * tint_b) as f32;
+                    } else {
+                        pixel[0] = ((normalized * tint_r).powf(inv_gamma)) as f32;
+                        pixel[1] = ((normalized * tint_g).powf(inv_gamma)) as f32;
+                        pixel[2] = ((normalized * tint_b).powf(inv_gamma)) as f32;
+                    }
                 }
                 buf
             })
             .collect();
 
-        Self { buffers, width, height }
+        Self { buffers, width, height, linear }
     }
 
-    fn pixel_count(&self) -> usize {
+    pub fn pixel_count(&self) -> usize {
         self.width * self.height
+    }
+
+    pub fn is_linear(&self) -> bool {
+        self.linear
     }
 }
 
@@ -513,9 +551,399 @@ fn encode_cycle_video(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Float-space bin interpolation for effect-mode cycle videos
+// ---------------------------------------------------------------------------
+
+/// Interpolate between two adjacent bin images in float space (linear [f32; 3]).
+fn lerp_bins_frame_f32(
+    bin_buffers: &BinBuffers,
+    bin_f: f64,
+    output: &mut Vec<[f32; 3]>,
+) {
+    let pixel_count = bin_buffers.pixel_count();
+    output.resize(pixel_count, [0.0f32; 3]);
+
+    let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
+    let lo = wrapped.floor() as usize % NUM_BINS;
+    let hi = (lo + 1) % NUM_BINS;
+    let t = wrapped.fract() as f32;
+    let one_minus_t = 1.0 - t;
+
+    let lo_buf = &bin_buffers.buffers[lo];
+    let hi_buf = &bin_buffers.buffers[hi];
+
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
+        pixel[0] = lo_buf[i][0] * one_minus_t + hi_buf[i][0] * t;
+        pixel[1] = lo_buf[i][1] * one_minus_t + hi_buf[i][1] * t;
+        pixel[2] = lo_buf[i][2] * one_minus_t + hi_buf[i][2] * t;
+    });
+}
+
+/// Per-pixel bin selection for the radial variant (float space).
+fn radial_frame_f32(
+    bin_buffers: &BinBuffers,
+    base_bin: f64,
+    dist_map: &[f64],
+    output: &mut Vec<[f32; 3]>,
+) {
+    let pixel_count = bin_buffers.pixel_count();
+    output.resize(pixel_count, [0.0f32; 3]);
+
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
+        let bin_f = base_bin - dist_map[i] * constants::RADIAL_SPREAD;
+        let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
+        let lo = wrapped.floor() as usize % NUM_BINS;
+        let hi = (lo + 1) % NUM_BINS;
+        let t = wrapped.fract() as f32;
+        let one_minus_t = 1.0 - t;
+
+        pixel[0] = bin_buffers.buffers[lo][i][0] * one_minus_t + bin_buffers.buffers[hi][i][0] * t;
+        pixel[1] = bin_buffers.buffers[lo][i][1] * one_minus_t + bin_buffers.buffers[hi][i][1] * t;
+        pixel[2] = bin_buffers.buffers[lo][i][2] * one_minus_t + bin_buffers.buffers[hi][i][2] * t;
+    });
+}
+
+/// Complementary: average two cursors 32 bins apart (float space).
+fn complementary_frame_f32(
+    bin_buffers: &BinBuffers,
+    bin_f: f64,
+    output: &mut Vec<[f32; 3]>,
+) {
+    let pixel_count = bin_buffers.pixel_count();
+    output.resize(pixel_count, [0.0f32; 3]);
+
+    let half = (NUM_BINS / 2) as f64;
+    let bin_a = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
+    let bin_b = (((bin_f + half) % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
+
+    let lo_a = bin_a.floor() as usize % NUM_BINS;
+    let hi_a = (lo_a + 1) % NUM_BINS;
+    let t_a = bin_a.fract() as f32;
+
+    let lo_b = bin_b.floor() as usize % NUM_BINS;
+    let hi_b = (lo_b + 1) % NUM_BINS;
+    let t_b = bin_b.fract() as f32;
+
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
+        let ra = bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
+        let ga = bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
+        let ba = bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
+
+        let rb = bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
+        let gb = bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
+        let bb = bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
+
+        pixel[0] = (ra + rb) * 0.5;
+        pixel[1] = (ga + gb) * 0.5;
+        pixel[2] = (ba + bb) * 0.5;
+    });
+}
+
+/// Compute the float-space bin index for a cycle frame (same logic as u16 variants).
+fn compute_cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) -> f64 {
+    let total_f = total_frames as f64;
+    let t = frame as f64 / total_f;
+    let max_bin = (NUM_BINS - 1) as f64;
+
+    match variant {
+        CycleVariant::Forward => frame as f64 * NUM_BINS as f64 / total_f,
+        CycleVariant::Reverse => NUM_BINS as f64 - (frame as f64 * NUM_BINS as f64 / total_f),
+        CycleVariant::PingPong => {
+            if t < 0.5 { t * 2.0 * max_bin } else { (1.0 - (t - 0.5) * 2.0) * max_bin }
+        }
+        CycleVariant::Ease => (1.0 - (t * 2.0 * PI).cos()) * 0.5 * NUM_BINS as f64,
+        CycleVariant::Radial | CycleVariant::Complementary => {
+            frame as f64 * NUM_BINS as f64 / total_f
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Effect-mode gallery generation
+// ---------------------------------------------------------------------------
+
+/// Generate a spectral gallery for one effect mode.
+///
+/// For most modes, each bin image is processed through the effect pipeline
+/// according to the bin's plan. For Masking mode, a two-pass approach is used:
+/// first all bins are processed, then each is blended with raw using the
+/// complementary bin's intensity as a mask.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_mode_gallery(
+    accum_spd: &[[f64; NUM_BINS]],
+    bin_buffers_linear: &BinBuffers,
+    plans: &[BinEffectPlan],
+    mode: SpectralEffectMode,
+    base_config: &EffectConfig,
+    width: u32,
+    height: u32,
+    output_dir: &str,
+) -> Result<()> {
+    info!("   Generating {} gallery ({NUM_BINS} bin images)...", mode.display_name());
+    let w = width as usize;
+    let h = height as usize;
+
+    if mode == SpectralEffectMode::Masking {
+        let processed: Vec<Vec<[f32; 3]>> = (0..NUM_BINS)
+            .into_par_iter()
+            .map(|bin| {
+                apply_effects_to_bin_linear(
+                    &bin_buffers_linear.buffers[bin],
+                    w,
+                    h,
+                    &plans[bin],
+                    base_config,
+                )
+            })
+            .collect();
+
+        (0..NUM_BINS).into_par_iter().try_for_each(|bin| {
+            let complement = (bin + NUM_BINS / 2) % NUM_BINS;
+            let blended = apply_masking_blend(
+                &bin_buffers_linear.buffers[bin],
+                &processed[bin],
+                &bin_buffers_linear.buffers[complement],
+            );
+            let wavelength = wavelength_nm_for_bin(bin);
+            let filename = format!("{output_dir}/{bin:02}_{wavelength:.0}nm.png");
+            apply_gamma_and_save(&blended, width, height, &filename)
+        })?;
+    } else {
+        (0..NUM_BINS).into_par_iter().try_for_each(|bin| {
+            let processed = apply_effects_to_bin_linear(
+                &bin_buffers_linear.buffers[bin],
+                w,
+                h,
+                &plans[bin],
+                base_config,
+            );
+            let wavelength = wavelength_nm_for_bin(bin);
+            let filename = format!("{output_dir}/{bin:02}_{wavelength:.0}nm.png");
+            apply_gamma_and_save(&processed, width, height, &filename)
+        })?;
+    }
+
+    generate_dominant_wavelength_heatmap(accum_spd, width, height, output_dir)?;
+
+    info!("   {} gallery complete ({} images)", mode.display_name(), NUM_BINS + 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Effect-mode cycle video generation
+// ---------------------------------------------------------------------------
+
+/// Generate all six cycle videos for one effect mode.
+#[allow(clippy::too_many_arguments)]
+fn generate_mode_cycle_videos_inner(
+    bin_buffers_linear: &BinBuffers,
+    plans: &[BinEffectPlan],
+    mode: SpectralEffectMode,
+    base_config: &EffectConfig,
+    width: u32,
+    height: u32,
+    output_dir: &str,
+    fast_encode: bool,
+) -> Result<()> {
+    info!("   Generating {} cycle videos (6 variants)...", mode.display_name());
+
+    let total_frames = constants::CYCLE_TOTAL_FRAMES;
+    let variants: [(&str, CycleVariant); 6] = [
+        ("forward", CycleVariant::Forward),
+        ("reverse", CycleVariant::Reverse),
+        ("pingpong", CycleVariant::PingPong),
+        ("ease", CycleVariant::Ease),
+        ("radial", CycleVariant::Radial),
+        ("complementary", CycleVariant::Complementary),
+    ];
+
+    let dist_map = build_distance_map(width as usize, height as usize);
+    let errors: std::sync::Mutex<Vec<RenderError>> = std::sync::Mutex::new(Vec::new());
+
+    std::thread::scope(|s| {
+        for &(name, variant) in &variants {
+            let output_path = format!("{output_dir}/{name}.mp4");
+            let bb = bin_buffers_linear;
+            let dm = &dist_map;
+            let errs = &errors;
+
+            s.spawn(move || {
+                if let Err(e) = encode_mode_cycle_video(
+                    bb,
+                    &variant,
+                    dm,
+                    total_frames,
+                    plans,
+                    mode,
+                    base_config,
+                    width,
+                    height,
+                    &output_path,
+                    fast_encode,
+                ) {
+                    errs.lock().unwrap().push(e);
+                }
+            });
+        }
+    });
+
+    let errs = errors.into_inner().unwrap();
+    if let Some(first_err) = errs.into_iter().next() {
+        return Err(first_err);
+    }
+
+    info!("   {} cycle videos complete (6 variants)", mode.display_name());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_mode_cycle_video(
+    bin_buffers: &BinBuffers,
+    variant: &CycleVariant,
+    dist_map: &[f64],
+    total_frames: u32,
+    plans: &[BinEffectPlan],
+    mode: SpectralEffectMode,
+    base_config: &EffectConfig,
+    width: u32,
+    height: u32,
+    output_path: &str,
+    fast_encode: bool,
+) -> Result<()> {
+    let fps = constants::DEFAULT_VIDEO_FPS;
+    let options = if fast_encode {
+        VideoEncodingOptions::fast_encode()
+    } else {
+        VideoEncodingOptions::default()
+    };
+    let w = width as usize;
+    let h = height as usize;
+
+    create_video_from_frames_singlepass(
+        width,
+        height,
+        fps,
+        |out| {
+            let mut frame_f32: Vec<[f32; 3]> = Vec::new();
+
+            for frame in 0..total_frames {
+                let bin_f = compute_cycle_bin_f(variant, frame, total_frames);
+
+                match variant {
+                    CycleVariant::Radial => {
+                        radial_frame_f32(bin_buffers, bin_f, dist_map, &mut frame_f32);
+                    }
+                    CycleVariant::Complementary => {
+                        complementary_frame_f32(bin_buffers, bin_f, &mut frame_f32);
+                    }
+                    _ => {
+                        lerp_bins_frame_f32(bin_buffers, bin_f, &mut frame_f32);
+                    }
+                }
+
+                let plan = cycle_frame_plan(mode, plans, bin_f, frame, total_frames);
+                let frame_16bit =
+                    apply_effects_to_cycle_frame(&frame_f32, w, h, &plan, base_config);
+
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        frame_16bit.as_ptr() as *const u8,
+                        frame_16bit.len() * 2,
+                    )
+                };
+                out.write_all(bytes)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            }
+            Ok(())
+        },
+        output_path,
+        &options,
+    )?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Multi-mode orchestrator
+// ---------------------------------------------------------------------------
+
+/// Generate spectral outputs for all nine effect modes.
+///
+/// Builds both gamma-corrected and linear `BinBuffers` once, then loops over
+/// each mode to produce its gallery and cycle videos in a dedicated subdirectory.
+pub fn generate_all_spectral_outputs_with_modes(
+    accum_spd: &[[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    spectral_dir: &str,
+    fast_encode: bool,
+    base_config: &EffectConfig,
+    rng: &mut Sha3RandomByteStream,
+) -> Result<()> {
+    let w = width as usize;
+    let h = height as usize;
+
+    info!("Building shared BinBuffers ({NUM_BINS} bins, gamma + linear)...");
+    let bin_buffers_gamma = BinBuffers::new(accum_spd, w, h);
+    let bin_buffers_linear = BinBuffers::new_linear(accum_spd, w, h);
+
+    for &mode in SpectralEffectMode::ALL {
+        let mode_dir = format!("{spectral_dir}/{}", mode.dir_name());
+        std::fs::create_dir_all(&mode_dir).map_err(|e| {
+            RenderError::InvalidConfig(format!("Failed to create dir {mode_dir}: {e}"))
+        })?;
+
+        info!("Generating spectral mode: {}...", mode.display_name());
+
+        if mode == SpectralEffectMode::Default {
+            generate_spectral_gallery_with_buffers(
+                accum_spd,
+                &bin_buffers_gamma,
+                width,
+                height,
+                &mode_dir,
+            )?;
+            generate_spectral_cycle_videos_with_buffers(
+                &bin_buffers_gamma,
+                width,
+                height,
+                &mode_dir,
+                fast_encode,
+            )?;
+        } else {
+            let plans = plan_for_mode(mode, rng);
+            generate_mode_gallery(
+                accum_spd,
+                &bin_buffers_linear,
+                &plans,
+                mode,
+                base_config,
+                width,
+                height,
+                &mode_dir,
+            )?;
+            generate_mode_cycle_videos_inner(
+                &bin_buffers_linear,
+                &plans,
+                mode,
+                base_config,
+                width,
+                height,
+                &mode_dir,
+                fast_encode,
+            )?;
+        }
+    }
+
+    info!("All spectral effect modes complete ({} modes)", SpectralEffectMode::ALL.len());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::spectral_effects;
 
     const TEST_W: usize = 4;
     const TEST_H: usize = 4;
@@ -1333,5 +1761,334 @@ mod tests {
     fn test_radial_spread_positive() {
         let spread = constants::RADIAL_SPREAD;
         assert!(spread > 0.0, "radial spread must be positive, got {spread}");
+    }
+
+    // ── BinBuffers::new_linear ────────────────────────────────────
+
+    #[test]
+    fn test_new_linear_correct_dimensions() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        assert_eq!(bb.buffers.len(), NUM_BINS);
+        assert!(bb.is_linear());
+        for buf in &bb.buffers {
+            assert_eq!(buf.len(), TEST_W * TEST_H);
+        }
+    }
+
+    #[test]
+    fn test_new_linear_values_in_unit_range() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        for (bin, buf) in bb.buffers.iter().enumerate() {
+            for (i, pixel) in buf.iter().enumerate() {
+                assert!(
+                    pixel[0] >= 0.0 && pixel[0] <= 1.0,
+                    "linear bin {bin} pixel {i} R={} out of range",
+                    pixel[0]
+                );
+                assert!(
+                    pixel[1] >= 0.0 && pixel[1] <= 1.0,
+                    "linear bin {bin} pixel {i} G={} out of range",
+                    pixel[1]
+                );
+                assert!(
+                    pixel[2] >= 0.0 && pixel[2] <= 1.0,
+                    "linear bin {bin} pixel {i} B={} out of range",
+                    pixel[2]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_new_linear_differs_from_gamma() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        for (i, pixel) in spd.iter_mut().enumerate() {
+            pixel[20] = (i + 1) as f64;
+        }
+        let bb_gamma = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let bb_linear = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+
+        assert!(!bb_gamma.is_linear());
+        assert!(bb_linear.is_linear());
+
+        let mut differ = false;
+        'outer: for i in 0..bb_gamma.buffers[20].len() {
+            for c in 0..3 {
+                if (bb_gamma.buffers[20][i][c] - bb_linear.buffers[20][i][c]).abs() > 1e-6 {
+                    differ = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(differ, "gamma and linear buffers should differ for non-uniform energy");
+    }
+
+    #[test]
+    fn test_new_linear_midtones_higher_than_gamma() {
+        let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        for pixel in &mut spd {
+            pixel[30] = 0.5;
+        }
+        let bb_gamma = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let bb_linear = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+
+        let gamma_val = bb_gamma.buffers[30][0][0];
+        let linear_val = bb_linear.buffers[30][0][0];
+        assert!(
+            gamma_val > linear_val,
+            "gamma ({gamma_val}) should be > linear ({linear_val}) for midtone values \
+             (gamma 2.2 lifts midtones)"
+        );
+    }
+
+    #[test]
+    fn test_new_linear_zero_energy_is_black() {
+        let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        for buf in &bb.buffers {
+            for pixel in buf {
+                assert_eq!(pixel[0], 0.0);
+                assert_eq!(pixel[1], 0.0);
+                assert_eq!(pixel[2], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_new_linear_deterministic() {
+        let spd = make_test_spd();
+        let bb1 = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let bb2 = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        for bin in 0..NUM_BINS {
+            for i in 0..TEST_W * TEST_H {
+                assert_eq!(
+                    bb1.buffers[bin][i][0].to_bits(),
+                    bb2.buffers[bin][i][0].to_bits(),
+                    "linear bin {bin} pixel {i} R not deterministic"
+                );
+            }
+        }
+    }
+
+    // ── Float-space frame interpolation ───────────────────────────
+
+    #[test]
+    fn test_lerp_bins_f32_output_length() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let mut output = Vec::new();
+        lerp_bins_frame_f32(&bb, 5.5, &mut output);
+        assert_eq!(output.len(), TEST_W * TEST_H);
+    }
+
+    #[test]
+    fn test_lerp_bins_f32_wraps() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let mut out_neg = Vec::new();
+        let mut out_pos = Vec::new();
+        lerp_bins_frame_f32(&bb, -1.0, &mut out_neg);
+        lerp_bins_frame_f32(&bb, (NUM_BINS - 1) as f64, &mut out_pos);
+        assert_eq!(out_neg, out_pos);
+    }
+
+    #[test]
+    fn test_radial_frame_f32_output_length() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let dist_map = build_distance_map(TEST_W, TEST_H);
+        let mut output = Vec::new();
+        radial_frame_f32(&bb, 10.0, &dist_map, &mut output);
+        assert_eq!(output.len(), TEST_W * TEST_H);
+    }
+
+    #[test]
+    fn test_complementary_frame_f32_output_length() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let mut output = Vec::new();
+        complementary_frame_f32(&bb, 5.0, &mut output);
+        assert_eq!(output.len(), TEST_W * TEST_H);
+    }
+
+    #[test]
+    fn test_compute_cycle_bin_f_forward_monotonic() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        let mut prev = -1.0f64;
+        for frame in 0..total {
+            let val = compute_cycle_bin_f(&CycleVariant::Forward, frame, total);
+            assert!(val >= prev, "forward should be non-decreasing");
+            prev = val;
+        }
+    }
+
+    // ── Effect-mode gallery (tmpdir, no video encoding) ────────────
+
+    #[test]
+    fn test_mode_gallery_default_writes_files() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = make_single_bin_spd(20, 1.0);
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let plans = spectral_effects::plan_default();
+        let base_config = make_minimal_effect_config();
+
+        generate_mode_gallery(
+            &spd,
+            &bb,
+            &plans,
+            SpectralEffectMode::Default,
+            &base_config,
+            TEST_W as u32,
+            TEST_H as u32,
+            dir,
+        )
+        .expect("default gallery should succeed");
+
+        for bin in 0..NUM_BINS {
+            let wl = wavelength_nm_for_bin(bin);
+            let file = format!("{dir}/{bin:02}_{wl:.0}nm.png");
+            assert!(std::path::Path::new(&file).exists(), "missing: {file}");
+        }
+        let heatmap = format!("{dir}/dominant_wavelength.png");
+        assert!(std::path::Path::new(&heatmap).exists());
+    }
+
+    #[test]
+    fn test_mode_gallery_dispersion_writes_files() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = make_single_bin_spd(10, 2.0);
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let plans = spectral_effects::plan_dispersion();
+        let base_config = make_minimal_effect_config();
+
+        generate_mode_gallery(
+            &spd,
+            &bb,
+            &plans,
+            SpectralEffectMode::Dispersion,
+            &base_config,
+            TEST_W as u32,
+            TEST_H as u32,
+            dir,
+        )
+        .expect("dispersion gallery should succeed");
+
+        let file_count = std::fs::read_dir(dir).unwrap().count();
+        assert_eq!(file_count, NUM_BINS + 1, "expected {} PNGs + 1 heatmap", NUM_BINS);
+    }
+
+    #[test]
+    fn test_mode_gallery_masking_writes_files() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = make_single_bin_spd(20, 1.0);
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let plans = spectral_effects::plan_masking();
+        let base_config = make_minimal_effect_config();
+
+        generate_mode_gallery(
+            &spd,
+            &bb,
+            &plans,
+            SpectralEffectMode::Masking,
+            &base_config,
+            TEST_W as u32,
+            TEST_H as u32,
+            dir,
+        )
+        .expect("masking gallery should succeed");
+
+        let file_count = std::fs::read_dir(dir).unwrap().count();
+        assert_eq!(file_count, NUM_BINS + 1);
+    }
+
+    #[test]
+    fn test_mode_gallery_zero_energy_does_not_crash() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
+        let plans = spectral_effects::plan_dispersion();
+        let base_config = make_minimal_effect_config();
+
+        let result = generate_mode_gallery(
+            &spd,
+            &bb,
+            &plans,
+            SpectralEffectMode::Dispersion,
+            &base_config,
+            TEST_W as u32,
+            TEST_H as u32,
+            dir,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mode_gallery_non_square() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let dir = tmp.path().to_str().unwrap();
+
+        let w = 6;
+        let h = 3;
+        let spd = vec![[0.5f64; NUM_BINS]; w * h];
+        let bb = BinBuffers::new_linear(&spd, w, h);
+        let plans = spectral_effects::plan_cascade();
+        let base_config = make_minimal_effect_config();
+
+        let result = generate_mode_gallery(
+            &spd,
+            &bb,
+            &plans,
+            SpectralEffectMode::Cascade,
+            &base_config,
+            w as u32,
+            h as u32,
+            dir,
+        );
+        assert!(result.is_ok());
+    }
+
+    fn make_minimal_effect_config() -> EffectConfig {
+        use super::super::effects::DogBloomConfig;
+        EffectConfig {
+            bloom_mode: "none".to_string(),
+            blur_radius_px: 0,
+            blur_strength: 0.0,
+            blur_core_brightness: 1.0,
+            dog_config: DogBloomConfig::default(),
+            perceptual_blur_enabled: false,
+            perceptual_blur_config: None,
+            color_grade_enabled: false,
+            color_grade_params: Default::default(),
+            gradient_map_enabled: false,
+            gradient_map_config: Default::default(),
+            champleve_enabled: false,
+            champleve_config: Default::default(),
+            aether_enabled: false,
+            aether_config: Default::default(),
+            chromatic_bloom_enabled: false,
+            chromatic_bloom_config: Default::default(),
+            opalescence_enabled: false,
+            opalescence_config: Default::default(),
+            edge_luminance_enabled: false,
+            edge_luminance_config: Default::default(),
+            micro_contrast_enabled: false,
+            micro_contrast_config: Default::default(),
+            glow_enhancement_enabled: false,
+            glow_enhancement_config: Default::default(),
+            atmospheric_depth_enabled: false,
+            atmospheric_depth_config: Default::default(),
+            fine_texture_enabled: false,
+            fine_texture_config: Default::default(),
+        }
     }
 }

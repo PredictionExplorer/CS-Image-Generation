@@ -230,6 +230,35 @@ pub const RADIAL_SPREAD: f64 = 24.0;
 /// Display gamma used for spectral gallery and bin image output
 pub const DISPLAY_GAMMA: f64 = 2.2;
 
+// ========== Spectral Effect Mode Constants ==========
+
+/// Min number of resonance bins selected by the Resonance mode
+pub const SPECTRAL_RESONANCE_MIN_BINS: usize = 5;
+
+/// Max number of resonance bins selected by the Resonance mode
+pub const SPECTRAL_RESONANCE_MAX_BINS: usize = 8;
+
+/// Sinusoidal frequency for the Interference mode (cycles across 64 bins)
+pub const SPECTRAL_INTERFERENCE_FREQUENCY: f64 = 3.5;
+
+/// Gaussian sigma (in bins) for the Gravity Well mode falloff
+pub const SPECTRAL_GRAVITY_SIGMA: f64 = 8.0;
+
+/// Min effects per bin in Fingerprint mode
+pub const SPECTRAL_FINGERPRINT_MIN_EFFECTS: usize = 2;
+
+/// Max effects per bin in Fingerprint mode
+pub const SPECTRAL_FINGERPRINT_MAX_EFFECTS: usize = 4;
+
+/// Zone boundaries for Weathering mode: [gaseous_end, metallic_end]
+pub const SPECTRAL_WEATHERING_ZONE_BOUNDARIES: [usize; 2] = [21, 44];
+
+/// Max bloom radius scale for Dispersion mode (applied to violet / bin 0)
+pub const SPECTRAL_DISPERSION_BLOOM_MAX: f64 = 3.0;
+
+/// Min bloom radius scale for Dispersion mode (applied to red / bin 63)
+pub const SPECTRAL_DISPERSION_BLOOM_MIN: f64 = 1.0;
+
 // ========== Simulation Constants ==========
 
 /// Default simulation timestep

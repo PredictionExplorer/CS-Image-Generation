@@ -298,12 +298,20 @@ fn main() -> Result<()> {
 
     let spectral_dir = format!("{seed_dir}/spectral");
 
-    app::generate_spectral_outputs(
+    let base_effect_config = render::build_effect_config_from_resolved(
+        &resolved_effect_config,
+        &render_config,
+        render::FinishOutputMode::Still,
+    );
+
+    app::generate_spectral_outputs_with_modes(
         &accum_spd,
         args.resolution.width,
         args.resolution.height,
         &spectral_dir,
         args.fast_encode,
+        &base_effect_config,
+        &mut rng,
     )?;
 
     info!(
