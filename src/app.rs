@@ -74,6 +74,7 @@ pub struct GenerationLogConfig {
     pub velocity: f64,
     pub chaos_weight: f64,
     pub equil_weight: f64,
+    pub weights_randomized: bool,
 }
 
 /// Initialize per-seed output directory structure:
@@ -414,6 +415,7 @@ pub fn log_generation(
         chaos_weight: config.chaos_weight,
         equil_weight: config.equil_weight,
         escape_threshold: config.escape_threshold,
+        weights_randomized: config.weights_randomized,
     };
 
     record.orbit_info = OrbitInfo {

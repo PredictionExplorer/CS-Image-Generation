@@ -84,6 +84,8 @@ pub struct SimulationConfig {
     pub chaos_weight: f64,
     pub equil_weight: f64,
     pub escape_threshold: f64,
+    /// Indicates if Borda weights were randomly generated
+    pub weights_randomized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +162,7 @@ impl Default for SimulationConfig {
             chaos_weight: 0.75,
             equil_weight: 11.0,
             escape_threshold: -0.3,
+            weights_randomized: false,
         }
     }
 }

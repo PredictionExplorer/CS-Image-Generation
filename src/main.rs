@@ -18,8 +18,6 @@ const DEFAULT_LOCATION: f64 = 300.0;
 const DEFAULT_VELOCITY: f64 = 1.0;
 const DEFAULT_MIN_MASS: f64 = 100.0;
 const DEFAULT_MAX_MASS: f64 = 300.0;
-const DEFAULT_CHAOS_WEIGHT: f64 = 0.75;
-const DEFAULT_EQUIL_WEIGHT: f64 = 11.0;
 const DEFAULT_ALPHA_DENOM: usize = 15_000_000;
 const DEFAULT_ALPHA_COMPRESS: f64 = 6.0;
 const DEFAULT_ESCAPE_THRESHOLD: f64 = -0.3;
@@ -96,6 +94,16 @@ struct Args {
 
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
+
+    /// Borda weight for chaos (FFT regularity) rank points.
+    /// Omit to randomize from a curated range.
+    #[arg(long)]
+    chaos_weight: Option<f64>,
+
+    /// Borda weight for equilateralness (triangle balance) rank points.
+    /// Omit to randomize from a curated range.
+    #[arg(long)]
+    equil_weight: Option<f64>,
 }
 
 fn setup_logging(level: &str) {
@@ -129,10 +137,68 @@ fn resolved_perceptual_blur_radius(
     Some((radius_scale * min_dim as f64).round().max(1.0) as usize)
 }
 
+struct ResolvedBordaWeights {
+    chaos_weight: f64,
+    equil_weight: f64,
+    was_randomized: bool,
+}
+
+/// Draw a log-uniform equil/chaos ratio and derive weights from it.
+///
+/// Log-uniform sampling ensures that chaos-dominant ratios (e.g. 1/20)
+/// and equil-dominant ratios (e.g. 20) are equally likely.  The ratio
+/// is expressed as equil_weight / chaos_weight.
+fn resolve_borda_weights(
+    chaos_opt: Option<f64>,
+    equil_opt: Option<f64>,
+    rng: &mut Sha3RandomByteStream,
+) -> ResolvedBordaWeights {
+    use render::parameter_descriptors::EQUIL_CHAOS_RATIO;
+
+    let (chaos_weight, equil_weight, was_randomized) = match (chaos_opt, equil_opt) {
+        (Some(cw), Some(ew)) => (cw, ew, false),
+        (None, None) => {
+            let log_min = EQUIL_CHAOS_RATIO.min.ln();
+            let log_max = EQUIL_CHAOS_RATIO.max.ln();
+            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
+            (1.0, ratio, true)
+        }
+        (Some(cw), None) => {
+            let log_min = EQUIL_CHAOS_RATIO.min.ln();
+            let log_max = EQUIL_CHAOS_RATIO.max.ln();
+            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
+            (cw, cw * ratio, true)
+        }
+        (None, Some(ew)) => {
+            let log_min = EQUIL_CHAOS_RATIO.min.ln();
+            let log_max = EQUIL_CHAOS_RATIO.max.ln();
+            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
+            (ew / ratio, ew, true)
+        }
+    };
+
+    let ratio = equil_weight / chaos_weight;
+    let label = if ratio >= 1.0 {
+        format!("equil {:.1}x", ratio)
+    } else {
+        format!("chaos {:.1}x", 1.0 / ratio)
+    };
+    info!(
+        "Borda weights: chaos={:.3}, equil={:.3} ({}){}",
+        chaos_weight,
+        equil_weight,
+        label,
+        if was_randomized { " [randomized]" } else { " [explicit]" }
+    );
+
+    ResolvedBordaWeights { chaos_weight, equil_weight, was_randomized }
+}
+
 fn build_generation_log_config(
     args: &Args,
     resolved: &render::randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
+    borda_weights: &ResolvedBordaWeights,
 ) -> app::GenerationLogConfig {
     let min_dim = resolved.width.min(resolved.height);
     let bloom_mode = if resolved.enable_bloom {
@@ -169,8 +235,9 @@ fn build_generation_log_config(
         max_mass: DEFAULT_MAX_MASS,
         location: DEFAULT_LOCATION,
         velocity: DEFAULT_VELOCITY,
-        chaos_weight: DEFAULT_CHAOS_WEIGHT,
-        equil_weight: DEFAULT_EQUIL_WEIGHT,
+        chaos_weight: borda_weights.chaos_weight,
+        equil_weight: borda_weights.equil_weight,
+        weights_randomized: borda_weights.was_randomized,
     }
 }
 
@@ -221,12 +288,14 @@ fn main() -> Result<()> {
             - num_randomized
     );
 
+    let borda_weights = resolve_borda_weights(args.chaos_weight, args.equil_weight, &mut rng);
+
     let (best_bodies, best_info) = app::run_borda_selection(
         &mut rng,
         args.sims,
         args.steps,
-        DEFAULT_CHAOS_WEIGHT,
-        DEFAULT_EQUIL_WEIGHT,
+        borda_weights.chaos_weight,
+        borda_weights.equil_weight,
         DEFAULT_ESCAPE_THRESHOLD,
     )?;
 
@@ -320,7 +389,7 @@ fn main() -> Result<()> {
     );
 
     let generation_log_config =
-        build_generation_log_config(&args, &resolved_effect_config, &render_config);
+        build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights);
     app::log_generation(
         &generation_log_config,
         &args.output,
@@ -349,6 +418,8 @@ mod tests {
         assert_eq!(args.drift, DriftModeArg::Elliptical);
         assert!(!args.fast_encode);
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);
+        assert!(args.chaos_weight.is_none());
+        assert!(args.equil_weight.is_none());
     }
 
     #[test]
@@ -374,6 +445,74 @@ mod tests {
         assert_eq!(args.sims, 5000);
         assert_eq!(args.steps, 12000);
         assert!(args.fast_encode);
+    }
+
+    #[test]
+    fn test_parse_explicit_borda_weights() {
+        let args = Args::parse_from([
+            "three_body_problem",
+            "--chaos-weight",
+            "1.5",
+            "--equil-weight",
+            "8.0",
+        ]);
+        assert_eq!(args.chaos_weight, Some(1.5));
+        assert_eq!(args.equil_weight, Some(8.0));
+    }
+
+    #[test]
+    fn test_resolve_borda_weights_randomized() {
+        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
+        let w = resolve_borda_weights(None, None, &mut rng);
+        assert!(w.was_randomized);
+        assert_eq!(w.chaos_weight, 1.0);
+        let ratio = w.equil_weight / w.chaos_weight;
+        assert!(ratio >= 0.05 && ratio <= 20.0,
+            "ratio {} outside [0.05, 20.0]", ratio);
+    }
+
+    #[test]
+    fn test_resolve_borda_weights_explicit() {
+        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
+        let w = resolve_borda_weights(Some(1.0), Some(10.0), &mut rng);
+        assert!(!w.was_randomized);
+        assert_eq!(w.chaos_weight, 1.0);
+        assert_eq!(w.equil_weight, 10.0);
+    }
+
+    #[test]
+    fn test_resolve_borda_weights_partial_chaos_explicit() {
+        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
+        let w = resolve_borda_weights(Some(0.5), None, &mut rng);
+        assert!(w.was_randomized);
+        assert_eq!(w.chaos_weight, 0.5);
+        let ratio = w.equil_weight / w.chaos_weight;
+        assert!(ratio >= 0.05 && ratio <= 20.0,
+            "ratio {} outside [0.05, 20.0]", ratio);
+    }
+
+    #[test]
+    fn test_resolve_borda_weights_partial_equil_explicit() {
+        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
+        let w = resolve_borda_weights(None, Some(5.0), &mut rng);
+        assert!(w.was_randomized);
+        assert_eq!(w.equil_weight, 5.0);
+        let ratio = w.equil_weight / w.chaos_weight;
+        assert!(ratio >= 0.05 && ratio <= 20.0,
+            "ratio {} outside [0.05, 20.0]", ratio);
+    }
+
+    #[test]
+    fn test_resolve_borda_weights_range_coverage() {
+        for seed_byte in 0u8..=255 {
+            let seed = [seed_byte; 32];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let w = resolve_borda_weights(None, None, &mut rng);
+            assert_eq!(w.chaos_weight, 1.0);
+            let ratio = w.equil_weight / w.chaos_weight;
+            assert!(ratio >= 0.05 && ratio <= 20.0,
+                "seed {} produced ratio {} outside [0.05, 20.0]", seed_byte, ratio);
+        }
     }
 
     #[test]

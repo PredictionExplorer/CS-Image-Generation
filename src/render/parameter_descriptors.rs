@@ -21,6 +21,18 @@ pub struct IntParamDescriptor {
     pub description: &'static str,
 }
 
+// ==================== BORDA ORBIT SELECTION WEIGHTS ====================
+// The equil/chaos ratio is sampled log-uniformly so that chaos-dominant
+// and equil-dominant outcomes are equally likely.  Ratio range: 1/20 to 20.
+// At ratio < 1 chaos dominates; at ratio > 1 equilateralness dominates.
+
+pub const EQUIL_CHAOS_RATIO: FloatParamDescriptor = FloatParamDescriptor {
+    name: "equil_chaos_ratio",
+    min: 0.05,
+    max: 20.0,
+    description: "Equilateralness-to-chaos Borda weight ratio (log-uniform, 1/20x to 20x)",
+};
+
 // ==================== EFFECT ENABLE PROBABILITIES ====================
 // Derived from empirical analysis of visually pleasing outputs.
 // Each value is the probability [0.0, 1.0] that the effect is enabled when randomized.
