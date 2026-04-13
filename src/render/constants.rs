@@ -237,6 +237,37 @@ pub const CYCLE_TOTAL_FRAMES: u32 = 720;
 /// Display gamma used for spectral gallery and bin image output
 pub const DISPLAY_GAMMA: f64 = 2.2;
 
+/// First bin included in the spectral sweep (skips the dimmest violet bins).
+pub const SWEEP_BIN_START: usize = 4;
+
+/// Last bin included in the spectral sweep (skips the dimmest red bins).
+pub const SWEEP_BIN_END: usize = 59;
+
+/// Gaussian kernel sigma (in bin-units) for multi-bin blending during the sweep.
+pub const SWEEP_GAUSSIAN_SIGMA: f64 = 2.5;
+
+/// Number of frames used for the fade-in from (and fade-out to) the full-spectrum
+/// composite at each end of the sweep video (~0.75 s at 60 fps).
+pub const SWEEP_FADE_FRAMES: u32 = 45;
+
+/// Gaussian bloom blur radius (pixels) applied to each sweep frame.
+pub const SWEEP_BLOOM_RADIUS: usize = 12;
+
+/// Gaussian bloom strength multiplier for sweep frames.
+pub const SWEEP_BLOOM_STRENGTH: f64 = 0.3;
+
+/// Gaussian bloom core brightness multiplier for sweep frames.
+pub const SWEEP_BLOOM_CORE_BRIGHTNESS: f64 = 1.0;
+
+/// Vignette strength applied during sweep color grading.
+pub const SWEEP_VIGNETTE_STRENGTH: f64 = 0.35;
+
+/// Vignette softness exponent for sweep color grading.
+pub const SWEEP_VIGNETTE_SOFTNESS: f64 = 2.6;
+
+/// Vibrance boost factor for sweep color grading.
+pub const SWEEP_VIBRANCE: f64 = 1.08;
+
 // ========== Simulation Constants ==========
 
 /// Default simulation timestep
