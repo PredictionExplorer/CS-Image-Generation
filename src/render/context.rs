@@ -14,9 +14,13 @@ pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 /// Encapsulates common rendering operations and coordinate transformations
 #[derive(Debug)]
 pub struct RenderContext {
+    /// Output image width in pixels.
     pub width: u32,
+    /// Output image height in pixels.
     pub height: u32,
+    /// Output image width as `usize` (avoids repeated casts).
     pub width_usize: usize,
+    /// Output image height as `usize` (avoids repeated casts).
     pub height_usize: usize,
     bounds: BoundingBox,
 }
@@ -63,11 +67,17 @@ impl RenderContext {
 /// Bounding box for coordinate transformations
 #[derive(Clone, Copy, Debug)]
 pub struct BoundingBox {
+    /// Minimum x-coordinate of the bounding region.
     pub min_x: f64,
+    /// Maximum x-coordinate of the bounding region.
     pub max_x: f64,
+    /// Minimum y-coordinate of the bounding region.
     pub min_y: f64,
+    /// Maximum y-coordinate of the bounding region.
     pub max_y: f64,
+    /// Horizontal span (`max_x - min_x`), clamped to avoid division by zero.
     pub width: f64,
+    /// Vertical span (`max_y - min_y`), clamped to avoid division by zero.
     pub height: f64,
 }
 
@@ -162,8 +172,8 @@ mod tests {
     fn test_normalize_center() {
         let positions = make_positions(&[(0.0, 0.0), (10.0, 10.0)]);
         let bbox = BoundingBox::from_positions(&positions);
-        let cx = (bbox.min_x + bbox.max_x) / 2.0;
-        let cy = (bbox.min_y + bbox.max_y) / 2.0;
+        let cx = f64::midpoint(bbox.min_x, bbox.max_x);
+        let cy = f64::midpoint(bbox.min_y, bbox.max_y);
         let (nx, ny) = bbox.normalize(cx, cy);
         assert!((nx - 0.5).abs() < 0.01, "center should normalize to ~0.5");
         assert!((ny - 0.5).abs() < 0.01, "center should normalize to ~0.5");
@@ -184,9 +194,7 @@ mod tests {
         let target_ar = 1920.0 / 1080.0;
         assert!(
             (ar - target_ar).abs() < 0.01,
-            "corrected AR {:.3} should match target {:.3}",
-            ar,
-            target_ar
+            "corrected AR {ar:.3} should match target {target_ar:.3}"
         );
         assert!((bbox.width - 100.0).abs() < 0.01);
         assert!(bbox.height > 50.0);
@@ -207,9 +215,7 @@ mod tests {
         let target_ar = 1920.0 / 1080.0;
         assert!(
             (ar - target_ar).abs() < 0.01,
-            "corrected AR {:.3} should match target {:.3}",
-            ar,
-            target_ar
+            "corrected AR {ar:.3} should match target {target_ar:.3}"
         );
         assert!((bbox.height - 100.0).abs() < 0.01);
         assert!(bbox.width > 50.0);
@@ -242,9 +248,9 @@ mod tests {
             width: 100.0,
             height: 50.0,
         };
-        let cy_before = (bbox.min_y + bbox.max_y) / 2.0;
+        let cy_before = f64::midpoint(bbox.min_y, bbox.max_y);
         bbox.apply_aspect_correction(1920, 1080);
-        let cy_after = (bbox.min_y + bbox.max_y) / 2.0;
+        let cy_after = f64::midpoint(bbox.min_y, bbox.max_y);
         assert!((cy_before - cy_after).abs() < 0.01, "center Y should be preserved");
     }
 
@@ -271,9 +277,7 @@ mod tests {
         let target_ar = 1920.0 / 1080.0;
         assert!(
             (ar - target_ar).abs() < 0.05,
-            "aspect-corrected context AR {:.3} should be near {:.3}",
-            ar,
-            target_ar
+            "aspect-corrected context AR {ar:.3} should be near {target_ar:.3}"
         );
     }
 

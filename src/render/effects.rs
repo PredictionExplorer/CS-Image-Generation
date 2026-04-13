@@ -34,50 +34,76 @@ const LUMA_B: f64 = 0.114;
 /// 6. Atmospheric effects (depth, texture)
 #[derive(Clone, Debug)]
 pub struct EffectConfig {
-    // Core bloom and blur effects
+    /// Bloom mode selector (e.g., "gaussian", "dog", "none")
     pub bloom_mode: String,
+    /// Gaussian blur radius in pixels
     pub blur_radius_px: usize,
+    /// Bloom blur blend strength
     pub blur_strength: f64,
+    /// Brightness preservation factor for bloom core
     pub blur_core_brightness: f64,
+    /// Difference-of-Gaussians bloom configuration
     pub dog_config: DogBloomConfig,
+    /// Whether perceptual (`OKLab`) blur is enabled.
     pub perceptual_blur_enabled: bool,
+    /// Perceptual blur parameters, if enabled
     pub perceptual_blur_config: Option<PerceptualBlurConfig>,
 
-    // Color manipulation effects
+    /// Whether cinematic color grading is enabled
     pub color_grade_enabled: bool,
+    /// Cinematic color grading parameters
     pub color_grade_params: ColorGradeParams,
+    /// Whether gradient map color remapping is enabled
     pub gradient_map_enabled: bool,
+    /// Gradient map configuration
     pub gradient_map_config: GradientMapConfig,
 
-    // Material and iridescence effects
+    /// Whether champlevé iridescence effect is enabled
     pub champleve_enabled: bool,
+    /// Champlevé iridescence configuration
     pub champleve_config: ChampleveConfig,
+    /// Whether aether weave effect is enabled
     pub aether_enabled: bool,
+    /// Aether weave configuration
     pub aether_config: AetherConfig,
+    /// Whether chromatic bloom (prismatic separation) is enabled
     pub chromatic_bloom_enabled: bool,
+    /// Chromatic bloom configuration
     pub chromatic_bloom_config: ChromaticBloomConfig,
+    /// Whether opalescence shimmer effect is enabled
     pub opalescence_enabled: bool,
+    /// Opalescence shimmer configuration
     pub opalescence_config: OpalescenceConfig,
 
-    // Detail and clarity effects
+    /// Whether edge luminance enhancement is enabled
     pub edge_luminance_enabled: bool,
+    /// Edge luminance configuration
     pub edge_luminance_config: EdgeLuminanceConfig,
+    /// Whether micro-contrast detail enhancement is enabled
     pub micro_contrast_enabled: bool,
+    /// Micro-contrast configuration
     pub micro_contrast_config: MicroContrastConfig,
+    /// Whether glow enhancement (tight sparkle) is enabled
     pub glow_enhancement_enabled: bool,
+    /// Glow enhancement configuration
     pub glow_enhancement_config: GlowEnhancementConfig,
 
-    // Atmospheric and surface effects
+    /// Whether atmospheric depth/fog effect is enabled
     pub atmospheric_depth_enabled: bool,
+    /// Atmospheric depth configuration
     pub atmospheric_depth_config: AtmosphericDepthConfig,
+    /// Whether fine surface texture effect is enabled
     pub fine_texture_enabled: bool,
+    /// Fine texture configuration
     pub fine_texture_config: FineTextureConfig,
 }
 
 /// Per-frame parameters that may vary
 #[derive(Clone, Debug)]
 pub struct FrameParams {
+    /// Current animation frame index
     pub frame_number: usize,
+    /// Optional density override for this frame
     pub density: Option<f64>,
 }
 
@@ -243,11 +269,13 @@ impl FinishEffectPipeline {
             .map_err(|e| RenderError::EffectChain(e.to_string()))
     }
 
+    /// Number of effects in the trajectory processing chain
     #[cfg(test)]
     pub fn trajectory_len(&self) -> usize {
         self.trajectory_chain.len()
     }
 
+    /// Number of effects in the image processing chain
     #[cfg(test)]
     pub fn image_len(&self) -> usize {
         self.image_chain.len()
@@ -257,10 +285,14 @@ impl FinishEffectPipeline {
 /// Configuration for Difference-of-Gaussians bloom
 #[derive(Clone, Debug)]
 pub struct DogBloomConfig {
-    pub inner_sigma: f64, // Base blur radius
-    pub outer_ratio: f64, // Outer sigma = inner * ratio (typically 2-3)
-    pub strength: f64,    // DoG multiplier (0.2-0.8)
-    pub threshold: f64,   // Minimum value to include
+    /// Base blur radius
+    pub inner_sigma: f64,
+    /// Outer sigma = inner * ratio (typically 2-3)
+    pub outer_ratio: f64,
+    /// `DoG` multiplier (0.2--0.8).
+    pub strength: f64,
+    /// Minimum value to include
+    pub threshold: f64,
 }
 
 impl Default for DogBloomConfig {
@@ -277,6 +309,7 @@ pub struct MipPyramid {
 }
 
 impl MipPyramid {
+    /// Build a mipmap pyramid with the given number of downsampled levels
     #[must_use]
     pub fn new(base: &[(f64, f64, f64, f64)], width: usize, height: usize, levels: usize) -> Self {
         let mut pyramid =

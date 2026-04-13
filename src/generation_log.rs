@@ -61,9 +61,9 @@ pub struct LoggedRenderConfig {
     pub bloom_mode: String,
     /// Difference-of-Gaussians bloom strength.
     pub dog_strength: f64,
-    /// Inner Gaussian sigma for DoG bloom, if overridden.
+    /// Inner Gaussian sigma for `DoG` bloom, if overridden.
     pub dog_sigma: Option<f64>,
-    /// Outer-to-inner sigma ratio for DoG bloom.
+    /// Outer-to-inner sigma ratio for `DoG` bloom.
     pub dog_ratio: f64,
     /// HDR handling mode string (e.g. `auto`).
     pub hdr_mode: String,
@@ -263,7 +263,7 @@ impl GenerationLogger {
         // ---- End critical section (lock released on drop) ----
 
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 info!("Generation logged: {}", record.file_name);
             }
             Err(e) => {
@@ -345,8 +345,10 @@ mod tests {
 
     fn temp_paths(tag: &str) -> (String, String) {
         let dir = std::env::temp_dir();
-        let ts =
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
         let log = dir.join(format!("test_gen_log_{tag}_{ts}.json")).to_string_lossy().to_string();
         let lock = format!("{log}.lock");
         (log, lock)
@@ -428,7 +430,7 @@ mod tests {
     #[test]
     fn test_empty_file_handled() {
         let paths = temp_paths("empty");
-        File::create(&paths.0).unwrap();
+        File::create(&paths.0).expect("failed to create temp file");
 
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
         let records = logger.load_records();
@@ -444,7 +446,7 @@ mod tests {
     #[test]
     fn test_corrupt_file_backed_up() {
         let paths = temp_paths("corrupt");
-        std::fs::write(&paths.0, "this is not json").unwrap();
+        std::fs::write(&paths.0, "this is not json").expect("failed to write test data");
 
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
         logger.log_generation(make_record("fresh_start"));
@@ -454,8 +456,8 @@ mod tests {
         assert_eq!(records[0].file_name, "fresh_start");
 
         let backups: Vec<_> = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .filter_map(|e| e.ok())
+            .expect("failed to read temp directory")
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().contains("test_gen_log_corrupt"))
             .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
             .collect();

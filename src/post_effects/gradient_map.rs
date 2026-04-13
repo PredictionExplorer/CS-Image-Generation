@@ -95,6 +95,7 @@ pub struct GradientMap {
 }
 
 impl GradientMap {
+    /// Creates a new gradient map effect from the given configuration.
     #[must_use]
     pub fn new(config: GradientMapConfig) -> Self {
         Self { config, enabled: true }
@@ -421,7 +422,7 @@ mod tests {
             hue_preservation: 0.6,
         });
         let input = vec![(0.45, 0.45, 0.45, 1.0)];
-        let output = gradient.process(&input, 1, 1).unwrap();
+        let output = gradient.process(&input, 1, 1).expect("gradient map process should succeed");
         let (r, g, b, _) = output[0];
 
         assert!((r - g).abs() < 0.25);

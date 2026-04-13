@@ -66,7 +66,7 @@ fn voronoi_distances(p: (f64, f64)) -> (f64, f64) {
 
     for j in -1..=1 {
         for i in -1..=1 {
-            let cell_offset = (i as f64, j as f64);
+            let cell_offset = (f64::from(i), f64::from(j));
             let point = hash2((ix + cell_offset.0, iy + cell_offset.1));
             let r = (cell_offset.0 + point.0 - fx, cell_offset.1 + point.1 - fy);
             let d_sq = r.0 * r.0 + r.1 * r.1;
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn test_voronoi_distances_ordered() {
         for i in 0..50 {
-            let p = (i as f64 * 0.37, i as f64 * 0.53);
+            let p = (f64::from(i) * 0.37, f64::from(i) * 0.53);
             let (d1, d2) = voronoi_distances(p);
             assert!(d1 <= d2, "Closest must be <= second closest at {p:?}");
             assert!(d1 >= 0.0, "Distance cannot be negative");

@@ -12,7 +12,7 @@ use crate::render::error::{RenderError, Result};
 
 /// Configuration for video encoding
 ///
-/// This struct provides fine-grained control over FFmpeg encoding parameters.
+/// This struct provides fine-grained control over `FFmpeg` encoding parameters.
 /// The default configuration uses H.265 with 10-bit color depth and perceptual
 /// optimizations for maximum quality. Use `fast_encode()` for hardware-accelerated
 /// encoding when speed is prioritized over quality.
@@ -38,14 +38,14 @@ pub struct VideoEncodingOptions {
     /// yuv420p10le = 10-bit 4:2:0 (good quality, smaller files)
     pub pixel_format: String,
 
-    /// Video codec to use (e.g., "libx264", "libx265", "h264_videotoolbox")
+    /// Video codec to use (e.g., "libx264", "libx265", "`h264_videotoolbox`")
     pub codec: String,
 
     /// Input pixel format from source frames (rgb24 for 8-bit, rgb48le for 16-bit)
     pub input_pixel_format: String,
 
-    /// Additional FFmpeg arguments for advanced customization
-    /// These are passed directly to FFmpeg after all other options
+    /// Additional `FFmpeg` arguments for advanced customization
+    /// These are passed directly to `FFmpeg` after all other options
     pub extra_args: Vec<String>,
 }
 
@@ -56,7 +56,7 @@ impl Default for VideoEncodingOptions {
     /// - H.265 codec: 30-40% better compression than H.264
     /// - 10-bit color: Eliminates banding in smooth gradients
     /// - 4:2:0 chroma: Standard chroma subsampling (QuickTime/Safari compatible)
-    /// - Main10 profile: Widely supported, works in QuickTime and modern browsers
+    /// - Main10 profile: Widely supported, works in `QuickTime` and modern browsers
     /// - CRF 19: Visually transparent quality
     /// - "slower" preset: Excellent compression efficiency
     /// - Perceptual tuning: Optimized for human perception
@@ -64,7 +64,7 @@ impl Default for VideoEncodingOptions {
     ///
     /// Expected encoding time: 3-5× slower than H.264 medium preset
     /// Expected file size: 30-40% smaller than current H.264 output
-    /// Compatibility: QuickTime, Safari, VLC, most modern video players
+    /// Compatibility: `QuickTime`, Safari, VLC, most modern video players
     fn default() -> Self {
         Self {
             codec: "libx265".to_string(),
@@ -106,7 +106,7 @@ impl Default for VideoEncodingOptions {
 }
 
 impl VideoEncodingOptions {
-    /// Fast encoding mode using hardware acceleration (macOS VideoToolbox)
+    /// Fast encoding mode using hardware acceleration (macOS `VideoToolbox`)
     ///
     /// This configuration prioritizes encoding speed over maximum quality:
     /// - Hardware HEVC encoder: 3-5× faster than software
@@ -186,11 +186,11 @@ impl VideoEncodingOptions {
     }
 }
 
-/// Create video in a single pass using FFmpeg with configurable options
+/// Create video in a single pass using `FFmpeg` with configurable options
 ///
-/// This function pipes raw RGB frames directly to FFmpeg's stdin, avoiding the need
+/// This function pipes raw RGB frames directly to `FFmpeg`'s stdin, avoiding the need
 /// for temporary frame files on disk. Supports both 8-bit (rgb24) and 16-bit (rgb48le)
-/// input formats, automatically determined from the VideoEncodingOptions.
+/// input formats, automatically determined from the `VideoEncodingOptions`.
 ///
 /// # Arguments
 /// * `width` - Frame width in pixels
@@ -202,17 +202,20 @@ impl VideoEncodingOptions {
 ///
 /// # Returns
 /// * `Ok(())` on success
-/// * `Err(RenderError)` if FFmpeg fails or encoding parameters are invalid
+/// * `Err(RenderError)` if `FFmpeg` fails or encoding parameters are invalid
 ///
 /// # Example
-/// ```ignore
+///
+/// ```no_run
+/// # use three_body_problem::render::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
+/// # use std::io::Write;
 /// let options = VideoEncodingOptions::default();
 /// create_video_from_frames_singlepass(
 ///     1920, 1080, 60,
-///     |writer| write_frames_to(writer),
+///     |writer| { writer.write_all(&[0u8; 3])?; Ok(()) },
 ///     "output.mp4",
-///     &options
-/// )?;
+///     &options,
+/// ).expect("encoding should succeed");
 /// ```
 pub fn create_video_from_frames_singlepass(
     width: u32,
@@ -244,7 +247,7 @@ pub fn create_video_from_frames_singlepass(
         "-pix_fmt",
         &options.input_pixel_format, // rgb24 (8-bit) or rgb48le (16-bit)
         "-s",
-        &format!("{}x{}", width, height),
+        &format!("{width}x{height}"),
         "-r",
         &frame_rate.to_string(),
         "-i",
@@ -364,13 +367,17 @@ mod tests {
         let options = VideoEncodingOptions::default();
         // Verify color metadata is set for accurate reproduction
         let args = &options.extra_args;
-        let colorspace_idx = args.iter().position(|s| s == "-colorspace").unwrap();
+        let colorspace_idx =
+            args.iter().position(|s| s == "-colorspace").expect("expected -colorspace arg");
         assert_eq!(args[colorspace_idx + 1], "bt709");
 
-        let primaries_idx = args.iter().position(|s| s == "-color_primaries").unwrap();
+        let primaries_idx = args
+            .iter()
+            .position(|s| s == "-color_primaries")
+            .expect("expected -color_primaries arg");
         assert_eq!(args[primaries_idx + 1], "bt709");
 
-        let trc_idx = args.iter().position(|s| s == "-color_trc").unwrap();
+        let trc_idx = args.iter().position(|s| s == "-color_trc").expect("expected -color_trc arg");
         assert_eq!(args[trc_idx + 1], "iec61966-2-1");
     }
 
@@ -385,7 +392,7 @@ mod tests {
             .map(|idx| &options.extra_args[idx + 1]);
 
         assert!(x265_params.is_some());
-        let params = x265_params.unwrap();
+        let params = x265_params.expect("expected -x265-params arg");
         assert!(params.contains("profile=main422-10"));
         assert!(params.contains("aq-mode=3"));
         assert!(params.contains("psy-rd=2.5"));

@@ -207,7 +207,7 @@ impl ChromaticBloom {
                     count += 1;
                 }
 
-                let inv_count = 1.0 / count as f64;
+                let inv_count = 1.0 / f64::from(count);
                 temp[y * width + x] =
                     (sum.0 * inv_count, sum.1 * inv_count, sum.2 * inv_count, sum.3 * inv_count);
             }
@@ -229,7 +229,7 @@ impl ChromaticBloom {
                     count += 1;
                 }
 
-                let inv_count = 1.0 / count as f64;
+                let inv_count = 1.0 / f64::from(count);
                 buffer[y * width + x] =
                     (sum.0 * inv_count, sum.1 * inv_count, sum.2 * inv_count, sum.3 * inv_count);
             }
@@ -334,7 +334,7 @@ mod tests {
         let cfg = ChromaticBloomConfig { strength: 0.0, ..ChromaticBloomConfig::default() };
         let bloom = ChromaticBloom::new(cfg);
         let input = vec![(0.5, 0.3, 0.2, 1.0); 100];
-        let output = bloom.process(&input, 10, 10).unwrap();
+        let output = bloom.process(&input, 10, 10).expect("bloom process should succeed");
         assert_eq!(input, output);
     }
 
@@ -343,11 +343,11 @@ mod tests {
         let bloom = ChromaticBloom::new(ChromaticBloomConfig::from_resolution(100, 100));
         let input: PixelBuffer = (0..100)
             .map(|i| {
-                let v = i as f64 / 100.0;
+                let v = f64::from(i) / 100.0;
                 (v, v, v, 0.8)
             })
             .collect();
-        let output = bloom.process(&input, 10, 10).unwrap();
+        let output = bloom.process(&input, 10, 10).expect("bloom process should succeed");
         for (inp, out) in input.iter().zip(output.iter()) {
             assert_eq!(inp.3, out.3, "Alpha must be preserved");
         }

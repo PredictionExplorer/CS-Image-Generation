@@ -20,7 +20,7 @@ pub const BIN_WIDTH: f64 = LAMBDA_RANGE / NUM_BINS as f64;
 /// Convert wavelength (nm) to fractional bin position
 ///
 /// # Arguments
-/// * `wavelength` - Wavelength in nanometers, should be in range [LAMBDA_START, LAMBDA_END]
+/// * `wavelength` - Wavelength in nanometers, should be in range [`LAMBDA_START`, `LAMBDA_END`]
 ///
 /// # Returns
 /// Fractional bin position, clamped to valid range [0, NUM_BINS-1]
@@ -33,7 +33,7 @@ pub fn wavelength_to_bin(wavelength: f64) -> f64 {
 /// Convert bin index to center wavelength (nm)
 ///
 /// # Arguments
-/// * `bin` - Bin index in range [0, NUM_BINS)
+/// * `bin` - Bin index in range [0, `NUM_BINS`)
 ///
 /// # Returns
 /// Center wavelength of the bin in nanometers
@@ -55,7 +55,7 @@ mod tests {
         assert!(wavelength_to_bin(LAMBDA_END) <= (NUM_BINS - 1) as f64);
 
         // Test middle of spectrum
-        let mid_wavelength = (LAMBDA_START + LAMBDA_END) / 2.0;
+        let mid_wavelength = f64::midpoint(LAMBDA_START, LAMBDA_END);
         let mid_bin = wavelength_to_bin(mid_wavelength);
         assert!(mid_bin > 0.0 && mid_bin < (NUM_BINS - 1) as f64);
     }
@@ -109,7 +109,7 @@ mod tests {
     fn test_wavelength_to_bin_monotonic() {
         let mut prev = -1.0;
         for wl in (380..=700).step_by(1) {
-            let bin = wavelength_to_bin(wl as f64);
+            let bin = wavelength_to_bin(f64::from(wl));
             assert!(bin >= prev, "wavelength_to_bin should be monotonic");
             prev = bin;
         }
@@ -119,7 +119,7 @@ mod tests {
     fn test_all_64_bins_reachable() {
         let mut reached = [false; NUM_BINS];
         for wl_x10 in 3800..=7000 {
-            let wl = wl_x10 as f64 / 10.0;
+            let wl = f64::from(wl_x10) / 10.0;
             let bin = wavelength_to_bin(wl).round() as usize;
             if bin < NUM_BINS {
                 reached[bin] = true;

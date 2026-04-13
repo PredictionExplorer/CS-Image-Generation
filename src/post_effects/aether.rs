@@ -62,7 +62,7 @@ fn anisotropic_voronoi(p: (f64, f64), flow_dir: f64, flow_strength: f64) -> f64 
 
     for j in -1..=1 {
         for i in -1..=1 {
-            let cell_offset = (i as f64, j as f64);
+            let cell_offset = (f64::from(i), f64::from(j));
             let point = hash2((ix + cell_offset.0, iy + cell_offset.1));
             let mut r = (cell_offset.0 + point.0 - fx, cell_offset.1 + point.1 - fy);
 
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn test_anisotropic_voronoi_non_negative() {
         for i in 0..50 {
-            let p = (i as f64 * 0.31, i as f64 * 0.47);
+            let p = (f64::from(i) * 0.31, f64::from(i) * 0.47);
             let d = anisotropic_voronoi(p, 0.5, 0.3);
             assert!(d >= 0.0, "Voronoi distance must be >= 0 at {p:?}");
         }

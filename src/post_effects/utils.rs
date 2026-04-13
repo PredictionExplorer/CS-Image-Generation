@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn test_hash2_output_is_fractional() {
         for i in 0..20 {
-            let (x, y) = hash2((i as f64, (i * 7) as f64));
+            let (x, y) = hash2((f64::from(i), f64::from(i * 7)));
             assert!(x.is_finite());
             assert!(y.is_finite());
         }
@@ -141,7 +141,7 @@ mod tests {
     fn test_highlight_extract_factor_monotonic() {
         let mut prev = highlight_extract_factor(0.0);
         for i in 1..=100 {
-            let lum = i as f64 / 100.0;
+            let lum = f64::from(i) / 100.0;
             let cur = highlight_extract_factor(lum);
             assert!(cur >= prev - 1e-10, "Not monotonic at lum={lum}");
             prev = cur;

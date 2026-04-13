@@ -64,7 +64,7 @@ pub fn fourier_transform(input: &[f64]) -> Vec<Complex<f64>> {
     data
 }
 
-/// 2D bounding box: (min_x, max_x, min_y, max_y)
+/// 2D bounding box: (`min_x`, `max_x`, `min_y`, `max_y`)
 #[must_use]
 pub fn bounding_box_2d(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) {
     let mut min_x = f64::INFINITY;
@@ -204,7 +204,7 @@ mod tests {
 
         // Kernel should sum to approximately 1.0 (normalized)
         let sum: f64 = kernel.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-10, "Kernel sum = {}, expected 1.0", sum);
+        assert!((sum - 1.0).abs() < 1e-10, "Kernel sum = {sum}, expected 1.0");
 
         // Kernel should be symmetric
         for i in 0..radius {

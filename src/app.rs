@@ -26,11 +26,17 @@ use tracing::{info, warn};
 /// Museum-quality enhancement flags (all default to true / enabled).
 #[derive(Clone, Debug)]
 pub struct Enhancements {
+    /// Enable chroma boosting for richer color saturation.
     pub chroma_boost: bool,
+    /// Enable perceptual saturation boost.
     pub sat_boost: bool,
+    /// Enable ACES-inspired tone-mapping tweak.
     pub aces_tweak: bool,
+    /// Enable per-body alpha variation for visual depth.
     pub alpha_variation: bool,
+    /// Enable aspect-ratio correction for non-square outputs.
     pub aspect_correction: bool,
+    /// Enable spectral dispersion boost.
     pub dispersion_boost: bool,
 }
 
@@ -49,31 +55,57 @@ impl Default for Enhancements {
 
 /// Configuration recorded for generation logging.
 pub struct GenerationLogConfig {
+    /// Number of simulation time-steps.
     pub num_steps_sim: usize,
+    /// Output image width in pixels.
     pub width: u32,
+    /// Output image height in pixels.
     pub height: u32,
+    /// Black-point clipping percentile.
     pub clip_black: f64,
+    /// White-point clipping percentile.
     pub clip_white: f64,
+    /// Alpha denominator controlling base trail opacity.
     pub alpha_denom: usize,
+    /// Alpha compression factor.
     pub alpha_compress: f64,
+    /// Escape threshold for orbit rejection.
     pub escape_threshold: f64,
+    /// Drift mode identifier (e.g. `"elliptical"`, `"none"`).
     pub drift_mode: String,
+    /// Bloom post-processing mode.
     pub bloom_mode: String,
+    /// Difference-of-Gaussians edge-enhancement strength.
     pub dog_strength: f64,
+    /// Optional sigma for the `DoG` narrow Gaussian.
     pub dog_sigma: Option<f64>,
+    /// Ratio between the two `DoG` Gaussian widths.
     pub dog_ratio: f64,
+    /// HDR tone-mapping mode.
     pub hdr_mode: String,
+    /// HDR intensity scale factor.
     pub hdr_scale: f64,
+    /// Perceptual blur mode identifier.
     pub perceptual_blur: String,
+    /// Optional explicit radius for perceptual blur.
     pub perceptual_blur_radius: Option<usize>,
+    /// Perceptual blur strength multiplier.
     pub perceptual_blur_strength: f64,
+    /// Perceptual gamut-mapping mode.
     pub perceptual_gamut_mode: String,
+    /// Minimum body mass for simulation.
     pub min_mass: f64,
+    /// Maximum body mass for simulation.
     pub max_mass: f64,
+    /// Initial location spread parameter.
     pub location: f64,
+    /// Initial velocity spread parameter.
     pub velocity: f64,
+    /// Weight for chaos metric in Borda scoring.
     pub chaos_weight: f64,
+    /// Weight for equilibrium metric in Borda scoring.
     pub equil_weight: f64,
+    /// Whether Borda weights were randomized.
     pub weights_randomized: bool,
 }
 
@@ -351,7 +383,7 @@ pub fn log_generation(
 ) {
     let logger = GenerationLogger::new();
 
-    let mut record = GenerationRecord::new(file_name.to_string(), format!("0x{}", seed));
+    let mut record = GenerationRecord::new(file_name.to_string(), format!("0x{seed}"));
 
     record.render_config = LoggedRenderConfig {
         width: config.width,
@@ -427,7 +459,7 @@ mod tests {
         let result = parse_seed("0x100033");
         assert!(result.is_ok());
 
-        let bytes = result.unwrap();
+        let bytes = result.expect("hex bytes should parse");
         assert_eq!(bytes, vec![0x10, 0x00, 0x33]);
     }
 
@@ -522,7 +554,11 @@ mod tests {
 
         if actual != expected {
             let diff_count = actual.iter().zip(expected).filter(|(a, b)| a != b).count();
-            let first = actual.iter().zip(expected).position(|(a, b)| a != b).unwrap();
+            let first = actual
+                .iter()
+                .zip(expected)
+                .position(|(a, b)| a != b)
+                .expect("expected differing pixel position");
             panic!(
                 "{label}: pixel buffers differ: {diff_count} of {} values, \
                  first at index {first} ({} vs {})",
@@ -646,7 +682,7 @@ mod tests {
     fn test_setup_seed_directory_returns_correct_path() {
         let result = setup_seed_directory("test_seed_42");
         assert!(result.is_ok());
-        let seed_dir = result.unwrap();
+        let seed_dir = result.expect("seed directory setup should succeed");
         assert_eq!(seed_dir, "output/test_seed_42");
         assert!(std::path::Path::new("output/test_seed_42").is_dir());
         assert!(std::path::Path::new("output/test_seed_42/spectral").is_dir());

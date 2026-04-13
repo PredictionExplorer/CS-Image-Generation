@@ -9,15 +9,15 @@ use crate::render::constants::{
 use crate::sim::Sha3RandomByteStream;
 use tracing::info;
 
-/// Type alias for OKLab color (L, a, b components)
+/// Type alias for `OKLab` color (L, a, b components)
 pub type OklabColor = (f64, f64, f64);
 
 /// Small random hue variation for visual interest
 const HUE_DRIFT_JITTER: f64 = 0.1;
 
-/// Generate color gradient optimized for OKLab space.
+/// Generate color gradient optimized for `OKLab` space.
 ///
-/// Generates colors in OKLCh (cylindrical OKLab) for perceptually
+/// Generates colors in `OKLCh` (cylindrical `OKLab`) for perceptually
 /// uniform distribution. `chroma_boost` selects richer saturation
 /// constants; `hue_wave_freq` controls per-seed color rhythm.
 pub fn generate_color_gradient_oklab(

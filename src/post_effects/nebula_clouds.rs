@@ -1,7 +1,7 @@
 //! Nebula Dust Clouds post-effect
 //!
 //! Creates organic, flowing nebula clouds in the background using multi-octave
-//! OpenSimplex2S noise. The clouds slowly drift and evolve over time, adding
+//! `OpenSimplex2S` noise. The clouds slowly drift and evolve over time, adding
 //! atmospheric depth and cosmic beauty without overpowering the trajectories.
 
 use super::{PixelBuffer, PostEffect, PostEffectError};
@@ -56,7 +56,7 @@ impl NebulaCloudConfig {
                 [0.03, 0.08, 0.20], // Deep blue - strong foundation
             ],
             time_scale: 0.0022, // Gentle drift - ~4 units over 30sec @60fps
-            noise_seed: seed as i64,
+            noise_seed: i64::from(seed),
             edge_fade: 0.25, // Gentle radial vignette
         }
     }
@@ -72,7 +72,7 @@ impl NebulaCloudConfig {
             lacunarity: 2.0,
             colors: [[0.0, 0.0, 0.0]; 4],
             time_scale: 0.002,
-            noise_seed: seed as i64,
+            noise_seed: i64::from(seed),
             edge_fade: 0.0,
         }
     }
@@ -93,7 +93,7 @@ impl NebulaClouds {
     }
 
     /// Evaluate multi-octave noise at given position and time
-    /// Uses noise3_ImproveXY which is optimized for time-varied animations
+    /// Uses `noise3_ImproveXY` which is optimized for time-varied animations
     /// Returns value in [0, 1] range
     #[inline]
     fn evaluate_noise(&self, x: f64, y: f64, time: f64) -> f64 {
@@ -111,7 +111,7 @@ impl NebulaClouds {
                 y * frequency,
                 time,
             );
-            total += (noise_val as f64) * amplitude;
+            total += f64::from(noise_val) * amplitude;
             max_amplitude += amplitude;
 
             amplitude *= self.config.persistence;
@@ -185,10 +185,10 @@ impl NebulaClouds {
         frame_number: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
         if !self.enabled {
-            return Ok(buffer.to_vec());
+            return Ok(buffer.clone());
         }
 
-        let mut result = buffer.to_vec();
+        let mut result = buffer.clone();
 
         // Calculate time offset for smooth animation
         // At 60fps over 30 seconds: frame_number goes 0 to 1800
@@ -264,7 +264,7 @@ mod tests {
 
         // Noise should be in [0, 1] range
         let noise = nebula.evaluate_noise(100.0, 100.0, 0.0);
-        assert!((0.0..=1.0).contains(&noise), "Noise value out of range: {}", noise);
+        assert!((0.0..=1.0).contains(&noise), "Noise value out of range: {noise}");
 
         // Different positions should give different values
         let noise2 = nebula.evaluate_noise(500.0, 500.0, 0.0);
@@ -302,11 +302,11 @@ mod tests {
 
         // Center should have full opacity
         let center_fade = nebula.calculate_edge_fade(960.0, 540.0, 1920.0, 1080.0);
-        assert!(center_fade > 0.98, "Center fade too low: {}", center_fade);
+        assert!(center_fade > 0.98, "Center fade too low: {center_fade}");
 
         // Edges should fade significantly
         let corner_fade = nebula.calculate_edge_fade(0.0, 0.0, 1920.0, 1080.0);
-        assert!(corner_fade < 0.2, "Corner fade too high: {}", corner_fade);
+        assert!(corner_fade < 0.2, "Corner fade too high: {corner_fade}");
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
 
         // Small time step should produce small change (continuity)
         let small_diff = (noise_t1 - noise_t0).abs();
-        assert!(small_diff < 0.5, "Noise changing too fast over small time: {}", small_diff);
+        assert!(small_diff < 0.5, "Noise changing too fast over small time: {small_diff}");
     }
 
     #[test]
@@ -356,7 +356,8 @@ mod tests {
 
         // Create test buffer (all black)
         let buffer = vec![(0.0, 0.0, 0.0, 0.0); 10000];
-        let result = nebula.process(&buffer, 100, 100).unwrap();
+        let result =
+            nebula.process(&buffer, 100, 100).expect("nebula clouds process should succeed");
 
         // Result should have nebula colors added
         let has_color = result.iter().any(|&(r, g, b, _a)| r > 0.0 || g > 0.0 || b > 0.0);

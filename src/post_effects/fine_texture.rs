@@ -46,6 +46,7 @@ pub struct FineTexture {
 }
 
 impl FineTexture {
+    /// Creates a new fine texture overlay effect from the given configuration.
     #[must_use]
     pub fn new(config: FineTextureConfig) -> Self {
         let enabled = config.strength > 0.0;
@@ -198,7 +199,8 @@ mod tests {
 
         // Create uniform test buffer
         let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 10000];
-        let result = texture.process(&buffer, 100, 100).unwrap();
+        let result =
+            texture.process(&buffer, 100, 100).expect("fine texture process should succeed");
 
         // Verify texture has been applied (values should vary)
         assert_eq!(result.len(), buffer.len());

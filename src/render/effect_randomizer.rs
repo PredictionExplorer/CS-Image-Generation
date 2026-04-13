@@ -25,8 +25,7 @@ impl<'a> EffectRandomizer<'a> {
     pub fn randomize_enable(&mut self, probability: f64) -> bool {
         debug_assert!(
             (0.0..=1.0).contains(&probability),
-            "enable probability must be in [0.0, 1.0], got {}",
-            probability,
+            "enable probability must be in [0.0, 1.0], got {probability}",
         );
         self.random_f64() < probability
     }
@@ -68,39 +67,49 @@ impl<'a> EffectRandomizer<'a> {
 
     /// Get a random f64 in [0.0, 1.0) from the RNG.
     fn random_f64(&mut self) -> f64 {
-        let b0 = self.rng.next_byte() as u32;
-        let b1 = self.rng.next_byte() as u32;
-        let b2 = self.rng.next_byte() as u32;
-        let b3 = self.rng.next_byte() as u32;
+        let b0 = u32::from(self.rng.next_byte());
+        let b1 = u32::from(self.rng.next_byte());
+        let b2 = u32::from(self.rng.next_byte());
+        let b3 = u32::from(self.rng.next_byte());
         let bits = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-        (bits as f64) / (u32::MAX as f64)
+        f64::from(bits) / f64::from(u32::MAX)
     }
 }
 
 /// Tracks randomization decisions for logging.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RandomizationRecord {
+    /// Name of the effect that was randomized.
     pub effect_name: String,
+    /// Whether the effect was enabled after randomization.
     pub enabled: bool,
+    /// Whether the effect's enable state was determined randomly.
     pub was_randomized: bool,
+    /// Individual parameter values that were recorded.
     pub parameters: Vec<RandomizedParameter>,
 }
 
 /// A single randomized parameter value.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RandomizedParameter {
+    /// Parameter name.
     pub name: String,
+    /// Formatted parameter value.
     pub value: String,
+    /// Whether this parameter was randomly generated.
     pub was_randomized: bool,
+    /// Formatted range string (e.g. `[0.0, 1.0]`).
     pub range_used: String,
 }
 
 impl RandomizationRecord {
+    /// Create a new record for the named effect.
     #[must_use]
     pub fn new(effect_name: impl Into<String>, enabled: bool, was_randomized: bool) -> Self {
         Self { effect_name: effect_name.into(), enabled, was_randomized, parameters: Vec::new() }
     }
 
+    /// Record a float parameter value and the range it was sampled from.
     pub fn add_float(
         &mut self,
         name: impl Into<String>,
@@ -110,12 +119,13 @@ impl RandomizationRecord {
     ) {
         self.parameters.push(RandomizedParameter {
             name: name.into(),
-            value: format!("{:.4}", value),
+            value: format!("{value:.4}"),
             was_randomized,
             range_used: format!("[{:.4}, {:.4}]", range.0, range.1),
         });
     }
 
+    /// Record an integer parameter value and the range it was sampled from.
     pub fn add_int(
         &mut self,
         name: impl Into<String>,
@@ -135,15 +145,18 @@ impl RandomizationRecord {
 /// Collection of all randomization records for a render session.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RandomizationLog {
+    /// Ordered list of per-effect randomization records.
     pub effects: Vec<RandomizationRecord>,
 }
 
 impl RandomizationLog {
+    /// Create an empty randomization log.
     #[must_use]
     pub fn new() -> Self {
         Self { effects: Vec::new() }
     }
 
+    /// Append a randomization record to the log.
     pub fn add_record(&mut self, record: RandomizationRecord) {
         self.effects.push(record);
     }
@@ -172,8 +185,7 @@ mod tests {
 
         assert!(
             count_true > 400 && count_true < 600,
-            "50% probability produced {} / 1000",
-            count_true
+            "50% probability produced {count_true} / 1000"
         );
     }
 
@@ -191,8 +203,7 @@ mod tests {
 
         assert!(
             count_true > 700 && count_true < 900,
-            "80% probability produced {} / 1000",
-            count_true
+            "80% probability produced {count_true} / 1000"
         );
     }
 
@@ -210,8 +221,7 @@ mod tests {
 
         assert!(
             count_true > 100 && count_true < 300,
-            "20% probability produced {} / 1000",
-            count_true
+            "20% probability produced {count_true} / 1000"
         );
     }
 
@@ -261,7 +271,7 @@ mod tests {
 
         for _ in 0..100 {
             let (a, b) = randomizer.randomize_ordered_pair(&desc, &desc);
-            assert!(a < b, "First value must be less than second: {} < {}", a, b);
+            assert!(a < b, "First value must be less than second: {a} < {b}");
         }
     }
 

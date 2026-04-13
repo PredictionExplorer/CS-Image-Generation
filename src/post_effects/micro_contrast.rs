@@ -33,6 +33,7 @@ pub struct MicroContrast {
 }
 
 impl MicroContrast {
+    /// Creates a new micro-contrast enhancement effect from the given configuration.
     #[must_use]
     pub fn new(config: MicroContrastConfig) -> Self {
         let enabled = config.strength > 0.0;
@@ -75,7 +76,7 @@ impl MicroContrast {
         }
 
         if count > 0 {
-            let inv_count = 1.0 / count as f64;
+            let inv_count = 1.0 / f64::from(count);
             (sum_r * inv_count, sum_g * inv_count, sum_b * inv_count, sum_a * inv_count)
         } else {
             (0.0, 0.0, 0.0, 0.0)
@@ -257,7 +258,7 @@ mod tests {
         // Create simple gradient buffer
         let buffer: PixelBuffer = (0..100)
             .map(|i| {
-                let val = (i as f64 / 100.0) * 0.5;
+                let val = (f64::from(i) / 100.0) * 0.5;
                 (val, val, val, 1.0)
             })
             .collect();
@@ -277,12 +278,12 @@ mod tests {
         // Create test buffer with gradient
         let buffer: PixelBuffer = (0..10000)
             .map(|i| {
-                let val = ((i % 100) as f64 / 100.0) * 0.5;
+                let val = (f64::from(i % 100) / 100.0) * 0.5;
                 (val, val, val, 1.0)
             })
             .collect();
 
-        let result = mc.process(&buffer, 100, 100).unwrap();
+        let result = mc.process(&buffer, 100, 100).expect("micro contrast process should succeed");
         assert_eq!(result.len(), buffer.len());
     }
 }

@@ -230,7 +230,7 @@ mod tests {
         let mut hist = HistogramData::with_capacity(0);
         hist.reserve(1000);
         for i in 0..1000 {
-            let v = i as f64 / 1000.0;
+            let v = f64::from(i) / 1000.0;
             hist.push(v, v, v);
         }
         assert_eq!(hist.data().len(), 1000);
@@ -240,7 +240,7 @@ mod tests {
     fn test_tonemapping_analysis_fields_finite() {
         let samples: Vec<[f64; 3]> = (0..500)
             .map(|i| {
-                let v = i as f64 / 500.0;
+                let v = f64::from(i) / 500.0;
                 [v, v, v]
             })
             .collect();

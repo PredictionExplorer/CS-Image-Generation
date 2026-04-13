@@ -17,9 +17,13 @@ const DRIFT_ECCENTRICITY_RANGE: f64 = 0.1;
 /// Resolved drift configuration ready for use
 #[derive(Debug, Clone)]
 pub struct ResolvedDriftConfig {
+    /// Drift magnitude multiplier.
     pub scale: f64,
+    /// Fraction of one full orbit swept during the animation.
     pub arc_fraction: f64,
+    /// Orbital eccentricity (0 = circular, approaching 1 = highly elliptical).
     pub orbit_eccentricity: f64,
+    /// Whether the values were randomly generated rather than user-specified.
     pub was_randomized: bool,
 }
 
@@ -44,7 +48,7 @@ impl ResolvedDriftConfig {
         Self { scale, arc_fraction, orbit_eccentricity, was_randomized: true }
     }
 
-    /// Convert to DriftParameters for use in the drift system
+    /// Convert to `DriftParameters` for use in the drift system
     pub fn to_drift_parameters(&self) -> DriftParameters {
         DriftParameters::new(self.scale, self.arc_fraction, self.orbit_eccentricity)
     }
@@ -115,7 +119,8 @@ mod tests {
     #[test]
     fn test_resolve_all_provided() {
         let mut rng = make_rng();
-        let config = resolve_drift_config(Some(1.0), Some(0.5), Some(0.3), &mut rng).unwrap();
+        let config = resolve_drift_config(Some(1.0), Some(0.5), Some(0.3), &mut rng)
+            .expect("drift config should resolve");
         assert_eq!(config.scale, 1.0);
         assert!(!config.was_randomized);
     }
@@ -123,7 +128,8 @@ mod tests {
     #[test]
     fn test_resolve_none_provided() {
         let mut rng = make_rng();
-        let config = resolve_drift_config(None, None, None, &mut rng).unwrap();
+        let config =
+            resolve_drift_config(None, None, None, &mut rng).expect("drift config should resolve");
         assert!(config.was_randomized);
     }
 

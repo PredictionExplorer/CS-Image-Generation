@@ -1,4 +1,4 @@
-//! Difference of Gaussians (DoG) bloom effect implementation.
+//! Difference of Gaussians (`DoG`) bloom effect implementation.
 
 use super::{PixelBuffer, PostEffect, PostEffectError, utils};
 use crate::render::{DogBloomConfig, apply_dog_bloom};
@@ -10,7 +10,7 @@ use rayon::prelude::*;
 /// of different radii, emphasizing edges and reducing overall haziness.
 #[derive(Debug)]
 pub struct DogBloom {
-    /// Configuration for the DoG algorithm.
+    /// Configuration for the `DoG` algorithm.
     pub config: DogBloomConfig,
 
     /// Brightness multiplier for the core (unblurred) image.
@@ -21,7 +21,7 @@ pub struct DogBloom {
 }
 
 impl DogBloom {
-    /// Creates a new DoG bloom effect with the given configuration.
+    /// Creates a new `DoG` bloom effect with the given configuration.
     #[must_use]
     pub fn new(config: DogBloomConfig, core_brightness: f64) -> Self {
         Self { config, core_brightness, enabled: true }
@@ -96,7 +96,7 @@ mod tests {
     fn test_dog_bloom_preserves_dark_pixels() {
         let bloom = DogBloom::new(DogBloomConfig::default(), 12.0);
         let input = vec![(0.08, 0.08, 0.08, 1.0)];
-        let output = bloom.process(&input, 1, 1).unwrap();
+        let output = bloom.process(&input, 1, 1).expect("bloom process should succeed");
 
         assert!((output[0].0 - input[0].0).abs() < 1e-3);
         assert!((output[0].1 - input[0].1).abs() < 1e-3);
@@ -109,7 +109,7 @@ mod tests {
         let w = 20;
         let h = 20;
         let input: PixelBuffer = vec![(2.0, 2.0, 2.0, 1.0); w * h];
-        let output = bloom.process(&input, w, h).unwrap();
+        let output = bloom.process(&input, w, h).expect("bloom process should succeed");
         let center = output[h / 2 * w + w / 2];
         assert!(center.0 > input[0].0, "Bright pixels should be lifted by bloom");
     }
@@ -127,7 +127,7 @@ mod tests {
         let w = 10;
         let h = 10;
         let input: PixelBuffer = vec![(1.0, 1.0, 1.0, 0.75); w * h];
-        let output = bloom.process(&input, w, h).unwrap();
+        let output = bloom.process(&input, w, h).expect("bloom process should succeed");
         for (i, pixel) in output.iter().enumerate() {
             assert_eq!(pixel.3, 0.75, "Alpha changed at pixel {i}");
         }

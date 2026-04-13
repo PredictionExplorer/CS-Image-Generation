@@ -367,8 +367,7 @@ mod tests {
         let red_pixel = bb.buffers[NUM_BINS - 3][0];
         assert!(
             blue_pixel[2] > blue_pixel[0],
-            "bin 2 (~violet/blue) should be blue-dominant: {:?}",
-            blue_pixel
+            "bin 2 (~violet/blue) should be blue-dominant: {blue_pixel:?}"
         );
         assert!(
             red_pixel[0] > red_pixel[2],
@@ -450,8 +449,9 @@ mod tests {
 
         for i in 0..out_lo.len() {
             for c in 0..3 {
-                let expected = ((out_lo[i][c] as f64 + out_hi[i][c] as f64) / 2.0).round() as u16;
-                let diff = (out_mid[i][c] as i32 - expected as i32).unsigned_abs();
+                let expected =
+                    f64::midpoint(f64::from(out_lo[i][c]), f64::from(out_hi[i][c])).round() as u16;
+                let diff = (i32::from(out_mid[i][c]) - i32::from(expected)).unsigned_abs();
                 assert!(
                     diff <= 1,
                     "lerp at 0.5 should be average: pixel {i} ch {c}: mid={}, expected={expected}",
@@ -513,7 +513,7 @@ mod tests {
             assert!(std::path::Path::new(&file).exists(), "missing bin image: {file}");
         }
 
-        let file_count = std::fs::read_dir(dir).unwrap().count();
+        let file_count = std::fs::read_dir(dir).expect("failed to read gallery directory").count();
         assert_eq!(file_count, NUM_BINS, "expected exactly {NUM_BINS} PNG files");
     }
 
@@ -601,19 +601,21 @@ mod tests {
     fn test_gallery_deterministic() {
         let tmp1 = tempfile::tempdir().expect("tmpdir1");
         let tmp2 = tempfile::tempdir().expect("tmpdir2");
-        let dir1 = tmp1.path().to_str().unwrap();
-        let dir2 = tmp2.path().to_str().unwrap();
+        let dir1 = tmp1.path().to_str().expect("tmpdir1 path should be valid utf-8");
+        let dir2 = tmp2.path().to_str().expect("tmpdir2 path should be valid utf-8");
 
         let spd = make_single_bin_spd(30, 2.5);
-        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir1).unwrap();
-        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir2).unwrap();
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir1)
+            .expect("gallery generation for dir1 should succeed");
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir2)
+            .expect("gallery generation for dir2 should succeed");
 
         for bin in 0..NUM_BINS {
             let wl = wavelength_nm_for_bin(bin);
             let f1 = format!("{dir1}/{bin:02}_{wl:.0}nm.png");
             let f2 = format!("{dir2}/{bin:02}_{wl:.0}nm.png");
-            let bytes1 = std::fs::read(&f1).unwrap();
-            let bytes2 = std::fs::read(&f2).unwrap();
+            let bytes1 = std::fs::read(&f1).expect("failed to read gallery file from dir1");
+            let bytes2 = std::fs::read(&f2).expect("failed to read gallery file from dir2");
             assert_eq!(bytes1, bytes2, "bin {bin} PNG should be identical between two runs");
         }
     }
@@ -623,10 +625,11 @@ mod tests {
     #[test]
     fn test_gallery_pngs_are_valid_16bit_images() {
         let tmp = tempfile::tempdir().expect("failed to create temp directory");
-        let dir = tmp.path().to_str().unwrap();
+        let dir = tmp.path().to_str().expect("temp path should be valid utf-8");
 
         let spd = make_single_bin_spd(20, 1.0);
-        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir).unwrap();
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir)
+            .expect("gallery generation should succeed");
 
         let wl = wavelength_nm_for_bin(20);
         let path = format!("{dir}/20_{wl:.0}nm.png");
@@ -642,19 +645,22 @@ mod tests {
     #[test]
     fn test_gallery_distinct_bins_produce_distinct_files() {
         let tmp = tempfile::tempdir().expect("failed to create temp directory");
-        let dir = tmp.path().to_str().unwrap();
+        let dir = tmp.path().to_str().expect("temp path should be valid utf-8");
 
         let mut spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
         for pixel in &mut spd {
             pixel[5] = 1.0;
             pixel[50] = 1.0;
         }
-        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir).unwrap();
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir)
+            .expect("gallery generation should succeed");
 
         let wl5 = wavelength_nm_for_bin(5);
         let wl50 = wavelength_nm_for_bin(50);
-        let bytes5 = std::fs::read(format!("{dir}/05_{wl5:.0}nm.png")).unwrap();
-        let bytes50 = std::fs::read(format!("{dir}/50_{wl50:.0}nm.png")).unwrap();
+        let bytes5 =
+            std::fs::read(format!("{dir}/05_{wl5:.0}nm.png")).expect("failed to read bin 5 png");
+        let bytes50 =
+            std::fs::read(format!("{dir}/50_{wl50:.0}nm.png")).expect("failed to read bin 50 png");
         assert_ne!(
             bytes5, bytes50,
             "bins with different wavelengths should produce different PNGs"
@@ -721,8 +727,8 @@ mod tests {
     #[test]
     fn test_cycle_constants_are_consistent() {
         let expected_frames = (constants::CYCLE_DURATION_SECONDS
-            * constants::DEFAULT_VIDEO_FPS as f64)
-            .round() as u32;
+            * f64::from(constants::DEFAULT_VIDEO_FPS))
+        .round() as u32;
         assert_eq!(
             constants::CYCLE_TOTAL_FRAMES,
             expected_frames,

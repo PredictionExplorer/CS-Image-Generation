@@ -8,110 +8,168 @@ use super::parameter_descriptors as pd;
 use crate::sim::Sha3RandomByteStream;
 
 /// Complete configuration for all randomizable effect parameters.
-/// Each field is Option<T>: None means "randomize this", Some(T) means "use explicit value".
+///
+/// Each field is `Option<T>`: `None` means "randomize this", `Some(T)` means "use explicit value".
 #[derive(Clone, Debug, Default)]
 pub struct RandomizableEffectConfig {
-    // Effect enable/disable flags
+    /// Whether to enable the bloom effect.
     pub enable_bloom: Option<bool>,
+    /// Whether to enable the glow effect.
     pub enable_glow: Option<bool>,
+    /// Whether to enable chromatic bloom.
     pub enable_chromatic_bloom: Option<bool>,
+    /// Whether to enable perceptual blur.
     pub enable_perceptual_blur: Option<bool>,
+    /// Whether to enable micro contrast enhancement.
     pub enable_micro_contrast: Option<bool>,
+    /// Whether to enable gradient map color mapping.
     pub enable_gradient_map: Option<bool>,
+    /// Whether to enable color grading.
     pub enable_color_grade: Option<bool>,
+    /// Whether to enable the champlevé material effect.
     pub enable_champleve: Option<bool>,
+    /// Whether to enable the aether material effect.
     pub enable_aether: Option<bool>,
+    /// Whether to enable the opalescence material effect.
     pub enable_opalescence: Option<bool>,
+    /// Whether to enable edge luminance enhancement.
     pub enable_edge_luminance: Option<bool>,
+    /// Whether to enable atmospheric depth simulation.
     pub enable_atmospheric_depth: Option<bool>,
+    /// Whether to enable fine texture overlay.
     pub enable_fine_texture: Option<bool>,
 
-    // Bloom & Glow parameters
+    /// Bloom blur strength (iteration count).
     pub blur_strength: Option<f64>,
+    /// Bloom blur radius as a fraction of image size.
     pub blur_radius_scale: Option<f64>,
+    /// Core brightness retention during bloom blur.
     pub blur_core_brightness: Option<f64>,
+    /// Difference-of-Gaussians edge enhancement strength.
     pub dog_strength: Option<f64>,
+    /// `DoG` sigma as a fraction of image size.
     pub dog_sigma_scale: Option<f64>,
+    /// `DoG` ratio between the two Gaussian widths.
     pub dog_ratio: Option<f64>,
+    /// Glow effect strength.
     pub glow_strength: Option<f64>,
+    /// Luminance threshold for glow activation.
     pub glow_threshold: Option<f64>,
+    /// Glow radius as a fraction of image size.
     pub glow_radius_scale: Option<f64>,
+    /// Glow falloff sharpness.
     pub glow_sharpness: Option<f64>,
+    /// Saturation boost applied in glow regions.
     pub glow_saturation_boost: Option<f64>,
 
-    // Chromatic effects
+    /// Chromatic bloom intensity.
     pub chromatic_bloom_strength: Option<f64>,
+    /// Chromatic bloom radius as a fraction of image size.
     pub chromatic_bloom_radius_scale: Option<f64>,
+    /// Channel separation distance for chromatic bloom.
     pub chromatic_bloom_separation_scale: Option<f64>,
+    /// Luminance threshold for chromatic bloom.
     pub chromatic_bloom_threshold: Option<f64>,
 
-    // Perceptual blur
+    /// Perceptual blur strength.
     pub perceptual_blur_strength: Option<f64>,
 
-    // Color grading
+    /// Overall color grading intensity.
     pub color_grade_strength: Option<f64>,
+    /// Vignette darkening strength at image edges.
     pub vignette_strength: Option<f64>,
+    /// Vignette gradient softness.
     pub vignette_softness: Option<f64>,
+    /// Color vibrance adjustment multiplier.
     pub vibrance: Option<f64>,
+    /// Clarity (local contrast) strength.
     pub clarity_strength: Option<f64>,
+    /// Tone curve S-curve strength.
     pub tone_curve_strength: Option<f64>,
 
-    // Gradient mapping
+    /// Gradient map blending strength.
     pub gradient_map_strength: Option<f64>,
+    /// How much original hue is preserved in gradient mapping.
     pub gradient_map_hue_preservation: Option<f64>,
-    pub gradient_map_palette: Option<usize>, // 0-14 for 15 different palettes
+    /// Palette index for gradient mapping (0–14).
+    pub gradient_map_palette: Option<usize>,
 
-    // Material effects - Opalescence
+    /// Opalescence effect strength.
     pub opalescence_strength: Option<f64>,
+    /// Opalescence pattern scale.
     pub opalescence_scale: Option<f64>,
+    /// Number of opalescence interference layers.
     pub opalescence_layers: Option<usize>,
 
-    // Material effects - Champlevé
+    /// Champlevé flow alignment with simulation field.
     pub champleve_flow_alignment: Option<f64>,
+    /// Champlevé interference pattern amplitude.
     pub champleve_interference_amplitude: Option<f64>,
+    /// Champlevé rim highlight intensity.
     pub champleve_rim_intensity: Option<f64>,
+    /// Champlevé rim warmth (cool-to-warm shift).
     pub champleve_rim_warmth: Option<f64>,
+    /// Champlevé interior brightness lift.
     pub champleve_interior_lift: Option<f64>,
 
-    // Material effects - Aether
+    /// Aether flow alignment with simulation field.
     pub aether_flow_alignment: Option<f64>,
+    /// Aether volumetric scattering strength.
     pub aether_scattering_strength: Option<f64>,
+    /// Aether iridescence color-shift amplitude.
     pub aether_iridescence_amplitude: Option<f64>,
+    /// Aether caustic light pattern strength.
     pub aether_caustic_strength: Option<f64>,
 
-    // Detail & Clarity
+    /// Micro contrast enhancement strength.
     pub micro_contrast_strength: Option<f64>,
+    /// Micro contrast sampling radius in pixels.
     pub micro_contrast_radius: Option<usize>,
+    /// Edge luminance enhancement strength.
     pub edge_luminance_strength: Option<f64>,
+    /// Edge detection threshold for luminance enhancement.
     pub edge_luminance_threshold: Option<f64>,
+    /// Brightness boost applied to detected edges.
     pub edge_luminance_brightness_boost: Option<f64>,
 
-    // Atmospheric
+    /// Atmospheric depth effect strength.
     pub atmospheric_depth_strength: Option<f64>,
+    /// Atmospheric desaturation amount with depth.
     pub atmospheric_desaturation: Option<f64>,
+    /// Atmospheric darkening amount with depth.
     pub atmospheric_darkening: Option<f64>,
-    pub atmospheric_fog_color_r: Option<f64>, // Fog color RGB components
+    /// Fog color red component.
+    pub atmospheric_fog_color_r: Option<f64>,
+    /// Fog color green component.
     pub atmospheric_fog_color_g: Option<f64>,
+    /// Fog color blue component.
     pub atmospheric_fog_color_b: Option<f64>,
+    /// Fine texture overlay strength.
     pub fine_texture_strength: Option<f64>,
+    /// Fine texture pattern scale.
     pub fine_texture_scale: Option<f64>,
+    /// Fine texture contrast.
     pub fine_texture_contrast: Option<f64>,
 
-    // HDR & Exposure
+    /// HDR intensity scaling factor.
     pub hdr_scale: Option<f64>,
 
-    // Clipping
+    /// Black point clipping threshold.
     pub clip_black: Option<f64>,
+    /// White point clipping threshold.
     pub clip_white: Option<f64>,
 
-    // Nebula
+    /// Nebula overlay strength.
     pub nebula_strength: Option<f64>,
+    /// Number of noise octaves for nebula generation.
     pub nebula_octaves: Option<usize>,
+    /// Base frequency for nebula noise.
     pub nebula_base_frequency: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
-    /// Resolve all Option<T> values: use explicit values or randomize.
+    /// Resolve all `Option<T>` values: use explicit values or randomize.
+    ///
     /// Returns a fully resolved configuration and a log of randomization decisions.
     pub fn resolve(
         &self,
@@ -765,7 +823,7 @@ impl RandomizableEffectConfig {
         resolved
     }
 
-    /// Extract effect group name from parameter name (e.g., "glow_strength" -> "glow")
+    /// Extract effect group name from parameter name (e.g., "`glow_strength`" -> "glow")
     fn effect_group_name(param_name: &str) -> String {
         if param_name.starts_with("atmospheric_") {
             return "atmospheric_depth".to_string();
@@ -793,81 +851,151 @@ impl RandomizableEffectConfig {
 /// Fully resolved effect configuration with all parameters determined.
 #[derive(Clone, Debug, Default)]
 pub struct ResolvedEffectConfig {
+    /// Output image width in pixels.
     pub width: u32,
+    /// Output image height in pixels.
     pub height: u32,
 
-    // Effect enables
+    /// Whether bloom is enabled.
     pub enable_bloom: bool,
+    /// Whether glow is enabled.
     pub enable_glow: bool,
+    /// Whether chromatic bloom is enabled.
     pub enable_chromatic_bloom: bool,
+    /// Whether perceptual blur is enabled.
     pub enable_perceptual_blur: bool,
+    /// Whether micro contrast is enabled.
     pub enable_micro_contrast: bool,
+    /// Whether gradient map is enabled.
     pub enable_gradient_map: bool,
+    /// Whether color grading is enabled.
     pub enable_color_grade: bool,
+    /// Whether champlevé is enabled.
     pub enable_champleve: bool,
+    /// Whether aether is enabled.
     pub enable_aether: bool,
+    /// Whether opalescence is enabled.
     pub enable_opalescence: bool,
+    /// Whether edge luminance is enabled.
     pub enable_edge_luminance: bool,
+    /// Whether atmospheric depth is enabled.
     pub enable_atmospheric_depth: bool,
+    /// Whether fine texture is enabled.
     pub enable_fine_texture: bool,
 
-    // Parameters
+    /// Resolved bloom blur strength.
     pub blur_strength: f64,
+    /// Resolved bloom blur radius scale.
     pub blur_radius_scale: f64,
+    /// Resolved bloom core brightness.
     pub blur_core_brightness: f64,
+    /// Resolved `DoG` edge enhancement strength.
     pub dog_strength: f64,
+    /// Resolved `DoG` sigma scale.
     pub dog_sigma_scale: f64,
+    /// Resolved `DoG` Gaussian ratio.
     pub dog_ratio: f64,
+    /// Resolved glow strength.
     pub glow_strength: f64,
+    /// Resolved glow luminance threshold.
     pub glow_threshold: f64,
+    /// Resolved glow radius scale.
     pub glow_radius_scale: f64,
+    /// Resolved glow falloff sharpness.
     pub glow_sharpness: f64,
+    /// Resolved glow saturation boost.
     pub glow_saturation_boost: f64,
+    /// Resolved chromatic bloom strength.
     pub chromatic_bloom_strength: f64,
+    /// Resolved chromatic bloom radius scale.
     pub chromatic_bloom_radius_scale: f64,
+    /// Resolved chromatic bloom channel separation scale.
     pub chromatic_bloom_separation_scale: f64,
+    /// Resolved chromatic bloom threshold.
     pub chromatic_bloom_threshold: f64,
+    /// Resolved perceptual blur strength.
     pub perceptual_blur_strength: f64,
+    /// Resolved color grading strength.
     pub color_grade_strength: f64,
+    /// Resolved vignette strength.
     pub vignette_strength: f64,
+    /// Resolved vignette softness.
     pub vignette_softness: f64,
+    /// Resolved vibrance multiplier.
     pub vibrance: f64,
+    /// Resolved clarity strength.
     pub clarity_strength: f64,
+    /// Resolved tone curve strength.
     pub tone_curve_strength: f64,
+    /// Resolved gradient map strength.
     pub gradient_map_strength: f64,
+    /// Resolved gradient map hue preservation.
     pub gradient_map_hue_preservation: f64,
-    pub gradient_map_palette: usize, // Palette index (0-14)
+    /// Palette index for gradient mapping (0–14).
+    pub gradient_map_palette: usize,
+    /// Resolved opalescence strength.
     pub opalescence_strength: f64,
+    /// Resolved opalescence scale.
     pub opalescence_scale: f64,
+    /// Resolved number of opalescence layers.
     pub opalescence_layers: usize,
+    /// Resolved champlevé flow alignment.
     pub champleve_flow_alignment: f64,
+    /// Resolved champlevé interference amplitude.
     pub champleve_interference_amplitude: f64,
+    /// Resolved champlevé rim intensity.
     pub champleve_rim_intensity: f64,
+    /// Resolved champlevé rim warmth.
     pub champleve_rim_warmth: f64,
+    /// Resolved champlevé interior lift.
     pub champleve_interior_lift: f64,
+    /// Resolved aether flow alignment.
     pub aether_flow_alignment: f64,
+    /// Resolved aether scattering strength.
     pub aether_scattering_strength: f64,
+    /// Resolved aether iridescence amplitude.
     pub aether_iridescence_amplitude: f64,
+    /// Resolved aether caustic strength.
     pub aether_caustic_strength: f64,
+    /// Resolved micro contrast strength.
     pub micro_contrast_strength: f64,
+    /// Resolved micro contrast radius.
     pub micro_contrast_radius: usize,
+    /// Resolved edge luminance strength.
     pub edge_luminance_strength: f64,
+    /// Resolved edge luminance threshold.
     pub edge_luminance_threshold: f64,
+    /// Resolved edge luminance brightness boost.
     pub edge_luminance_brightness_boost: f64,
+    /// Resolved atmospheric depth strength.
     pub atmospheric_depth_strength: f64,
+    /// Resolved atmospheric desaturation.
     pub atmospheric_desaturation: f64,
+    /// Resolved atmospheric darkening.
     pub atmospheric_darkening: f64,
-    pub atmospheric_fog_color_r: f64, // RGB fog color components
+    /// Resolved fog color red component.
+    pub atmospheric_fog_color_r: f64,
+    /// Resolved fog color green component.
     pub atmospheric_fog_color_g: f64,
+    /// Resolved fog color blue component.
     pub atmospheric_fog_color_b: f64,
+    /// Resolved fine texture strength.
     pub fine_texture_strength: f64,
+    /// Resolved fine texture scale.
     pub fine_texture_scale: f64,
+    /// Resolved fine texture contrast.
     pub fine_texture_contrast: f64,
+    /// Resolved HDR scaling factor.
     pub hdr_scale: f64,
+    /// Resolved black point clipping threshold.
     pub clip_black: f64,
+    /// Resolved white point clipping threshold.
     pub clip_white: f64,
+    /// Resolved nebula overlay strength.
     pub nebula_strength: f64,
+    /// Resolved number of nebula noise octaves.
     pub nebula_octaves: usize,
+    /// Resolved nebula base frequency.
     pub nebula_base_frequency: f64,
 }
 
@@ -1081,8 +1209,7 @@ fn apply_conflict_detection(
     if softness_score >= 2.6 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
         config.enable_perceptual_blur = false;
         adjustments.push(format!(
-            "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {:.2})",
-            softness_score
+            "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {softness_score:.2})"
         ));
     }
 
@@ -1521,14 +1648,10 @@ mod tests {
 
         let check = |name: &str, expected_prob: f64, tolerance: f64| {
             let count = *counts.get(name).unwrap_or(&0) as f64;
-            let rate = count / n as f64;
+            let rate = count / f64::from(n);
             assert!(
                 (rate - expected_prob).abs() < tolerance,
-                "{}: rate {:.3} deviates from expected {:.2} by more than {:.2}",
-                name,
-                rate,
-                expected_prob,
-                tolerance,
+                "{name}: rate {rate:.3} deviates from expected {expected_prob:.2} by more than {tolerance:.2}",
             );
         };
 
@@ -1670,7 +1793,7 @@ mod tests {
         }
     }
 
-    /// Test that LuxuryPalette::from_index correctly maps all valid indices
+    /// Test that `LuxuryPalette::from_index` correctly maps all valid indices
     #[test]
     fn test_luxury_palette_from_index() {
         use crate::post_effects::LuxuryPalette;

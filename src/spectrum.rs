@@ -6,7 +6,6 @@
 //! right before the normal tone-mapping / bloom pipeline.
 
 use crate::spectrum_simd;
-use once_cell::sync::Lazy;
 
 /// Number of wavelength buckets in the SPD.
 pub const NUM_BINS: usize = 64;
@@ -56,39 +55,40 @@ pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
 }
 
 /// Combined lookup table for cache-friendly SPD conversion
-/// Stores (R, G, B, tone_k) in a single cache line for better performance
-pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(|| {
-    let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
-    for (i, entry) in arr.iter_mut().enumerate() {
-        let (r, g, b) = wavelength_to_rgb(wavelength_nm_for_bin(i));
-        let lambda = wavelength_nm_for_bin(i);
+/// Stores (R, G, B, `tone_k`) in a single cache line for better performance
+pub static BIN_COMBINED_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
+    std::sync::LazyLock::new(|| {
+        let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
+        for (i, entry) in arr.iter_mut().enumerate() {
+            let (r, g, b) = wavelength_to_rgb(wavelength_nm_for_bin(i));
+            let lambda = wavelength_nm_for_bin(i);
 
-        // Compute tone-mapping strength inline
-        let k = if lambda < 450.0 {
-            2.2 + 0.3 * (450.0 - lambda) / 70.0
-        } else if lambda < 490.0 {
-            2.0
-        } else if lambda < 550.0 {
-            1.8
-        } else if lambda < 590.0 {
-            1.6
-        } else if lambda < 650.0 {
-            1.4 - 0.2 * (lambda - 590.0) / 60.0
-        } else {
-            1.2 - 0.2 * (lambda - 650.0) / 50.0
-        };
+            // Compute tone-mapping strength inline
+            let k = if lambda < 450.0 {
+                2.2 + 0.3 * (450.0 - lambda) / 70.0
+            } else if lambda < 490.0 {
+                2.0
+            } else if lambda < 550.0 {
+                1.8
+            } else if lambda < 590.0 {
+                1.6
+            } else if lambda < 650.0 {
+                1.4 - 0.2 * (lambda - 590.0) / 60.0
+            } else {
+                1.2 - 0.2 * (lambda - 650.0) / 50.0
+            };
 
-        *entry = (r, g, b, k);
-    }
-    arr
-});
+            *entry = (r, g, b, k);
+        }
+        arr
+    });
 
 /// Convert an SPD sample (per-bin energy) to linear-sRGB premultiplied RGBA.
 /// Alpha equals total energy (capped at 1.0) so downstream blending treats it
 /// similarly to our old pipeline.
 ///
 /// Automatically selects the best SIMD path for the current platform:
-/// - x86_64 AVX2: 4 bins/iter via 256-bit FMA
+/// - `x86_64` AVX2: 4 bins/iter via 256-bit FMA
 /// - aarch64 NEON: 2 bins/iter via 128-bit FMA
 /// - Scalar fallback for all other targets
 #[inline]
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_wavelength_to_rgb_visible_range_non_zero() {
         for wl in (400..=680).step_by(10) {
-            let (r, g, b) = wavelength_to_rgb(wl as f64);
+            let (r, g, b) = wavelength_to_rgb(f64::from(wl));
             let sum = r + g + b;
             assert!(sum > 0.0, "wavelength {wl}nm should produce nonzero RGB, got ({r},{g},{b})");
         }
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_wavelength_to_rgb_values_in_unit_range() {
         for wl in (380..=700).step_by(1) {
-            let (r, g, b) = wavelength_to_rgb(wl as f64);
+            let (r, g, b) = wavelength_to_rgb(f64::from(wl));
             assert!((0.0..=1.0).contains(&r), "R={r} out of [0,1] at {wl}nm");
             assert!((0.0..=1.0).contains(&g), "G={g} out of [0,1] at {wl}nm");
             assert!((0.0..=1.0).contains(&b), "B={b} out of [0,1] at {wl}nm");
@@ -365,7 +365,7 @@ mod tests {
     fn test_wavelength_to_rgb_continuous() {
         let mut prev = wavelength_to_rgb(380.0);
         for wl_x10 in 3810..=7000 {
-            let wl = wl_x10 as f64 / 10.0;
+            let wl = f64::from(wl_x10) / 10.0;
             let curr = wavelength_to_rgb(wl);
             let dr = (curr.0 - prev.0).abs();
             let dg = (curr.1 - prev.1).abs();

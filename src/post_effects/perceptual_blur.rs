@@ -1,6 +1,6 @@
-//! Perceptual blur post-processing effect using OKLab color space.
+//! Perceptual blur post-processing effect using `OKLab` color space.
 //!
-//! This effect performs blur operations in the perceptually uniform OKLab color space,
+//! This effect performs blur operations in the perceptually uniform `OKLab` color space,
 //! resulting in more natural and vibrant color mixing compared to RGB blur.
 
 use super::{PixelBuffer, PostEffect, PostEffectError};
@@ -45,11 +45,13 @@ impl PerceptualBlurConfig {
 
 /// Perceptual blur post-processing effect.
 ///
-/// This effect converts the image to OKLab color space before applying blur,
+/// This effect converts the image to `OKLab` color space before applying blur,
 /// then converts back to RGB. This produces more vibrant and natural-looking
 /// blur halos, especially when mixing complementary colors.
 pub struct PerceptualBlur {
+    /// Active configuration controlling radius, strength, and gamut mapping.
     pub config: PerceptualBlurConfig,
+    /// Whether the effect is applied during post-processing.
     pub enabled: bool,
 }
 
@@ -183,7 +185,7 @@ mod tests {
         blur.enabled = false;
 
         let input = vec![(0.5, 0.5, 0.5, 1.0); 100];
-        let result = blur.process(&input, 10, 10).unwrap();
+        let result = blur.process(&input, 10, 10).expect("disabled blur should succeed");
 
         // Should return unchanged input when disabled
         assert_eq!(result, input);
@@ -195,7 +197,7 @@ mod tests {
         let blur = PerceptualBlur::new(config);
 
         let input = vec![(0.5, 0.5, 0.5, 1.0); 100];
-        let result = blur.process(&input, 10, 10).unwrap();
+        let result = blur.process(&input, 10, 10).expect("zero-radius blur should succeed");
 
         // Should return unchanged input when radius is 0
         assert_eq!(result, input);
@@ -214,7 +216,7 @@ mod tests {
         let mut input = vec![(0.0, 0.0, 0.0, 0.0); 25]; // 5x5 image
         input[12] = (1.0, 0.0, 0.0, 1.0); // Red pixel in center
 
-        let result = blur.process(&input, 5, 5).unwrap();
+        let result = blur.process(&input, 5, 5).expect("blur with transparency should succeed");
 
         // Check that originally transparent pixels have valid alpha
         for pixel in &result {
@@ -236,7 +238,7 @@ mod tests {
             (1.0, 1.0, 0.0, 1.0), // Yellow
         ];
 
-        let result = blur.process(&input, 2, 2).unwrap();
+        let result = blur.process(&input, 2, 2).expect("gamut-mapped blur should succeed");
 
         // Verify all colors are in gamut after processing
         for (i, &(r, g, b, a)) in result.iter().enumerate() {
@@ -248,21 +250,15 @@ mod tests {
 
                 assert!(
                     (-0.001..=1.001).contains(&r_straight),
-                    "Pixel {} R out of gamut: {}",
-                    i,
-                    r_straight
+                    "Pixel {i} R out of gamut: {r_straight}"
                 );
                 assert!(
                     (-0.001..=1.001).contains(&g_straight),
-                    "Pixel {} G out of gamut: {}",
-                    i,
-                    g_straight
+                    "Pixel {i} G out of gamut: {g_straight}"
                 );
                 assert!(
                     (-0.001..=1.001).contains(&b_straight),
-                    "Pixel {} B out of gamut: {}",
-                    i,
-                    b_straight
+                    "Pixel {i} B out of gamut: {b_straight}"
                 );
             }
         }

@@ -1,3 +1,5 @@
+//! CLI front-end for the three-body problem visualization generator.
+
 use clap::{Parser, ValueEnum};
 use rayon::ThreadPoolBuilder;
 use three_body_problem::{
@@ -128,7 +130,7 @@ struct ResolvedBordaWeights {
 ///
 /// Log-uniform sampling ensures that chaos-dominant ratios (e.g. 1/20)
 /// and equil-dominant ratios (e.g. 20) are equally likely.  The ratio
-/// is expressed as equil_weight / chaos_weight.
+/// is expressed as `equil_weight` / `chaos_weight`.
 fn resolve_borda_weights(
     chaos_opt: Option<f64>,
     equil_opt: Option<f64>,
@@ -160,7 +162,7 @@ fn resolve_borda_weights(
 
     let ratio = equil_weight / chaos_weight;
     let label = if ratio >= 1.0 {
-        format!("equil {:.1}x", ratio)
+        format!("equil {ratio:.1}x")
     } else {
         format!("chaos {:.1}x", 1.0 / ratio)
     };
@@ -287,7 +289,10 @@ fn main() -> Result<()> {
 
     let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
 
-    let drift_config = if args.drift != DriftModeArg::None {
+    let drift_config = if args.drift == DriftModeArg::None {
+        info!("STAGE 2.5/7: Drift disabled");
+        None
+    } else {
         app::apply_drift_transformation(
             &mut positions,
             args.drift.as_str(),
@@ -296,9 +301,6 @@ fn main() -> Result<()> {
             None,
             &mut rng,
         )?
-    } else {
-        info!("STAGE 2.5/7: Drift disabled");
-        None
     };
 
     let (colors, body_alphas) =
@@ -453,7 +455,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
     }
 
     #[test]
@@ -472,7 +474,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
     }
 
     #[test]
@@ -482,7 +484,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
     }
 
     #[test]
@@ -495,9 +497,7 @@ mod tests {
             let ratio = w.equil_weight / w.chaos_weight;
             assert!(
                 (0.2..=125.0).contains(&ratio),
-                "seed {} produced ratio {} outside [0.2, 125.0]",
-                seed_byte,
-                ratio
+                "seed {seed_byte} produced ratio {ratio} outside [0.2, 125.0]"
             );
         }
     }

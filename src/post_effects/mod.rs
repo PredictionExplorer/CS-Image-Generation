@@ -16,7 +16,12 @@ pub enum PostEffectError {
 
     /// A named effect reported an error.
     #[error("PostEffect '{effect_name}' error: {message}")]
-    EffectFailed { effect_name: String, message: String },
+    EffectFailed {
+        /// Name of the effect that failed.
+        effect_name: String,
+        /// Human-readable error description.
+        message: String,
+    },
 }
 
 /// Trait for implementing post-processing effects.
@@ -179,7 +184,8 @@ mod tests {
         assert_eq!(chain.len(), 0);
 
         let input = vec![(0.5, 0.5, 0.5, 1.0)];
-        let result = chain.process(input.clone(), 1, 1).unwrap();
+        let result =
+            chain.process(input.clone(), 1, 1).expect("empty chain process should succeed");
         assert_eq!(result, input);
     }
 
@@ -192,7 +198,7 @@ mod tests {
         assert!(!chain.is_empty());
 
         let input = vec![(0.5, 0.5, 0.5, 1.0)];
-        let result = chain.process(input, 1, 1).unwrap();
+        let result = chain.process(input, 1, 1).expect("single effect chain should succeed");
         assert_eq!(result[0].0, 0.6);
         assert_eq!(result[0].1, 0.6);
         assert_eq!(result[0].2, 0.6);
@@ -206,7 +212,7 @@ mod tests {
         chain.add(Box::new(AddEffect { value: 0.2, enabled: true }));
 
         let input = vec![(0.5, 0.5, 0.5, 1.0)];
-        let result = chain.process(input, 1, 1).unwrap();
+        let result = chain.process(input, 1, 1).expect("multi-effect chain should succeed");
         assert_eq!(result[0].0, 0.8); // 0.5 + 0.1 + 0.2
         assert_eq!(result[0].1, 0.8);
         assert_eq!(result[0].2, 0.8);
@@ -220,7 +226,7 @@ mod tests {
         chain.add(Box::new(AddEffect { value: 0.2, enabled: true }));
 
         let input = vec![(0.5, 0.5, 0.5, 1.0)];
-        let result = chain.process(input, 1, 1).unwrap();
+        let result = chain.process(input, 1, 1).expect("chain with disabled effect should succeed");
         assert_eq!(result[0].0, 0.7); // 0.5 + 0.2 (first effect disabled)
         assert_eq!(result[0].1, 0.7);
         assert_eq!(result[0].2, 0.7);
@@ -234,7 +240,7 @@ mod tests {
             message: "Test error".to_string(),
         };
 
-        assert_eq!(format!("{}", error), "PostEffect 'Test Effect' error: Test error");
+        assert_eq!(format!("{error}"), "PostEffect 'Test Effect' error: Test error");
     }
 
     #[test]

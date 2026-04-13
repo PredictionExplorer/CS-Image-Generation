@@ -24,17 +24,28 @@ fn remap_tone_curve(lum: f64, strength: f64) -> f64 {
 
 use super::utils::smoothstep;
 
+/// Tunable parameters for the cinematic color-grading pass.
 #[derive(Clone, Debug)]
 pub struct ColorGradeParams {
+    /// Overall blend strength of the grading effect (0.0 = bypass, 1.0 = full).
     pub strength: f64,
+    /// Intensity of the edge-darkening vignette.
     pub vignette_strength: f64,
+    /// Falloff softness of the vignette gradient.
     pub vignette_softness: f64,
+    /// Midtone vibrance boost factor.
     pub vibrance: f64,
+    /// Strength of the local-contrast clarity adjustment.
     pub clarity_strength: f64,
+    /// Blur radius (in pixels) used for the clarity detail layer.
     pub clarity_radius: usize,
+    /// S-curve tone-mapping strength.
     pub tone_curve: f64,
+    /// RGB tint applied to shadow regions.
     pub shadow_tint: [f64; 3],
+    /// RGB tint applied to highlight regions.
     pub highlight_tint: [f64; 3],
+    /// Strength of the complementary palette-wave accent shift.
     pub palette_wave_strength: f64,
 }
 
@@ -65,12 +76,16 @@ impl ColorGradeParams {
     }
 }
 
+/// Cinematic color-grading post effect combining vignette, vibrance, clarity, and tinting.
 pub struct CinematicColorGrade {
+    /// Active grading parameters.
     pub params: ColorGradeParams,
+    /// Whether the effect is enabled.
     pub enabled: bool,
 }
 
 impl CinematicColorGrade {
+    /// Create a new color-grading effect with the given parameters.
     #[must_use]
     pub fn new(params: ColorGradeParams) -> Self {
         Self { params, enabled: true }

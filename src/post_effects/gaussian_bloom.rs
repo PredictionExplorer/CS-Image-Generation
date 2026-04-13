@@ -109,7 +109,7 @@ mod tests {
     fn test_gaussian_bloom_preserves_dark_pixels() {
         let bloom = GaussianBloom::new(0, 0.5, 12.0);
         let input = vec![(0.08, 0.08, 0.08, 1.0)];
-        let output = bloom.process(&input, 1, 1).unwrap();
+        let output = bloom.process(&input, 1, 1).expect("bloom process should succeed");
 
         assert!((output[0].0 - input[0].0).abs() < 1e-3);
         assert!((output[0].1 - input[0].1).abs() < 1e-3);
@@ -120,7 +120,7 @@ mod tests {
     fn test_gaussian_bloom_lifts_highlights() {
         let bloom = GaussianBloom::new(0, 0.5, 12.0);
         let input = vec![(0.85, 0.85, 0.85, 1.0)];
-        let output = bloom.process(&input, 1, 1).unwrap();
+        let output = bloom.process(&input, 1, 1).expect("bloom process should succeed");
 
         assert!(output[0].0 > input[0].0);
         assert!(output[0].1 > input[0].1);

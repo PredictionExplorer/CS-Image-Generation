@@ -39,19 +39,33 @@ pub enum SimulationError {
     #[error(
         "No valid orbits found after filtering {discarded}/{total_attempted} candidates. Reason: {reason}"
     )]
-    NoValidOrbits { total_attempted: usize, discarded: usize, reason: String },
+    NoValidOrbits {
+        /// Total number of orbit candidates that were attempted.
+        total_attempted: usize,
+        /// Number of candidates that were discarded.
+        discarded: usize,
+        /// Human-readable explanation for the failure.
+        reason: String,
+    },
 }
 
 /// Errors that can occur during rendering operations (app-level wrapper)
 #[derive(Debug, Error)]
 pub enum AppRenderError {
-    /// Wraps the existing render::error::RenderError
+    /// Wraps the existing `render::error::RenderError`
     #[error("{0}")]
     Inner(#[from] crate::render::error::RenderError),
 
     /// Invalid rendering dimensions
     #[error("Invalid dimensions {width}x{height}: {reason}")]
-    InvalidDimensions { width: u32, height: u32, reason: String },
+    InvalidDimensions {
+        /// Requested width in pixels.
+        width: u32,
+        /// Requested height in pixels.
+        height: u32,
+        /// Why the dimensions are invalid.
+        reason: String,
+    },
 }
 
 /// Configuration and validation errors
@@ -59,22 +73,44 @@ pub enum AppRenderError {
 pub enum ConfigError {
     /// Invalid seed format
     #[error("Invalid hex seed '{seed}': {error}")]
-    InvalidSeed { seed: String, error: hex::FromHexError },
+    InvalidSeed {
+        /// The seed string that failed to parse.
+        seed: String,
+        /// The underlying hex-decode error.
+        error: hex::FromHexError,
+    },
 
     /// File system error
     #[error("Failed to {operation} '{path}': {error}")]
-    FileSystem { operation: String, path: String, error: std::io::Error },
+    FileSystem {
+        /// The file-system operation that failed (e.g. "read", "write").
+        operation: String,
+        /// Path that was being accessed.
+        path: String,
+        /// The underlying I/O error.
+        error: std::io::Error,
+    },
 
     /// Invalid resolution format
     #[error("Invalid resolution: {reason}")]
-    InvalidResolution { reason: String },
+    InvalidResolution {
+        /// Why the resolution is invalid.
+        reason: String,
+    },
 
     /// Partial drift configuration (must be all-or-nothing)
     #[error(
         "Drift parameters must be either all specified or all omitted. \
          Provided: scale={scale:?}, arc_fraction={arc_fraction:?}, eccentricity={eccentricity:?}"
     )]
-    InvalidDriftConfig { scale: Option<f64>, arc_fraction: Option<f64>, eccentricity: Option<f64> },
+    InvalidDriftConfig {
+        /// Drift scale, if provided.
+        scale: Option<f64>,
+        /// Arc fraction, if provided.
+        arc_fraction: Option<f64>,
+        /// Eccentricity, if provided.
+        eccentricity: Option<f64>,
+    },
 }
 
 /// Helper functions for common validation patterns
@@ -97,7 +133,7 @@ pub mod validation {
             return Err(AppRenderError::InvalidDimensions {
                 width,
                 height,
-                reason: format!("Dimensions must not exceed {}", MAX_DIMENSION),
+                reason: format!("Dimensions must not exceed {MAX_DIMENSION}"),
             }
             .into());
         }
@@ -126,7 +162,7 @@ mod tests {
             reason: "All orbits escaped".to_string(),
         };
 
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("95/100"));
         assert!(display.contains("escaped"));
     }

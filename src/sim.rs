@@ -96,11 +96,14 @@ impl std::fmt::Debug for Sha3RandomByteStream {
     }
 }
 
-/// Single Body in the 3-body sim
+/// Single body in the three-body gravitational simulation.
 #[derive(Clone, Debug)]
 pub struct Body {
+    /// Gravitational mass of this body.
     pub mass: f64,
+    /// Current 3D position vector.
     pub position: Vector3<f64>,
+    /// Current 3D velocity vector.
     pub velocity: Vector3<f64>,
     acceleration: Vector3<f64>,
 }
@@ -134,7 +137,7 @@ fn symplectic_step(bodies: &mut [Body], dt: f64) {
     const W0: f64 = -1.7024143839193153;
 
     const C1: f64 = W1 / 2.0;
-    const C2: f64 = (W0 + W1) / 2.0;
+    const C2: f64 = f64::midpoint(W0, W1);
     const C3: f64 = C2;
     const C4: f64 = C1;
 
@@ -185,7 +188,7 @@ fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
         body.reset_acceleration();
         for j in 0..3 {
             if i != j {
-                body.update_acceleration(mass[j], &pos[j])
+                body.update_acceleration(mass[j], &pos[j]);
             }
         }
     }
@@ -201,7 +204,7 @@ impl std::fmt::Debug for FullSim {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FullSim")
             .field("num_bodies", &self.positions.len())
-            .field("num_steps", &self.positions.first().map_or(0, |p| p.len()))
+            .field("num_steps", &self.positions.first().map_or(0, std::vec::Vec::len))
             .finish()
     }
 }
@@ -451,13 +454,9 @@ pub fn select_best_trajectory(
             }
 
             // Run simulation with early-exit checks for escaping bodies
-            let simr = match get_positions_with_early_exit(b.clone(), steps, th) {
-                Some(result) => result,
-                None => {
-                    // Early-exit triggered - body escaped during simulation
-                    dc.fetch_add(1, Ordering::Relaxed);
-                    return None;
-                }
+            let Some(simr) = get_positions_with_early_exit(b.clone(), steps, th) else {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
             };
 
             let pos = simr.positions;
@@ -507,8 +506,7 @@ pub fn select_best_trajectory(
             discarded: dtot,
             reason: format!(
                 "All orbits filtered out due to: high energy (E > 10), \
-                low angular momentum (L < 10), or escaping bodies (threshold: {})",
-                th
+                low angular momentum (L < 10), or escaping bodies (threshold: {th})"
             ),
         }
         .into());

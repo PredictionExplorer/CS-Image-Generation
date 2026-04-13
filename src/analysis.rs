@@ -179,8 +179,8 @@ mod tests {
             .map(|body| {
                 (0..n)
                     .map(|step| {
-                        let t = step as f64 * 0.1;
-                        let angle = t + body as f64 * std::f64::consts::TAU / 3.0;
+                        let t = f64::from(step) * 0.1;
+                        let angle = t + f64::from(body) * std::f64::consts::TAU / 3.0;
                         Vector3::new(angle.cos(), angle.sin(), 0.0)
                     })
                     .collect()
@@ -196,7 +196,7 @@ mod tests {
         let n = 50;
         let positions: Vec<Vec<Vector3<f64>>> = (0..3)
             .map(|body| {
-                let angle = body as f64 * std::f64::consts::TAU / 3.0;
+                let angle = f64::from(body) * std::f64::consts::TAU / 3.0;
                 vec![Vector3::new(angle.cos(), angle.sin(), 0.0); n]
             })
             .collect();

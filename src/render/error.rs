@@ -5,18 +5,28 @@ use thiserror::Error;
 /// Errors that can occur during rendering
 #[derive(Debug, Error)]
 pub enum RenderError {
+    /// A post-processing effect chain step failed.
     #[error("Effect chain failed: {0}")]
     EffectChain(String),
 
+    /// Video encoder encountered an I/O failure.
     #[error("Video encoding failed")]
     VideoEncoding(#[from] std::io::Error),
 
+    /// Render configuration is invalid or inconsistent.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    /// Output dimensions are zero or otherwise unsupported.
     #[error("Invalid dimensions: width={width}, height={height}")]
-    InvalidDimensions { width: u32, height: u32 },
+    InvalidDimensions {
+        /// Requested output width.
+        width: u32,
+        /// Requested output height.
+        height: u32,
+    },
 
+    /// Image file encoding (e.g. PNG write) failed.
     #[error("Image encoding failed: {0}")]
     ImageEncoding(String),
 }

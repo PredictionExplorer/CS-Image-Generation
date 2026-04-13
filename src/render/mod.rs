@@ -15,7 +15,7 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info};
 
-/// When true, tonemapping uses the AgX punchy output matrix instead of default AgX.
+/// When true, tonemapping uses the `AgX` punchy output matrix instead of default `AgX`.
 pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
@@ -69,6 +69,7 @@ pub enum BloomMode {
 }
 
 impl BloomMode {
+    /// Parse a bloom mode from a CLI argument string (case-insensitive).
     #[must_use]
     pub fn from_arg(value: &str) -> Self {
         match value {
@@ -78,6 +79,7 @@ impl BloomMode {
         }
     }
 
+    /// Return the canonical lowercase string representation of this bloom mode.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -124,11 +126,11 @@ pub struct SpectralScene<'a> {
     pub body_alphas: &'a [f64],
 }
 
-impl<'a> std::fmt::Debug for SpectralScene<'a> {
+impl std::fmt::Debug for SpectralScene<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpectralScene")
             .field("num_bodies", &self.positions.len())
-            .field("num_steps", &self.positions.first().map_or(0, |p| p.len()))
+            .field("num_steps", &self.positions.first().map_or(0, std::vec::Vec::len))
             .field("num_body_alphas", &self.body_alphas.len())
             .finish()
     }
@@ -173,7 +175,7 @@ pub struct SpectralRenderSettings<'a> {
     pub aspect_correction: bool,
 }
 
-impl<'a> std::fmt::Debug for SpectralRenderSettings<'a> {
+impl std::fmt::Debug for SpectralRenderSettings<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpectralRenderSettings")
             .field("render_config", &self.render_config)
@@ -214,7 +216,7 @@ fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) ->
 
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit)
 /// Returns final RGB channels in 0.0-1.0 range
-/// Upgraded to AgX for superior color rendition without hue-skewing in extreme highlights
+/// Upgraded to `AgX` for superior color rendition without hue-skewing in extreme highlights
 #[inline]
 fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [f64; 3] {
     let alpha = fa.clamp(0.0, 1.0);
@@ -373,7 +375,7 @@ fn build_nebula_config(
         base_frequency: resolved_config.nebula_base_frequency,
         lacunarity: 2.0,
         persistence: 0.5,
-        noise_seed: noise_seed as i64,
+        noise_seed: i64::from(noise_seed),
         colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
         time_scale: 1.0,
         edge_fade: 0.3,
@@ -985,7 +987,9 @@ fn pass_2_write_frames_spectral_with_backend(
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
-    accum_spd.iter_mut().for_each(|s| *s = [0.0; NUM_BINS]);
+    for s in accum_spd.iter_mut() {
+        *s = [0.0; NUM_BINS];
+    }
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     let effect_config =
@@ -1400,7 +1404,7 @@ mod tests {
     }
 
     fn image_energy(image: &ImageBuffer<Rgb<u16>, Vec<u16>>) -> u64 {
-        image.as_raw().iter().map(|&channel| channel as u64).sum()
+        image.as_raw().iter().map(|&channel| u64::from(channel)).sum()
     }
 
     type SceneData = (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>);
@@ -1409,7 +1413,11 @@ mod tests {
     fn assert_frame_bytes_eq(actual: &[u8], expected: &[u8], label: &str) {
         assert_eq!(actual.len(), expected.len(), "{label}: frame byte lengths differ");
         if actual != expected {
-            let first = actual.iter().zip(expected).position(|(a, b)| a != b).unwrap();
+            let first = actual
+                .iter()
+                .zip(expected)
+                .position(|(a, b)| a != b)
+                .expect("expected differing byte position");
             panic!(
                 "{label}: frame bytes differ at index {first} ({} vs {})",
                 actual[first], expected[first],
@@ -1697,7 +1705,7 @@ mod tests {
         let levels = default_levels();
         let result = tonemap_to_16bit(0.5, 0.4, 0.6, 0.9, &levels);
         for ch in result {
-            assert!((ch as u32) <= 65535, "16-bit channel {ch} out of range");
+            assert!(u32::from(ch) <= 65535, "16-bit channel {ch} out of range");
         }
     }
 
@@ -1975,10 +1983,10 @@ mod tests {
         let settings = SpectralRenderSettings::new(&resolved, &render_config, 29, false);
         let levels = ChannelLevels::new(0.0, 0.12, 0.0, 0.12, 0.0, 0.12);
 
-        let serial_single =
-            render_single_frame_spectral_serial_reference(scene, &levels, settings).unwrap();
-        let serial_final =
-            render_final_frame_spectral_serial_reference(scene, &levels, settings).unwrap();
+        let serial_single = render_single_frame_spectral_serial_reference(scene, &levels, settings)
+            .expect("serial single frame render should succeed");
+        let serial_final = render_final_frame_spectral_serial_reference(scene, &levels, settings)
+            .expect("serial final frame render should succeed");
 
         for thread_count in [1usize, 2, 3, resolved.height as usize] {
             let (parallel_single, parallel_final) = ThreadPoolBuilder::new()
@@ -1987,8 +1995,10 @@ mod tests {
                 .expect("thread pool should build")
                 .install(|| {
                     (
-                        render_single_frame_spectral(scene, &levels, settings).unwrap(),
-                        render_final_frame_spectral(scene, &levels, settings).unwrap(),
+                        render_single_frame_spectral(scene, &levels, settings)
+                            .expect("parallel single frame render should succeed"),
+                        render_final_frame_spectral(scene, &levels, settings)
+                            .expect("parallel final frame render should succeed"),
                     )
                 });
             assert_image_bits_eq(
@@ -2113,7 +2123,7 @@ mod tests {
         cfg.enable_perceptual_blur = true;
         let radius = compute_softness_radius(&cfg, BloomMode::Dog);
         assert!(radius.is_some());
-        assert!(radius.unwrap() >= 1);
+        assert!(radius.expect("softness radius should be some") >= 1);
     }
 
     #[test]
@@ -2126,13 +2136,13 @@ mod tests {
         high.enable_glow = true;
         high.enable_atmospheric_depth = true;
 
-        let r_low = compute_softness_radius(&low, BloomMode::Dog).unwrap();
-        let r_high = compute_softness_radius(&high, BloomMode::Dog).unwrap();
+        let r_low = compute_softness_radius(&low, BloomMode::Dog)
+            .expect("low softness radius should resolve");
+        let r_high = compute_softness_radius(&high, BloomMode::Dog)
+            .expect("high softness radius should resolve");
         assert!(
             r_high <= r_low,
-            "higher softness stack should produce equal or smaller radius: {} vs {}",
-            r_high,
-            r_low,
+            "higher softness stack should produce equal or smaller radius: {r_high} vs {r_low}",
         );
     }
 }

@@ -1,14 +1,14 @@
-//! OKLab color space conversions and utilities.
+//! `OKLab` color space conversions and utilities.
 //!
-//! Based on the OKLab color space by Björn Ottosson (2020)
-//! Reference: https://bottosson.github.io/posts/oklab/
+//! Based on the `OKLab` color space by Björn Ottosson (2020)
+//! Reference: <https://bottosson.github.io/posts/oklab>/
 //!
-//! This module provides accurate conversions between linear sRGB and OKLab color spaces,
+//! This module provides accurate conversions between linear sRGB and `OKLab` color spaces,
 //! with support for batch processing and various gamut mapping strategies.
 
 use rayon::prelude::*;
 
-/// Configuration for gamut mapping strategies when converting from OKLab back to sRGB.
+/// Configuration for gamut mapping strategies when converting from `OKLab` back to sRGB.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum GamutMapMode {
     /// Simple clamping of out-of-gamut values (fast but can cause discontinuities)
@@ -20,13 +20,13 @@ pub enum GamutMapMode {
     SoftClip,
 }
 
-/// Convert linear sRGB to OKLab color space.
+/// Convert linear sRGB to `OKLab` color space.
 ///
 /// # Arguments
 /// * `r`, `g`, `b` - Linear RGB values (not gamma corrected), typically in range [0, 1]
 ///
 /// # Returns
-/// * `(L, a, b)` - OKLab values where:
+/// * `(L, a, b)` - `OKLab` values where:
 ///   - L is lightness [0, 1]
 ///   - a is green-red axis [-0.4, 0.4] approximately
 ///   - b is blue-yellow axis [-0.4, 0.4] approximately
@@ -51,7 +51,7 @@ pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     (lab_l, lab_a, lab_b)
 }
 
-/// Convert OKLab to linear sRGB color space.
+/// Convert `OKLab` to linear sRGB color space.
 ///
 /// # Arguments
 /// * `l` - Lightness value
@@ -81,7 +81,7 @@ pub fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     (r, g, b)
 }
 
-/// Batch convert linear sRGB pixels to OKLab.
+/// Batch convert linear sRGB pixels to `OKLab`.
 ///
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
@@ -96,7 +96,7 @@ pub fn linear_srgb_to_oklab_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, 
         .collect()
 }
 
-/// Batch convert OKLab pixels to linear sRGB.
+/// Batch convert `OKLab` pixels to linear sRGB.
 ///
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
@@ -144,7 +144,7 @@ impl GamutMapMode {
                 let lum_clamped = lum.clamp(0.0, 1.0);
 
                 while high - low > tolerance {
-                    let mid = (low + high) / 2.0;
+                    let mid = f64::midpoint(low, high);
 
                     // Scale the chroma while preserving luminance
                     let test_r = lum_clamped + (r - lum) * mid;
@@ -223,9 +223,9 @@ mod tests {
             let (l, a, b_ch) = linear_srgb_to_oklab(*r, *g, *b);
             let (r2, g2, b2) = oklab_to_linear_srgb(l, a, b_ch);
 
-            assert!((r - r2).abs() < EPSILON, "{}: Red channel error: {} vs {}", name, r, r2);
-            assert!((g - g2).abs() < EPSILON, "{}: Green channel error: {} vs {}", name, g, g2);
-            assert!((b - b2).abs() < EPSILON, "{}: Blue channel error: {} vs {}", name, b, b2);
+            assert!((r - r2).abs() < EPSILON, "{name}: Red channel error: {r} vs {r2}");
+            assert!((g - g2).abs() < EPSILON, "{name}: Green channel error: {g} vs {g2}");
+            assert!((b - b2).abs() < EPSILON, "{name}: Blue channel error: {b} vs {b2}");
         }
     }
 
@@ -233,21 +233,21 @@ mod tests {
     fn test_oklab_properties() {
         // Test that black has L=0 and white has L≈1
         let (black_l, black_a, black_b) = linear_srgb_to_oklab(0.0, 0.0, 0.0);
-        assert!(black_l.abs() < EPSILON, "Black should have L≈0, got {}", black_l);
-        assert!(black_a.abs() < EPSILON, "Black should have a≈0, got {}", black_a);
-        assert!(black_b.abs() < EPSILON, "Black should have b≈0, got {}", black_b);
+        assert!(black_l.abs() < EPSILON, "Black should have L≈0, got {black_l}");
+        assert!(black_a.abs() < EPSILON, "Black should have a≈0, got {black_a}");
+        assert!(black_b.abs() < EPSILON, "Black should have b≈0, got {black_b}");
 
         let (white_l, white_a, white_b) = linear_srgb_to_oklab(1.0, 1.0, 1.0);
-        assert!((white_l - 1.0).abs() < 0.001, "White should have L≈1, got {}", white_l);
-        assert!(white_a.abs() < 0.001, "White should have a≈0, got {}", white_a);
-        assert!(white_b.abs() < 0.001, "White should have b≈0, got {}", white_b);
+        assert!((white_l - 1.0).abs() < 0.001, "White should have L≈1, got {white_l}");
+        assert!(white_a.abs() < 0.001, "White should have a≈0, got {white_a}");
+        assert!(white_b.abs() < 0.001, "White should have b≈0, got {white_b}");
 
         // Test that grays have a≈0 and b≈0
         for i in 1..10 {
-            let gray = i as f64 / 10.0;
+            let gray = f64::from(i) / 10.0;
             let (_, a, b) = linear_srgb_to_oklab(gray, gray, gray);
-            assert!(a.abs() < 0.001, "Gray {} should have a≈0, got {}", gray, a);
-            assert!(b.abs() < 0.001, "Gray {} should have b≈0, got {}", gray, b);
+            assert!(a.abs() < 0.001, "Gray {gray} should have a≈0, got {a}");
+            assert!(b.abs() < 0.001, "Gray {gray} should have b≈0, got {b}");
         }
     }
 
@@ -293,9 +293,9 @@ mod tests {
         let in_gamut = (0.5, 0.7, 0.3);
         for mode in [GamutMapMode::Clamp, GamutMapMode::PreserveHue, GamutMapMode::SoftClip] {
             let mapped = mode.map_to_gamut(in_gamut.0, in_gamut.1, in_gamut.2);
-            assert!((mapped.0 - in_gamut.0).abs() < EPSILON, "{:?} changed in-gamut R", mode);
-            assert!((mapped.1 - in_gamut.1).abs() < EPSILON, "{:?} changed in-gamut G", mode);
-            assert!((mapped.2 - in_gamut.2).abs() < EPSILON, "{:?} changed in-gamut B", mode);
+            assert!((mapped.0 - in_gamut.0).abs() < EPSILON, "{mode:?} changed in-gamut R");
+            assert!((mapped.1 - in_gamut.1).abs() < EPSILON, "{mode:?} changed in-gamut G");
+            assert!((mapped.2 - in_gamut.2).abs() < EPSILON, "{mode:?} changed in-gamut B");
         }
 
         // Test out-of-gamut colors
@@ -315,24 +315,15 @@ mod tests {
                 // Verify all outputs are in valid range
                 assert!(
                     (0.0..=1.0).contains(&r_out),
-                    "{:?} failed to map {} R to gamut: {}",
-                    mode,
-                    name,
-                    r_out
+                    "{mode:?} failed to map {name} R to gamut: {r_out}"
                 );
                 assert!(
                     (0.0..=1.0).contains(&g_out),
-                    "{:?} failed to map {} G to gamut: {}",
-                    mode,
-                    name,
-                    g_out
+                    "{mode:?} failed to map {name} G to gamut: {g_out}"
                 );
                 assert!(
                     (0.0..=1.0).contains(&b_out),
-                    "{:?} failed to map {} B to gamut: {}",
-                    mode,
-                    name,
-                    b_out
+                    "{mode:?} failed to map {name} B to gamut: {b_out}"
                 );
             }
         }
@@ -347,18 +338,16 @@ mod tests {
         let (r_out, g_out, b_out) = GamutMapMode::PreserveHue.map_to_gamut(r_in, g_in, b_in);
 
         // Verify the color is now in gamut
-        assert!((0.0..=1.0).contains(&r_out), "R out of gamut: {}", r_out);
-        assert!((0.0..=1.0).contains(&g_out), "G out of gamut: {}", g_out);
-        assert!((0.0..=1.0).contains(&b_out), "B out of gamut: {}", b_out);
+        assert!((0.0..=1.0).contains(&r_out), "R out of gamut: {r_out}");
+        assert!((0.0..=1.0).contains(&g_out), "G out of gamut: {g_out}");
+        assert!((0.0..=1.0).contains(&b_out), "B out of gamut: {b_out}");
 
         let lum_in = crate::render::constants::rec709_luminance(r_in, g_in, b_in);
         let lum_out = crate::render::constants::rec709_luminance(r_out, g_out, b_out);
         let lum_expected = lum_in.clamp(0.0, 1.0);
         assert!(
             (lum_out - lum_expected).abs() < 0.01,
-            "Luminance not preserved: {} vs {}",
-            lum_out,
-            lum_expected
+            "Luminance not preserved: {lum_out} vs {lum_expected}"
         );
 
         // Test 2: pure scaling case - over-bright gray
@@ -367,8 +356,8 @@ mod tests {
             GamutMapMode::PreserveHue.map_to_gamut(gray_scale.0, gray_scale.1, gray_scale.2);
 
         // For gray, all channels should be equal after mapping
-        assert!((r_gray - g_gray).abs() < EPSILON, "Gray not preserved: R={} G={}", r_gray, g_gray);
-        assert!((g_gray - b_gray).abs() < EPSILON, "Gray not preserved: G={} B={}", g_gray, b_gray);
+        assert!((r_gray - g_gray).abs() < EPSILON, "Gray not preserved: R={r_gray} G={g_gray}");
+        assert!((g_gray - b_gray).abs() < EPSILON, "Gray not preserved: G={g_gray} B={b_gray}");
         assert_eq!(r_gray, 1.0, "Gray should be clamped to 1.0");
 
         // Test 3: Negative values
@@ -380,9 +369,9 @@ mod tests {
         );
 
         // Verify all values are in gamut
-        assert!(r_neg >= 0.0, "R should be non-negative: {}", r_neg);
-        assert!((0.0..=1.0).contains(&g_neg), "G out of gamut: {}", g_neg);
-        assert!((0.0..=1.0).contains(&b_neg), "B out of gamut: {}", b_neg);
+        assert!(r_neg >= 0.0, "R should be non-negative: {r_neg}");
+        assert!((0.0..=1.0).contains(&g_neg), "G out of gamut: {g_neg}");
+        assert!((0.0..=1.0).contains(&b_neg), "B out of gamut: {b_neg}");
 
         // Test 4: Already in gamut - should be unchanged
         let in_gamut = (0.8, 0.5, 0.3);

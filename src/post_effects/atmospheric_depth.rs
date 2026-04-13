@@ -79,7 +79,7 @@ impl AtmosphericDepth {
             }
         }
 
-        if count > 0 { sum / count as f64 } else { 0.0 }
+        if count > 0 { sum / f64::from(count) } else { 0.0 }
     }
 
     /// Convert RGB to HSL for saturation manipulation

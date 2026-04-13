@@ -46,6 +46,7 @@ pub struct Opalescence {
 }
 
 impl Opalescence {
+    /// Creates a new opalescence effect from the given configuration.
     #[must_use]
     pub fn new(config: OpalescenceConfig) -> Self {
         let enabled = config.strength > 0.0;
@@ -250,12 +251,12 @@ mod tests {
         // Create test buffer with varying luminance
         let buffer: PixelBuffer = (0..10000)
             .map(|i| {
-                let val = (i as f64 / 10000.0) * 0.5;
+                let val = (f64::from(i) / 10000.0) * 0.5;
                 (val, val, val, 1.0)
             })
             .collect();
 
-        let result = opal.process(&buffer, 100, 100).unwrap();
+        let result = opal.process(&buffer, 100, 100).expect("opalescence process should succeed");
 
         // Verify colors have been shifted
         assert_eq!(result.len(), buffer.len());

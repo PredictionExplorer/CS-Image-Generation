@@ -18,7 +18,7 @@ pub struct EdgeLuminanceConfig {
     pub brightness_boost: f64,
     /// Apply enhancement only to bright edges (vs all edges)
     pub bright_edges_only: bool,
-    /// Minimum luminance for edge to be enhanced (if bright_edges_only)
+    /// Minimum luminance for edge to be enhanced (if `bright_edges_only`)
     pub min_luminance: f64,
 }
 
@@ -41,6 +41,7 @@ pub struct EdgeLuminance {
 }
 
 impl EdgeLuminance {
+    /// Creates a new edge luminance enhancement effect from the given configuration.
     #[must_use]
     pub fn new(config: EdgeLuminanceConfig) -> Self {
         let enabled = config.strength > 0.0;
@@ -269,12 +270,13 @@ mod tests {
         // Create simple gradient (creates edges)
         let buffer: PixelBuffer = (0..10000)
             .map(|i| {
-                let val = ((i % 100) as f64 / 100.0) * 0.5;
+                let val = (f64::from(i % 100) / 100.0) * 0.5;
                 (val, val, val, 1.0)
             })
             .collect();
 
-        let result = edge.process(&buffer, 100, 100).unwrap();
+        let result =
+            edge.process(&buffer, 100, 100).expect("edge luminance process should succeed");
         assert_eq!(result.len(), buffer.len());
     }
 }

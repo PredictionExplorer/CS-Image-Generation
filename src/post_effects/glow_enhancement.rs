@@ -43,6 +43,7 @@ pub struct GlowEnhancement {
 }
 
 impl GlowEnhancement {
+    /// Creates a new glow enhancement effect from the given configuration.
     #[must_use]
     pub fn new(config: GlowEnhancementConfig) -> Self {
         let enabled = config.strength > 0.0;
@@ -268,12 +269,12 @@ mod tests {
         // Create test buffer with gradient
         let buffer: PixelBuffer = (0..10000)
             .map(|i| {
-                let val = i as f64 / 10000.0;
+                let val = f64::from(i) / 10000.0;
                 (val, val, val, 1.0)
             })
             .collect();
 
-        let result = glow.process(&buffer, 100, 100).unwrap();
+        let result = glow.process(&buffer, 100, 100).expect("glow process should succeed");
         assert_eq!(result.len(), buffer.len());
     }
 

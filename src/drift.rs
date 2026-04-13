@@ -5,6 +5,7 @@ use tracing::warn;
 
 /// Trait for applying drift transformations to position data
 pub trait DriftTransform {
+    /// Apply the drift transformation to all body positions for one time step.
     fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64);
 }
 
@@ -20,6 +21,7 @@ pub struct DriftParameters {
 }
 
 impl DriftParameters {
+    /// Create drift parameters, clamping values to valid ranges.
     #[must_use]
     pub fn new(scale: f64, arc_fraction: f64, eccentricity: f64) -> Self {
         let clamped_scale = scale.max(0.0);
@@ -44,6 +46,7 @@ impl DriftParameters {
         Self { scale: clamped_scale, arc_fraction: clamped_arc, eccentricity: clamped_ecc }
     }
 
+    /// Convert `arc_fraction` to radians (0–2π range).
     #[must_use]
     #[inline]
     pub fn sweep_radians(&self) -> f64 {
@@ -66,6 +69,7 @@ pub struct BrownianDrift {
 }
 
 impl BrownianDrift {
+    /// Pre-generate Brownian displacement vectors for the given number of steps.
     pub fn new(rng: &mut Sha3RandomByteStream, scale: f64, num_steps: usize) -> Self {
         let dt_sqrt = 0.001f64.sqrt(); // Using known dt value
         let mut displacements = Vec::with_capacity(num_steps);
@@ -126,6 +130,7 @@ pub struct LinearDrift {
 }
 
 impl LinearDrift {
+    /// Create a linear drift with a random velocity direction and the given speed.
     pub fn new(rng: &mut Sha3RandomByteStream, scale: f64) -> Self {
         // Random spherical coordinates
         let theta = rng.next_f64() * PI; // polar angle [0, π]
@@ -170,6 +175,7 @@ pub struct EllipticalDrift {
 }
 
 impl EllipticalDrift {
+    /// Create an elliptical drift with random orbital orientation from the given parameters.
     pub fn new(rng: &mut Sha3RandomByteStream, params: DriftParameters) -> Self {
         let inclination = rng.next_f64() * PI;
         let ascending_node = rng.next_f64() * crate::render::constants::TWO_PI;

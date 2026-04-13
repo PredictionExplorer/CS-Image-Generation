@@ -21,7 +21,7 @@ impl<'a> VelocityHdrCalculator<'a> {
     }
 
     /// Compute HDR multiplier for a line segment between two bodies.
-    /// Returns 1.0 (no boost) up to VELOCITY_HDR_BOOST_FACTOR for fast motion.
+    /// Returns 1.0 (no boost) up to `VELOCITY_HDR_BOOST_FACTOR` for fast motion.
     #[must_use]
     #[inline]
     pub fn compute_segment_multiplier(&self, step: usize, body0: usize, body1: usize) -> f64 {

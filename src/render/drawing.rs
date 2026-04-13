@@ -10,7 +10,7 @@ use spectral_constants::{LAMBDA_END, LAMBDA_START};
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 
-/// One endpoint of a line in pixel space with OkLab color and coverage.
+/// One endpoint of a line in pixel space with `OkLab` color and coverage.
 #[derive(Clone, Copy, Debug)]
 pub struct LineVertex {
     /// Horizontal pixel coordinate.
@@ -19,7 +19,7 @@ pub struct LineVertex {
     pub y: f32,
     /// Depth coordinate used for thickness and depth-of-field.
     pub z: f32,
-    /// OkLab color at this vertex.
+    /// `OkLab` color at this vertex.
     pub color: OklabColor,
     /// Opacity or stroke weight multiplier in \[0, 1\] (or beyond for HDR).
     pub alpha: f64,
@@ -36,7 +36,7 @@ pub struct SpectralLineSegment {
     pub hdr_scale: f64,
 }
 
-/// Convert OkLab hue to wavelength with perceptually uniform distribution.
+/// Convert `OkLab` hue to wavelength with perceptually uniform distribution.
 ///
 /// This mapping ensures that the full visible spectrum (380-700nm) is utilized,
 /// providing rich color diversity across blues, greens, yellows, oranges, and reds.

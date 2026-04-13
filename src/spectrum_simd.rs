@@ -2,13 +2,14 @@
 //!
 //! This module provides highly optimized SIMD implementations of SPD to RGBA conversion,
 //! with dedicated paths for each major architecture:
-//! - x86_64 AVX2: ~3-4x speedup using 256-bit FMA (4 bins per iteration)
+//! - `x86_64` AVX2: ~3-4x speedup using 256-bit FMA (4 bins per iteration)
 //! - aarch64 NEON: ~2x speedup using 128-bit FMA (Apple Silicon, ARM servers)
 //! - Scalar fallback: portable implementation for all other platforms
 
 use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// When true, applies an enhanced saturation boost during spectral-to-RGBA conversion.
 pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Convert SPD to RGBA using SIMD when available
@@ -17,12 +18,12 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 /// automatically selects the best implementation for the current platform.
 ///
 /// # Performance
-/// - x86_64 AVX2: ~3-4x faster than scalar (256-bit FMA, 4 bins/iter)
+/// - `x86_64` AVX2: ~3-4x faster than scalar (256-bit FMA, 4 bins/iter)
 /// - aarch64 NEON: ~2x faster than scalar (128-bit FMA, 2 bins/iter)
 /// - Scalar fallback: portable, suitable for all other architectures
 ///
 /// # Accuracy
-/// AVX2 path uses a vectorized exp() approximation (< 2e-11 relative error)
+/// AVX2 path uses a vectorized `exp()` approximation (< 2e-11 relative error)
 /// for maximum throughput.  Results may differ from the scalar path by a few
 /// ULPs but are deterministic within the same architecture.
 #[must_use]
@@ -36,11 +37,13 @@ pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
 fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     {
+        // SAFETY: `spd_to_rgba_avx2` requires AVX2+FMA, guaranteed by the `#[cfg(target_feature = "avx2")]` gate.
         unsafe { spd_to_rgba_avx2(spd, boosted) }
     }
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
     {
+        // SAFETY: `spd_to_rgba_neon` requires NEON, guaranteed by the `#[cfg(target_feature = "neon")]` gate.
         unsafe { spd_to_rgba_neon(spd, boosted) }
     }
 
@@ -161,6 +164,7 @@ fn finalize_rgba(
 unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
     use std::arch::x86_64::*;
 
+    // SAFETY: caller guarantees AVX2+FMA are available; all intrinsics below require only those features.
     unsafe {
         let x_safe = _mm256_min_pd(x, _mm256_set1_pd(700.0));
         let zero = _mm256_setzero_pd();
@@ -211,6 +215,8 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
 unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
     use std::arch::x86_64::*;
 
+    // SAFETY: caller guarantees AVX2+FMA are available; `spd` is a fixed-size array so all
+    // `_mm256_loadu_pd` reads stay in bounds (NUM_BINS is a multiple of 4).
     unsafe {
         let mut r_accum = _mm256_setzero_pd();
         let mut g_accum = _mm256_setzero_pd();
@@ -263,7 +269,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
 
 /// aarch64 NEON SIMD implementation (~2x faster than scalar)
 ///
-/// Processes 2 bins at a time using 128-bit NEON FMA. The exp() call remains
+/// Processes 2 bins at a time using 128-bit NEON FMA. The `exp()` call remains
 /// scalar (no hardware transcendental on NEON), but accumulation is fully vectorized.
 #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
 #[inline]
@@ -317,14 +323,14 @@ mod tests {
 
     // ── helpers ──────────────────────────────────────────────────────
 
-    /// Strict parity — use only when few bins are active and color_range
+    /// Strict parity — use only when few bins are active and `color_range`
     /// cannot straddle a saturation-boost threshold.
     fn assert_simd_scalar_match(spd: &[f64; NUM_BINS], label: &str) {
         assert_simd_scalar_close(spd, 1e-10, label);
     }
 
     /// Relaxed parity — FMA accumulation order differs between SIMD and
-    /// scalar, and when the resulting color_range straddles a sat-boost
+    /// scalar, and when the resulting `color_range` straddles a sat-boost
     /// threshold (0.1 or 0.3) the boost factor can jump by ~0.4, causing
     /// visible but harmless divergence.  Use `tol ≈ 0.02` for complex
     /// multi-bin inputs.
@@ -695,7 +701,7 @@ mod tests {
         let mut seed = 12345u64;
         for _ in 0..50 {
             let mut spd = [0.0; NUM_BINS];
-            for v in spd.iter_mut() {
+            for v in &mut spd {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
                 seed ^= seed << 17;

@@ -49,6 +49,7 @@ pub struct TemporalSmoothing {
 }
 
 impl TemporalSmoothing {
+    /// Creates a new temporal smoothing effect from the given configuration.
     #[must_use]
     pub fn new(config: TemporalSmoothingConfig) -> Self {
         let enabled = config.blend_factor > 0.0;
@@ -57,7 +58,7 @@ impl TemporalSmoothing {
 
     /// Process a frame with temporal smoothing
     ///
-    /// This is NOT a PostEffect trait implementation because it needs mutable state.
+    /// This is NOT a `PostEffect` trait implementation because it needs mutable state.
     /// Called directly from the rendering pipeline for video frames.
     pub fn process_frame(&self, current: PixelBuffer) -> PixelBuffer {
         if !self.enabled {
