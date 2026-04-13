@@ -465,7 +465,10 @@ mod tests {
         // All bodies at the same timestep get the same offset
         let offset_0 = positions[0][2] - Vector3::new(1.0, 0.0, 0.0);
         let offset_1 = positions[1][2] - Vector3::new(0.0, 1.0, 0.0);
-        assert!((offset_0 - offset_1).norm() < 1e-10, "All bodies should share the same drift offset");
+        assert!(
+            (offset_0 - offset_1).norm() < 1e-10,
+            "All bodies should share the same drift offset"
+        );
     }
 
     #[test]

@@ -39,11 +39,7 @@ pub enum SimulationError {
     #[error(
         "No valid orbits found after filtering {discarded}/{total_attempted} candidates. Reason: {reason}"
     )]
-    NoValidOrbits {
-        total_attempted: usize,
-        discarded: usize,
-        reason: String,
-    },
+    NoValidOrbits { total_attempted: usize, discarded: usize, reason: String },
 }
 
 /// Errors that can occur during rendering operations (app-level wrapper)
@@ -55,11 +51,7 @@ pub enum AppRenderError {
 
     /// Invalid rendering dimensions
     #[error("Invalid dimensions {width}x{height}: {reason}")]
-    InvalidDimensions {
-        width: u32,
-        height: u32,
-        reason: String,
-    },
+    InvalidDimensions { width: u32, height: u32, reason: String },
 }
 
 /// Configuration and validation errors
@@ -67,18 +59,11 @@ pub enum AppRenderError {
 pub enum ConfigError {
     /// Invalid seed format
     #[error("Invalid hex seed '{seed}': {error}")]
-    InvalidSeed {
-        seed: String,
-        error: hex::FromHexError,
-    },
+    InvalidSeed { seed: String, error: hex::FromHexError },
 
     /// File system error
     #[error("Failed to {operation} '{path}': {error}")]
-    FileSystem {
-        operation: String,
-        path: String,
-        error: std::io::Error,
-    },
+    FileSystem { operation: String, path: String, error: std::io::Error },
 
     /// Invalid resolution format
     #[error("Invalid resolution: {reason}")]
@@ -89,11 +74,7 @@ pub enum ConfigError {
         "Drift parameters must be either all specified or all omitted. \
          Provided: scale={scale:?}, arc_fraction={arc_fraction:?}, eccentricity={eccentricity:?}"
     )]
-    InvalidDriftConfig {
-        scale: Option<f64>,
-        arc_fraction: Option<f64>,
-        eccentricity: Option<f64>,
-    },
+    InvalidDriftConfig { scale: Option<f64>, arc_fraction: Option<f64>, eccentricity: Option<f64> },
 }
 
 /// Helper functions for common validation patterns

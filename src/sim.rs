@@ -592,7 +592,11 @@ mod tests {
         for _ in 0..1000 {
             seen.insert(rng.next_byte());
         }
-        assert!(seen.len() > 200, "RNG should produce diverse byte values, only got {}", seen.len());
+        assert!(
+            seen.len() > 200,
+            "RNG should produce diverse byte values, only got {}",
+            seen.len()
+        );
     }
 
     #[test]
@@ -623,7 +627,8 @@ mod tests {
         shift_bodies_to_com(&mut bodies);
 
         let mt: f64 = bodies.iter().map(|b| b.mass).sum();
-        let com: Vector3<f64> = bodies.iter().map(|b| b.mass * b.position).sum::<Vector3<f64>>() / mt;
+        let com: Vector3<f64> =
+            bodies.iter().map(|b| b.mass * b.position).sum::<Vector3<f64>>() / mt;
         assert!(com.norm() < 1e-10, "COM should be at origin, got {com:?}");
 
         let mom: Vector3<f64> = bodies.iter().map(|b| b.mass * b.velocity).sum();
@@ -652,9 +657,7 @@ mod tests {
 
     #[test]
     fn test_full_sim_debug() {
-        let sim = FullSim {
-            positions: vec![vec![Vector3::zeros(); 10]; 3],
-        };
+        let sim = FullSim { positions: vec![vec![Vector3::zeros(); 10]; 3] };
         let dbg = format!("{sim:?}");
         assert!(dbg.contains("num_bodies"));
         assert!(dbg.contains("num_steps"));

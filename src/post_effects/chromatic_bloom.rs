@@ -341,10 +341,12 @@ mod tests {
     #[test]
     fn test_process_preserves_alpha() {
         let bloom = ChromaticBloom::new(ChromaticBloomConfig::from_resolution(100, 100));
-        let input: PixelBuffer = (0..100).map(|i| {
-            let v = i as f64 / 100.0;
-            (v, v, v, 0.8)
-        }).collect();
+        let input: PixelBuffer = (0..100)
+            .map(|i| {
+                let v = i as f64 / 100.0;
+                (v, v, v, 0.8)
+            })
+            .collect();
         let output = bloom.process(&input, 10, 10).unwrap();
         for (inp, out) in input.iter().zip(output.iter()) {
             assert_eq!(inp.3, out.3, "Alpha must be preserved");

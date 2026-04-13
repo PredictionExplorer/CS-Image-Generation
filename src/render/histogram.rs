@@ -238,10 +238,12 @@ mod tests {
 
     #[test]
     fn test_tonemapping_analysis_fields_finite() {
-        let samples: Vec<[f64; 3]> = (0..500).map(|i| {
-            let v = i as f64 / 500.0;
-            [v, v, v]
-        }).collect();
+        let samples: Vec<[f64; 3]> = (0..500)
+            .map(|i| {
+                let v = i as f64 / 500.0;
+                [v, v, v]
+            })
+            .collect();
         let analysis = analyze_tonemapping(&samples, 0.01, 0.99);
         assert!(analysis.black_r.is_finite());
         assert!(analysis.white_r.is_finite());

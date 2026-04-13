@@ -5,9 +5,8 @@
 
 use crate::post_effects::{
     AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
-    EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette,
-    MicroContrastConfig, NebulaCloudConfig, NebulaClouds, OpalescenceConfig,
-    PerceptualBlurConfig,
+    EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
+    NebulaCloudConfig, NebulaClouds, OpalescenceConfig, PerceptualBlurConfig,
 };
 use crate::spectrum::NUM_BINS;
 use crate::utils::f64_to_usize_saturating;
@@ -37,7 +36,9 @@ pub mod velocity_hdr;
 pub mod video;
 
 // Import from our submodules
-use self::batch_drawing::{BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices};
+use self::batch_drawing::{
+    BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices,
+};
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
 use self::error::{RenderError, Result};
@@ -373,12 +374,7 @@ fn build_nebula_config(
         lacunarity: 2.0,
         persistence: 0.5,
         noise_seed: noise_seed as i64,
-        colors: [
-            [0.08, 0.12, 0.22],
-            [0.15, 0.08, 0.25],
-            [0.25, 0.12, 0.18],
-            [0.12, 0.15, 0.28],
-        ],
+        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
         time_scale: 1.0,
         edge_fade: 0.3,
     }
@@ -430,9 +426,7 @@ pub fn compute_softness_radius(
     let radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
     let min_dim = resolved.width.min(resolved.height);
 
-    Some(f64_to_usize_saturating(
-        (radius_scale * f64::from(min_dim)).round().max(1.0),
-    ))
+    Some(f64_to_usize_saturating((radius_scale * f64::from(min_dim)).round().max(1.0)))
 }
 
 fn build_dog_config(
@@ -470,9 +464,8 @@ fn build_chromatic_bloom_config(
     resolved: &randomizable_config::ResolvedEffectConfig,
     min_dim: usize,
 ) -> ChromaticBloomConfig {
-    let radius = f64_to_usize_saturating(
-        (resolved.chromatic_bloom_radius_scale * min_dim as f64).round(),
-    );
+    let radius =
+        f64_to_usize_saturating((resolved.chromatic_bloom_radius_scale * min_dim as f64).round());
     let separation = resolved.chromatic_bloom_separation_scale * min_dim as f64;
     ChromaticBloomConfig {
         radius,
@@ -514,9 +507,7 @@ fn build_glow_config(
     }
 }
 
-fn build_champleve_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-) -> ChampleveConfig {
+fn build_champleve_config(resolved: &randomizable_config::ResolvedEffectConfig) -> ChampleveConfig {
     ChampleveConfig {
         cell_density: constants::DEFAULT_CHAMPLEVE_CELL_DENSITY,
         flow_alignment: resolved.champleve_flow_alignment,
@@ -531,9 +522,7 @@ fn build_champleve_config(
     }
 }
 
-fn build_aether_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-) -> AetherConfig {
+fn build_aether_config(resolved: &randomizable_config::ResolvedEffectConfig) -> AetherConfig {
     AetherConfig {
         filament_density: constants::DEFAULT_AETHER_FILAMENT_DENSITY,
         flow_alignment: resolved.aether_flow_alignment,
@@ -837,12 +826,7 @@ fn accumulate_spectral_steps(
         }
         #[cfg(test)]
         AccumulationBackend::SerialReference => {
-            accumulate_spectral_steps_into_rows(
-                accum_spd,
-                params,
-                0,
-                params.ctx.height_usize,
-            );
+            accumulate_spectral_steps_into_rows(accum_spd, params, 0, params.ctx.height_usize);
         }
     }
 }
@@ -969,7 +953,11 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     params: Pass2Params<'_>,
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
-    pass_2_write_frames_spectral_with_backend(params, frame_sink, AccumulationBackend::SerialReference)
+    pass_2_write_frames_spectral_with_backend(
+        params,
+        frame_sink,
+        AccumulationBackend::SerialReference,
+    )
 }
 
 // ====================== PASS 2 (SPECTRAL) ===========================
@@ -982,7 +970,15 @@ fn pass_2_write_frames_spectral_with_backend(
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     backend: AccumulationBackend,
 ) -> Result<()> {
-    let Pass2Params { scene, frame_interval, levels, settings, last_frame_out, enable_temporal_smoothing, accum_spd } = params;
+    let Pass2Params {
+        scene,
+        frame_interval,
+        levels,
+        settings,
+        last_frame_out,
+        enable_temporal_smoothing,
+        accum_spd,
+    } = params;
     let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
         settings;
     let width = resolved_config.width;
@@ -1820,11 +1816,7 @@ mod tests {
         };
 
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
-        accumulate_spectral_steps(
-            &mut serial,
-            &accum_params,
-            AccumulationBackend::SerialReference,
-        );
+        accumulate_spectral_steps(&mut serial, &accum_params, AccumulationBackend::SerialReference);
 
         for thread_count in [1usize, 2, 3, ctx.height_usize] {
             let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];

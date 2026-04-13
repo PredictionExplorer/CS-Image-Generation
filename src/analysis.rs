@@ -132,7 +132,10 @@ mod tests {
             Body::new(1.0, Vector3::new(-1.0, 0.0, 0.0), Vector3::zeros()),
         ];
         let energy = calculate_total_energy(&bodies);
-        assert!(energy < 0.0, "Stationary bodies should have negative total energy (pure potential)");
+        assert!(
+            energy < 0.0,
+            "Stationary bodies should have negative total energy (pure potential)"
+        );
     }
 
     #[test]

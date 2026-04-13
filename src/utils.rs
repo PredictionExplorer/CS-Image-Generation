@@ -320,10 +320,7 @@ mod tests {
 
     #[test]
     fn test_bounding_box_2d_ignores_z() {
-        let positions = vec![vec![
-            Vector3::new(0.0, 0.0, -100.0),
-            Vector3::new(0.0, 0.0, 100.0),
-        ]];
+        let positions = vec![vec![Vector3::new(0.0, 0.0, -100.0), Vector3::new(0.0, 0.0, 100.0)]];
         let (min_x, max_x, min_y, max_y) = bounding_box_2d(&positions);
         assert_eq!(min_x, 0.0);
         assert_eq!(max_x, 0.0);

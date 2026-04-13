@@ -4,11 +4,17 @@
 # Generated assets
 pics/
 vids/
+output/
 
 # Log files
 imgcheck.log
 imgcheck.log.*
 run.log
+generation_log.json
+generation_log.json.lock
+
+# macOS
+.DS_Store
 
 # Rust build artifacts
 target/

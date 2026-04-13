@@ -34,7 +34,11 @@ pub(super) fn highlight_extract_factor(luminance: f64) -> f64 {
 }
 
 /// Computes luminance gradients for a given pixel buffer, used for flow-aware effects.
-pub(super) fn calculate_gradients(buffer: &PixelBuffer, width: usize, height: usize) -> Vec<(f64, f64)> {
+pub(super) fn calculate_gradients(
+    buffer: &PixelBuffer,
+    width: usize,
+    height: usize,
+) -> Vec<(f64, f64)> {
     let mut luminance = vec![0.0f64; buffer.len()];
     luminance.par_iter_mut().enumerate().for_each(|(idx, lum)| {
         let (r, g, b, a) = buffer[idx];

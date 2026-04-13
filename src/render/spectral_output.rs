@@ -101,9 +101,15 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
     let pixel_count = (width * height) as usize;
     let mut raw = Vec::with_capacity(pixel_count * 3);
     for pixel in buf {
-        raw.push(f64_to_u16_saturating(f64::from(pixel[0].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
-        raw.push(f64_to_u16_saturating(f64::from(pixel[1].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
-        raw.push(f64_to_u16_saturating(f64::from(pixel[2].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
+        raw.push(f64_to_u16_saturating(
+            f64::from(pixel[0].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
+        ));
+        raw.push(f64_to_u16_saturating(
+            f64::from(pixel[1].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
+        ));
+        raw.push(f64_to_u16_saturating(
+            f64::from(pixel[2].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
+        ));
     }
 
     let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
@@ -444,8 +450,7 @@ mod tests {
 
         for i in 0..out_lo.len() {
             for c in 0..3 {
-                let expected =
-                    ((out_lo[i][c] as f64 + out_hi[i][c] as f64) / 2.0).round() as u16;
+                let expected = ((out_lo[i][c] as f64 + out_hi[i][c] as f64) / 2.0).round() as u16;
                 let diff = (out_mid[i][c] as i32 - expected as i32).unsigned_abs();
                 assert!(
                     diff <= 1,
@@ -609,10 +614,7 @@ mod tests {
             let f2 = format!("{dir2}/{bin:02}_{wl:.0}nm.png");
             let bytes1 = std::fs::read(&f1).unwrap();
             let bytes2 = std::fs::read(&f2).unwrap();
-            assert_eq!(
-                bytes1, bytes2,
-                "bin {bin} PNG should be identical between two runs"
-            );
+            assert_eq!(bytes1, bytes2, "bin {bin} PNG should be identical between two runs");
         }
     }
 
@@ -653,7 +655,10 @@ mod tests {
         let wl50 = wavelength_nm_for_bin(50);
         let bytes5 = std::fs::read(format!("{dir}/05_{wl5:.0}nm.png")).unwrap();
         let bytes50 = std::fs::read(format!("{dir}/50_{wl50:.0}nm.png")).unwrap();
-        assert_ne!(bytes5, bytes50, "bins with different wavelengths should produce different PNGs");
+        assert_ne!(
+            bytes5, bytes50,
+            "bins with different wavelengths should produce different PNGs"
+        );
     }
 
     // -- Sweep: all frames finite -------------------------------------------

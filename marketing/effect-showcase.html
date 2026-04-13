@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Post-Processing Effects | Cosmic Signature</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --cosmic-indigo: #1A0B3E; --nebula-violet: #6C3CE1; --stellar-white: #F0EDFF;
+      --aurora-cyan: #00E5FF; --solar-gold: #FFB800; --chrono-rose: #FF3D8A;
+      --impact-green: #00D68F; --deep-bg: #0D0521; --muted-cosmos: #2D1B69;
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: var(--deep-bg); color: var(--stellar-white);
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 48px; }
+    .header .badge {
+      display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      letter-spacing: 3px; text-transform: uppercase; color: var(--nebula-violet);
+      margin-bottom: 12px;
+    }
+    .header h1 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+      font-size: 2.5rem; margin-bottom: 12px;
+    }
+    .header p { color: rgba(240,237,255,0.55); font-size: 1.05rem; max-width: 700px; margin: 0 auto; }
+
+    .legend { display: flex; gap: 24px; justify-content: center; margin-bottom: 40px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    .category { margin-bottom: 48px; }
+    .category-title {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.3rem;
+      margin-bottom: 20px; padding-bottom: 8px;
+      border-bottom: 1px solid rgba(108,60,225,0.2);
+    }
+
+    .effects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+
+    .effect-card {
+      background: rgba(45,27,105,0.2); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 24px; cursor: pointer; user-select: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .effect-card:hover { border-color: rgba(108,60,225,0.35); background: rgba(45,27,105,0.3); }
+
+    .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .card-name {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.05rem;
+    }
+    .card-toggle {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+      color: rgba(240,237,255,0.3);
+    }
+    .card-probability {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      padding: 2px 8px; border-radius: 6px; white-space: nowrap;
+    }
+    .prob-always { background: rgba(0,214,143,0.15); color: var(--impact-green); }
+    .prob-common { background: rgba(0,229,255,0.12); color: var(--aurora-cyan); }
+    .prob-moderate { background: rgba(255,184,0,0.12); color: var(--solar-gold); }
+    .prob-uncommon { background: rgba(108,60,225,0.2); color: var(--nebula-violet); }
+    .prob-rare { background: rgba(255,61,138,0.12); color: var(--chrono-rose); }
+
+    .card-summary { color: rgba(240,237,255,0.55); font-size: 0.88rem; line-height: 1.6; margin-bottom: 12px; }
+
+    .card-details {
+      max-height: 0; opacity: 0; overflow: hidden;
+      transition: max-height 0.4s ease, opacity 0.3s ease;
+    }
+    .card-details.open { max-height: 600px; opacity: 1; }
+
+    .detail-grid {
+      display: grid; grid-template-columns: auto 1fr; gap: 6px 12px;
+      padding-top: 12px; border-top: 1px solid rgba(108,60,225,0.1);
+      font-size: 0.82rem;
+    }
+    .detail-label { font-weight: 600; color: rgba(240,237,255,0.7); }
+    .detail-value { color: rgba(240,237,255,0.5); }
+    .hl-cyan { color: var(--aurora-cyan); font-weight: 600; }
+    .hl-gold { color: var(--solar-gold); font-weight: 600; }
+    .hl-rose { color: var(--chrono-rose); font-weight: 600; }
+    .hl-green { color: var(--impact-green); font-weight: 600; }
+    .hl-violet { color: var(--nebula-violet); font-weight: 600; }
+    .code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--aurora-cyan); }
+
+    .chain-section { margin-top: 48px; }
+    .chain-section h2 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.3rem;
+      text-align: center; margin-bottom: 16px;
+    }
+    .chain-section p { color: rgba(240,237,255,0.5); font-size: 0.88rem; text-align: center; max-width: 680px; margin: 0 auto 24px; line-height: 1.6; }
+    .chain-flow {
+      display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center;
+    }
+    .chain-step {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+      padding: 6px 12px; border-radius: 6px;
+      background: rgba(45,27,105,0.3); border: 1px solid rgba(108,60,225,0.15);
+    }
+    .chain-arrow { color: rgba(240,237,255,0.2); font-size: 0.8rem; }
+
+    .footer {
+      text-align: center; margin-top: 64px; padding-top: 32px;
+      border-top: 1px solid rgba(108,60,225,0.1);
+    }
+    .footer p { margin-bottom: 4px; }
+
+    @media (max-width: 700px) {
+      .effects-grid { grid-template-columns: 1fr; }
+      .chain-flow { flex-direction: column; }
+      .chain-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">Visual Effects Reference</div>
+      <h1>Post-Processing Effects</h1>
+      <p>Every Cosmic Signature NFT passes through a curated chain of post-processing effects. Each effect is independently toggled per seed, creating natural visual trait categories. Click any card to see technical parameters.</p>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background: var(--impact-green);"></div> Always on</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--aurora-cyan);"></div> Common (55%+)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--solar-gold);"></div> Moderate (35-54%)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--nebula-violet);"></div> Uncommon (20-34%)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--chrono-rose);"></div> Rare (&lt;20%)</div>
+    </div>
+
+    <!-- Bloom & Light -->
+    <div class="category">
+      <div class="category-title" style="color: var(--aurora-cyan);">Bloom &amp; Light</div>
+      <div class="effects-grid">
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">DoG Bloom</span>
+            <span class="card-probability prob-always">Always</span>
+          </div>
+          <div class="card-summary">Difference-of-Gaussians bloom. Extracts highlights and applies a controlled two-scale blur for a refined glow around the brightest trail regions.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Method</div>
+              <div class="detail-value">Subtract two Gaussian blurs at different sigma scales; add residual back</div>
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-cyan">0.22 -- 0.36</span></div>
+              <div class="detail-label">Sigma scale</div>
+              <div class="detail-value">0.0038 -- 0.0070 (relative to resolution)</div>
+              <div class="detail-label">Sigma ratio</div>
+              <div class="detail-value">2.2 -- 3.0 (outer/inner)</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Gaussian Bloom</span>
+            <span class="card-probability prob-uncommon">28%</span>
+          </div>
+          <div class="card-summary">Classic bloom: extract highlights above a threshold, apply Gaussian blur, and blend back. Produces soft halos around the brightest orbital hotspots.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-cyan">3.0 -- 5.5</span></div>
+              <div class="detail-label">Radius scale</div>
+              <div class="detail-value">0.004 -- 0.010 (relative to resolution)</div>
+              <div class="detail-label">Core brightness</div>
+              <div class="detail-value">9.0 -- 14.0</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Glow</span>
+            <span class="card-probability prob-common">55%</span>
+          </div>
+          <div class="card-summary">Broad-radius light diffusion that creates an ethereal atmosphere around the entire orbital trail system.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-cyan">0.18 -- 0.40</span></div>
+              <div class="detail-label">Threshold</div>
+              <div class="detail-value">0.62 -- 0.78 luminance</div>
+              <div class="detail-label">Radius scale</div>
+              <div class="detail-value">0.0025 -- 0.0045</div>
+              <div class="detail-label">Sharpness</div>
+              <div class="detail-value">2.2 -- 3.4 (falloff exponent)</div>
+              <div class="detail-label">Saturation boost</div>
+              <div class="detail-value">0.15 -- 0.35</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Chromatic Bloom</span>
+            <span class="card-probability prob-rare">20%</span>
+          </div>
+          <div class="card-summary">Bloom applied per RGB channel with slight spatial offsets, producing subtle prismatic color fringing in bright areas.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-rose">0.30 -- 0.55</span></div>
+              <div class="detail-label">Radius scale</div>
+              <div class="detail-value">0.0035 -- 0.0065</div>
+              <div class="detail-label">Separation scale</div>
+              <div class="detail-value">0.0008 -- 0.0016 (RGB channel offset)</div>
+              <div class="detail-label">Threshold</div>
+              <div class="detail-value">0.18 -- 0.28 luminance</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Color & Tone -->
+    <div class="category">
+      <div class="category-title" style="color: var(--solar-gold);">Color &amp; Tone</div>
+      <div class="effects-grid">
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Cinematic Color Grade</span>
+            <span class="card-probability prob-common">60%</span>
+          </div>
+          <div class="card-summary">Full color grading suite: vibrance, clarity, tone curve, shadow/highlight tinting, and vignette. Gives pieces a filmic, intentionally graded look.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Grade strength</div>
+              <div class="detail-value"><span class="hl-gold">0.45 -- 0.72</span></div>
+              <div class="detail-label">Vibrance</div>
+              <div class="detail-value">1.10 -- 1.35x multiplier</div>
+              <div class="detail-label">Clarity</div>
+              <div class="detail-value">0.25 -- 0.45 (high-pass contrast)</div>
+              <div class="detail-label">Tone curve</div>
+              <div class="detail-value">0.45 -- 0.75 midtone contrast</div>
+              <div class="detail-label">Shadow tint</div>
+              <div class="detail-value">Cool blue [-0.08, -0.02, +0.16]</div>
+              <div class="detail-label">Highlight tint</div>
+              <div class="detail-value">Warm gold [+0.11, +0.05, -0.03]</div>
+              <div class="detail-label">Vignette</div>
+              <div class="detail-value">0.25 -- 0.55 strength, 2.2 -- 3.0 softness</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Gradient Map</span>
+            <span class="card-probability prob-rare">18%</span>
+          </div>
+          <div class="card-summary">Maps luminance to one of 15 curated luxury color palettes. Transforms the tonal character of the piece while preserving trail structure.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-rose">0.18 -- 0.40</span></div>
+              <div class="detail-label">Hue preservation</div>
+              <div class="detail-value">0.40 -- 0.65 (blends with original color)</div>
+              <div class="detail-label">Palette range</div>
+              <div class="detail-value">0 -- 14 (15 luxury palettes)</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Perceptual Blur</span>
+            <span class="card-probability prob-rare">5%</span>
+          </div>
+          <div class="card-summary">Gaussian blur performed in OKLab perceptual color space. Prevents the hue shifts that occur with standard RGB blurring. Creates a dreamy, soft-focus quality.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-rose">0.40 -- 0.60</span></div>
+              <div class="detail-label">Color space</div>
+              <div class="detail-value">OKLab (perceptually uniform)</div>
+              <div class="detail-label">Rarity</div>
+              <div class="detail-value">Very rare -- only ~5% of pieces</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Material Effects -->
+    <div class="category">
+      <div class="category-title" style="color: var(--chrono-rose);">Material Effects</div>
+      <div class="effects-grid">
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Opalescence</span>
+            <span class="card-probability prob-uncommon">25%</span>
+          </div>
+          <div class="card-summary">Iridescent color shifting based on surface orientation and angle. Produces a pearlescent, gem-like shimmer across the orbital trails.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-violet">0.04 -- 0.14</span></div>
+              <div class="detail-label">Pattern scale</div>
+              <div class="detail-value">0.007 -- 0.012</div>
+              <div class="detail-label">Interference layers</div>
+              <div class="detail-value">2 -- 3</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Champlev&eacute;</span>
+            <span class="card-probability prob-uncommon">25%</span>
+          </div>
+          <div class="card-summary">Metal-inlay-inspired effect: cell-based interference patterns, golden rim highlights, interior opaline glow, and anisotropic brushed-metal sheen.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Cell density</div>
+              <div class="detail-value">55 cells/unit (default)</div>
+              <div class="detail-label">Flow alignment</div>
+              <div class="detail-value"><span class="hl-violet">0.45 -- 0.75</span></div>
+              <div class="detail-label">Interference</div>
+              <div class="detail-value">0.35 -- 0.70 amplitude, 30 Hz frequency</div>
+              <div class="detail-label">Rim intensity</div>
+              <div class="detail-value">1.2 -- 2.5x brightness</div>
+              <div class="detail-label">Rim warmth</div>
+              <div class="detail-value">0.40 -- 0.80 (gold tint blend)</div>
+              <div class="detail-label">Interior lift</div>
+              <div class="detail-value">0.45 -- 0.80</div>
+              <div class="detail-label">Anisotropy</div>
+              <div class="detail-value">0.95 (brushed-metal)</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Aether</span>
+            <span class="card-probability prob-moderate">35%</span>
+          </div>
+          <div class="card-summary">Volumetric scattering simulation: filament density fields, flow-aligned anisotropic warping, iridescent color shifting, and caustic patterns in negative space.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Filament density</div>
+              <div class="detail-value">90 (default)</div>
+              <div class="detail-label">Flow alignment</div>
+              <div class="detail-value"><span class="hl-gold">0.55 -- 0.90</span></div>
+              <div class="detail-label">Scattering</div>
+              <div class="detail-value">0.60 -- 1.20 strength, 2.5 falloff</div>
+              <div class="detail-label">Iridescence</div>
+              <div class="detail-value">0.40 -- 0.75 amplitude, 12 Hz frequency</div>
+              <div class="detail-label">Caustics</div>
+              <div class="detail-value">0.15 -- 0.45 strength, 3.0 softness</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Detail & Depth -->
+    <div class="category">
+      <div class="category-title" style="color: var(--impact-green);">Detail &amp; Depth</div>
+      <div class="effects-grid">
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Micro-Contrast</span>
+            <span class="card-probability prob-common">85%</span>
+          </div>
+          <div class="card-summary">High-frequency local contrast enhancement. Sharpens fine trail structures without affecting overall tonal balance. The most common optional effect.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-green">0.15 -- 0.35</span></div>
+              <div class="detail-label">Radius</div>
+              <div class="detail-value">3 -- 6 pixels (neighborhood)</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Edge Luminance</span>
+            <span class="card-probability prob-common">55%</span>
+          </div>
+          <div class="card-summary">Brightens edges where orbital trails meet the dark background, enhancing definition and making trail boundaries crisp and luminous.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-cyan">0.12 -- 0.30</span></div>
+              <div class="detail-label">Threshold</div>
+              <div class="detail-value">0.15 -- 0.25 (detection sensitivity)</div>
+              <div class="detail-label">Brightness boost</div>
+              <div class="detail-value">0.20 -- 0.40x</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Atmospheric Depth</span>
+            <span class="card-probability prob-rare">18%</span>
+          </div>
+          <div class="card-summary">Distance-based color desaturation, darkening, and blue-tinted fog. Simulates atmospheric perspective, giving the piece a sense of vast depth.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-rose">0.06 -- 0.18</span></div>
+              <div class="detail-label">Desaturation</div>
+              <div class="detail-value">0.08 -- 0.22</div>
+              <div class="detail-label">Darkening</div>
+              <div class="detail-value">0.04 -- 0.12</div>
+              <div class="detail-label">Fog color</div>
+              <div class="detail-value">Dark blue-teal [R: 0.02-0.10, G: 0.04-0.12, B: 0.08-0.18]</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/post_effects/</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="effect-card" onclick="toggle(this)">
+          <div class="card-top">
+            <span class="card-name">Fine Texture</span>
+            <span class="card-probability prob-moderate">45%</span>
+          </div>
+          <div class="card-summary">Subtle noise-based texture overlay applied after tonemapping. Adds organic grain reminiscent of physical print media or canvas.</div>
+          <span class="card-toggle">[+]</span>
+          <div class="card-details">
+            <div class="detail-grid">
+              <div class="detail-label">Strength</div>
+              <div class="detail-value"><span class="hl-gold">0.06 -- 0.18</span></div>
+              <div class="detail-label">Scale</div>
+              <div class="detail-value">0.0012 -- 0.0022 (feature size)</div>
+              <div class="detail-label">Contrast</div>
+              <div class="detail-value">0.25 -- 0.42</div>
+              <div class="detail-label">Source</div>
+              <div class="detail-value"><span class="code">src/render/effects.rs</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Effect Chain Order -->
+    <div class="chain-section">
+      <h2>Effect Chain Order</h2>
+      <p>Effects are applied in a fixed order defined in <span class="code">build_trajectory_chain()</span>. The order matters: bloom must precede tonemapping, and fine texture is applied last.</p>
+      <div class="chain-flow">
+        <div class="chain-step">Gaussian Bloom</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">DoG Bloom</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Glow</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Chromatic Bloom</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Perceptual Blur</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Micro-Contrast</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Gradient Map</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Cinematic Grade</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Opalescence</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step" style="border-color: var(--chrono-rose);">Champlev&eacute;</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Aether</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Edge Luminance</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Atmospheric Depth</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step" style="border-color: var(--solar-gold);">Tonemap</div>
+        <div class="chain-arrow">&rarr;</div>
+        <div class="chain-step">Fine Texture</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.1rem;">cosmicsignature.com &bull; cosmicsignature.art</p>
+      <p style="color: rgba(240,237,255,0.35); font-size: 0.8rem;">Bid. Endure. Win. Give.</p>
+      <p style="color: rgba(240,237,255,0.25); font-size: 0.7rem;">
+        Probabilities from <a href="https://github.com/" style="color: var(--nebula-violet); text-decoration: none;"><span class="code">src/render/parameter_descriptors.rs</span></a>
+        &bull; Full guide: <a href="art-algorithm-guide.md" style="color: var(--nebula-violet); text-decoration: none;">art-algorithm-guide.md</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    function toggle(card) {
+      var details = card.querySelector('.card-details');
+      var toggleText = card.querySelector('.card-toggle');
+      details.classList.toggle('open');
+      toggleText.textContent = details.classList.contains('open') ? '[-]' : '[+]';
+    }
+  </script>
+</body>
+</html>

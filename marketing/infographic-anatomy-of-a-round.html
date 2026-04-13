@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anatomy of a Round | Cosmic Signature</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --cosmic-indigo: #1A0B3E; --nebula-violet: #6C3CE1; --stellar-white: #F0EDFF;
+      --aurora-cyan: #00E5FF; --solar-gold: #FFB800; --chrono-rose: #FF3D8A;
+      --impact-green: #00D68F; --deep-bg: #0D0521; --muted-cosmos: #2D1B69;
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: var(--deep-bg); color: var(--stellar-white);
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 1000px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 56px; }
+    .header .badge {
+      display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      letter-spacing: 3px; text-transform: uppercase; color: var(--nebula-violet);
+      margin-bottom: 12px;
+    }
+    .header h1 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+      font-size: 2.5rem; margin-bottom: 12px;
+    }
+    .header p { color: rgba(240,237,255,0.55); font-size: 1.05rem; max-width: 560px; margin: 0 auto; }
+
+    /* Timeline */
+    .timeline { position: relative; padding-left: 60px; }
+    .timeline::before {
+      content: ''; position: absolute; left: 24px; top: 0; bottom: 0; width: 2px;
+      background: linear-gradient(180deg, var(--nebula-violet), var(--chrono-rose), var(--solar-gold), var(--impact-green));
+    }
+    .phase { position: relative; margin-bottom: 48px; }
+    .phase:last-child { margin-bottom: 0; }
+    .phase-dot {
+      position: absolute; left: -44px; top: 6px; width: 16px; height: 16px;
+      border-radius: 50%; border: 3px solid; background: var(--deep-bg);
+    }
+    .phase-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+    .phase-number {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: rgba(240,237,255,0.4); letter-spacing: 1px;
+    }
+    .phase-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.3rem; }
+    .phase-desc { color: rgba(240,237,255,0.55); font-size: 0.95rem; line-height: 1.7; margin-bottom: 16px; }
+    .phase-details {
+      background: rgba(45,27,105,0.2); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 20px 24px;
+    }
+    .detail-row {
+      display: flex; align-items: flex-start; gap: 12px; padding: 8px 0;
+      border-bottom: 1px solid rgba(108,60,225,0.08);
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { font-weight: 600; font-size: 0.85rem; min-width: 140px; flex-shrink: 0; }
+    .detail-value { color: rgba(240,237,255,0.6); font-size: 0.85rem; }
+    .highlight { font-weight: 600; }
+    .hl-gold { color: var(--solar-gold); }
+    .hl-violet { color: var(--nebula-violet); }
+    .hl-cyan { color: var(--aurora-cyan); }
+    .hl-rose { color: var(--chrono-rose); }
+    .hl-green { color: var(--impact-green); }
+
+    /* Prize distribution chart */
+    .prize-chart { margin-top: 56px; }
+    .prize-chart h2 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.6rem;
+      text-align: center; margin-bottom: 32px;
+    }
+    .bar-chart { display: flex; flex-direction: column; gap: 12px; }
+    .bar-row { display: flex; align-items: center; gap: 16px; }
+    .bar-label { font-size: 0.85rem; width: 200px; text-align: right; flex-shrink: 0; }
+    .bar-track { flex: 1; height: 32px; background: rgba(45,27,105,0.25); border-radius: 8px; overflow: hidden; position: relative; }
+    .bar-fill { height: 100%; border-radius: 8px; display: flex; align-items: center; padding-left: 12px; font-size: 0.8rem; font-weight: 600; transition: width 1.5s ease-out; }
+    .bar-pct { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 48px; text-align: right; flex-shrink: 0; }
+
+    /* Flow diagram */
+    .flow-section { margin-top: 56px; text-align: center; }
+    .flow-section h2 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.6rem;
+      margin-bottom: 32px;
+    }
+    .flow-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; align-items: center; }
+    .flow-node {
+      background: rgba(45,27,105,0.3); border: 1px solid rgba(108,60,225,0.2);
+      border-radius: 12px; padding: 20px 12px; text-align: center;
+    }
+    .flow-node .icon { font-size: 1.5rem; margin-bottom: 8px; }
+    .flow-node .label { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 0.85rem; }
+    .flow-node .sub { font-size: 0.75rem; color: rgba(240,237,255,0.45); margin-top: 4px; }
+    .flow-arrow { font-size: 1.5rem; color: rgba(108,60,225,0.5); text-align: center; }
+
+    @media (max-width: 700px) {
+      .timeline { padding-left: 40px; }
+      .timeline::before { left: 14px; }
+      .phase-dot { left: -34px; }
+      .bar-label { width: 120px; font-size: 0.75rem; }
+      .flow-grid { grid-template-columns: 1fr; gap: 4px; }
+      .flow-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">Infographic</div>
+      <h1>Anatomy of a Round</h1>
+      <p>Every round of Cosmic Signature follows the same lifecycle. Here's what happens from start to finish.</p>
+    </div>
+
+    <div class="timeline">
+      <!-- Phase 1 -->
+      <div class="phase">
+        <div class="phase-dot" style="border-color: var(--nebula-violet);"></div>
+        <div class="phase-header">
+          <span class="phase-number">PHASE 01</span>
+          <span class="phase-title">Round Activation</span>
+        </div>
+        <p class="phase-desc">After a 30-minute cooldown following the previous round, the new round becomes active. No bids have been placed yet. The ETH Dutch auction begins its ~2-day price decline from ceiling to floor.</p>
+        <div class="phase-details">
+          <div class="detail-row">
+            <div class="detail-label">ETH Price</div>
+            <div class="detail-value">Starts at <span class="highlight hl-gold">2x previous round's first bid price</span>, declines linearly to floor (ceiling / 200) over ~2 days</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">CST Price</div>
+            <div class="detail-value">Not available until first ETH bid is placed</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Timer</div>
+            <div class="detail-value">Not started -- waiting for first bid</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">RWLK Discount</div>
+            <div class="detail-value">Random Walk NFT holders can bid at <span class="highlight hl-green">50% off</span> the current price (one-time per NFT)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Strategy</div>
+            <div class="detail-value">Bidding early costs more but starts the round on your terms. Waiting gets a better price but risks someone else bidding first.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 2 -->
+      <div class="phase">
+        <div class="phase-dot" style="border-color: var(--aurora-cyan);"></div>
+        <div class="phase-header">
+          <span class="phase-number">PHASE 02</span>
+          <span class="phase-title">First Bid (Round Starts)</span>
+        </div>
+        <p class="phase-desc">The first bid must be in ETH. It starts the countdown timer (~1 day initial duration), sets the ETH Dutch auction beginning price for the next round, and switches ETH pricing to incremental mode.</p>
+        <div class="phase-details">
+          <div class="detail-row">
+            <div class="detail-label">Requirement</div>
+            <div class="detail-value">First bid <span class="highlight hl-gold">must be ETH</span> (CST bids open after)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Timer Starts</div>
+            <div class="detail-value">Set to <span class="highlight hl-rose">~1 day</span> from now (initial duration)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">CST Reward</div>
+            <div class="detail-value"><span class="highlight hl-violet">100 CST</span> minted instantly to the bidder</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">ETH Pricing Shifts</div>
+            <div class="detail-value">Dutch auction ends. Next ETH bid = <span class="highlight hl-gold">paidPrice + paidPrice/100 + 1 wei</span> (~1% more)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">CST Auction Opens</div>
+            <div class="detail-value">CST Dutch auction begins: ceiling of <span class="highlight hl-violet">200 CST</span> (min), declining over ~12 hours</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 3 -->
+      <div class="phase">
+        <div class="phase-dot" style="border-color: var(--solar-gold);"></div>
+        <div class="phase-header">
+          <span class="phase-number">PHASE 03</span>
+          <span class="phase-title">Active Bidding</span>
+        </div>
+        <p class="phase-desc">Players compete by placing bids in ETH or CST. Each bid extends the timer by ~1 hour. Champions are tracked in real time. Every bid earns 100 CST. Bid messages (up to 280 bytes) can accompany any bid.</p>
+        <div class="phase-details">
+          <div class="detail-row">
+            <div class="detail-label">ETH Bids</div>
+            <div class="detail-value">Price increments ~1%: <span class="highlight hl-gold">previous + previous/100 + 1 wei</span>. RWLK holders pay half.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">CST Bids</div>
+            <div class="detail-value">Dutch auction resets per bid (ceiling = <span class="highlight hl-violet">2x paid, min 200 CST</span>). Paid CST is <span class="highlight hl-violet">burned</span>. +100 CST reward.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Timer Extension</div>
+            <div class="detail-value">Each bid extends deadline by <span class="highlight hl-rose">~1 hour</span> (grows ~1% per round). max(deadline, now) + increment.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Endurance Champion</div>
+            <div class="detail-value">Longest single <span class="highlight hl-cyan">unbroken streak</span> as last bidder in the round. Prize: 1 CSN + 1,000 CST.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Chrono-Warrior</div>
+            <div class="detail-value">Longest <span class="highlight hl-rose">reign as Endurance Champion</span>. Prize: <span class="highlight hl-rose">8% ETH</span> + 1 CSN + 1,000 CST.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Donations</div>
+            <div class="detail-value">Bids can include donated ERC-20 tokens or ERC-721 NFTs, added to PrizesWallet for the winner.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 4 -->
+      <div class="phase">
+        <div class="phase-dot" style="border-color: var(--chrono-rose);"></div>
+        <div class="phase-header">
+          <span class="phase-number">PHASE 04</span>
+          <span class="phase-title">Timer Expires</span>
+        </div>
+        <p class="phase-desc">When no new bid arrives before the deadline, the timer expires. The last bidder has a 1-day exclusive window to claim. After that, anyone can claim and receive the main prize themselves.</p>
+        <div class="phase-details">
+          <div class="detail-row">
+            <div class="detail-label">Last Bidder</div>
+            <div class="detail-value">Can call <span class="highlight hl-gold">claimMainPrize()</span> immediately after timer expires</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Claim Timeout</div>
+            <div class="detail-value">After <span class="highlight hl-rose">1 day</span>, <span class="highlight hl-cyan">anyone</span> can claim and receive the main prize</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Champions Finalized</div>
+            <div class="detail-value">Final EC and CW evaluated at the moment of claim -- ongoing streaks are counted</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Prizes Never Lock</div>
+            <div class="detail-value">Secondary prizes in PrizesWallet have a <span class="highlight hl-cyan">5-week</span> withdrawal window, then claimable by anyone</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 5 -->
+      <div class="phase">
+        <div class="phase-dot" style="border-color: var(--impact-green);"></div>
+        <div class="phase-header">
+          <span class="phase-number">PHASE 05</span>
+          <span class="phase-title">Prize Distribution</span>
+        </div>
+        <p class="phase-desc">The contract snapshots its total ETH balance, distributes percentages, mints CST and Cosmic Signature NFTs to all winner categories, and initializes the next round's inactive stage.</p>
+        <div class="phase-details">
+          <div class="detail-row">
+            <div class="detail-label">Main Prize</div>
+            <div class="detail-value"><span class="highlight hl-gold">25% ETH</span> (direct transfer) + 1 CSN + 1,000 CST to claimer</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Chrono-Warrior</div>
+            <div class="detail-value"><span class="highlight hl-rose">8% ETH</span> (PrizesWallet) + 1 CSN + 1,000 CST</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Endurance Champion</div>
+            <div class="detail-value">1 CSN + <span class="highlight hl-cyan">1,000 CST</span> (minted directly)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Last CST Bidder</div>
+            <div class="detail-value">1 CSN + <span class="highlight hl-violet">1,000 CST</span> (minted directly)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">ETH Raffles</div>
+            <div class="detail-value"><span class="highlight hl-gold">4% ETH</span> split among 3 random bidders (PrizesWallet)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">NFT Raffle (Bidders)</div>
+            <div class="detail-value"><span class="highlight hl-cyan">10 random bidders</span> each get 1 CSN + 1,000 CST</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">NFT Raffle (RWLK Stakers)</div>
+            <div class="detail-value">Up to <span class="highlight hl-cyan">10 random RWLK stakers</span> each get 1 CSN + 1,000 CST</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">CSN Stakers</div>
+            <div class="detail-value"><span class="highlight hl-cyan">6% ETH</span> to staking contract, split equally per staked NFT</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Protocol Guild</div>
+            <div class="detail-value"><span class="highlight hl-green">7% ETH</span> sent directly (non-reverting -- does not block claim on failure)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Marketing Wallet</div>
+            <div class="detail-value"><span class="highlight hl-violet">3,000 CST</span> minted (no ETH)</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Rollover</div>
+            <div class="detail-value"><span class="highlight">~50% ETH stays</span> in the game contract, growing the future prize pool</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prize Distribution Bar Chart -->
+    <div class="prize-chart">
+      <h2>ETH Distribution (% of Game Contract Balance at Round End)</h2>
+      <div class="bar-chart">
+        <div class="bar-row">
+          <div class="bar-label">Rolls to Next Round</div>
+          <div class="bar-track"><div class="bar-fill" style="width:100%; background: linear-gradient(90deg, rgba(108,60,225,0.3), rgba(108,60,225,0.1));">Growing Prize Pool</div></div>
+          <div class="bar-pct" style="color: rgba(240,237,255,0.5);">~50%</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Main Prize (Last Bidder)</div>
+          <div class="bar-track"><div class="bar-fill" style="width:50%; background: linear-gradient(90deg, #FFB800, #FF9500);">25% ETH + 1 CSN + 1,000 CST</div></div>
+          <div class="bar-pct hl-gold">25%</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Chrono-Warrior</div>
+          <div class="bar-track"><div class="bar-fill" style="width:16%; background: linear-gradient(90deg, #FF3D8A, #FF1A6D);"></div></div>
+          <div class="bar-pct hl-rose">8%</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Protocol Guild (Public Goods)</div>
+          <div class="bar-track"><div class="bar-fill" style="width:14%; background: linear-gradient(90deg, #00D68F, #00B377);"></div></div>
+          <div class="bar-pct hl-green">7%</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">CSN NFT Stakers</div>
+          <div class="bar-track"><div class="bar-fill" style="width:12%; background: linear-gradient(90deg, #00E5FF, #00C4D9);"></div></div>
+          <div class="bar-pct hl-cyan">6%</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">ETH Raffles (3 random bidders)</div>
+          <div class="bar-track"><div class="bar-fill" style="width:8%; background: linear-gradient(90deg, #6C3CE1, #9B6EF3);"></div></div>
+          <div class="bar-pct hl-violet">4%</div>
+        </div>
+      </div>
+      <p style="text-align:center; margin-top:20px; color:rgba(240,237,255,0.4); font-size:0.8rem;">Total explicit distribution: 50%. Remaining ~50% stays in game contract. Zero ETH goes to any team wallet.</p>
+    </div>
+
+    <!-- Game Flow Diagram -->
+    <div class="flow-section">
+      <h2>Game Economy Flow</h2>
+      <div class="flow-grid">
+        <div class="flow-node">
+          <div class="icon" style="color: var(--solar-gold);">&#9733;</div>
+          <div class="label">Player Bids</div>
+          <div class="sub">ETH or CST</div>
+        </div>
+        <div class="flow-arrow">&#8594;</div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--chrono-rose);">&#9203;</div>
+          <div class="label">Round Timer</div>
+          <div class="sub">Extends per bid</div>
+        </div>
+        <div class="flow-arrow">&#8594;</div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--nebula-violet);">&#127942;</div>
+          <div class="label">Prize Split</div>
+          <div class="sub">10+ categories</div>
+        </div>
+      </div>
+      <div style="text-align: center; color: rgba(108,60,225,0.5); font-size: 1.5rem; margin: 8px 0;">&#8595;</div>
+      <div class="flow-grid">
+        <div class="flow-node">
+          <div class="icon" style="color: var(--impact-green);">&#10084;</div>
+          <div class="label">Protocol Guild</div>
+          <div class="sub">7% to Ethereum</div>
+        </div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--aurora-cyan);">&#128274;</div>
+          <div class="label">Stakers</div>
+          <div class="sub">6% ETH yield</div>
+        </div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--solar-gold);">&#127922;</div>
+          <div class="label">Raffles</div>
+          <div class="sub">Random winners</div>
+        </div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--nebula-violet);">&#127968;</div>
+          <div class="label">DAO</div>
+          <div class="sub">CST governance</div>
+        </div>
+        <div class="flow-node">
+          <div class="icon" style="color: var(--chrono-rose);">&#128260;</div>
+          <div class="label">Next Round</div>
+          <div class="sub">50% ETH rolls</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 64px; padding-top: 32px; border-top: 1px solid rgba(108,60,225,0.1);">
+      <p style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.1rem; margin-bottom: 8px;">cosmicsignature.com</p>
+      <p style="color: rgba(240,237,255,0.35); font-size: 0.8rem;">Bid. Endure. Win. Give.</p>
+    </div>
+  </div>
+</body>
+</html>

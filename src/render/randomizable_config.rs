@@ -143,55 +143,86 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.enable_bloom = self.resolve_enable(
-            "bloom", self.enable_bloom, pd::ENABLE_PROB_BLOOM, randomizer, log,
-        );
-        resolved.enable_glow = self.resolve_enable(
-            "glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log,
-        );
+        resolved.enable_bloom =
+            self.resolve_enable("bloom", self.enable_bloom, pd::ENABLE_PROB_BLOOM, randomizer, log);
+        resolved.enable_glow =
+            self.resolve_enable("glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log);
         resolved.enable_chromatic_bloom = self.resolve_enable(
-            "chromatic_bloom", self.enable_chromatic_bloom,
-            pd::ENABLE_PROB_CHROMATIC_BLOOM, randomizer, log,
+            "chromatic_bloom",
+            self.enable_chromatic_bloom,
+            pd::ENABLE_PROB_CHROMATIC_BLOOM,
+            randomizer,
+            log,
         );
         resolved.enable_perceptual_blur = self.resolve_enable(
-            "perceptual_blur", self.enable_perceptual_blur,
-            pd::ENABLE_PROB_PERCEPTUAL_BLUR, randomizer, log,
+            "perceptual_blur",
+            self.enable_perceptual_blur,
+            pd::ENABLE_PROB_PERCEPTUAL_BLUR,
+            randomizer,
+            log,
         );
         resolved.enable_micro_contrast = self.resolve_enable(
-            "micro_contrast", self.enable_micro_contrast,
-            pd::ENABLE_PROB_MICRO_CONTRAST, randomizer, log,
+            "micro_contrast",
+            self.enable_micro_contrast,
+            pd::ENABLE_PROB_MICRO_CONTRAST,
+            randomizer,
+            log,
         );
         resolved.enable_gradient_map = self.resolve_enable(
-            "gradient_map", self.enable_gradient_map,
-            pd::ENABLE_PROB_GRADIENT_MAP, randomizer, log,
+            "gradient_map",
+            self.enable_gradient_map,
+            pd::ENABLE_PROB_GRADIENT_MAP,
+            randomizer,
+            log,
         );
         resolved.enable_color_grade = self.resolve_enable(
-            "color_grade", self.enable_color_grade,
-            pd::ENABLE_PROB_COLOR_GRADE, randomizer, log,
+            "color_grade",
+            self.enable_color_grade,
+            pd::ENABLE_PROB_COLOR_GRADE,
+            randomizer,
+            log,
         );
         resolved.enable_champleve = self.resolve_enable(
-            "champleve", self.enable_champleve,
-            pd::ENABLE_PROB_CHAMPLEVE, randomizer, log,
+            "champleve",
+            self.enable_champleve,
+            pd::ENABLE_PROB_CHAMPLEVE,
+            randomizer,
+            log,
         );
         resolved.enable_aether = self.resolve_enable(
-            "aether", self.enable_aether,
-            pd::ENABLE_PROB_AETHER, randomizer, log,
+            "aether",
+            self.enable_aether,
+            pd::ENABLE_PROB_AETHER,
+            randomizer,
+            log,
         );
         resolved.enable_opalescence = self.resolve_enable(
-            "opalescence", self.enable_opalescence,
-            pd::ENABLE_PROB_OPALESCENCE, randomizer, log,
+            "opalescence",
+            self.enable_opalescence,
+            pd::ENABLE_PROB_OPALESCENCE,
+            randomizer,
+            log,
         );
         resolved.enable_edge_luminance = self.resolve_enable(
-            "edge_luminance", self.enable_edge_luminance,
-            pd::ENABLE_PROB_EDGE_LUMINANCE, randomizer, log,
+            "edge_luminance",
+            self.enable_edge_luminance,
+            pd::ENABLE_PROB_EDGE_LUMINANCE,
+            randomizer,
+            log,
         );
         resolved.enable_atmospheric_depth = self.resolve_enable(
-            "atmospheric_depth", self.enable_atmospheric_depth,
-            pd::ENABLE_PROB_ATMOSPHERIC_DEPTH, randomizer, log,
+            "atmospheric_depth",
+            self.enable_atmospheric_depth,
+            pd::ENABLE_PROB_ATMOSPHERIC_DEPTH,
+            randomizer,
+            log,
         );
         resolved.enable_fine_texture = self.resolve_enable(
-            "fine_texture", self.enable_fine_texture,
-            pd::ENABLE_PROB_FINE_TEXTURE, randomizer, log,
+            "fine_texture",
+            self.enable_fine_texture,
+            pd::ENABLE_PROB_FINE_TEXTURE,
+            randomizer,
+            log,
         );
     }
 
@@ -202,44 +233,76 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.blur_strength = self.resolve_float(
-            "blur_strength", self.blur_strength, &pd::BLUR_STRENGTH, randomizer, log,
+            "blur_strength",
+            self.blur_strength,
+            &pd::BLUR_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.blur_radius_scale = self.resolve_float(
-            "blur_radius_scale", self.blur_radius_scale,
-            &pd::BLUR_RADIUS_SCALE, randomizer, log,
+            "blur_radius_scale",
+            self.blur_radius_scale,
+            &pd::BLUR_RADIUS_SCALE,
+            randomizer,
+            log,
         );
         resolved.blur_core_brightness = self.resolve_float(
-            "blur_core_brightness", self.blur_core_brightness,
-            &pd::BLUR_CORE_BRIGHTNESS, randomizer, log,
+            "blur_core_brightness",
+            self.blur_core_brightness,
+            &pd::BLUR_CORE_BRIGHTNESS,
+            randomizer,
+            log,
         );
         resolved.dog_strength = self.resolve_float(
-            "dog_strength", self.dog_strength, &pd::DOG_STRENGTH, randomizer, log,
+            "dog_strength",
+            self.dog_strength,
+            &pd::DOG_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.dog_sigma_scale = self.resolve_float(
-            "dog_sigma_scale", self.dog_sigma_scale,
-            &pd::DOG_SIGMA_SCALE, randomizer, log,
+            "dog_sigma_scale",
+            self.dog_sigma_scale,
+            &pd::DOG_SIGMA_SCALE,
+            randomizer,
+            log,
         );
-        resolved.dog_ratio = self.resolve_float(
-            "dog_ratio", self.dog_ratio, &pd::DOG_RATIO, randomizer, log,
-        );
+        resolved.dog_ratio =
+            self.resolve_float("dog_ratio", self.dog_ratio, &pd::DOG_RATIO, randomizer, log);
         resolved.glow_strength = self.resolve_float(
-            "glow_strength", self.glow_strength, &pd::GLOW_STRENGTH, randomizer, log,
+            "glow_strength",
+            self.glow_strength,
+            &pd::GLOW_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.glow_threshold = self.resolve_float(
-            "glow_threshold", self.glow_threshold,
-            &pd::GLOW_THRESHOLD, randomizer, log,
+            "glow_threshold",
+            self.glow_threshold,
+            &pd::GLOW_THRESHOLD,
+            randomizer,
+            log,
         );
         resolved.glow_radius_scale = self.resolve_float(
-            "glow_radius_scale", self.glow_radius_scale,
-            &pd::GLOW_RADIUS_SCALE, randomizer, log,
+            "glow_radius_scale",
+            self.glow_radius_scale,
+            &pd::GLOW_RADIUS_SCALE,
+            randomizer,
+            log,
         );
         resolved.glow_sharpness = self.resolve_float(
-            "glow_sharpness", self.glow_sharpness,
-            &pd::GLOW_SHARPNESS, randomizer, log,
+            "glow_sharpness",
+            self.glow_sharpness,
+            &pd::GLOW_SHARPNESS,
+            randomizer,
+            log,
         );
         resolved.glow_saturation_boost = self.resolve_float(
-            "glow_saturation_boost", self.glow_saturation_boost,
-            &pd::GLOW_SATURATION_BOOST, randomizer, log,
+            "glow_saturation_boost",
+            self.glow_saturation_boost,
+            &pd::GLOW_SATURATION_BOOST,
+            randomizer,
+            log,
         );
     }
 
@@ -250,20 +313,32 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.chromatic_bloom_strength = self.resolve_float(
-            "chromatic_bloom_strength", self.chromatic_bloom_strength,
-            &pd::CHROMATIC_BLOOM_STRENGTH, randomizer, log,
+            "chromatic_bloom_strength",
+            self.chromatic_bloom_strength,
+            &pd::CHROMATIC_BLOOM_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.chromatic_bloom_radius_scale = self.resolve_float(
-            "chromatic_bloom_radius_scale", self.chromatic_bloom_radius_scale,
-            &pd::CHROMATIC_BLOOM_RADIUS_SCALE, randomizer, log,
+            "chromatic_bloom_radius_scale",
+            self.chromatic_bloom_radius_scale,
+            &pd::CHROMATIC_BLOOM_RADIUS_SCALE,
+            randomizer,
+            log,
         );
         resolved.chromatic_bloom_separation_scale = self.resolve_float(
-            "chromatic_bloom_separation_scale", self.chromatic_bloom_separation_scale,
-            &pd::CHROMATIC_BLOOM_SEPARATION_SCALE, randomizer, log,
+            "chromatic_bloom_separation_scale",
+            self.chromatic_bloom_separation_scale,
+            &pd::CHROMATIC_BLOOM_SEPARATION_SCALE,
+            randomizer,
+            log,
         );
         resolved.chromatic_bloom_threshold = self.resolve_float(
-            "chromatic_bloom_threshold", self.chromatic_bloom_threshold,
-            &pd::CHROMATIC_BLOOM_THRESHOLD, randomizer, log,
+            "chromatic_bloom_threshold",
+            self.chromatic_bloom_threshold,
+            &pd::CHROMATIC_BLOOM_THRESHOLD,
+            randomizer,
+            log,
         );
     }
 
@@ -274,43 +349,69 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.perceptual_blur_strength = self.resolve_float(
-            "perceptual_blur_strength", self.perceptual_blur_strength,
-            &pd::PERCEPTUAL_BLUR_STRENGTH, randomizer, log,
+            "perceptual_blur_strength",
+            self.perceptual_blur_strength,
+            &pd::PERCEPTUAL_BLUR_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.color_grade_strength = self.resolve_float(
-            "color_grade_strength", self.color_grade_strength,
-            &pd::COLOR_GRADE_STRENGTH, randomizer, log,
+            "color_grade_strength",
+            self.color_grade_strength,
+            &pd::COLOR_GRADE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.vignette_strength = self.resolve_float(
-            "vignette_strength", self.vignette_strength,
-            &pd::VIGNETTE_STRENGTH, randomizer, log,
+            "vignette_strength",
+            self.vignette_strength,
+            &pd::VIGNETTE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.vignette_softness = self.resolve_float(
-            "vignette_softness", self.vignette_softness,
-            &pd::VIGNETTE_SOFTNESS, randomizer, log,
+            "vignette_softness",
+            self.vignette_softness,
+            &pd::VIGNETTE_SOFTNESS,
+            randomizer,
+            log,
         );
-        resolved.vibrance = self.resolve_float(
-            "vibrance", self.vibrance, &pd::VIBRANCE, randomizer, log,
-        );
+        resolved.vibrance =
+            self.resolve_float("vibrance", self.vibrance, &pd::VIBRANCE, randomizer, log);
         resolved.clarity_strength = self.resolve_float(
-            "clarity_strength", self.clarity_strength,
-            &pd::CLARITY_STRENGTH, randomizer, log,
+            "clarity_strength",
+            self.clarity_strength,
+            &pd::CLARITY_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.tone_curve_strength = self.resolve_float(
-            "tone_curve_strength", self.tone_curve_strength,
-            &pd::TONE_CURVE_STRENGTH, randomizer, log,
+            "tone_curve_strength",
+            self.tone_curve_strength,
+            &pd::TONE_CURVE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.gradient_map_strength = self.resolve_float(
-            "gradient_map_strength", self.gradient_map_strength,
-            &pd::GRADIENT_MAP_STRENGTH, randomizer, log,
+            "gradient_map_strength",
+            self.gradient_map_strength,
+            &pd::GRADIENT_MAP_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.gradient_map_hue_preservation = self.resolve_float(
-            "gradient_map_hue_preservation", self.gradient_map_hue_preservation,
-            &pd::GRADIENT_MAP_HUE_PRESERVATION, randomizer, log,
+            "gradient_map_hue_preservation",
+            self.gradient_map_hue_preservation,
+            &pd::GRADIENT_MAP_HUE_PRESERVATION,
+            randomizer,
+            log,
         );
         resolved.gradient_map_palette = self.resolve_int(
-            "gradient_map_palette", self.gradient_map_palette,
-            &pd::GRADIENT_MAP_PALETTE, randomizer, log,
+            "gradient_map_palette",
+            self.gradient_map_palette,
+            &pd::GRADIENT_MAP_PALETTE,
+            randomizer,
+            log,
         );
     }
 
@@ -321,52 +422,88 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.opalescence_strength = self.resolve_float(
-            "opalescence_strength", self.opalescence_strength,
-            &pd::OPALESCENCE_STRENGTH, randomizer, log,
+            "opalescence_strength",
+            self.opalescence_strength,
+            &pd::OPALESCENCE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.opalescence_scale = self.resolve_float(
-            "opalescence_scale", self.opalescence_scale,
-            &pd::OPALESCENCE_SCALE, randomizer, log,
+            "opalescence_scale",
+            self.opalescence_scale,
+            &pd::OPALESCENCE_SCALE,
+            randomizer,
+            log,
         );
         resolved.opalescence_layers = self.resolve_int(
-            "opalescence_layers", self.opalescence_layers,
-            &pd::OPALESCENCE_LAYERS, randomizer, log,
+            "opalescence_layers",
+            self.opalescence_layers,
+            &pd::OPALESCENCE_LAYERS,
+            randomizer,
+            log,
         );
         resolved.champleve_flow_alignment = self.resolve_float(
-            "champleve_flow_alignment", self.champleve_flow_alignment,
-            &pd::CHAMPLEVE_FLOW_ALIGNMENT, randomizer, log,
+            "champleve_flow_alignment",
+            self.champleve_flow_alignment,
+            &pd::CHAMPLEVE_FLOW_ALIGNMENT,
+            randomizer,
+            log,
         );
         resolved.champleve_interference_amplitude = self.resolve_float(
-            "champleve_interference_amplitude", self.champleve_interference_amplitude,
-            &pd::CHAMPLEVE_INTERFERENCE_AMPLITUDE, randomizer, log,
+            "champleve_interference_amplitude",
+            self.champleve_interference_amplitude,
+            &pd::CHAMPLEVE_INTERFERENCE_AMPLITUDE,
+            randomizer,
+            log,
         );
         resolved.champleve_rim_intensity = self.resolve_float(
-            "champleve_rim_intensity", self.champleve_rim_intensity,
-            &pd::CHAMPLEVE_RIM_INTENSITY, randomizer, log,
+            "champleve_rim_intensity",
+            self.champleve_rim_intensity,
+            &pd::CHAMPLEVE_RIM_INTENSITY,
+            randomizer,
+            log,
         );
         resolved.champleve_rim_warmth = self.resolve_float(
-            "champleve_rim_warmth", self.champleve_rim_warmth,
-            &pd::CHAMPLEVE_RIM_WARMTH, randomizer, log,
+            "champleve_rim_warmth",
+            self.champleve_rim_warmth,
+            &pd::CHAMPLEVE_RIM_WARMTH,
+            randomizer,
+            log,
         );
         resolved.champleve_interior_lift = self.resolve_float(
-            "champleve_interior_lift", self.champleve_interior_lift,
-            &pd::CHAMPLEVE_INTERIOR_LIFT, randomizer, log,
+            "champleve_interior_lift",
+            self.champleve_interior_lift,
+            &pd::CHAMPLEVE_INTERIOR_LIFT,
+            randomizer,
+            log,
         );
         resolved.aether_flow_alignment = self.resolve_float(
-            "aether_flow_alignment", self.aether_flow_alignment,
-            &pd::AETHER_FLOW_ALIGNMENT, randomizer, log,
+            "aether_flow_alignment",
+            self.aether_flow_alignment,
+            &pd::AETHER_FLOW_ALIGNMENT,
+            randomizer,
+            log,
         );
         resolved.aether_scattering_strength = self.resolve_float(
-            "aether_scattering_strength", self.aether_scattering_strength,
-            &pd::AETHER_SCATTERING_STRENGTH, randomizer, log,
+            "aether_scattering_strength",
+            self.aether_scattering_strength,
+            &pd::AETHER_SCATTERING_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.aether_iridescence_amplitude = self.resolve_float(
-            "aether_iridescence_amplitude", self.aether_iridescence_amplitude,
-            &pd::AETHER_IRIDESCENCE_AMPLITUDE, randomizer, log,
+            "aether_iridescence_amplitude",
+            self.aether_iridescence_amplitude,
+            &pd::AETHER_IRIDESCENCE_AMPLITUDE,
+            randomizer,
+            log,
         );
         resolved.aether_caustic_strength = self.resolve_float(
-            "aether_caustic_strength", self.aether_caustic_strength,
-            &pd::AETHER_CAUSTIC_STRENGTH, randomizer, log,
+            "aether_caustic_strength",
+            self.aether_caustic_strength,
+            &pd::AETHER_CAUSTIC_STRENGTH,
+            randomizer,
+            log,
         );
     }
 
@@ -377,24 +514,39 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.micro_contrast_strength = self.resolve_float(
-            "micro_contrast_strength", self.micro_contrast_strength,
-            &pd::MICRO_CONTRAST_STRENGTH, randomizer, log,
+            "micro_contrast_strength",
+            self.micro_contrast_strength,
+            &pd::MICRO_CONTRAST_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.micro_contrast_radius = self.resolve_int(
-            "micro_contrast_radius", self.micro_contrast_radius,
-            &pd::MICRO_CONTRAST_RADIUS, randomizer, log,
+            "micro_contrast_radius",
+            self.micro_contrast_radius,
+            &pd::MICRO_CONTRAST_RADIUS,
+            randomizer,
+            log,
         );
         resolved.edge_luminance_strength = self.resolve_float(
-            "edge_luminance_strength", self.edge_luminance_strength,
-            &pd::EDGE_LUMINANCE_STRENGTH, randomizer, log,
+            "edge_luminance_strength",
+            self.edge_luminance_strength,
+            &pd::EDGE_LUMINANCE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.edge_luminance_threshold = self.resolve_float(
-            "edge_luminance_threshold", self.edge_luminance_threshold,
-            &pd::EDGE_LUMINANCE_THRESHOLD, randomizer, log,
+            "edge_luminance_threshold",
+            self.edge_luminance_threshold,
+            &pd::EDGE_LUMINANCE_THRESHOLD,
+            randomizer,
+            log,
         );
         resolved.edge_luminance_brightness_boost = self.resolve_float(
-            "edge_luminance_brightness_boost", self.edge_luminance_brightness_boost,
-            &pd::EDGE_LUMINANCE_BRIGHTNESS_BOOST, randomizer, log,
+            "edge_luminance_brightness_boost",
+            self.edge_luminance_brightness_boost,
+            &pd::EDGE_LUMINANCE_BRIGHTNESS_BOOST,
+            randomizer,
+            log,
         );
     }
 
@@ -405,40 +557,67 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.atmospheric_depth_strength = self.resolve_float(
-            "atmospheric_depth_strength", self.atmospheric_depth_strength,
-            &pd::ATMOSPHERIC_DEPTH_STRENGTH, randomizer, log,
+            "atmospheric_depth_strength",
+            self.atmospheric_depth_strength,
+            &pd::ATMOSPHERIC_DEPTH_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.atmospheric_desaturation = self.resolve_float(
-            "atmospheric_desaturation", self.atmospheric_desaturation,
-            &pd::ATMOSPHERIC_DESATURATION, randomizer, log,
+            "atmospheric_desaturation",
+            self.atmospheric_desaturation,
+            &pd::ATMOSPHERIC_DESATURATION,
+            randomizer,
+            log,
         );
         resolved.atmospheric_darkening = self.resolve_float(
-            "atmospheric_darkening", self.atmospheric_darkening,
-            &pd::ATMOSPHERIC_DARKENING, randomizer, log,
+            "atmospheric_darkening",
+            self.atmospheric_darkening,
+            &pd::ATMOSPHERIC_DARKENING,
+            randomizer,
+            log,
         );
         resolved.atmospheric_fog_color_r = self.resolve_float(
-            "atmospheric_fog_color_r", self.atmospheric_fog_color_r,
-            &pd::ATMOSPHERIC_FOG_COLOR_R, randomizer, log,
+            "atmospheric_fog_color_r",
+            self.atmospheric_fog_color_r,
+            &pd::ATMOSPHERIC_FOG_COLOR_R,
+            randomizer,
+            log,
         );
         resolved.atmospheric_fog_color_g = self.resolve_float(
-            "atmospheric_fog_color_g", self.atmospheric_fog_color_g,
-            &pd::ATMOSPHERIC_FOG_COLOR_G, randomizer, log,
+            "atmospheric_fog_color_g",
+            self.atmospheric_fog_color_g,
+            &pd::ATMOSPHERIC_FOG_COLOR_G,
+            randomizer,
+            log,
         );
         resolved.atmospheric_fog_color_b = self.resolve_float(
-            "atmospheric_fog_color_b", self.atmospheric_fog_color_b,
-            &pd::ATMOSPHERIC_FOG_COLOR_B, randomizer, log,
+            "atmospheric_fog_color_b",
+            self.atmospheric_fog_color_b,
+            &pd::ATMOSPHERIC_FOG_COLOR_B,
+            randomizer,
+            log,
         );
         resolved.fine_texture_strength = self.resolve_float(
-            "fine_texture_strength", self.fine_texture_strength,
-            &pd::FINE_TEXTURE_STRENGTH, randomizer, log,
+            "fine_texture_strength",
+            self.fine_texture_strength,
+            &pd::FINE_TEXTURE_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.fine_texture_scale = self.resolve_float(
-            "fine_texture_scale", self.fine_texture_scale,
-            &pd::FINE_TEXTURE_SCALE, randomizer, log,
+            "fine_texture_scale",
+            self.fine_texture_scale,
+            &pd::FINE_TEXTURE_SCALE,
+            randomizer,
+            log,
         );
         resolved.fine_texture_contrast = self.resolve_float(
-            "fine_texture_contrast", self.fine_texture_contrast,
-            &pd::FINE_TEXTURE_CONTRAST, randomizer, log,
+            "fine_texture_contrast",
+            self.fine_texture_contrast,
+            &pd::FINE_TEXTURE_CONTRAST,
+            randomizer,
+            log,
         );
     }
 
@@ -448,20 +627,28 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.hdr_scale = self.resolve_float(
-            "hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log,
-        );
+        resolved.hdr_scale =
+            self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
         resolved.nebula_strength = self.resolve_float(
-            "nebula_strength", self.nebula_strength,
-            &pd::NEBULA_STRENGTH, randomizer, log,
+            "nebula_strength",
+            self.nebula_strength,
+            &pd::NEBULA_STRENGTH,
+            randomizer,
+            log,
         );
         resolved.nebula_octaves = self.resolve_int(
-            "nebula_octaves", self.nebula_octaves,
-            &pd::NEBULA_OCTAVES, randomizer, log,
+            "nebula_octaves",
+            self.nebula_octaves,
+            &pd::NEBULA_OCTAVES,
+            randomizer,
+            log,
         );
         resolved.nebula_base_frequency = self.resolve_float(
-            "nebula_base_frequency", self.nebula_base_frequency,
-            &pd::NEBULA_BASE_FREQUENCY, randomizer, log,
+            "nebula_base_frequency",
+            self.nebula_base_frequency,
+            &pd::NEBULA_BASE_FREQUENCY,
+            randomizer,
+            log,
         );
     }
 

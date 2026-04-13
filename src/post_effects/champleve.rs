@@ -182,9 +182,8 @@ mod tests {
     fn test_preserves_alpha() {
         let w = 10;
         let h = 10;
-        let mut buffer: Vec<(f64, f64, f64, f64)> = (0..w * h)
-            .map(|i| (0.5, 0.3, 0.2, 0.7 + (i as f64) * 0.001))
-            .collect();
+        let mut buffer: Vec<(f64, f64, f64, f64)> =
+            (0..w * h).map(|i| (0.5, 0.3, 0.2, 0.7 + (i as f64) * 0.001)).collect();
         let alphas: Vec<f64> = buffer.iter().map(|p| p.3).collect();
         apply_champleve_iridescence(&mut buffer, w, h, &ChampleveConfig::default());
         for (i, (pixel, &orig_a)) in buffer.iter().zip(alphas.iter()).enumerate() {

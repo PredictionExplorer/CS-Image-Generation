@@ -319,12 +319,7 @@ pub fn generate_spectral_gallery(
     height: u32,
     spectral_dir: &str,
 ) -> Result<()> {
-    Ok(render::spectral_output::generate_spectral_gallery(
-        accum_spd,
-        width,
-        height,
-        spectral_dir,
-    )?)
+    Ok(render::spectral_output::generate_spectral_gallery(accum_spd, width, height, spectral_dir)?)
 }
 
 /// Generate the spectral sweep video (violet-to-red cycle) at `output_path`.

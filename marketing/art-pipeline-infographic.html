@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Art Generation Pipeline | Cosmic Signature</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --cosmic-indigo: #1A0B3E; --nebula-violet: #6C3CE1; --stellar-white: #F0EDFF;
+      --aurora-cyan: #00E5FF; --solar-gold: #FFB800; --chrono-rose: #FF3D8A;
+      --impact-green: #00D68F; --deep-bg: #0D0521; --muted-cosmos: #2D1B69;
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: var(--deep-bg); color: var(--stellar-white);
+      min-height: 100vh; padding: 40px 24px;
+    }
+    .container { max-width: 1000px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 56px; }
+    .header .badge {
+      display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      letter-spacing: 3px; text-transform: uppercase; color: var(--nebula-violet);
+      margin-bottom: 12px;
+    }
+    .header h1 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+      font-size: 2.5rem; margin-bottom: 12px;
+    }
+    .header p { color: rgba(240,237,255,0.55); font-size: 1.05rem; max-width: 620px; margin: 0 auto; }
+
+    /* Pipeline stages */
+    .pipeline { position: relative; padding-left: 60px; }
+    .pipeline::before {
+      content: ''; position: absolute; left: 24px; top: 0; bottom: 0; width: 2px;
+      background: linear-gradient(180deg,
+        var(--nebula-violet),
+        var(--aurora-cyan),
+        var(--solar-gold),
+        var(--impact-green),
+        var(--chrono-rose),
+        var(--nebula-violet),
+        var(--aurora-cyan));
+    }
+    .stage { position: relative; margin-bottom: 36px; }
+    .stage:last-child { margin-bottom: 0; }
+    .stage-dot {
+      position: absolute; left: -44px; top: 6px; width: 16px; height: 16px;
+      border-radius: 50%; border: 3px solid; background: var(--deep-bg);
+    }
+    .stage-header {
+      display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px;
+      cursor: pointer; user-select: none;
+    }
+    .stage-header:hover .stage-title { color: var(--aurora-cyan); }
+    .stage-number {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: rgba(240,237,255,0.4); letter-spacing: 1px;
+    }
+    .stage-title {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.3rem;
+      transition: color 0.2s;
+    }
+    .stage-toggle {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: rgba(240,237,255,0.3); margin-left: auto;
+    }
+    .stage-summary { color: rgba(240,237,255,0.55); font-size: 0.95rem; line-height: 1.7; margin-bottom: 12px; }
+    .stage-details {
+      background: rgba(45,27,105,0.2); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 20px 24px; overflow: hidden;
+      max-height: 0; opacity: 0; transition: max-height 0.4s ease, opacity 0.3s ease, padding 0.3s ease;
+      padding-top: 0; padding-bottom: 0;
+    }
+    .stage-details.open {
+      max-height: 800px; opacity: 1; padding-top: 20px; padding-bottom: 20px;
+    }
+    .detail-row {
+      display: flex; align-items: flex-start; gap: 12px; padding: 8px 0;
+      border-bottom: 1px solid rgba(108,60,225,0.08);
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { font-weight: 600; font-size: 0.85rem; min-width: 160px; flex-shrink: 0; }
+    .detail-value { color: rgba(240,237,255,0.6); font-size: 0.85rem; line-height: 1.6; }
+    .hl-gold { color: var(--solar-gold); font-weight: 600; }
+    .hl-violet { color: var(--nebula-violet); font-weight: 600; }
+    .hl-cyan { color: var(--aurora-cyan); font-weight: 600; }
+    .hl-rose { color: var(--chrono-rose); font-weight: 600; }
+    .hl-green { color: var(--impact-green); font-weight: 600; }
+    .code { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--aurora-cyan); }
+
+    /* Stats bar */
+    .stats-bar {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+      margin-bottom: 48px; text-align: center;
+    }
+    .stat-card {
+      background: rgba(45,27,105,0.2); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 20px 12px;
+    }
+    .stat-value {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.5rem;
+    }
+    .stat-label { font-size: 0.75rem; color: rgba(240,237,255,0.45); margin-top: 4px; }
+
+    /* Output section */
+    .output-section { margin-top: 56px; text-align: center; }
+    .output-section h2 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.6rem;
+      margin-bottom: 32px;
+    }
+    .output-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .output-card {
+      background: rgba(45,27,105,0.25); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 24px 16px; text-align: center;
+    }
+    .output-card .icon { font-size: 1.8rem; margin-bottom: 10px; }
+    .output-card .label {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 0.95rem;
+      margin-bottom: 6px;
+    }
+    .output-card .spec {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      color: rgba(240,237,255,0.45);
+    }
+
+    /* Key principles */
+    .principles { margin-top: 56px; }
+    .principles h2 {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.6rem;
+      text-align: center; margin-bottom: 32px;
+    }
+    .principle-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .principle-card {
+      background: rgba(45,27,105,0.2); border: 1px solid rgba(108,60,225,0.15);
+      border-radius: 12px; padding: 24px;
+    }
+    .principle-card .card-title {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1rem;
+      margin-bottom: 8px;
+    }
+    .principle-card .card-text { color: rgba(240,237,255,0.55); font-size: 0.85rem; line-height: 1.6; }
+
+    @media (max-width: 700px) {
+      .pipeline { padding-left: 40px; }
+      .pipeline::before { left: 14px; }
+      .stage-dot { left: -34px; }
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .output-grid { grid-template-columns: 1fr; }
+      .principle-grid { grid-template-columns: 1fr; }
+      .detail-label { min-width: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">Art & Technology</div>
+      <h1>How the Art Is Made</h1>
+      <p>Every Cosmic Signature NFT is generated by simulating the Three Body Problem -- three celestial bodies locked in gravitational orbit. Real physics. Spectral light. No AI. Click any stage to explore the details.</p>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--solar-gold);">100K</div>
+        <div class="stat-label">Orbits Simulated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--aurora-cyan);">1M</div>
+        <div class="stat-label">Physics Steps Recorded</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--chrono-rose);">16</div>
+        <div class="stat-label">Spectral Wavelength Bins</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--impact-green);">60 fps</div>
+        <div class="stat-label">Video Frame Rate</div>
+      </div>
+    </div>
+
+    <div class="pipeline">
+
+      <!-- Stage 1 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--nebula-violet);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 01</span>
+          <span class="stage-title">Seed &amp; RNG</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">A hex seed (from the NFT's on-chain randomness) is fed into a SHA3-256 hash function to produce an infinite, deterministic stream of random numbers.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Hash Function</div>
+            <div class="detail-value"><span class="hl-violet">SHA3-256</span> (Keccak) -- cryptographic quality randomness with full avalanche effect. A single bit change in the seed produces completely different output.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Chaining</div>
+            <div class="detail-value">32-byte buffer extended by: <span class="code">hash(seed || previous_buffer)</span>. Produces billions of pseudorandom bytes from any seed.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Drives</div>
+            <div class="detail-value">Body masses, positions, velocities, color palettes, drift parameters, effect randomization -- every aspect of the art.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/sim.rs</span> -- <span class="code">Sha3RandomByteStream</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 2 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--aurora-cyan);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 02</span>
+          <span class="stage-title">Physics Simulation</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">100,000 random three-body configurations are generated and simulated using Newtonian gravity with a 4th-order Yoshida symplectic integrator -- the same class of method used in astrophysics research.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Gravity</div>
+            <div class="detail-value">Classical Newtonian pairwise: <span class="code">a_i = -m_j * (r_i - r_j) / |r_i - r_j|^3</span></div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Integrator</div>
+            <div class="detail-value"><span class="hl-cyan">Yoshida 4th-order symplectic</span> -- preserves energy over millions of timesteps (unlike Euler or Runge-Kutta methods). Constants: W1 = 1.351, W0 = -1.702.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Body Parameters</div>
+            <div class="detail-value">Mass: <span class="hl-gold">100-300</span> units. Position: &plusmn;300 per axis. Velocity: &plusmn;1 per axis. All in 3D.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Timestep</div>
+            <div class="detail-value"><span class="code">dt = 0.001</span>. Per orbit: 1M warmup steps + 1M recorded steps = 2M total.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/sim.rs</span> -- <span class="code">symplectic_step</span>, <span class="code">get_positions</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 3 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--solar-gold);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 03</span>
+          <span class="stage-title">Orbit Selection (Borda Search)</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">From 100,000 simulated orbits, the system selects the single most visually interesting one using Borda-style rank aggregation across two quality metrics.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Fast Rejection</div>
+            <div class="detail-value">Discard orbits with: total energy > 10 (unbound), angular momentum < 10 (degenerate), or escaping bodies (kinetic > binding energy by threshold <span class="hl-rose">-0.3</span>).</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Chaos Metric</div>
+            <div class="detail-value">Per-body distance to the other two bodies' COM over time &rarr; <span class="hl-cyan">FFT</span> &rarr; std dev of magnitude spectrum. Lower = more chaotic. The Borda ranking rewards <span class="hl-rose">more chaotic</span> orbits with higher points.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Equilateralness</div>
+            <div class="detail-value">Mean of (min_side / max_side) over time. <span class="hl-gold">1.0</span> = perfect equilateral triangle. Favors balanced triangular shapes.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Borda Weights</div>
+            <div class="detail-value">Chaos: <span class="hl-violet">0.75</span>, Equilateralness: <span class="hl-gold">11.0</span>. Triangle balance dominates selection (~15x weight).</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Parallelism</div>
+            <div class="detail-value">All 100K evaluations run in parallel via <span class="code">rayon</span> (data-parallel threading).</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/sim.rs</span> -- <span class="code">select_best_trajectory</span>; <span class="code">src/analysis.rs</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 4 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--impact-green);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 04</span>
+          <span class="stage-title">Camera Drift</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">A slow camera motion is applied to all recorded positions, creating parallax and cinematic perspective shifts in the final video.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Elliptical (default)</div>
+            <div class="detail-value">Viewpoint traces an ellipse with configurable <span class="hl-cyan">scale</span>, <span class="hl-gold">arc fraction</span> (0-1, how much of the orbit to traverse), and <span class="hl-rose">eccentricity</span> (0-0.95). Parameters randomized per-seed.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Brownian</div>
+            <div class="detail-value">Random walk using <span class="hl-violet">Box-Muller Gaussian</span> displacements at each timestep. Organic, wandering motion.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Linear</div>
+            <div class="detail-value">Constant-velocity translation. Simple slow pan across the scene.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/drift.rs</span>, <span class="code">src/drift_config.rs</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 5 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--chrono-rose);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 05</span>
+          <span class="stage-title">Color Generation (OKLab)</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">Each body is assigned a color sequence in the OKLab perceptual color space -- 120 degrees of hue separation ensures maximally distinct colors that evolve over time.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Color Space</div>
+            <div class="detail-value"><span class="hl-cyan">OKLab</span> (Bjorn Ottosson) -- perceptually uniform. Equal numerical distances = equal perceived color differences.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Hue Separation</div>
+            <div class="detail-value"><span class="hl-gold">120&deg;</span> between bodies + fixed phase offsets [0&deg;, 120&deg;, 240&deg;] for maximum contrast.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Time Evolution</div>
+            <div class="detail-value">Base hue + <span class="hl-violet">log-time drift</span> + <span class="hl-rose">sine wave</span> (freq 1.8-4.0 Hz per seed) + random jitter. Chroma and lightness also modulated.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Alpha Variation</div>
+            <div class="detail-value">Per-body opacity shuffled from {1/13M, 1/15M, 1/17M} for subtle depth hierarchy.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/render/color.rs</span>, <span class="code">src/render/constants.rs</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 6 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--nebula-violet);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 06</span>
+          <span class="stage-title">Spectral Rendering</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">Instead of drawing in RGB, the renderer accumulates energy across 16 wavelength bins (380-700 nm) -- the full visible spectrum. One million timesteps of triangle edges are drawn with anti-aliased, velocity-dependent spectral light.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Spectral Bins</div>
+            <div class="detail-value"><span class="hl-cyan">16 bins</span>, 20 nm each, from 380 nm (deep violet) to 700 nm (far red). Each pixel stores a full spectral power distribution.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Line Drawing</div>
+            <div class="detail-value">Anti-aliased with <span class="hl-violet">Gaussian falloff</span>: energy = &alpha; &times; exp(-d&sup2; / &sigma;&sup2;). Fractional bin interpolation prevents spectral aliasing.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Velocity Thickness</div>
+            <div class="detail-value">Fast bodies &rarr; thin, bright streaks. Slow bodies &rarr; wider, softer trails. <span class="hl-rose">HDR boost up to 8x</span> at close encounters.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Depth Effects</div>
+            <div class="detail-value">Circle-of-confusion (depth of field) + exponential depth fade: <span class="code">exp(-|z| &times; 0.002)</span></div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Spectral Shift</div>
+            <div class="detail-value">High-energy pixels undergo <span class="hl-gold">red-shift</span> -- energy redistributed toward longer wavelengths for "heat glow" effect.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Chromatic Dispersion</div>
+            <div class="detail-value">Radial prismatic effect: each wavelength bin samples from slightly offset spatial positions, producing rainbow fringing near edges.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">SPD to RGB</div>
+            <div class="detail-value">Bruton-style wavelength&rarr;RGB basis with per-bin tone weights. SIMD-accelerated on x86_64.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/render/drawing.rs</span>, <span class="code">src/spectrum.rs</span>, <span class="code">src/spectral_constants.rs</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 7 -->
+      <div class="stage">
+        <div class="stage-dot" style="border-color: var(--aurora-cyan);"></div>
+        <div class="stage-header" onclick="toggle(this)">
+          <span class="stage-number">STAGE 07</span>
+          <span class="stage-title">Post-Processing &amp; Output</span>
+          <span class="stage-toggle">[+]</span>
+        </div>
+        <p class="stage-summary">A curated chain of post-effects transforms the raw spectral render into a polished artwork. Two-pass histogram tonemapping ensures optimal exposure. Output: 16-bit PNG + 30-second H.265 video at 60 fps.</p>
+        <div class="stage-details">
+          <div class="detail-row">
+            <div class="detail-label">Tonemapping</div>
+            <div class="detail-value"><span class="hl-gold">AgX-style</span> log/spline curve with matrix transforms. Two-pass histogram analysis for percentile-based exposure. Paper white: 0.92, highlight rolloff: 2.25.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Bloom &amp; Glow</div>
+            <div class="detail-value">DoG bloom (difference-of-Gaussians), chromatic bloom with per-channel offsets, broad-radius glow.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Nebula</div>
+            <div class="detail-value">Multi-octave <span class="hl-violet">OpenSimplex2S</span> noise (fBm-style) composited beneath trails. Per-seed density and coloring.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Color Grading</div>
+            <div class="detail-value">Cinematic grade: vibrance, clarity, tone curve, <span class="hl-cyan">cool shadow tint</span>, <span class="hl-gold">warm highlight tint</span>, vignette.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Additional Effects</div>
+            <div class="detail-value">Perceptual blur (OKLab space), micro-contrast, opalescence, champlev&eacute;, aether scattering, atmospheric depth, edge luminance, fine texture.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Video Encoding</div>
+            <div class="detail-value"><span class="hl-rose">H.265</span>, CRF 17, 10-bit color (yuv422p10le), 60 fps, ~30 seconds. Raw 16-bit frames piped to FFmpeg.</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Image Output</div>
+            <div class="detail-value"><span class="hl-green">16-bit PNG</span> for maximum color fidelity (65,536 levels per channel vs 256 for 8-bit).</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Source</div>
+            <div class="detail-value"><span class="code">src/render/effects.rs</span>, <span class="code">src/render/video.rs</span>, <span class="code">src/render/histogram.rs</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output formats -->
+    <div class="output-section">
+      <h2>Output Formats</h2>
+      <div class="output-grid">
+        <div class="output-card">
+          <div class="icon" style="color: var(--aurora-cyan);">&#128444;</div>
+          <div class="label">Still Image</div>
+          <div class="spec">16-bit PNG &bull; Up to 4K &bull; 65,536 levels/channel</div>
+        </div>
+        <div class="output-card">
+          <div class="icon" style="color: var(--chrono-rose);">&#127910;</div>
+          <div class="label">Video</div>
+          <div class="spec">H.265 &bull; 60 fps &bull; 10-bit &bull; ~30 seconds</div>
+        </div>
+        <div class="output-card">
+          <div class="icon" style="color: var(--solar-gold);">&#128196;</div>
+          <div class="label">Metadata</div>
+          <div class="spec">generation_log.json &bull; Full reproducibility</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key principles -->
+    <div class="principles">
+      <h2>Key Principles</h2>
+      <div class="principle-grid">
+        <div class="principle-card">
+          <div class="card-title" style="color: var(--solar-gold);">Deterministic</div>
+          <div class="card-text">Same seed = same art, every time. Verified by CI with SHA-256 hash comparison across builds. Your NFT's art is provably tied to its on-chain seed.</div>
+        </div>
+        <div class="principle-card">
+          <div class="card-title" style="color: var(--aurora-cyan);">Physics-Based</div>
+          <div class="card-text">Real Newtonian gravity and symplectic integration. The unpredictable beauty of the Three Body Problem is the artist -- not an AI model or random noise.</div>
+        </div>
+        <div class="principle-card">
+          <div class="card-title" style="color: var(--chrono-rose);">Spectral</div>
+          <div class="card-text">16 wavelength bins (380-700 nm) capture the full visible spectrum. Color mixing happens physically, producing transitions impossible in standard RGB.</div>
+        </div>
+        <div class="principle-card">
+          <div class="card-title" style="color: var(--impact-green);">Open Source (CC0)</div>
+          <div class="card-text">The entire codebase is public domain. Anyone can read the code, verify the algorithm, reproduce any NFT's art, or build on it.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 64px; padding-top: 32px; border-top: 1px solid rgba(108,60,225,0.1);">
+      <p style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.1rem; margin-bottom: 4px;">cosmicsignature.com &bull; cosmicsignature.art</p>
+      <p style="color: rgba(240,237,255,0.35); font-size: 0.8rem; margin-bottom: 4px;">Bid. Endure. Win. Give.</p>
+      <p style="color: rgba(240,237,255,0.25); font-size: 0.7rem;">Full technical details: <a href="art-algorithm-guide.md" style="color: var(--nebula-violet); text-decoration: none;">art-algorithm-guide.md</a></p>
+    </div>
+  </div>
+
+  <script>
+    function toggle(header) {
+      var details = header.parentElement.querySelector('.stage-details');
+      var toggleText = header.querySelector('.stage-toggle');
+      details.classList.toggle('open');
+      toggleText.textContent = details.classList.contains('open') ? '[-]' : '[+]';
+    }
+  </script>
+</body>
+</html>

@@ -675,7 +675,10 @@ mod tests {
         let result = upsample_bilinear(&input, w, h, w * 2, h * 2);
         assert_eq!(result.len(), w * h * 4);
         for pixel in &result {
-            assert!((pixel.0 - 1.0).abs() < 0.5, "Upsampled uniform data should stay near original");
+            assert!(
+                (pixel.0 - 1.0).abs() < 0.5,
+                "Upsampled uniform data should stay near original"
+            );
         }
     }
 
