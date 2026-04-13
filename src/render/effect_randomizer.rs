@@ -13,6 +13,7 @@ pub struct EffectRandomizer<'a> {
 
 impl<'a> EffectRandomizer<'a> {
     /// Wrap a deterministic [`Sha3RandomByteStream`] for effect parameter sampling.
+    #[must_use]
     pub fn new(rng: &'a mut Sha3RandomByteStream) -> Self {
         Self { rng }
     }
@@ -95,6 +96,7 @@ pub struct RandomizedParameter {
 }
 
 impl RandomizationRecord {
+    #[must_use]
     pub fn new(effect_name: impl Into<String>, enabled: bool, was_randomized: bool) -> Self {
         Self { effect_name: effect_name.into(), enabled, was_randomized, parameters: Vec::new() }
     }
@@ -137,6 +139,7 @@ pub struct RandomizationLog {
 }
 
 impl RandomizationLog {
+    #[must_use]
     pub fn new() -> Self {
         Self { effects: Vec::new() }
     }
@@ -259,6 +262,27 @@ mod tests {
         for _ in 0..100 {
             let (a, b) = randomizer.randomize_ordered_pair(&desc, &desc);
             assert!(a < b, "First value must be less than second: {} < {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_randomize_int_range() {
+        let mut rng = make_test_rng();
+        let mut randomizer = EffectRandomizer::new(&mut rng);
+
+        let descriptor = IntParamDescriptor {
+            name: "test_int",
+            min: 3,
+            max: 8,
+            description: "Test integer parameter",
+        };
+
+        for _ in 0..200 {
+            let value = randomizer.randomize_int(&descriptor);
+            assert!(
+                (3..=8).contains(&value),
+                "randomize_int returned {value}, expected [3, 8]",
+            );
         }
     }
 }

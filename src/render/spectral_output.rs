@@ -24,6 +24,7 @@ impl BinBuffers {
     ///
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
     /// bin's wavelength color, and applies display gamma.
+    #[must_use]
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
         let pixel_count = width * height;
         assert_eq!(accum_spd.len(), pixel_count);
@@ -53,6 +54,8 @@ impl BinBuffers {
         Self { buffers, width, height }
     }
 
+    /// Number of pixels (`width * height`) per bin buffer.
+    #[must_use]
     pub fn pixel_count(&self) -> usize {
         self.width * self.height
     }
@@ -98,9 +101,9 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
     let pixel_count = (width * height) as usize;
     let mut raw = Vec::with_capacity(pixel_count * 3);
     for pixel in buf {
-        raw.push(f64_to_u16_saturating(f64::from(pixel[0].clamp(0.0, 1.0)) * 65535.0));
-        raw.push(f64_to_u16_saturating(f64::from(pixel[1].clamp(0.0, 1.0)) * 65535.0));
-        raw.push(f64_to_u16_saturating(f64::from(pixel[2].clamp(0.0, 1.0)) * 65535.0));
+        raw.push(f64_to_u16_saturating(f64::from(pixel[0].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
+        raw.push(f64_to_u16_saturating(f64::from(pixel[1].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
+        raw.push(f64_to_u16_saturating(f64::from(pixel[2].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64));
     }
 
     let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
@@ -126,9 +129,9 @@ impl FramePixel for [u16; 3] {
     #[inline]
     fn from_rgb(r: f32, g: f32, b: f32) -> Self {
         [
-            (r.clamp(0.0, 1.0) * 65535.0).round() as u16,
-            (g.clamp(0.0, 1.0) * 65535.0).round() as u16,
-            (b.clamp(0.0, 1.0) * 65535.0).round() as u16,
+            (r.clamp(0.0, 1.0) * super::constants::U16_MAX_F64 as f32).round() as u16,
+            (g.clamp(0.0, 1.0) * super::constants::U16_MAX_F64 as f32).round() as u16,
+            (b.clamp(0.0, 1.0) * super::constants::U16_MAX_F64 as f32).round() as u16,
         ]
     }
 }

@@ -44,6 +44,8 @@ pub struct AtmosphericDepth {
 }
 
 impl AtmosphericDepth {
+    /// Creates the effect; it stays disabled when `config.strength` is zero.
+    #[must_use]
     pub fn new(config: AtmosphericDepthConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }

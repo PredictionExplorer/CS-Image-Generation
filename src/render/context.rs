@@ -5,7 +5,10 @@
 
 use nalgebra::Vector3;
 
-/// Type alias for pixel buffer - RGBA premultiplied
+/// Type alias for pixel buffers used throughout the pipeline.
+///
+/// Format: `(R, G, B, A)` with premultiplied alpha.
+/// Color channels may be linear or display-space depending on the render stage.
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
 /// Encapsulates common rendering operations and coordinate transformations
@@ -20,6 +23,7 @@ pub struct RenderContext {
 
 impl RenderContext {
     /// Creates a new render context from position data
+    #[must_use]
     pub fn new(
         width: u32,
         height: u32,
@@ -35,18 +39,21 @@ impl RenderContext {
     }
 
     /// Convert world coordinates to pixel coordinates
+    #[must_use]
     #[inline]
     pub fn to_pixel(&self, x: f64, y: f64) -> (f32, f32) {
         self.bounds.world_to_pixel(x, y, self.width, self.height)
     }
 
     /// Get total pixel count
+    #[must_use]
     #[inline]
     pub fn pixel_count(&self) -> usize {
         self.width_usize * self.height_usize
     }
 
     /// Get the bounding box used for coordinate transformations
+    #[must_use]
     #[inline]
     pub fn bounds(&self) -> &BoundingBox {
         &self.bounds
@@ -66,6 +73,7 @@ pub struct BoundingBox {
 
 impl BoundingBox {
     /// Create a new bounding box from position data
+    #[must_use]
     pub fn from_positions(positions: &[Vec<Vector3<f64>>]) -> Self {
         let (min_x, max_x, min_y, max_y) = crate::utils::bounding_box(positions);
         Self {
@@ -79,6 +87,7 @@ impl BoundingBox {
     }
 
     /// Convert world coordinates to normalized coordinates (0..1)
+    #[must_use]
     #[inline]
     pub fn normalize(&self, x: f64, y: f64) -> (f64, f64) {
         let nx = (x - self.min_x) / self.width;
@@ -87,6 +96,7 @@ impl BoundingBox {
     }
 
     /// Convert world coordinates to pixel coordinates
+    #[must_use]
     #[inline]
     pub fn world_to_pixel(&self, x: f64, y: f64, width: u32, height: u32) -> (f32, f32) {
         let (nx, ny) = self.normalize(x, y);

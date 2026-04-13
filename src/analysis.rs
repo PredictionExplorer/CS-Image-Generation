@@ -124,4 +124,98 @@ mod tests {
         assert!(sample_std_dev(&[]).is_nan());
         assert!(sample_std_dev(&[42.0]).is_nan());
     }
+
+    #[test]
+    fn test_calculate_total_energy_stationary_bodies() {
+        let bodies = vec![
+            Body::new(1.0, Vector3::new(1.0, 0.0, 0.0), Vector3::zeros()),
+            Body::new(1.0, Vector3::new(-1.0, 0.0, 0.0), Vector3::zeros()),
+        ];
+        let energy = calculate_total_energy(&bodies);
+        assert!(energy < 0.0, "Stationary bodies should have negative total energy (pure potential)");
+    }
+
+    #[test]
+    fn test_calculate_total_energy_single_body() {
+        let bodies = vec![Body::new(1.0, Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0))];
+        let energy = calculate_total_energy(&bodies);
+        assert!(energy > 0.0, "Single moving body should have positive kinetic energy");
+    }
+
+    #[test]
+    fn test_angular_momentum_zero_velocity() {
+        let bodies = vec![
+            Body::new(1.0, Vector3::new(1.0, 0.0, 0.0), Vector3::zeros()),
+            Body::new(1.0, Vector3::new(0.0, 1.0, 0.0), Vector3::zeros()),
+        ];
+        let l = calculate_total_angular_momentum(&bodies);
+        assert!(l.norm() < 1e-12, "Stationary bodies should have zero angular momentum");
+    }
+
+    #[test]
+    fn test_angular_momentum_circular_orbit() {
+        let bodies = vec![
+            Body::new(1.0, Vector3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0)),
+            Body::new(1.0, Vector3::new(-1.0, 0.0, 0.0), Vector3::new(0.0, -1.0, 0.0)),
+        ];
+        let l = calculate_total_angular_momentum(&bodies);
+        assert!(l[2].abs() > 0.1, "Circular orbit should have non-zero z-angular momentum");
+    }
+
+    #[test]
+    fn test_non_chaoticness_empty_returns_zero() {
+        let positions = vec![vec![], vec![], vec![]];
+        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn test_non_chaoticness_returns_finite() {
+        let n = 100;
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                (0..n)
+                    .map(|step| {
+                        let t = step as f64 * 0.1;
+                        let angle = t + body as f64 * std::f64::consts::TAU / 3.0;
+                        Vector3::new(angle.cos(), angle.sin(), 0.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
+        assert!(result.is_finite(), "non_chaoticness should return a finite value");
+        assert!(result >= 0.0);
+    }
+
+    #[test]
+    fn test_equilateralness_equilateral_triangle() {
+        let n = 50;
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                let angle = body as f64 * std::f64::consts::TAU / 3.0;
+                vec![Vector3::new(angle.cos(), angle.sin(), 0.0); n]
+            })
+            .collect();
+        let score = equilateralness_score(&positions);
+        assert!((score - 1.0).abs() < 1e-6, "Perfect equilateral should score ~1.0, got {score}");
+    }
+
+    #[test]
+    fn test_equilateralness_degenerate() {
+        let n = 10;
+        let positions = vec![
+            vec![Vector3::new(0.0, 0.0, 0.0); n],
+            vec![Vector3::new(100.0, 0.0, 0.0); n],
+            vec![Vector3::new(100.001, 0.0, 0.0); n],
+        ];
+        let score = equilateralness_score(&positions);
+        assert!(score < 0.05, "Near-degenerate triangle should score near 0, got {score}");
+    }
+
+    #[test]
+    fn test_equilateralness_empty_returns_zero() {
+        let positions = vec![vec![], vec![], vec![]];
+        assert_eq!(equilateralness_score(&positions), 0.0);
+    }
 }

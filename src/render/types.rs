@@ -3,8 +3,11 @@
 /// Tone-mapping controls shared across render stages.
 #[derive(Clone, Copy, Debug)]
 pub struct ToneMappingControls {
+    /// Global exposure multiplier applied before tone mapping.
     pub exposure_scale: f64,
+    /// Target luminance for diffuse white on display (paper white).
     pub paper_white: f64,
+    /// Strength of highlight compression above paper white.
     pub highlight_rolloff: f64,
 }
 
@@ -21,15 +24,21 @@ impl Default for ToneMappingControls {
 /// Channel levels for tone mapping.
 #[derive(Clone, Copy, Debug)]
 pub struct ChannelLevels {
+    /// Per-channel black points (shadow floor) in linear space.
     pub black: [f64; 3],
+    /// Per-channel span from black to white (white − black, clamped positive).
     pub range: [f64; 3],
+    /// Global exposure multiplier applied before tone mapping.
     pub exposure_scale: f64,
+    /// Target luminance for diffuse white on display (paper white).
     pub paper_white: f64,
+    /// Strength of highlight compression above paper white.
     pub highlight_rolloff: f64,
 }
 
 impl ChannelLevels {
     /// Create channel levels from black/white points.
+    #[must_use]
     #[inline]
     pub fn new(
         black_r: f64,
@@ -51,6 +60,7 @@ impl ChannelLevels {
     }
 
     /// Create channel levels with explicit tone-mapping controls.
+    #[must_use]
     #[inline]
     pub fn with_tone_mapping(
         black_r: f64,
@@ -74,26 +84,36 @@ impl ChannelLevels {
         }
     }
 
+    /// Black point for `channel` (0 = R, 1 = G, 2 = B).
+    #[must_use]
     #[inline]
     pub fn black_point(&self, channel: usize) -> f64 {
         self.black[channel]
     }
 
+    /// White-minus-black span for `channel` (0 = R, 1 = G, 2 = B).
+    #[must_use]
     #[inline]
     pub fn range(&self, channel: usize) -> f64 {
         self.range[channel]
     }
 
+    /// Global exposure multiplier used when building these levels.
+    #[must_use]
     #[inline]
     pub fn exposure_scale(&self) -> f64 {
         self.exposure_scale
     }
 
+    /// Paper-white target used when building these levels.
+    #[must_use]
     #[inline]
     pub fn paper_white(&self) -> f64 {
         self.paper_white
     }
 
+    /// Highlight rolloff strength used when building these levels.
+    #[must_use]
     #[inline]
     pub fn highlight_rolloff(&self) -> f64 {
         self.highlight_rolloff

@@ -41,6 +41,7 @@ pub struct EdgeLuminance {
 }
 
 impl EdgeLuminance {
+    #[must_use]
     pub fn new(config: EdgeLuminanceConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }
@@ -49,7 +50,7 @@ impl EdgeLuminance {
     /// Calculate luminance from RGB
     #[inline]
     fn calculate_luminance(r: f64, g: f64, b: f64) -> f64 {
-        0.2126 * r + 0.7152 * g + 0.0722 * b
+        crate::render::constants::rec709_luminance(r, g, b)
     }
 
     /// Get pixel luminance safely

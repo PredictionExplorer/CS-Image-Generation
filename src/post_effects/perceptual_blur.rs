@@ -31,6 +31,7 @@ impl Default for PerceptualBlurConfig {
 impl PerceptualBlurConfig {
     /// Create configuration scaled for the given resolution.
     /// This ensures the effect looks consistent across different resolutions.
+    #[must_use]
     pub fn from_resolution(width: usize, height: usize) -> Self {
         let min_dim = width.min(height) as f64;
         Self {
@@ -54,6 +55,7 @@ pub struct PerceptualBlur {
 
 impl PerceptualBlur {
     /// Creates a new perceptual blur effect with the given configuration.
+    #[must_use]
     pub fn new(config: PerceptualBlurConfig) -> Self {
         Self { config, enabled: true }
     }

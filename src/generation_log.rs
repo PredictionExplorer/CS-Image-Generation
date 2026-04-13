@@ -42,57 +42,95 @@ pub struct GenerationRecord {
     pub randomization_log: Option<crate::render::effect_randomizer::RandomizationLog>,
 }
 
+/// Snapshot of render pipeline settings written to the generation log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggedRenderConfig {
+    /// Output width in pixels.
     pub width: u32,
+    /// Output height in pixels.
     pub height: u32,
+    /// Lower percentile used as black point when leveling.
     pub clip_black: f64,
+    /// Upper percentile used as white point when leveling.
     pub clip_white: f64,
+    /// Denominator for alpha accumulation normalization.
     pub alpha_denom: usize,
+    /// Curve strength compressing very high alpha values.
     pub alpha_compress: f64,
+    /// Bloom algorithm name (`dog`, `gaussian`, or `none`).
     pub bloom_mode: String,
+    /// Difference-of-Gaussians bloom strength.
     pub dog_strength: f64,
+    /// Inner Gaussian sigma for DoG bloom, if overridden.
     pub dog_sigma: Option<f64>,
+    /// Outer-to-inner sigma ratio for DoG bloom.
     pub dog_ratio: f64,
+    /// HDR handling mode string (e.g. `auto`).
     pub hdr_mode: String,
+    /// Scalar applied to HDR accumulation before tone mapping.
     pub hdr_scale: f64,
+    /// Perceptual blur on/off flag string.
     pub perceptual_blur: String,
+    /// Blur radius in pixels when set.
     pub perceptual_blur_radius: Option<usize>,
+    /// Blend strength for perceptual blur.
     pub perceptual_blur_strength: f64,
+    /// Gamut mapping mode for blur (e.g. hue preservation).
     pub perceptual_gamut_mode: String,
 }
 
+/// Camera drift parameters used for the logged generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriftConfig {
+    /// Whether orbital drift is applied.
     pub enabled: bool,
+    /// Drift path style (e.g. `elliptical`).
     pub mode: String,
+    /// Overall scale of the drift motion.
     pub scale: f64,
+    /// Fraction of the orbit used per segment of motion.
     pub arc_fraction: f64,
+    /// Eccentricity of the drift ellipse.
     pub orbit_eccentricity: f64,
     /// Indicates if these values were randomly generated
     pub randomized: bool,
 }
 
+/// Physical simulation and Borda-weight parameters for the logged run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationConfig {
+    /// Number of parallel simulations sampled.
     pub num_sims: usize,
+    /// Integration steps per simulation.
     pub num_steps_sim: usize,
+    /// Initial position scale for bodies.
     pub location: f64,
+    /// Initial velocity scale for bodies.
     pub velocity: f64,
+    /// Minimum body mass in the sampled range.
     pub min_mass: f64,
+    /// Maximum body mass in the sampled range.
     pub max_mass: f64,
+    /// Borda weight favouring chaotic orbits.
     pub chaos_weight: f64,
+    /// Borda weight favouring equilibrium-like orbits.
     pub equil_weight: f64,
+    /// Score threshold below which an orbit is treated as escaping.
     pub escape_threshold: f64,
     /// Indicates if Borda weights were randomly generated
     pub weights_randomized: bool,
 }
 
+/// Borda selection outcome for the orbit used in this generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrbitInfo {
+    /// Index of the chosen candidate in the ranking list.
     pub selected_index: usize,
+    /// Aggregated Borda score of the selected orbit.
     pub weighted_score: f64,
+    /// Number of orbits that entered the selection pool.
     pub total_candidates: usize,
+    /// Candidates removed before ranking (e.g. failed filters).
     pub discarded_count: usize,
 }
 
@@ -183,6 +221,8 @@ pub struct GenerationLogger {
 }
 
 impl GenerationLogger {
+    /// Logger using the default `generation_log.json` and lock file paths.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             log_file_path: LOG_FILE_PATH.to_string(),
@@ -190,7 +230,9 @@ impl GenerationLogger {
         }
     }
 
+    /// Test helper: logger using custom log and lock file paths.
     #[cfg(test)]
+    #[must_use]
     pub fn with_paths(log_path: impl Into<String>, lock_path: impl Into<String>) -> Self {
         Self { log_file_path: log_path.into(), lock_file_path: lock_path.into() }
     }

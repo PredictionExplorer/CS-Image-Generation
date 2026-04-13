@@ -122,6 +122,7 @@ impl VideoEncodingOptions {
     ///
     /// Best for: Preview renders, iteration, batch generation
     #[cfg(target_os = "macos")]
+    #[must_use]
     pub fn fast_encode() -> Self {
         Self {
             codec: "hevc_videotoolbox".to_string(),
@@ -158,6 +159,7 @@ impl VideoEncodingOptions {
 
     /// Fast encoding fallback for non-macOS platforms (H.264 with faster settings)
     #[cfg(not(target_os = "macos"))]
+    #[must_use]
     pub fn fast_encode() -> Self {
         Self {
             codec: "libx264".to_string(),

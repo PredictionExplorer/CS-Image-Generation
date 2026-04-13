@@ -82,6 +82,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
 }
 
 /// Prepare triangle vertices from position data for batched drawing
+#[must_use]
 #[inline]
 pub fn prepare_triangle_vertices(
     positions: &[Vec<Vector3<f64>>],

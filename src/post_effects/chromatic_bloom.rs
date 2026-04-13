@@ -29,6 +29,7 @@ impl Default for ChromaticBloomConfig {
 impl ChromaticBloomConfig {
     /// Create configuration scaled for the given resolution.
     /// This ensures the effect looks consistent across different resolutions.
+    #[must_use]
     pub fn from_resolution(width: usize, height: usize) -> Self {
         let min_dim = width.min(height) as f64;
         Self {
@@ -50,6 +51,8 @@ pub struct ChromaticBloom {
 }
 
 impl ChromaticBloom {
+    /// Creates a chromatic bloom stage from the given configuration.
+    #[must_use]
     pub fn new(config: ChromaticBloomConfig) -> Self {
         Self { config, enabled: true }
     }
@@ -64,7 +67,7 @@ impl ChromaticBloom {
                 }
 
                 // Calculate luminance (Rec. 709)
-                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                let lum = crate::render::constants::rec709_luminance(r, g, b);
 
                 // Threshold-based extraction with smooth falloff
                 let brightness =
@@ -281,5 +284,91 @@ impl PostEffect for ChromaticBloom {
             .collect();
 
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_matches_1080p() {
+        let cfg = ChromaticBloomConfig::default();
+        let explicit = ChromaticBloomConfig::from_resolution(1920, 1080);
+        assert_eq!(cfg.radius, explicit.radius);
+        assert_eq!(cfg.separation, explicit.separation);
+        assert_eq!(cfg.strength, explicit.strength);
+        assert_eq!(cfg.threshold, explicit.threshold);
+    }
+
+    #[test]
+    fn test_from_resolution_scales_radius() {
+        let small = ChromaticBloomConfig::from_resolution(640, 480);
+        let large = ChromaticBloomConfig::from_resolution(3840, 2160);
+        assert!(large.radius > small.radius);
+        assert!(large.separation > small.separation);
+    }
+
+    #[test]
+    fn test_is_enabled_default() {
+        let bloom = ChromaticBloom::new(ChromaticBloomConfig::default());
+        assert!(bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_is_enabled_zero_strength() {
+        let cfg = ChromaticBloomConfig { strength: 0.0, ..ChromaticBloomConfig::default() };
+        let bloom = ChromaticBloom::new(cfg);
+        assert!(!bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_is_enabled_zero_radius() {
+        let cfg = ChromaticBloomConfig { radius: 0, ..ChromaticBloomConfig::default() };
+        let bloom = ChromaticBloom::new(cfg);
+        assert!(!bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_disabled_passthrough() {
+        let cfg = ChromaticBloomConfig { strength: 0.0, ..ChromaticBloomConfig::default() };
+        let bloom = ChromaticBloom::new(cfg);
+        let input = vec![(0.5, 0.3, 0.2, 1.0); 100];
+        let output = bloom.process(&input, 10, 10).unwrap();
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn test_process_preserves_alpha() {
+        let bloom = ChromaticBloom::new(ChromaticBloomConfig::from_resolution(100, 100));
+        let input: PixelBuffer = (0..100).map(|i| {
+            let v = i as f64 / 100.0;
+            (v, v, v, 0.8)
+        }).collect();
+        let output = bloom.process(&input, 10, 10).unwrap();
+        for (inp, out) in input.iter().zip(output.iter()) {
+            assert_eq!(inp.3, out.3, "Alpha must be preserved");
+        }
+    }
+
+    #[test]
+    fn test_bright_extraction_threshold() {
+        let cfg = ChromaticBloomConfig { threshold: 0.5, ..ChromaticBloomConfig::default() };
+        let bloom = ChromaticBloom::new(cfg);
+        let dark = vec![(0.1, 0.1, 0.1, 1.0)];
+        let bright = vec![(0.9, 0.9, 0.9, 1.0)];
+
+        let dark_out = bloom.extract_bright_pixels(&dark);
+        let bright_out = bloom.extract_bright_pixels(&bright);
+
+        assert!(dark_out[0].0 < bright_out[0].0, "Bright pixels should have higher extraction");
+    }
+
+    #[test]
+    fn test_transparent_pixel_extraction() {
+        let bloom = ChromaticBloom::new(ChromaticBloomConfig::default());
+        let input = vec![(0.0, 0.0, 0.0, 0.0)];
+        let output = bloom.extract_bright_pixels(&input);
+        assert_eq!(output[0], (0.0, 0.0, 0.0, 0.0));
     }
 }

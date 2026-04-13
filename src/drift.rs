@@ -11,12 +11,16 @@ pub trait DriftTransform {
 /// Shared configuration for every drift strategy.
 #[derive(Clone, Copy, Debug)]
 pub struct DriftParameters {
+    /// Non-negative multiplier for drift magnitude and elliptical orbit size.
     pub scale: f64,
+    /// Fraction of one full rotation (0–1) swept during elliptical drift.
     pub arc_fraction: f64,
+    /// Orbital eccentricity for elliptical drift (0 is circular; clamped below 1).
     pub eccentricity: f64,
 }
 
 impl DriftParameters {
+    #[must_use]
     pub fn new(scale: f64, arc_fraction: f64, eccentricity: f64) -> Self {
         let clamped_scale = scale.max(0.0);
         let clamped_arc = arc_fraction.clamp(0.0, 1.0);
@@ -40,6 +44,7 @@ impl DriftParameters {
         Self { scale: clamped_scale, arc_fraction: clamped_arc, eccentricity: clamped_ecc }
     }
 
+    #[must_use]
     #[inline]
     pub fn sweep_radians(&self) -> f64 {
         self.arc_fraction * crate::render::constants::TWO_PI
@@ -370,5 +375,112 @@ mod tests {
         let mut drift = EllipticalDrift::new(&mut rng, params);
         drift.apply(&mut positions, 0.001);
         assert_eq!(positions, positions_clone);
+    }
+
+    #[test]
+    fn test_parse_drift_mode_none() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.5, 0.1);
+        let mut drift = parse_drift_mode("none", &mut rng, params, 100);
+        let mut positions = test_bodies();
+        let original = positions.clone();
+        drift.apply(&mut positions, 0.001);
+        assert_eq!(positions, original, "NoDrift should not modify positions");
+    }
+
+    #[test]
+    fn test_parse_drift_mode_brownian() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.5, 0.1);
+        let mut drift = parse_drift_mode("brownian", &mut rng, params, 3);
+        let mut positions = test_bodies();
+        let original = positions.clone();
+        drift.apply(&mut positions, 0.001);
+        assert_ne!(positions, original, "BrownianDrift should modify positions");
+    }
+
+    #[test]
+    fn test_parse_drift_mode_linear() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.5, 0.1);
+        let mut drift = parse_drift_mode("linear", &mut rng, params, 3);
+        let mut positions = test_bodies();
+        drift.apply(&mut positions, 0.001);
+        // Step 0 has zero offset from linear drift, but later steps should differ
+        let initial_step1 = Vector3::new(1.0, 0.0, 0.0);
+        assert_ne!(positions[0][1], initial_step1, "LinearDrift should offset later steps");
+    }
+
+    #[test]
+    fn test_parse_drift_mode_elliptical() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.25, 0.1);
+        let mut drift = parse_drift_mode("elliptical", &mut rng, params, 3);
+        let mut positions = test_bodies();
+        drift.apply(&mut positions, 0.001);
+        let initial = Vector3::new(1.0, 0.0, 0.0);
+        assert_ne!(positions[0][1], initial);
+    }
+
+    #[test]
+    fn test_parse_drift_mode_unknown_defaults_to_brownian() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.5, 0.1);
+        let mut drift = parse_drift_mode("unknown_xyz", &mut rng, params, 3);
+        let mut positions = test_bodies();
+        let original = positions.clone();
+        drift.apply(&mut positions, 0.001);
+        assert_ne!(positions, original, "Unknown mode defaults to brownian");
+    }
+
+    #[test]
+    fn test_drift_parameters_clamping() {
+        let p = DriftParameters::new(-5.0, 2.0, 1.0);
+        assert_eq!(p.scale, 0.0, "Negative scale should clamp to 0");
+        assert_eq!(p.arc_fraction, 1.0, "arc_fraction > 1 should clamp to 1");
+        assert_eq!(p.eccentricity, 0.95, "eccentricity > 0.95 should clamp to 0.95");
+    }
+
+    #[test]
+    fn test_sweep_radians() {
+        let p = DriftParameters::new(1.0, 0.5, 0.0);
+        let expected = 0.5 * crate::render::constants::TWO_PI;
+        assert!((p.sweep_radians() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_no_drift_leaves_positions_unchanged() {
+        let mut positions = test_bodies();
+        let original = positions.clone();
+        NoDrift.apply(&mut positions, 0.001);
+        assert_eq!(positions, original);
+    }
+
+    #[test]
+    fn test_brownian_drift_accumulates_offset() {
+        let mut rng = make_rng();
+        let mut drift = BrownianDrift::new(&mut rng, 1.0, 3);
+        let mut positions = test_bodies();
+        drift.apply(&mut positions, 0.001);
+        // All bodies at the same timestep get the same offset
+        let offset_0 = positions[0][2] - Vector3::new(1.0, 0.0, 0.0);
+        let offset_1 = positions[1][2] - Vector3::new(0.0, 1.0, 0.0);
+        assert!((offset_0 - offset_1).norm() < 1e-10, "All bodies should share the same drift offset");
+    }
+
+    #[test]
+    fn test_linear_drift_grows_with_step() {
+        let mut rng = make_rng();
+        let mut drift = LinearDrift::new(&mut rng, 1.0);
+        let steps = 10;
+        let mut positions = vec![
+            vec![Vector3::new(0.0, 0.0, 0.0); steps],
+            vec![Vector3::new(1.0, 0.0, 0.0); steps],
+            vec![Vector3::new(0.0, 1.0, 0.0); steps],
+        ];
+        drift.apply(&mut positions, 0.001);
+        let offset_early = (positions[0][1] - Vector3::zeros()).norm();
+        let offset_late = (positions[0][steps - 1] - Vector3::zeros()).norm();
+        assert!(offset_late > offset_early, "Linear drift should grow over time");
     }
 }

@@ -46,6 +46,7 @@ pub struct Opalescence {
 }
 
 impl Opalescence {
+    #[must_use]
     pub fn new(config: OpalescenceConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }
@@ -162,7 +163,7 @@ impl PostEffect for Opalescence {
                 let sb = b / a;
 
                 // Calculate luminance
-                let lum = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
+                let lum = crate::render::constants::rec709_luminance(sr, sg, sb);
 
                 // Pixel coordinates
                 let x = (idx % width) as f64;

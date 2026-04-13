@@ -28,6 +28,7 @@ impl Default for TemporalSmoothingConfig {
 
 impl TemporalSmoothingConfig {
     /// Create configuration for special mode (stronger smoothing)
+    #[must_use]
     pub fn special_mode() -> Self {
         Self {
             blend_factor: 0.25,    // 25% of previous frame
@@ -48,6 +49,7 @@ pub struct TemporalSmoothing {
 }
 
 impl TemporalSmoothing {
+    #[must_use]
     pub fn new(config: TemporalSmoothingConfig) -> Self {
         let enabled = config.blend_factor > 0.0;
         Self { config, enabled, previous_frame: Mutex::new(None) }

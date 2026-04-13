@@ -575,4 +575,88 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_body_new_zero_acceleration() {
+        let b = Body::new(5.0, Vector3::new(1.0, 2.0, 3.0), Vector3::new(0.1, 0.2, 0.3));
+        assert_eq!(b.mass, 5.0);
+        assert_eq!(b.position, Vector3::new(1.0, 2.0, 3.0));
+        assert_eq!(b.velocity, Vector3::new(0.1, 0.2, 0.3));
+        assert_eq!(b.acceleration, Vector3::zeros());
+    }
+
+    #[test]
+    fn test_next_byte_produces_values() {
+        let mut rng = Sha3RandomByteStream::new(&[42], 1.0, 2.0, 1.0, 1.0);
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            seen.insert(rng.next_byte());
+        }
+        assert!(seen.len() > 200, "RNG should produce diverse byte values, only got {}", seen.len());
+    }
+
+    #[test]
+    fn test_next_f64_in_unit_range() {
+        let mut rng = Sha3RandomByteStream::new(&[99], 1.0, 2.0, 1.0, 1.0);
+        for _ in 0..10_000 {
+            let v = rng.next_f64();
+            assert!((0.0..=1.0).contains(&v), "next_f64 returned {v}, expected [0, 1]");
+        }
+    }
+
+    #[test]
+    fn test_random_mass_in_range() {
+        let mut rng = Sha3RandomByteStream::new(&[7], 100.0, 300.0, 1.0, 1.0);
+        for _ in 0..1000 {
+            let m = rng.random_mass();
+            assert!((100.0..=300.0).contains(&m), "mass {m} not in [100, 300]");
+        }
+    }
+
+    #[test]
+    fn test_shift_bodies_to_com_centers_position() {
+        let mut bodies = vec![
+            Body::new(1.0, Vector3::new(10.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)),
+            Body::new(1.0, Vector3::new(-10.0, 0.0, 0.0), Vector3::new(-1.0, 0.0, 0.0)),
+            Body::new(1.0, Vector3::new(0.0, 20.0, 0.0), Vector3::new(0.0, -2.0, 0.0)),
+        ];
+        shift_bodies_to_com(&mut bodies);
+
+        let mt: f64 = bodies.iter().map(|b| b.mass).sum();
+        let com: Vector3<f64> = bodies.iter().map(|b| b.mass * b.position).sum::<Vector3<f64>>() / mt;
+        assert!(com.norm() < 1e-10, "COM should be at origin, got {com:?}");
+
+        let mom: Vector3<f64> = bodies.iter().map(|b| b.mass * b.velocity).sum();
+        assert!(mom.norm() < 1e-10, "Total momentum should be zero, got {mom:?}");
+    }
+
+    #[test]
+    fn test_is_definitely_escaping_bound_system() {
+        let bodies = vec![
+            Body::new(200.0, Vector3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.01, 0.0)),
+            Body::new(200.0, Vector3::new(-1.0, 0.0, 0.0), Vector3::new(0.0, -0.01, 0.0)),
+            Body::new(200.0, Vector3::new(0.0, 1.0, 0.0), Vector3::new(0.01, 0.0, 0.0)),
+        ];
+        assert!(!is_definitely_escaping(&bodies, 0.0), "Close, slow bodies should not escape");
+    }
+
+    #[test]
+    fn test_is_definitely_escaping_fast_body() {
+        let bodies = vec![
+            Body::new(1.0, Vector3::new(1000.0, 0.0, 0.0), Vector3::new(1e6, 0.0, 0.0)),
+            Body::new(1.0, Vector3::new(-1.0, 0.0, 0.0), Vector3::zeros()),
+            Body::new(1.0, Vector3::new(0.0, 1.0, 0.0), Vector3::zeros()),
+        ];
+        assert!(is_definitely_escaping(&bodies, 0.0), "Very fast, far body should be escaping");
+    }
+
+    #[test]
+    fn test_full_sim_debug() {
+        let sim = FullSim {
+            positions: vec![vec![Vector3::zeros(); 10]; 3],
+        };
+        let dbg = format!("{sim:?}");
+        assert!(dbg.contains("num_bodies"));
+        assert!(dbg.contains("num_steps"));
+    }
 }

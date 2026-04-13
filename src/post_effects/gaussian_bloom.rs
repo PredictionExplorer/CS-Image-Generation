@@ -25,6 +25,7 @@ pub struct GaussianBloom {
 
 impl GaussianBloom {
     /// Creates a new Gaussian bloom effect with the given parameters.
+    #[must_use]
     pub fn new(radius: usize, strength: f64, core_brightness: f64) -> Self {
         Self { radius, strength, core_brightness, enabled: true }
     }
@@ -40,7 +41,7 @@ impl GaussianBloom {
                 let sr = r / a;
                 let sg = g / a;
                 let sb = b / a;
-                let luminance = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
+                let luminance = crate::render::constants::rec709_luminance(sr, sg, sb);
                 let factor = utils::highlight_extract_factor(luminance);
                 (r * factor, g * factor, b * factor, a * factor)
             })

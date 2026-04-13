@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info};
 
+/// When true, tonemapping uses the AgX punchy output matrix instead of default AgX.
 pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
@@ -67,6 +68,7 @@ pub enum BloomMode {
 }
 
 impl BloomMode {
+    #[must_use]
     pub fn from_arg(value: &str) -> Self {
         match value {
             v if v.eq_ignore_ascii_case("gaussian") => Self::Gaussian,
@@ -75,6 +77,7 @@ impl BloomMode {
         }
     }
 
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Dog => "dog",
@@ -99,10 +102,13 @@ impl Default for RenderConfig {
     }
 }
 
+/// Whether the finish pipeline targets a single still or a video sequence.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FinishOutputMode {
+    /// Single accumulated frame (still export and histogram-style passes).
     #[default]
     Still,
+    /// Multi-frame output (video encoding and temporal options).
     Video,
 }
 
@@ -129,6 +135,7 @@ impl<'a> std::fmt::Debug for SpectralScene<'a> {
 
 impl<'a> SpectralScene<'a> {
     /// Bundle trajectory positions, colours, and alpha weights into a scene view.
+    #[must_use]
     pub fn new(
         positions: &'a [Vec<Vector3<f64>>],
         colors: &'a [Vec<OklabColor>],
@@ -138,12 +145,14 @@ impl<'a> SpectralScene<'a> {
     }
 
     /// Number of simulation timesteps recorded for each body.
+    #[must_use]
     #[inline]
     pub fn step_count(self) -> usize {
         self.positions[0].len()
     }
 
     /// Extract the three body alphas into a fixed-size array for triangle drawing.
+    #[must_use]
     #[inline]
     pub fn triangle_alphas(self) -> [f64; 3] {
         [self.body_alphas[0], self.body_alphas[1], self.body_alphas[2]]
@@ -175,6 +184,7 @@ impl<'a> std::fmt::Debug for SpectralRenderSettings<'a> {
 
 impl<'a> SpectralRenderSettings<'a> {
     /// Bundle all spectral render inputs into a single settings struct.
+    #[must_use]
     pub fn new(
         resolved_config: &'a randomizable_config::ResolvedEffectConfig,
         render_config: &'a RenderConfig,
@@ -187,7 +197,7 @@ impl<'a> SpectralRenderSettings<'a> {
 
 #[inline]
 fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) -> [f64; 3] {
-    let luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    let luminance = constants::rec709_luminance(rgb[0], rgb[1], rgb[2]);
     if luminance <= paper_white || luminance <= 1e-10 {
         return rgb;
     }
@@ -295,9 +305,9 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
 fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [u16; 3] {
     let channels = tonemap_core(fr, fg, fb, fa, levels);
     [
-        crate::utils::f64_to_u16_saturating((channels[0] * 65535.0).round()),
-        crate::utils::f64_to_u16_saturating((channels[1] * 65535.0).round()),
-        crate::utils::f64_to_u16_saturating((channels[2] * 65535.0).round()),
+        crate::utils::f64_to_u16_saturating((channels[0] * constants::U16_MAX_F64).round()),
+        crate::utils::f64_to_u16_saturating((channels[1] * constants::U16_MAX_F64).round()),
+        crate::utils::f64_to_u16_saturating((channels[2] * constants::U16_MAX_F64).round()),
     ]
 }
 
@@ -329,9 +339,9 @@ fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> Pi
 fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf_16bit = vec![0u16; pixels.len() * 3];
     buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
-        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        chunk[0] = (r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
     });
     buf_16bit
 }
@@ -402,6 +412,7 @@ fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> Pixe
 
 /// Derive the perceptual-blur radius (in pixels) after accounting for the combined
 /// softness of all enabled blur/bloom effects. Returns `None` when blur is disabled.
+#[must_use]
 pub fn compute_softness_radius(
     resolved: &randomizable_config::ResolvedEffectConfig,
     bloom_mode: BloomMode,
@@ -615,6 +626,7 @@ fn build_fine_texture_config(
 }
 
 /// Build a fully populated [`EffectConfig`] from resolved parameters and render settings.
+#[must_use]
 pub fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
@@ -931,33 +943,33 @@ pub(crate) fn pass_1_build_histogram_spectral_serial_reference(
     )
 }
 
+/// Bundled parameters for `pass_2_write_frames_spectral` and its backend variants.
+///
+/// Groups the non-closure state that every pass-2 call site must supply,
+/// keeping the function signatures under clippy's argument-count threshold.
+pub struct Pass2Params<'a> {
+    /// Trajectory positions, colours, and per-body alphas to draw.
+    pub scene: SpectralScene<'a>,
+    /// Simulation steps between emitted video frames.
+    pub frame_interval: usize,
+    /// Per-channel black/white levels from pass 1 histogram analysis.
+    pub levels: &'a ChannelLevels,
+    /// Resolved effects, HDR scale, bloom, noise seed, and aspect handling.
+    pub settings: SpectralRenderSettings<'a>,
+    /// Receives the final frame as 16-bit RGB when the pass completes.
+    pub last_frame_out: &'a mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
+    /// When true, blends consecutive display frames to reduce temporal noise.
+    pub enable_temporal_smoothing: bool,
+    /// Scratch buffer for per-pixel spectral power distributions (reused across checkpoints).
+    pub accum_spd: &'a mut Vec<[f64; NUM_BINS]>,
+}
+
 #[cfg(test)]
-// Parameter count is inherently high: mixes owned accumulation state (`accum_spd`),
-// a generic `frame_sink` closure, and several borrowed config/output refs that cannot
-// be bundled into a single struct without introducing a lifetime-heavy wrapper around
-// the `FnMut` sink.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn pass_2_write_frames_spectral_serial_reference(
-    scene: SpectralScene<'_>,
-    frame_interval: usize,
-    levels: &ChannelLevels,
-    settings: SpectralRenderSettings<'_>,
+    params: Pass2Params<'_>,
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
-    last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    enable_temporal_smoothing: bool,
-    accum_spd: &mut Vec<[f64; NUM_BINS]>,
 ) -> Result<()> {
-    pass_2_write_frames_spectral_with_backend(
-        scene,
-        frame_interval,
-        levels,
-        settings,
-        frame_sink,
-        last_frame_out,
-        enable_temporal_smoothing,
-        AccumulationBackend::SerialReference,
-        accum_spd,
-    )
+    pass_2_write_frames_spectral_with_backend(params, frame_sink, AccumulationBackend::SerialReference)
 }
 
 // ====================== PASS 2 (SPECTRAL) ===========================
@@ -965,22 +977,12 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
 ///
 /// The caller-provided `accum_spd` buffer is populated incrementally and contains
 /// the fully accumulated spectral data when this function returns.
-// Parameter count is inherently high: mixes owned accumulation state (`accum_spd`),
-// a generic `frame_sink` closure, and several borrowed config/output refs that cannot
-// be bundled into a single struct without introducing a lifetime-heavy wrapper around
-// the `FnMut` sink.
-#[allow(clippy::too_many_arguments)]
 fn pass_2_write_frames_spectral_with_backend(
-    scene: SpectralScene<'_>,
-    frame_interval: usize,
-    levels: &ChannelLevels,
-    settings: SpectralRenderSettings<'_>,
+    params: Pass2Params<'_>,
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
-    last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    enable_temporal_smoothing: bool,
     backend: AccumulationBackend,
-    accum_spd: &mut Vec<[f64; NUM_BINS]>,
 ) -> Result<()> {
+    let Pass2Params { scene, frame_interval, levels, settings, last_frame_out, enable_temporal_smoothing, accum_spd } = params;
     let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
         settings;
     let width = resolved_config.width;
@@ -1089,29 +1091,11 @@ fn pass_2_write_frames_spectral_with_backend(
 }
 
 /// Pass 2: render frames with spectral accumulation and feed 16-bit bytes to `frame_sink`.
-// See `pass_2_write_frames_spectral_with_backend` for rationale.
-#[allow(clippy::too_many_arguments)]
 pub fn pass_2_write_frames_spectral(
-    scene: SpectralScene<'_>,
-    frame_interval: usize,
-    levels: &ChannelLevels,
-    settings: SpectralRenderSettings<'_>,
-    mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
-    last_frame_out: &mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    enable_temporal_smoothing: bool,
-    accum_spd: &mut Vec<[f64; NUM_BINS]>,
+    params: Pass2Params<'_>,
+    frame_sink: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
-    pass_2_write_frames_spectral_with_backend(
-        scene,
-        frame_interval,
-        levels,
-        settings,
-        &mut frame_sink,
-        last_frame_out,
-        enable_temporal_smoothing,
-        default_accumulation_backend(),
-        accum_spd,
-    )
+    pass_2_write_frames_spectral_with_backend(params, frame_sink, default_accumulation_backend())
 }
 
 /// Render the fully accumulated final frame without writing intermediate video frames.
@@ -1596,28 +1580,19 @@ mod tests {
                 };
                 let mut spd_buf = Vec::new();
 
+                let params = Pass2Params {
+                    scene,
+                    frame_interval,
+                    levels,
+                    settings,
+                    last_frame_out: &mut last_frame,
+                    enable_temporal_smoothing,
+                    accum_spd: &mut spd_buf,
+                };
                 if serial_reference {
-                    pass_2_write_frames_spectral_serial_reference(
-                        scene,
-                        frame_interval,
-                        levels,
-                        settings,
-                        frame_sink,
-                        &mut last_frame,
-                        enable_temporal_smoothing,
-                        &mut spd_buf,
-                    )
+                    pass_2_write_frames_spectral_serial_reference(params, frame_sink)
                 } else {
-                    pass_2_write_frames_spectral(
-                        scene,
-                        frame_interval,
-                        levels,
-                        settings,
-                        frame_sink,
-                        &mut last_frame,
-                        enable_temporal_smoothing,
-                        &mut spd_buf,
-                    )
+                    pass_2_write_frames_spectral(params, frame_sink)
                 }
             })
             .expect("frame rendering should succeed");

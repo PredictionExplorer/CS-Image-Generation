@@ -12,15 +12,25 @@ use rayon::prelude::*;
 /// Configuration for the champlevé iridescent finish.
 #[derive(Clone, Debug)]
 pub struct ChampleveConfig {
+    /// Target cell count scale from image area (higher yields smaller cells).
     pub cell_density: f64,
+    /// How strongly iridescence phase follows local gradient flow.
     pub flow_alignment: f64,
+    /// Strength of thin-film interference colour in cell interiors.
     pub interference_amplitude: f64,
+    /// Spatial frequency of the interference pattern.
     pub interference_frequency: f64,
+    /// Opacity of the warm metallic cell rim.
     pub rim_intensity: f64,
+    /// How much warm gold is mixed into the rim colour.
     pub rim_warmth: f64,
+    /// Sharpness of the transition from rim to interior.
     pub rim_sharpness: f64,
+    /// Brightness lift applied inside cells (away from the rim).
     pub interior_lift: f64,
+    /// Directional emphasis of colour along the flow field.
     pub anisotropy: f64,
+    /// Softens interior lift falloff from the cell edge.
     pub cell_softness: f64,
 }
 
@@ -137,4 +147,80 @@ pub fn apply_champleve_iridescence(
 
         *pixel = (sr.max(0.0) * a, sg.max(0.0) * a, sb.max(0.0) * a, a);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_uses_constants() {
+        let cfg = ChampleveConfig::default();
+        assert_eq!(cfg.cell_density, constants::DEFAULT_CHAMPLEVE_CELL_DENSITY);
+        assert_eq!(cfg.flow_alignment, constants::DEFAULT_CHAMPLEVE_FLOW_ALIGNMENT);
+        assert_eq!(cfg.rim_intensity, constants::DEFAULT_CHAMPLEVE_RIM_INTENSITY);
+    }
+
+    #[test]
+    fn test_voronoi_distances_ordered() {
+        for i in 0..50 {
+            let p = (i as f64 * 0.37, i as f64 * 0.53);
+            let (d1, d2) = voronoi_distances(p);
+            assert!(d1 <= d2, "Closest must be <= second closest at {p:?}");
+            assert!(d1 >= 0.0, "Distance cannot be negative");
+        }
+    }
+
+    #[test]
+    fn test_empty_buffer_is_noop() {
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![];
+        apply_champleve_iridescence(&mut buffer, 0, 0, &ChampleveConfig::default());
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_preserves_alpha() {
+        let w = 10;
+        let h = 10;
+        let mut buffer: Vec<(f64, f64, f64, f64)> = (0..w * h)
+            .map(|i| (0.5, 0.3, 0.2, 0.7 + (i as f64) * 0.001))
+            .collect();
+        let alphas: Vec<f64> = buffer.iter().map(|p| p.3).collect();
+        apply_champleve_iridescence(&mut buffer, w, h, &ChampleveConfig::default());
+        for (i, (pixel, &orig_a)) in buffer.iter().zip(alphas.iter()).enumerate() {
+            assert_eq!(pixel.3, orig_a, "Alpha changed at pixel {i}");
+        }
+    }
+
+    #[test]
+    fn test_modifies_visible_pixels() {
+        let w = 20;
+        let h = 20;
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.4, 0.3, 1.0); w * h];
+        let original = buffer.clone();
+        apply_champleve_iridescence(&mut buffer, w, h, &ChampleveConfig::default());
+        assert_ne!(buffer, original, "Effect should modify at least some pixels");
+    }
+
+    #[test]
+    fn test_transparent_pixels_unchanged() {
+        let mut buffer = vec![(0.5, 0.3, 0.2, 0.0); 100];
+        let original = buffer.clone();
+        apply_champleve_iridescence(&mut buffer, 10, 10, &ChampleveConfig::default());
+        assert_eq!(buffer, original);
+    }
+
+    #[test]
+    fn test_determinism() {
+        let w = 15;
+        let h = 15;
+        let cfg = ChampleveConfig::default();
+        let make_buf = || vec![(0.6, 0.4, 0.3, 1.0); w * h];
+
+        let mut a = make_buf();
+        let mut b = make_buf();
+        apply_champleve_iridescence(&mut a, w, h, &cfg);
+        apply_champleve_iridescence(&mut b, w, h, &cfg);
+        assert_eq!(a, b);
+    }
 }

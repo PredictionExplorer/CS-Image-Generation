@@ -33,6 +33,7 @@ pub struct MicroContrast {
 }
 
 impl MicroContrast {
+    #[must_use]
     pub fn new(config: MicroContrastConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }
@@ -84,7 +85,7 @@ impl MicroContrast {
     /// Calculate luminance
     #[inline]
     fn luminance(r: f64, g: f64, b: f64) -> f64 {
-        0.2126 * r + 0.7152 * g + 0.0722 * b
+        crate::render::constants::rec709_luminance(r, g, b)
     }
 
     /// Detect if pixel is on an edge (to avoid halos)

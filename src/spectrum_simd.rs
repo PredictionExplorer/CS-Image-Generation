@@ -25,6 +25,7 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 /// AVX2 path uses a vectorized exp() approximation (< 2e-11 relative error)
 /// for maximum throughput.  Results may differ from the scalar path by a few
 /// ULPs but are deterministic within the same architecture.
+#[must_use]
 #[inline]
 pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
@@ -57,6 +58,7 @@ fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64
 /// Uses index-based iteration for better auto-vectorization potential with
 /// `-C target-cpu=native` on platforms without explicit SIMD paths.
 #[cfg(test)]
+#[must_use]
 #[inline]
 pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);

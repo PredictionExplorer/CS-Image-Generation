@@ -108,6 +108,7 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
 }
 
 /// Derive noise seed from simulation seed for nebula generation
+#[must_use]
 pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
     let get_or_zero = |idx| seed_bytes.get(idx).copied().unwrap_or(0);
     i32::from_le_bytes([get_or_zero(0), get_or_zero(1), get_or_zero(2), get_or_zero(3)])
@@ -280,17 +281,19 @@ pub fn render_video(
         frame_rate,
         |out| {
             pass_2_write_frames_spectral(
-                scene,
-                frame_interval,
-                levels,
-                settings,
+                render::Pass2Params {
+                    scene,
+                    frame_interval,
+                    levels,
+                    settings,
+                    last_frame_out: &mut last_frame_png,
+                    enable_temporal_smoothing,
+                    accum_spd: &mut accum_spd,
+                },
                 |buf_8bit| {
                     out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
                     Ok(())
                 },
-                &mut last_frame_png,
-                enable_temporal_smoothing,
-                &mut accum_spd,
             )?;
             Ok(())
         },

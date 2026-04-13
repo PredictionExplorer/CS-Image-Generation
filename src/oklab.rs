@@ -30,6 +30,7 @@ pub enum GamutMapMode {
 ///   - L is lightness [0, 1]
 ///   - a is green-red axis [-0.4, 0.4] approximately
 ///   - b is blue-yellow axis [-0.4, 0.4] approximately
+#[must_use]
 #[inline]
 pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     // Step 1: Linear RGB to cone response (LMS)
@@ -59,6 +60,7 @@ pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
 ///
 /// # Returns
 /// * `(r, g, b)` - Linear RGB values (may be outside [0, 1] range)
+#[must_use]
 #[inline]
 pub fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     // Step 1: Lab to nonlinear cone response
@@ -83,6 +85,7 @@ pub fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
 ///
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
+#[must_use]
 pub fn linear_srgb_to_oklab_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
     pixels
         .par_iter()
@@ -97,6 +100,7 @@ pub fn linear_srgb_to_oklab_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, 
 ///
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
+#[must_use]
 pub fn oklab_to_linear_srgb_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
     pixels
         .par_iter()
@@ -112,6 +116,7 @@ impl GamutMapMode {
     ///
     /// Different strategies provide different tradeoffs between color accuracy
     /// and perceptual quality.
+    #[must_use]
     pub fn map_to_gamut(&self, r: f64, g: f64, b: f64) -> (f64, f64, f64) {
         match self {
             GamutMapMode::Clamp => {
@@ -128,8 +133,7 @@ impl GamutMapMode {
                     return (r, g, b);
                 }
 
-                // Calculate luminance using Rec. 709 coefficients
-                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                let lum = crate::render::constants::rec709_luminance(r, g, b);
 
                 // Binary search for the scale factor that brings the color into gamut
                 let mut low = 0.0;
@@ -347,9 +351,8 @@ mod tests {
         assert!((0.0..=1.0).contains(&g_out), "G out of gamut: {}", g_out);
         assert!((0.0..=1.0).contains(&b_out), "B out of gamut: {}", b_out);
 
-        // Test that the luminance is preserved
-        let lum_in = 0.2126 * r_in + 0.7152 * g_in + 0.0722 * b_in;
-        let lum_out = 0.2126 * r_out + 0.7152 * g_out + 0.0722 * b_out;
+        let lum_in = crate::render::constants::rec709_luminance(r_in, g_in, b_in);
+        let lum_out = crate::render::constants::rec709_luminance(r_out, g_out, b_out);
         let lum_expected = lum_in.clamp(0.0, 1.0);
         assert!(
             (lum_out - lum_expected).abs() < 0.01,

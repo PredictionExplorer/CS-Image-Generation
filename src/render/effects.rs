@@ -89,6 +89,7 @@ pub struct FinishEffectPipeline {
 
 impl FinishEffectPipeline {
     /// Create a new finish pipeline with given configuration
+    #[must_use]
     pub fn new(config: EffectConfig) -> Self {
         let trajectory_chain = Self::build_trajectory_chain(&config);
         let image_chain = Self::build_image_chain(&config);
@@ -276,6 +277,7 @@ pub struct MipPyramid {
 }
 
 impl MipPyramid {
+    #[must_use]
     pub fn new(base: &[(f64, f64, f64, f64)], width: usize, height: usize, levels: usize) -> Self {
         let mut pyramid =
             MipPyramid { levels: vec![base.to_vec()], widths: vec![width], heights: vec![height] };
@@ -323,6 +325,7 @@ impl MipPyramid {
 
 /// Standalone bilinear upsampling function for arbitrary data
 /// Handles premultiplied alpha values correctly
+#[must_use]
 pub fn upsample_bilinear(
     src: &[(f64, f64, f64, f64)],
     src_w: usize,
@@ -396,6 +399,7 @@ pub fn upsample_bilinear(
 }
 
 /// Apply Difference-of-Gaussians bloom effect
+#[must_use]
 pub fn apply_dog_bloom(
     input: &[(f64, f64, f64, f64)],
     width: usize,
@@ -624,5 +628,74 @@ mod tests {
 
         assert!(pipeline.trajectory_len() >= 1);
         assert_eq!(pipeline.image_len(), 1);
+    }
+
+    #[test]
+    fn test_mip_pyramid_dimensions() {
+        let w = 64;
+        let h = 64;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.5, 0.5, 1.0); w * h];
+        let pyramid = MipPyramid::new(&input, w, h, 3);
+        assert_eq!(pyramid.widths[0], w);
+        assert_eq!(pyramid.heights[0], h);
+        assert_eq!(pyramid.widths[1], w / 2);
+        assert_eq!(pyramid.heights[1], h / 2);
+        assert_eq!(pyramid.widths[2], w / 4);
+        assert_eq!(pyramid.heights[2], h / 4);
+        assert_eq!(pyramid.levels.len(), 3);
+    }
+
+    #[test]
+    fn test_mip_pyramid_single_level() {
+        let w = 16;
+        let h = 16;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(1.0, 0.5, 0.25, 1.0); w * h];
+        let pyramid = MipPyramid::new(&input, w, h, 1);
+        assert_eq!(pyramid.levels.len(), 1);
+        assert_eq!(pyramid.levels[0], input);
+    }
+
+    #[test]
+    fn test_upsample_bilinear_identity() {
+        let w = 4;
+        let h = 4;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.5, 0.5, 1.0); w * h];
+        let result = upsample_bilinear(&input, w, h, w, h);
+        assert_eq!(result.len(), w * h);
+        for pixel in &result {
+            assert!((pixel.0 - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_upsample_bilinear_doubles_size() {
+        let w = 4;
+        let h = 4;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(1.0, 0.5, 0.25, 1.0); w * h];
+        let result = upsample_bilinear(&input, w, h, w * 2, h * 2);
+        assert_eq!(result.len(), w * h * 4);
+        for pixel in &result {
+            assert!((pixel.0 - 1.0).abs() < 0.5, "Upsampled uniform data should stay near original");
+        }
+    }
+
+    #[test]
+    fn test_apply_dog_bloom_output_size() {
+        let w = 32;
+        let h = 32;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.5, 0.5, 1.0); w * h];
+        let result = apply_dog_bloom(&input, w, h, &DogBloomConfig::default());
+        assert_eq!(result.len(), w * h);
+    }
+
+    #[test]
+    fn test_apply_dog_bloom_dark_input_near_zero() {
+        let w = 16;
+        let h = 16;
+        let input: Vec<(f64, f64, f64, f64)> = vec![(0.01, 0.01, 0.01, 1.0); w * h];
+        let result = apply_dog_bloom(&input, w, h, &DogBloomConfig::default());
+        for pixel in &result {
+            assert!(pixel.0.abs() < 0.1, "Dark input should produce near-zero bloom");
+        }
     }
 }

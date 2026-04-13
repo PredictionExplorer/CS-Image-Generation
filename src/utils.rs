@@ -294,4 +294,40 @@ mod tests {
         assert_eq!(f64_to_u16_saturating(255.5), 255);
         assert_eq!(f64_to_u16_saturating(65534.999), 65534);
     }
+
+    #[test]
+    fn test_bounding_box_2d_basic() {
+        let positions = vec![
+            vec![Vector3::new(-5.0, 3.0, 0.0), Vector3::new(10.0, -2.0, 0.0)],
+            vec![Vector3::new(0.0, 7.0, 0.0)],
+        ];
+        let (min_x, max_x, min_y, max_y) = bounding_box_2d(&positions);
+        assert_eq!(min_x, -5.0);
+        assert_eq!(max_x, 10.0);
+        assert_eq!(min_y, -2.0);
+        assert_eq!(max_y, 7.0);
+    }
+
+    #[test]
+    fn test_bounding_box_2d_single_point() {
+        let positions = vec![vec![Vector3::new(3.0, 4.0, 5.0)]];
+        let (min_x, max_x, min_y, max_y) = bounding_box_2d(&positions);
+        assert_eq!(min_x, 3.0);
+        assert_eq!(max_x, 3.0);
+        assert_eq!(min_y, 4.0);
+        assert_eq!(max_y, 4.0);
+    }
+
+    #[test]
+    fn test_bounding_box_2d_ignores_z() {
+        let positions = vec![vec![
+            Vector3::new(0.0, 0.0, -100.0),
+            Vector3::new(0.0, 0.0, 100.0),
+        ]];
+        let (min_x, max_x, min_y, max_y) = bounding_box_2d(&positions);
+        assert_eq!(min_x, 0.0);
+        assert_eq!(max_x, 0.0);
+        assert_eq!(min_y, 0.0);
+        assert_eq!(max_y, 0.0);
+    }
 }

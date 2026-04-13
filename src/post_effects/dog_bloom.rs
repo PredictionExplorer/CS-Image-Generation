@@ -22,6 +22,7 @@ pub struct DogBloom {
 
 impl DogBloom {
     /// Creates a new DoG bloom effect with the given configuration.
+    #[must_use]
     pub fn new(config: DogBloomConfig, core_brightness: f64) -> Self {
         Self { config, core_brightness, enabled: true }
     }
@@ -37,7 +38,7 @@ impl DogBloom {
                 let sr = r / a;
                 let sg = g / a;
                 let sb = b / a;
-                let luminance = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
+                let luminance = crate::render::constants::rec709_luminance(sr, sg, sb);
                 let factor = utils::highlight_extract_factor(luminance);
                 (r * factor, g * factor, b * factor, a * factor)
             })
@@ -100,5 +101,35 @@ mod tests {
         assert!((output[0].0 - input[0].0).abs() < 1e-3);
         assert!((output[0].1 - input[0].1).abs() < 1e-3);
         assert!((output[0].2 - input[0].2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_dog_bloom_lifts_bright_pixels() {
+        let bloom = DogBloom::new(DogBloomConfig::default(), 12.0);
+        let w = 20;
+        let h = 20;
+        let input: PixelBuffer = vec![(2.0, 2.0, 2.0, 1.0); w * h];
+        let output = bloom.process(&input, w, h).unwrap();
+        let center = output[h / 2 * w + w / 2];
+        assert!(center.0 > input[0].0, "Bright pixels should be lifted by bloom");
+    }
+
+    #[test]
+    fn test_dog_bloom_disabled_passthrough() {
+        let mut bloom = DogBloom::new(DogBloomConfig::default(), 12.0);
+        bloom.enabled = false;
+        assert!(!bloom.is_enabled());
+    }
+
+    #[test]
+    fn test_dog_bloom_preserves_alpha() {
+        let bloom = DogBloom::new(DogBloomConfig::default(), 12.0);
+        let w = 10;
+        let h = 10;
+        let input: PixelBuffer = vec![(1.0, 1.0, 1.0, 0.75); w * h];
+        let output = bloom.process(&input, w, h).unwrap();
+        for (i, pixel) in output.iter().enumerate() {
+            assert_eq!(pixel.3, 0.75, "Alpha changed at pixel {i}");
+        }
     }
 }

@@ -5,10 +5,7 @@
 
 use thiserror::Error;
 
-/// Type alias for pixel buffers used throughout the pipeline.
-/// Format: (R, G, B, A) with premultiplied alpha.
-/// Color channels may be linear or display-space depending on the render stage.
-pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
+pub use crate::render::context::PixelBuffer;
 
 /// Error type for post-processing pipeline failures.
 #[derive(Debug, Error)]
@@ -57,6 +54,7 @@ pub struct PostEffectChain {
 
 impl PostEffectChain {
     /// Creates a new, empty effect chain.
+    #[must_use]
     pub fn new() -> Self {
         Self { effects: Vec::new() }
     }
@@ -124,7 +122,7 @@ pub mod nebula_clouds;
 pub mod opalescence;
 pub mod perceptual_blur;
 pub mod temporal_smoothing;
-pub mod utils;
+pub(super) mod utils;
 
 pub use aether::{AetherConfig, apply_aether_weave};
 pub use atmospheric_depth::{AtmosphericDepth, AtmosphericDepthConfig};

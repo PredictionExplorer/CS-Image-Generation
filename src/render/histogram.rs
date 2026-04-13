@@ -11,14 +11,23 @@ use rayon::prelude::*;
 /// Combined channel and luminance analysis used to drive tone mapping.
 #[derive(Clone, Copy, Debug)]
 pub struct TonemappingAnalysis {
+    /// Red channel black point from clipped histogram.
     pub black_r: f64,
+    /// Red channel white point from clipped histogram.
     pub white_r: f64,
+    /// Green channel black point from clipped histogram.
     pub black_g: f64,
+    /// Green channel white point from clipped histogram.
     pub white_g: f64,
+    /// Blue channel black point from clipped histogram.
     pub black_b: f64,
+    /// Blue channel white point from clipped histogram.
     pub white_b: f64,
+    /// High percentile of luminance after per-channel normalize, used for exposure target.
     pub normalized_luma_white: f64,
+    /// Fraction of samples that would clip after the chosen exposure scale.
     pub near_clip_ratio: f64,
+    /// Recommended exposure multiplier (≤ 1 after highlight budget).
     pub exposure_scale: f64,
 }
 
@@ -30,6 +39,7 @@ pub struct HistogramData {
 
 impl HistogramData {
     /// Create new histogram storage with given capacity
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self { data: Vec::with_capacity(capacity) }
     }
@@ -48,6 +58,7 @@ impl HistogramData {
     }
 
     /// Get raw histogram data for custom analysis
+    #[must_use]
     pub fn data(&self) -> &[[f64; 3]] {
         &self.data
     }
@@ -90,6 +101,7 @@ fn compute_black_white_gamma(
 }
 
 /// Analyze samples to produce channel levels plus a luminance-driven exposure scale.
+#[must_use]
 pub fn analyze_tonemapping(
     samples: &[[f64; 3]],
     clip_black: f64,
@@ -130,7 +142,7 @@ pub fn analyze_tonemapping(
         let nr = ((r - black_r).max(0.0)) / range_r;
         let ng = ((g - black_g).max(0.0)) / range_g;
         let nb = ((b - black_b).max(0.0)) / range_b;
-        normalized_luminances.push(0.2126 * nr + 0.7152 * ng + 0.0722 * nb);
+        normalized_luminances.push(constants::rec709_luminance(nr, ng, nb));
     }
 
     normalized_luminances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -194,5 +206,46 @@ mod tests {
 
         assert!(analysis.near_clip_ratio > 0.0);
         assert!(analysis.exposure_scale <= 1.0);
+    }
+
+    #[test]
+    fn test_histogram_data_with_capacity() {
+        let hist = HistogramData::with_capacity(100);
+        assert!(hist.data().is_empty());
+    }
+
+    #[test]
+    fn test_histogram_data_push_and_data() {
+        let mut hist = HistogramData::with_capacity(3);
+        hist.push(0.1, 0.2, 0.3);
+        hist.push(0.4, 0.5, 0.6);
+        let data = hist.data();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0], [0.1, 0.2, 0.3]);
+        assert_eq!(data[1], [0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn test_histogram_data_reserve() {
+        let mut hist = HistogramData::with_capacity(0);
+        hist.reserve(1000);
+        for i in 0..1000 {
+            let v = i as f64 / 1000.0;
+            hist.push(v, v, v);
+        }
+        assert_eq!(hist.data().len(), 1000);
+    }
+
+    #[test]
+    fn test_tonemapping_analysis_fields_finite() {
+        let samples: Vec<[f64; 3]> = (0..500).map(|i| {
+            let v = i as f64 / 500.0;
+            [v, v, v]
+        }).collect();
+        let analysis = analyze_tonemapping(&samples, 0.01, 0.99);
+        assert!(analysis.black_r.is_finite());
+        assert!(analysis.white_r.is_finite());
+        assert!(analysis.exposure_scale.is_finite());
+        assert!(analysis.exposure_scale > 0.0);
     }
 }

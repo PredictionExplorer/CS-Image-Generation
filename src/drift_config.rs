@@ -25,6 +25,7 @@ pub struct ResolvedDriftConfig {
 
 impl ResolvedDriftConfig {
     /// Create drift configuration from explicit values
+    #[must_use]
     pub fn from_values(scale: f64, arc_fraction: f64, orbit_eccentricity: f64) -> Self {
         Self { scale, arc_fraction, orbit_eccentricity, was_randomized: false }
     }

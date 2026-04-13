@@ -43,6 +43,7 @@ pub struct GlowEnhancement {
 }
 
 impl GlowEnhancement {
+    #[must_use]
     pub fn new(config: GlowEnhancementConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }
@@ -58,7 +59,7 @@ impl GlowEnhancement {
             let sr = r / a;
             let sg = g / a;
             let sb = b / a;
-            0.2126 * sr + 0.7152 * sg + 0.0722 * sb
+            crate::render::constants::rec709_luminance(sr, sg, sb)
         }
     }
 

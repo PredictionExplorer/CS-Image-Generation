@@ -250,6 +250,27 @@ pub const KINETIC_ENERGY_FACTOR: f64 = 0.5;
 /// Two times PI (full circle in radians)
 pub const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
 
+// ========== Rec. 709 Luma Coefficients ==========
+
+/// Rec. 709 red luminance weight
+pub const LUMA_R: f64 = 0.2126;
+/// Rec. 709 green luminance weight
+pub const LUMA_G: f64 = 0.7152;
+/// Rec. 709 blue luminance weight
+pub const LUMA_B: f64 = 0.0722;
+
+/// Compute Rec. 709 luminance from straight (un-premultiplied) RGB.
+#[inline]
+#[must_use]
+pub fn rec709_luminance(r: f64, g: f64, b: f64) -> f64 {
+    LUMA_R * r + LUMA_G * g + LUMA_B * b
+}
+
+// ========== Quantization Constants ==========
+
+/// Maximum value for 16-bit unsigned integer, as f64.
+pub const U16_MAX_F64: f64 = 65535.0;
+
 // ========== Progress Reporting Constants ==========
 
 /// Percentage conversion factor

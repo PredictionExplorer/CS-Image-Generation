@@ -46,6 +46,7 @@ pub struct FineTexture {
 }
 
 impl FineTexture {
+    #[must_use]
     pub fn new(config: FineTextureConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }

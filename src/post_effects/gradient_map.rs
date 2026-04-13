@@ -47,6 +47,7 @@ pub enum LuxuryPalette {
 impl LuxuryPalette {
     /// Convert an integer index (0-14) to a palette variant.
     /// Useful for randomized palette selection.
+    #[must_use]
     pub fn from_index(index: usize) -> Self {
         match index % 15 {
             // Modulo ensures we always get a valid palette
@@ -94,6 +95,7 @@ pub struct GradientMap {
 }
 
 impl GradientMap {
+    #[must_use]
     pub fn new(config: GradientMapConfig) -> Self {
         Self { config, enabled: true }
     }
@@ -347,7 +349,7 @@ impl PostEffect for GradientMap {
                 let sb = b / a;
 
                 // Calculate luminance
-                let lum = 0.2126 * sr + 0.7152 * sg + 0.0722 * sb;
+                let lum = crate::render::constants::rec709_luminance(sr, sg, sb);
 
                 // Sample gradient at luminance
                 let (gr, gg, gb) = self.sample_palette(lum);

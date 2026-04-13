@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use std::f64::consts::TAU;
 
 fn luminance(r: f64, g: f64, b: f64) -> f64 {
-    0.2126 * r + 0.7152 * g + 0.0722 * b
+    crate::render::constants::rec709_luminance(r, g, b)
 }
 
 fn remap_tone_curve(lum: f64, strength: f64) -> f64 {
@@ -47,6 +47,7 @@ impl Default for ColorGradeParams {
 
 impl ColorGradeParams {
     /// Create parameters scaled for the given resolution.
+    #[must_use]
     pub fn from_resolution(width: usize, height: usize) -> Self {
         let min_dim = width.min(height) as f64;
         Self {
@@ -70,6 +71,7 @@ pub struct CinematicColorGrade {
 }
 
 impl CinematicColorGrade {
+    #[must_use]
     pub fn new(params: ColorGradeParams) -> Self {
         Self { params, enabled: true }
     }

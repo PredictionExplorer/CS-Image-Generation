@@ -472,3 +472,96 @@ pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
     max: 0.0020,
     description: "Nebula noise base frequency",
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    const ALL_FLOAT_DESCRIPTORS: &[&FloatParamDescriptor] = &[
+        &EQUIL_CHAOS_RATIO,
+        &BLUR_STRENGTH, &BLUR_RADIUS_SCALE, &BLUR_CORE_BRIGHTNESS,
+        &DOG_STRENGTH, &DOG_SIGMA_SCALE, &DOG_RATIO,
+        &GLOW_STRENGTH, &GLOW_THRESHOLD, &GLOW_RADIUS_SCALE, &GLOW_SHARPNESS, &GLOW_SATURATION_BOOST,
+        &CHROMATIC_BLOOM_STRENGTH, &CHROMATIC_BLOOM_RADIUS_SCALE, &CHROMATIC_BLOOM_SEPARATION_SCALE, &CHROMATIC_BLOOM_THRESHOLD,
+        &PERCEPTUAL_BLUR_STRENGTH,
+        &COLOR_GRADE_STRENGTH, &VIGNETTE_STRENGTH, &VIGNETTE_SOFTNESS, &VIBRANCE, &CLARITY_STRENGTH, &TONE_CURVE_STRENGTH,
+        &GRADIENT_MAP_STRENGTH, &GRADIENT_MAP_HUE_PRESERVATION,
+        &OPALESCENCE_STRENGTH, &OPALESCENCE_SCALE,
+        &CHAMPLEVE_FLOW_ALIGNMENT, &CHAMPLEVE_INTERFERENCE_AMPLITUDE, &CHAMPLEVE_RIM_INTENSITY, &CHAMPLEVE_RIM_WARMTH, &CHAMPLEVE_INTERIOR_LIFT,
+        &AETHER_FLOW_ALIGNMENT, &AETHER_SCATTERING_STRENGTH, &AETHER_IRIDESCENCE_AMPLITUDE, &AETHER_CAUSTIC_STRENGTH,
+        &MICRO_CONTRAST_STRENGTH, &EDGE_LUMINANCE_STRENGTH, &EDGE_LUMINANCE_THRESHOLD, &EDGE_LUMINANCE_BRIGHTNESS_BOOST,
+        &ATMOSPHERIC_DEPTH_STRENGTH, &ATMOSPHERIC_DESATURATION, &ATMOSPHERIC_DARKENING,
+        &ATMOSPHERIC_FOG_COLOR_R, &ATMOSPHERIC_FOG_COLOR_G, &ATMOSPHERIC_FOG_COLOR_B,
+        &FINE_TEXTURE_STRENGTH, &FINE_TEXTURE_SCALE, &FINE_TEXTURE_CONTRAST,
+        &HDR_SCALE, &CLIP_BLACK, &CLIP_WHITE,
+        &NEBULA_STRENGTH, &NEBULA_BASE_FREQUENCY,
+    ];
+
+    const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] = &[
+        &GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS,
+        &MICRO_CONTRAST_RADIUS, &NEBULA_OCTAVES,
+    ];
+
+    const ALL_ENABLE_PROBS: &[(&str, f64)] = &[
+        ("bloom", ENABLE_PROB_BLOOM),
+        ("glow", ENABLE_PROB_GLOW),
+        ("chromatic_bloom", ENABLE_PROB_CHROMATIC_BLOOM),
+        ("perceptual_blur", ENABLE_PROB_PERCEPTUAL_BLUR),
+        ("micro_contrast", ENABLE_PROB_MICRO_CONTRAST),
+        ("gradient_map", ENABLE_PROB_GRADIENT_MAP),
+        ("color_grade", ENABLE_PROB_COLOR_GRADE),
+        ("champleve", ENABLE_PROB_CHAMPLEVE),
+        ("aether", ENABLE_PROB_AETHER),
+        ("opalescence", ENABLE_PROB_OPALESCENCE),
+        ("edge_luminance", ENABLE_PROB_EDGE_LUMINANCE),
+        ("atmospheric_depth", ENABLE_PROB_ATMOSPHERIC_DEPTH),
+        ("fine_texture", ENABLE_PROB_FINE_TEXTURE),
+    ];
+
+    #[test]
+    fn test_float_descriptors_have_valid_ranges() {
+        for desc in ALL_FLOAT_DESCRIPTORS {
+            assert!(desc.min.is_finite(), "{}: min is not finite", desc.name);
+            assert!(desc.max.is_finite(), "{}: max is not finite", desc.name);
+            assert!(desc.min <= desc.max, "{}: min ({}) > max ({})", desc.name, desc.min, desc.max);
+        }
+    }
+
+    #[test]
+    fn test_int_descriptors_have_valid_ranges() {
+        for desc in ALL_INT_DESCRIPTORS {
+            assert!(desc.min <= desc.max, "{}: min ({}) > max ({})", desc.name, desc.min, desc.max);
+        }
+    }
+
+    #[test]
+    fn test_enable_probabilities_in_unit_range() {
+        for &(name, prob) in ALL_ENABLE_PROBS {
+            assert!((0.0..=1.0).contains(&prob), "{name}: probability {prob} not in [0, 1]");
+        }
+    }
+
+    #[test]
+    fn test_descriptor_names_non_empty() {
+        for desc in ALL_FLOAT_DESCRIPTORS {
+            assert!(!desc.name.is_empty(), "Float descriptor has empty name");
+            assert!(!desc.description.is_empty(), "{}: description is empty", desc.name);
+        }
+        for desc in ALL_INT_DESCRIPTORS {
+            assert!(!desc.name.is_empty(), "Int descriptor has empty name");
+            assert!(!desc.description.is_empty(), "{}: description is empty", desc.name);
+        }
+    }
+
+    #[test]
+    fn test_descriptor_names_are_unique() {
+        let mut seen = HashSet::new();
+        for desc in ALL_FLOAT_DESCRIPTORS {
+            assert!(seen.insert(desc.name), "Duplicate float descriptor name: {}", desc.name);
+        }
+        for desc in ALL_INT_DESCRIPTORS {
+            assert!(seen.insert(desc.name), "Duplicate int descriptor name: {}", desc.name);
+        }
+    }
+}

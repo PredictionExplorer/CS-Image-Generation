@@ -6,22 +6,33 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use spectral_constants::{LAMBDA_END, LAMBDA_START};
 
+/// Runtime toggle: when true, spectral dispersion boost is applied in the render path.
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 
+/// One endpoint of a line in pixel space with OkLab color and coverage.
 #[derive(Clone, Copy, Debug)]
 pub struct LineVertex {
+    /// Horizontal pixel coordinate.
     pub x: f32,
+    /// Vertical pixel coordinate.
     pub y: f32,
+    /// Depth coordinate used for thickness and depth-of-field.
     pub z: f32,
+    /// OkLab color at this vertex.
     pub color: OklabColor,
+    /// Opacity or stroke weight multiplier in \[0, 1\] (or beyond for HDR).
     pub alpha: f64,
 }
 
+/// Anti-aliased spectral line segment between two vertices with HDR energy scale.
 #[derive(Clone, Copy, Debug)]
 pub struct SpectralLineSegment {
+    /// Start vertex (position, color, alpha).
     pub start: LineVertex,
+    /// End vertex (position, color, alpha).
     pub end: LineVertex,
+    /// Multiplier for deposited spectral energy (HDR / velocity boost).
     pub hdr_scale: f64,
 }
 
@@ -37,6 +48,7 @@ pub struct SpectralLineSegment {
 /// - Cyan hues (around 180°) map to cyan wavelengths (485-510nm)
 /// - Blue hues (around 240°) map to blue wavelengths (450-485nm)
 /// - Violet hues (around 300°) map to violet wavelengths (380-450nm)
+#[must_use]
 #[inline]
 pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
     let hue_rad = b.atan2(a);

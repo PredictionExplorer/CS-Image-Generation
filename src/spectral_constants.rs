@@ -24,6 +24,7 @@ pub const BIN_WIDTH: f64 = LAMBDA_RANGE / NUM_BINS as f64;
 ///
 /// # Returns
 /// Fractional bin position, clamped to valid range [0, NUM_BINS-1]
+#[must_use]
 #[inline]
 pub fn wavelength_to_bin(wavelength: f64) -> f64 {
     ((wavelength - LAMBDA_START) / BIN_WIDTH).clamp(0.0, (NUM_BINS - 1) as f64)
@@ -37,6 +38,7 @@ pub fn wavelength_to_bin(wavelength: f64) -> f64 {
 /// # Returns
 /// Center wavelength of the bin in nanometers
 #[cfg(test)]
+#[must_use]
 #[inline]
 pub fn bin_to_wavelength(bin: usize) -> f64 {
     LAMBDA_START + (bin as f64 + 0.5) * BIN_WIDTH

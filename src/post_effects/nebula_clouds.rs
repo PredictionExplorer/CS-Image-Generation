@@ -40,6 +40,7 @@ impl Default for NebulaCloudConfig {
 impl NebulaCloudConfig {
     /// Create configuration for special mode with enhanced atmosphere
     #[cfg(test)]
+    #[must_use]
     pub fn special_mode(width: usize, height: usize, seed: i32) -> Self {
         let min_dim = width.min(height) as f64;
         Self {
@@ -61,6 +62,7 @@ impl NebulaCloudConfig {
     }
 
     /// Create configuration for standard mode (disabled)
+    #[must_use]
     pub fn standard_mode(_width: usize, _height: usize, seed: i32) -> Self {
         Self {
             strength: 0.0, // Disabled in standard mode
@@ -84,6 +86,7 @@ pub struct NebulaClouds {
 
 impl NebulaClouds {
     /// Create new nebula clouds effect with given configuration
+    #[must_use]
     pub fn new(config: NebulaCloudConfig) -> Self {
         let enabled = config.strength > 0.0;
         Self { config, enabled }
