@@ -352,21 +352,21 @@ fn main() -> Result<()> {
     )?;
 
     let spectral_dir = format!("{seed_dir}/spectral");
+    let spectral_sweep_path = format!("{seed_dir}/spectral_sweep.mp4");
 
-    let base_effect_config = render::build_effect_config_from_resolved(
-        &resolved_effect_config,
-        &render_config,
-        render::FinishOutputMode::Still,
-    );
-
-    app::generate_spectral_outputs_with_modes(
+    app::generate_spectral_gallery(
         &accum_spd,
         args.resolution.width,
         args.resolution.height,
         &spectral_dir,
+    )?;
+
+    app::generate_spectral_sweep_video(
+        &accum_spd,
+        args.resolution.width,
+        args.resolution.height,
+        &spectral_sweep_path,
         args.fast_encode,
-        &base_effect_config,
-        &mut rng,
     )?;
 
     info!(

@@ -309,46 +309,35 @@ pub fn render_video(
     Ok(accum_spd)
 }
 
-/// Generate all spectral outputs: gallery (64 PNGs + heatmap) and 6 cycle videos.
-///
-/// Builds `BinBuffers` once and shares them between gallery and cycle video generation.
-pub fn generate_spectral_outputs(
+/// Generate the spectral gallery: 64 per-bin 16-bit PNGs in `spectral_dir`.
+pub fn generate_spectral_gallery(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
     spectral_dir: &str,
-    fast_encode: bool,
 ) -> Result<()> {
-    Ok(render::spectral_output::generate_all_spectral_outputs(
+    Ok(render::spectral_output::generate_spectral_gallery(
         accum_spd,
         width,
         height,
         spectral_dir,
-        fast_encode,
     )?)
 }
 
-/// Generate spectral outputs for all nine effect modes.
-///
-/// Each mode gets its own subdirectory under `spectral_dir` with a full gallery
-/// (64 PNGs + heatmap) and six cycle videos.
-pub fn generate_spectral_outputs_with_modes(
+/// Generate the spectral sweep video (violet-to-red cycle) at `output_path`.
+pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
-    spectral_dir: &str,
+    output_path: &str,
     fast_encode: bool,
-    base_config: &render::effects::EffectConfig,
-    rng: &mut crate::sim::Sha3RandomByteStream,
 ) -> Result<()> {
-    Ok(render::spectral_output::generate_all_spectral_outputs_with_modes(
+    Ok(render::spectral_output::generate_spectral_sweep_video(
         accum_spd,
         width,
         height,
-        spectral_dir,
+        output_path,
         fast_encode,
-        base_config,
-        rng,
     )?)
 }
 

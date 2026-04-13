@@ -30,7 +30,6 @@ pub mod error;
 pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
-pub mod spectral_effects;
 pub mod spectral_output;
 pub mod types;
 pub mod velocity_hdr;

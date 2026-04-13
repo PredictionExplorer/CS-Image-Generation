@@ -226,60 +226,16 @@ pub const DEFAULT_TARGET_FRAMES: u32 = 1800;
 /// only needs representative luminance coverage, not full video temporal density.
 pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
 
-// ========== Spectral Cycle Video Constants ==========
+// ========== Spectral Output Constants ==========
 
-/// Duration of each spectral cycle video in seconds
+/// Duration of the spectral sweep video in seconds
 pub const CYCLE_DURATION_SECONDS: f64 = 12.0;
 
-/// Total frames per spectral cycle video (12s * 60fps)
+/// Total frames in the spectral sweep video (12s * 60fps)
 pub const CYCLE_TOTAL_FRAMES: u32 = 720;
-
-/// Bin offset range for the radial spectral cycle variant
-pub const RADIAL_SPREAD: f64 = 24.0;
 
 /// Display gamma used for spectral gallery and bin image output
 pub const DISPLAY_GAMMA: f64 = 2.2;
-
-// ========== Spectral Effect Mode Constants ==========
-
-/// Min number of resonance bins selected by the Resonance mode
-pub const SPECTRAL_RESONANCE_MIN_BINS: usize = 5;
-
-/// Max number of resonance bins selected by the Resonance mode
-pub const SPECTRAL_RESONANCE_MAX_BINS: usize = 8;
-
-/// Sinusoidal frequency for the Interference mode (cycles across 64 bins)
-pub const SPECTRAL_INTERFERENCE_FREQUENCY: f64 = 3.5;
-
-/// Gaussian sigma (in bins) for the Gravity Well mode falloff
-pub const SPECTRAL_GRAVITY_SIGMA: f64 = 8.0;
-
-/// Min effects per bin in Fingerprint mode
-pub const SPECTRAL_FINGERPRINT_MIN_EFFECTS: usize = 2;
-
-/// Max effects per bin in Fingerprint mode
-pub const SPECTRAL_FINGERPRINT_MAX_EFFECTS: usize = 4;
-
-/// Zone boundaries for Weathering mode: [gaseous_end, metallic_end]
-pub const SPECTRAL_WEATHERING_ZONE_BOUNDARIES: [usize; 2] = [21, 44];
-
-/// Max bloom radius scale for Dispersion mode (applied to violet / bin 0)
-pub const SPECTRAL_DISPERSION_BLOOM_MAX: f64 = 3.0;
-
-/// Min bloom radius scale for Dispersion mode (applied to red / bin 63)
-pub const SPECTRAL_DISPERSION_BLOOM_MIN: f64 = 1.0;
-
-/// Chaos mode: minimum per-bin overall strength
-pub const SPECTRAL_CHAOS_STRENGTH_MIN: f64 = 0.3;
-
-/// Chaos mode: maximum per-bin overall strength
-pub const SPECTRAL_CHAOS_STRENGTH_MAX: f64 = 1.0;
-
-/// Chaos mode: minimum bloom radius scale
-pub const SPECTRAL_CHAOS_BLOOM_SCALE_MIN: f64 = 0.5;
-
-/// Chaos mode: maximum bloom radius scale
-pub const SPECTRAL_CHAOS_BLOOM_SCALE_MAX: f64 = 3.0;
 
 // ========== Simulation Constants ==========
 
