@@ -513,7 +513,8 @@ mod tests {
 
     #[test]
     fn test_simd_deterministic() {
-        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
+        let spd =
+            make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = spd_to_rgba_simd_with_sat_boost(&spd, true);
         for _ in 0..200 {
             let r = spd_to_rgba_simd_with_sat_boost(&spd, true);
@@ -527,7 +528,8 @@ mod tests {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     #[test]
     fn test_avx2_kernel_is_bitwise_deterministic() {
-        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
+        let spd =
+            make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = unsafe { spd_to_rgba_avx2(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_avx2(&spd, true) };
@@ -567,7 +569,8 @@ mod tests {
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
     #[test]
     fn test_neon_kernel_is_bitwise_deterministic() {
-        let spd = make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
+        let spd =
+            make_spd(&[0.3, 0.0, 0.7, 0.1, 0.0, 0.5, 0.9, 0.2, 0.0, 0.4, 0.6, 0.0, 0.8, 0.1, 0.3]);
         let reference = unsafe { spd_to_rgba_neon(&spd, true) };
         for _ in 0..200 {
             let r = unsafe { spd_to_rgba_neon(&spd, true) };
@@ -657,7 +660,8 @@ mod tests {
 
     #[test]
     fn test_sat_boost_affects_output() {
-        let spd = make_spd(&[0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2]);
+        let spd =
+            make_spd(&[0.0, 0.2, 0.5, 0.8, 1.0, 0.6, 0.3, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 0.5, 0.2]);
 
         let boosted = spd_to_rgba_simd_with_sat_boost(&spd, true);
         let unboosted = spd_to_rgba_simd_with_sat_boost(&spd, false);

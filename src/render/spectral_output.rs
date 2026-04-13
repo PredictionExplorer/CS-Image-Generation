@@ -11,9 +11,8 @@ use super::constants;
 use super::effects::EffectConfig;
 use super::error::{RenderError, Result};
 use super::spectral_effects::{
-    BinEffectPlan, SpectralEffectMode, apply_effects_to_bin_linear,
-    apply_effects_to_cycle_frame, apply_gamma_and_save, apply_masking_blend, cycle_frame_plan,
-    plan_for_mode,
+    BinEffectPlan, SpectralEffectMode, apply_effects_to_bin_linear, apply_effects_to_cycle_frame,
+    apply_gamma_and_save, apply_masking_blend, cycle_frame_plan, plan_for_mode,
 };
 use super::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 use crate::sim::Sha3RandomByteStream;
@@ -48,12 +47,7 @@ impl BinBuffers {
         Self::build(accum_spd, width, height, true)
     }
 
-    fn build(
-        accum_spd: &[[f64; NUM_BINS]],
-        width: usize,
-        height: usize,
-        linear: bool,
-    ) -> Self {
+    fn build(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize, linear: bool) -> Self {
         let pixel_count = width * height;
         assert_eq!(accum_spd.len(), pixel_count);
 
@@ -65,11 +59,8 @@ impl BinBuffers {
                 let wavelength = wavelength_nm_for_bin(bin);
                 let (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength);
 
-                let max_val = accum_spd
-                    .iter()
-                    .map(|spd| spd[bin])
-                    .fold(0.0f64, f64::max)
-                    .max(1e-10);
+                let max_val =
+                    accum_spd.iter().map(|spd| spd[bin]).fold(0.0f64, f64::max).max(1e-10);
 
                 let mut buf = vec![[0.0f32; 3]; pixel_count];
                 for (i, pixel) in buf.iter_mut().enumerate() {
@@ -174,15 +165,13 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
         raw.push((pixel[2].clamp(0.0, 1.0) * 65535.0).round() as u16);
     }
 
-    let img: ImageBuffer<Rgb<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(width, height, raw).ok_or_else(|| {
+    let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
+        .ok_or_else(|| {
             RenderError::InvalidConfig("Failed to create bin image buffer".to_string())
         })?;
 
     let dyn_img = image::DynamicImage::ImageRgb16(img);
-    dyn_img
-        .save(path)
-        .map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
+    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
     Ok(())
 }
 
@@ -216,10 +205,8 @@ fn generate_dominant_wavelength_heatmap(
     let pixel_count = (width * height) as usize;
     let inv_gamma = 1.0 / constants::DISPLAY_GAMMA;
 
-    let max_total: f64 = accum_spd
-        .par_iter()
-        .map(|spd| spd.iter().sum::<f64>())
-        .reduce(|| 0.0f64, f64::max);
+    let max_total: f64 =
+        accum_spd.par_iter().map(|spd| spd.iter().sum::<f64>()).reduce(|| 0.0f64, f64::max);
     let log_denom = (1.0 + max_total).ln().max(1e-10);
 
     let mut raw = Vec::with_capacity(pixel_count * 3);
@@ -241,16 +228,14 @@ fn generate_dominant_wavelength_heatmap(
         raw.push(((b * brightness).powf(inv_gamma).clamp(0.0, 1.0) * 65535.0).round() as u16);
     }
 
-    let img: ImageBuffer<Rgb<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(width, height, raw).ok_or_else(|| {
+    let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
+        .ok_or_else(|| {
             RenderError::InvalidConfig("Failed to create heatmap image buffer".to_string())
         })?;
 
     let path = format!("{output_dir}/dominant_wavelength.png");
     let dyn_img = image::DynamicImage::ImageRgb16(img);
-    dyn_img
-        .save(&path)
-        .map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
+    dyn_img.save(&path).map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
 
     Ok(())
 }
@@ -268,7 +253,13 @@ pub fn generate_spectral_cycle_videos(
     fast_encode: bool,
 ) -> Result<()> {
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
-    generate_spectral_cycle_videos_with_buffers(&bin_buffers, width, height, output_dir, fast_encode)
+    generate_spectral_cycle_videos_with_buffers(
+        &bin_buffers,
+        width,
+        height,
+        output_dir,
+        fast_encode,
+    )
 }
 
 fn generate_spectral_cycle_videos_with_buffers(
@@ -302,21 +293,24 @@ fn generate_spectral_cycle_videos_with_buffers(
             let dm = &dist_map;
             let errs = &errors;
 
-            s.spawn(move || {
-                info!("   Encoding {name} cycle...");
-                if let Err(e) = encode_cycle_video(
-                    bb,
-                    &variant,
-                    dm,
-                    total_frames,
-                    width,
-                    height,
-                    &output_path,
-                    fast_encode,
-                ) {
-                    errs.lock().unwrap().push(e);
-                }
-            });
+            std::thread::Builder::new()
+                .stack_size(constants::THREAD_STACK_SIZE)
+                .spawn_scoped(s, move || {
+                    info!("   Encoding {name} cycle...");
+                    if let Err(e) = encode_cycle_video(
+                        bb,
+                        &variant,
+                        dm,
+                        total_frames,
+                        width,
+                        height,
+                        &output_path,
+                        fast_encode,
+                    ) {
+                        errs.lock().unwrap().push(e);
+                    }
+                })
+                .expect("failed to spawn cycle encoding thread");
         }
     });
 
@@ -354,11 +348,7 @@ fn build_distance_map(width: usize, height: usize) -> Vec<f64> {
 }
 
 /// Interpolate between two adjacent bin images at fractional bin index (with wrapping).
-fn lerp_bins_frame(
-    bin_buffers: &BinBuffers,
-    bin_f: f64,
-    output: &mut Vec<u16>,
-) {
+fn lerp_bins_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u16>) {
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count * 3, 0);
 
@@ -382,12 +372,7 @@ fn lerp_bins_frame(
 }
 
 /// Per-pixel bin selection for the radial variant.
-fn radial_frame(
-    bin_buffers: &BinBuffers,
-    base_bin: f64,
-    dist_map: &[f64],
-    output: &mut Vec<u16>,
-) {
+fn radial_frame(bin_buffers: &BinBuffers, base_bin: f64, dist_map: &[f64], output: &mut Vec<u16>) {
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count * 3, 0);
 
@@ -409,11 +394,7 @@ fn radial_frame(
 }
 
 /// Complementary: average two cursors 32 bins apart.
-fn complementary_frame(
-    bin_buffers: &BinBuffers,
-    bin_f: f64,
-    output: &mut Vec<u16>,
-) {
+fn complementary_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u16>) {
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count * 3, 0);
 
@@ -430,13 +411,19 @@ fn complementary_frame(
     let t_b = bin_b.fract() as f32;
 
     output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
-        let ra = bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
-        let ga = bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
-        let ba = bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
+        let ra =
+            bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
+        let ga =
+            bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
+        let ba =
+            bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
 
-        let rb = bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
-        let gb = bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
-        let bb = bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
+        let rb =
+            bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
+        let gb =
+            bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
+        let bb =
+            bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
 
         let r = ((ra + rb) * 0.5).clamp(0.0, 1.0);
         let g = ((ga + gb) * 0.5).clamp(0.0, 1.0);
@@ -534,13 +521,9 @@ fn encode_cycle_video(
                 }
 
                 let bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        frame_buf.as_ptr() as *const u8,
-                        frame_buf.len() * 2,
-                    )
+                    std::slice::from_raw_parts(frame_buf.as_ptr() as *const u8, frame_buf.len() * 2)
                 };
-                out.write_all(bytes)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())
         },
@@ -556,11 +539,7 @@ fn encode_cycle_video(
 // ---------------------------------------------------------------------------
 
 /// Interpolate between two adjacent bin images in float space (linear [f32; 3]).
-fn lerp_bins_frame_f32(
-    bin_buffers: &BinBuffers,
-    bin_f: f64,
-    output: &mut Vec<[f32; 3]>,
-) {
+fn lerp_bins_frame_f32(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<[f32; 3]>) {
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count, [0.0f32; 3]);
 
@@ -605,11 +584,7 @@ fn radial_frame_f32(
 }
 
 /// Complementary: average two cursors 32 bins apart (float space).
-fn complementary_frame_f32(
-    bin_buffers: &BinBuffers,
-    bin_f: f64,
-    output: &mut Vec<[f32; 3]>,
-) {
+fn complementary_frame_f32(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<[f32; 3]>) {
     let pixel_count = bin_buffers.pixel_count();
     output.resize(pixel_count, [0.0f32; 3]);
 
@@ -626,13 +601,19 @@ fn complementary_frame_f32(
     let t_b = bin_b.fract() as f32;
 
     output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
-        let ra = bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
-        let ga = bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
-        let ba = bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
+        let ra =
+            bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
+        let ga =
+            bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
+        let ba =
+            bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
 
-        let rb = bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
-        let gb = bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
-        let bb = bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
+        let rb =
+            bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
+        let gb =
+            bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
+        let bb =
+            bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
 
         pixel[0] = (ra + rb) * 0.5;
         pixel[1] = (ga + gb) * 0.5;
@@ -650,7 +631,11 @@ fn compute_cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) ->
         CycleVariant::Forward => frame as f64 * NUM_BINS as f64 / total_f,
         CycleVariant::Reverse => NUM_BINS as f64 - (frame as f64 * NUM_BINS as f64 / total_f),
         CycleVariant::PingPong => {
-            if t < 0.5 { t * 2.0 * max_bin } else { (1.0 - (t - 0.5) * 2.0) * max_bin }
+            if t < 0.5 {
+                t * 2.0 * max_bin
+            } else {
+                (1.0 - (t - 0.5) * 2.0) * max_bin
+            }
         }
         CycleVariant::Ease => (1.0 - (t * 2.0 * PI).cos()) * 0.5 * NUM_BINS as f64,
         CycleVariant::Radial | CycleVariant::Complementary => {
@@ -768,23 +753,26 @@ fn generate_mode_cycle_videos_inner(
             let dm = &dist_map;
             let errs = &errors;
 
-            s.spawn(move || {
-                if let Err(e) = encode_mode_cycle_video(
-                    bb,
-                    &variant,
-                    dm,
-                    total_frames,
-                    plans,
-                    mode,
-                    base_config,
-                    width,
-                    height,
-                    &output_path,
-                    fast_encode,
-                ) {
-                    errs.lock().unwrap().push(e);
-                }
-            });
+            std::thread::Builder::new()
+                .stack_size(constants::THREAD_STACK_SIZE)
+                .spawn_scoped(s, move || {
+                    if let Err(e) = encode_mode_cycle_video(
+                        bb,
+                        &variant,
+                        dm,
+                        total_frames,
+                        plans,
+                        mode,
+                        base_config,
+                        width,
+                        height,
+                        &output_path,
+                        fast_encode,
+                    ) {
+                        errs.lock().unwrap().push(e);
+                    }
+                })
+                .expect("failed to spawn mode cycle encoding thread");
         }
     });
 
@@ -852,8 +840,7 @@ fn encode_mode_cycle_video(
                         frame_16bit.len() * 2,
                     )
                 };
-                out.write_all(bytes)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())
         },
@@ -1114,10 +1101,7 @@ mod tests {
         let h = 10;
         let map = build_distance_map(w, h);
         let max_val = map.iter().cloned().fold(0.0f64, f64::max);
-        assert!(
-            (max_val - 1.0).abs() < 0.02,
-            "corner distance should be ~1.0, got {max_val}"
-        );
+        assert!((max_val - 1.0).abs() < 0.02, "corner distance should be ~1.0, got {max_val}");
     }
 
     #[test]
@@ -1357,10 +1341,7 @@ mod tests {
         for bin in 0..NUM_BINS {
             let wl = wavelength_nm_for_bin(bin);
             let file = format!("{dir}/{bin:02}_{wl:.0}nm.png");
-            assert!(
-                std::path::Path::new(&file).exists(),
-                "missing bin image: {file}"
-            );
+            assert!(std::path::Path::new(&file).exists(), "missing bin image: {file}");
         }
 
         let heatmap = format!("{dir}/dominant_wavelength.png");
@@ -1511,7 +1492,8 @@ mod tests {
         let nonzero_count = output.iter().filter(|&&v| v > 0).count();
         assert!(
             nonzero_count > 0,
-            "complementary frame at bin 0 should pick up energy from bins 0 and {}", NUM_BINS / 2
+            "complementary frame at bin 0 should pick up energy from bins 0 and {}",
+            NUM_BINS / 2
         );
     }
 
@@ -1524,18 +1506,9 @@ mod tests {
         for &b in &boundaries {
             let (r1, g1, b1) = heatmap_color(b - eps);
             let (r2, g2, b2) = heatmap_color(b + eps);
-            assert!(
-                (r1 - r2).abs() < 0.01,
-                "R discontinuity at t={b}: {r1} vs {r2}"
-            );
-            assert!(
-                (g1 - g2).abs() < 0.01,
-                "G discontinuity at t={b}: {g1} vs {g2}"
-            );
-            assert!(
-                (b1 - b2).abs() < 0.01,
-                "B discontinuity at t={b}: {b1} vs {b2}"
-            );
+            assert!((r1 - r2).abs() < 0.01, "R discontinuity at t={b}: {r1} vs {r2}");
+            assert!((g1 - g2).abs() < 0.01, "G discontinuity at t={b}: {g1} vs {g2}");
+            assert!((b1 - b2).abs() < 0.01, "B discontinuity at t={b}: {b1} vs {b2}");
         }
     }
 
@@ -1695,9 +1668,8 @@ mod tests {
         // generate_all_spectral_outputs also tries to encode videos which needs ffmpeg,
         // so we test the gallery path alone via the shared-buffers function.
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let result = generate_spectral_gallery_with_buffers(
-            &spd, &bb, TEST_W as u32, TEST_H as u32, dir,
-        );
+        let result =
+            generate_spectral_gallery_with_buffers(&spd, &bb, TEST_W as u32, TEST_H as u32, dir);
         assert!(result.is_ok(), "gallery with shared buffers: {result:?}");
 
         for bin in 0..NUM_BINS {
@@ -1740,11 +1712,12 @@ mod tests {
 
     #[test]
     fn test_cycle_constants_are_consistent() {
-        let expected_frames =
-            (constants::CYCLE_DURATION_SECONDS * constants::DEFAULT_VIDEO_FPS as f64).round()
-                as u32;
+        let expected_frames = (constants::CYCLE_DURATION_SECONDS
+            * constants::DEFAULT_VIDEO_FPS as f64)
+            .round() as u32;
         assert_eq!(
-            constants::CYCLE_TOTAL_FRAMES, expected_frames,
+            constants::CYCLE_TOTAL_FRAMES,
+            expected_frames,
             "CYCLE_TOTAL_FRAMES should equal CYCLE_DURATION_SECONDS * FPS"
         );
     }
@@ -2090,5 +2063,51 @@ mod tests {
             fine_texture_enabled: false,
             fine_texture_config: Default::default(),
         }
+    }
+
+    #[test]
+    fn test_scoped_thread_with_configured_stack_size() {
+        let result = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let r = result.clone();
+
+        std::thread::scope(|s| {
+            std::thread::Builder::new()
+                .stack_size(constants::THREAD_STACK_SIZE)
+                .spawn_scoped(s, move || {
+                    r.store(true, std::sync::atomic::Ordering::Relaxed);
+                })
+                .expect("scoped thread with THREAD_STACK_SIZE should spawn");
+        });
+
+        assert!(
+            result.load(std::sync::atomic::Ordering::Relaxed),
+            "scoped thread should have executed its closure",
+        );
+    }
+
+    #[test]
+    fn test_scoped_threads_run_concurrently() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let counter = AtomicUsize::new(0);
+        let num_threads = 6;
+
+        std::thread::scope(|s| {
+            for _ in 0..num_threads {
+                let ctr = &counter;
+                std::thread::Builder::new()
+                    .stack_size(constants::THREAD_STACK_SIZE)
+                    .spawn_scoped(s, move || {
+                        ctr.fetch_add(1, Ordering::Relaxed);
+                    })
+                    .expect("scoped encoding thread should spawn");
+            }
+        });
+
+        assert_eq!(
+            counter.load(Ordering::Relaxed),
+            num_threads,
+            "all {num_threads} scoped threads should complete",
+        );
     }
 }

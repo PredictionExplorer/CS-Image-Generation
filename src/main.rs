@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use rayon::ThreadPoolBuilder;
 use three_body_problem::{
     app,
     error::{self, Result},
@@ -242,6 +243,11 @@ fn build_generation_log_config(
 }
 
 fn main() -> Result<()> {
+    ThreadPoolBuilder::new()
+        .stack_size(render::constants::THREAD_STACK_SIZE)
+        .build_global()
+        .expect("failed to initialize global thread pool");
+
     let args = Args::parse();
 
     setup_logging(&args.log_level);
@@ -467,8 +473,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0,
-            "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
     }
 
     #[test]
@@ -487,8 +492,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0,
-            "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
     }
 
     #[test]
@@ -498,8 +502,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0,
-            "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
     }
 
     #[test]
@@ -510,8 +513,12 @@ mod tests {
             let w = resolve_borda_weights(None, None, &mut rng);
             assert_eq!(w.chaos_weight, 1.0);
             let ratio = w.equil_weight / w.chaos_weight;
-            assert!(ratio >= 0.05 && ratio <= 20.0,
-                "seed {} produced ratio {} outside [0.05, 20.0]", seed_byte, ratio);
+            assert!(
+                ratio >= 0.05 && ratio <= 20.0,
+                "seed {} produced ratio {} outside [0.05, 20.0]",
+                seed_byte,
+                ratio
+            );
         }
     }
 

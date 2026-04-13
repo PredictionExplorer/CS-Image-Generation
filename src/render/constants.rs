@@ -4,6 +4,16 @@
 //! color space conversions, and video encoding. Each constant is documented
 //! with its purpose and typical usage range.
 
+// ========== Thread Configuration ==========
+
+/// Stack size for worker threads (Rayon pool and scoped encoding threads).
+///
+/// Rust's default is 2 MiB, which is insufficient for seeds that enable
+/// many post-effects simultaneously. 512 MiB provides a 256x safety margin.
+/// Only pages actually touched consume physical RAM (Linux lazy allocation),
+/// so the real memory cost is negligible.
+pub const THREAD_STACK_SIZE: usize = 512 * 1024 * 1024;
+
 // ========== Color Generation Constants ==========
 
 /// Degrees in a full rotation
@@ -288,3 +298,40 @@ pub const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
 
 /// Percentage conversion factor
 pub const PERCENT_FACTOR: f64 = 100.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RUST_DEFAULT_STACK: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn test_thread_stack_size_at_least_256x_default() {
+        assert!(
+            THREAD_STACK_SIZE >= 256 * RUST_DEFAULT_STACK,
+            "THREAD_STACK_SIZE ({}) must be at least 256x Rust's default 2 MiB ({})",
+            THREAD_STACK_SIZE,
+            256 * RUST_DEFAULT_STACK,
+        );
+    }
+
+    #[test]
+    fn test_thread_stack_size_is_power_of_two() {
+        assert!(
+            THREAD_STACK_SIZE.is_power_of_two(),
+            "THREAD_STACK_SIZE ({}) should be a power of two for alignment",
+            THREAD_STACK_SIZE,
+        );
+    }
+
+    #[test]
+    fn test_thread_stack_size_does_not_exceed_1_gib() {
+        let one_gib = 1024 * 1024 * 1024;
+        assert!(
+            THREAD_STACK_SIZE <= one_gib,
+            "THREAD_STACK_SIZE ({}) should not exceed 1 GiB ({})",
+            THREAD_STACK_SIZE,
+            one_gib,
+        );
+    }
+}

@@ -266,19 +266,13 @@ mod tests {
     #[test]
     fn test_bin_center_first_is_382_5nm() {
         let center = wavelength_nm_for_bin(0);
-        assert!(
-            (center - 382.5).abs() < 1e-10,
-            "bin 0 center should be 382.5nm, got {center}"
-        );
+        assert!((center - 382.5).abs() < 1e-10, "bin 0 center should be 382.5nm, got {center}");
     }
 
     #[test]
     fn test_bin_center_last_is_697_5nm() {
         let center = wavelength_nm_for_bin(63);
-        assert!(
-            (center - 697.5).abs() < 1e-10,
-            "bin 63 center should be 697.5nm, got {center}"
-        );
+        assert!((center - 697.5).abs() < 1e-10, "bin 63 center should be 697.5nm, got {center}");
     }
 
     #[test]
@@ -385,9 +379,6 @@ mod tests {
     fn test_wavelength_to_rgb_red_rolloff_at_700nm() {
         let (r_650, _, _) = wavelength_to_rgb(650.0);
         let (r_700, _, _) = wavelength_to_rgb(700.0);
-        assert!(
-            r_700 < r_650,
-            "700nm should have edge rolloff vs 650nm: {r_700} vs {r_650}"
-        );
+        assert!(r_700 < r_650, "700nm should have edge rolloff vs 650nm: {r_700} vs {r_650}");
     }
 }

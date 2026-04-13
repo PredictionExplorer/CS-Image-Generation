@@ -344,7 +344,12 @@ pub fn plan_weathering() -> Vec<BinEffectPlan> {
             } else {
                 EnabledEffects::luminous()
             };
-            BinEffectPlan { strength: 1.0, bloom_radius_scale: 1.0, enabled_effects: enabled, custom_config: None }
+            BinEffectPlan {
+                strength: 1.0,
+                bloom_radius_scale: 1.0,
+                enabled_effects: enabled,
+                custom_config: None,
+            }
         })
         .collect()
 }
@@ -365,7 +370,12 @@ pub fn plan_fingerprint(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
                 enabled.set_by_index(idx, true);
                 chosen = enabled.count();
             }
-            BinEffectPlan { strength: 0.85, bloom_radius_scale: 1.0, enabled_effects: enabled, custom_config: None }
+            BinEffectPlan {
+                strength: 0.85,
+                bloom_radius_scale: 1.0,
+                enabled_effects: enabled,
+                custom_config: None,
+            }
         })
         .collect()
 }
@@ -551,10 +561,7 @@ fn randomize_opalescence(
     }
 }
 
-fn randomize_champleve(
-    rng: &mut Sha3RandomByteStream,
-    base: &ChampleveConfig,
-) -> ChampleveConfig {
+fn randomize_champleve(rng: &mut Sha3RandomByteStream, base: &ChampleveConfig) -> ChampleveConfig {
     ChampleveConfig {
         cell_density: rand_range(rng, 20.0, 100.0),
         flow_alignment: rand_range(rng, 0.3, 1.0),
@@ -632,8 +639,16 @@ pub fn plan_chaos(
 ) -> Vec<BinEffectPlan> {
     (0..NUM_BINS)
         .map(|_| {
-            let strength = rand_range(rng, constants::SPECTRAL_CHAOS_STRENGTH_MIN, constants::SPECTRAL_CHAOS_STRENGTH_MAX);
-            let bloom_radius_scale = rand_range(rng, constants::SPECTRAL_CHAOS_BLOOM_SCALE_MIN, constants::SPECTRAL_CHAOS_BLOOM_SCALE_MAX);
+            let strength = rand_range(
+                rng,
+                constants::SPECTRAL_CHAOS_STRENGTH_MIN,
+                constants::SPECTRAL_CHAOS_STRENGTH_MAX,
+            );
+            let bloom_radius_scale = rand_range(
+                rng,
+                constants::SPECTRAL_CHAOS_BLOOM_SCALE_MIN,
+                constants::SPECTRAL_CHAOS_BLOOM_SCALE_MAX,
+            );
 
             let mut enabled = EnabledEffects::none();
             for idx in 0..EnabledEffects::TOTAL_EFFECTS {
@@ -778,8 +793,7 @@ pub fn build_bin_effect_config(base: &EffectConfig, plan: &BinEffectPlan) -> Eff
     if !fx.bloom {
         cfg.blur_radius_px = 0;
     } else {
-        cfg.blur_radius_px =
-            (cfg.blur_radius_px as f64 * plan.bloom_radius_scale).round() as usize;
+        cfg.blur_radius_px = (cfg.blur_radius_px as f64 * plan.bloom_radius_scale).round() as usize;
     }
 
     if !fx.dog_bloom {
@@ -825,7 +839,9 @@ pub fn bin_to_pixel_buffer(pixels: &[[f32; 3]]) -> Vec<(f64, f64, f64, f64)> {
 pub fn pixel_buffer_to_bin(pixels: &[(f64, f64, f64, f64)]) -> Vec<[f32; 3]> {
     pixels
         .iter()
-        .map(|&(r, g, b, _)| [r.clamp(0.0, 1.0) as f32, g.clamp(0.0, 1.0) as f32, b.clamp(0.0, 1.0) as f32])
+        .map(|&(r, g, b, _)| {
+            [r.clamp(0.0, 1.0) as f32, g.clamp(0.0, 1.0) as f32, b.clamp(0.0, 1.0) as f32]
+        })
         .collect()
 }
 
@@ -865,11 +881,7 @@ pub fn apply_effects_to_bin_linear(
         .iter()
         .zip(processed.iter())
         .map(|(raw, fx)| {
-            [
-                raw[0] * inv + fx[0] * s,
-                raw[1] * inv + fx[1] * s,
-                raw[2] * inv + fx[2] * s,
-            ]
+            [raw[0] * inv + fx[0] * s, raw[1] * inv + fx[1] * s, raw[2] * inv + fx[2] * s]
         })
         .collect()
 }
@@ -973,8 +985,7 @@ pub fn cycle_frame_plan(
             }
         }
         _ => {
-            let wrapped =
-                ((current_bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
+            let wrapped = ((current_bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
             let nearest = (wrapped.round() as usize).min(NUM_BINS - 1);
             plans[nearest].clone()
         }
@@ -1751,48 +1762,36 @@ mod tests {
                 assert_eq!(cfg.bloom_mode, "none", "bin {i}: dog disabled but mode not none");
             }
             assert_eq!(
-                cfg.glow_enhancement_enabled,
-                plan.enabled_effects.glow,
+                cfg.glow_enhancement_enabled, plan.enabled_effects.glow,
                 "bin {i}: glow mismatch"
             );
             assert_eq!(
-                cfg.chromatic_bloom_enabled,
-                plan.enabled_effects.chromatic_bloom,
+                cfg.chromatic_bloom_enabled, plan.enabled_effects.chromatic_bloom,
                 "bin {i}: chromatic_bloom mismatch"
             );
             assert_eq!(
-                cfg.micro_contrast_enabled,
-                plan.enabled_effects.micro_contrast,
+                cfg.micro_contrast_enabled, plan.enabled_effects.micro_contrast,
                 "bin {i}: micro_contrast mismatch"
             );
             assert_eq!(
-                cfg.opalescence_enabled,
-                plan.enabled_effects.opalescence,
+                cfg.opalescence_enabled, plan.enabled_effects.opalescence,
                 "bin {i}: opalescence mismatch"
             );
             assert_eq!(
-                cfg.champleve_enabled,
-                plan.enabled_effects.champleve,
+                cfg.champleve_enabled, plan.enabled_effects.champleve,
                 "bin {i}: champleve mismatch"
             );
+            assert_eq!(cfg.aether_enabled, plan.enabled_effects.aether, "bin {i}: aether mismatch");
             assert_eq!(
-                cfg.aether_enabled,
-                plan.enabled_effects.aether,
-                "bin {i}: aether mismatch"
-            );
-            assert_eq!(
-                cfg.edge_luminance_enabled,
-                plan.enabled_effects.edge_luminance,
+                cfg.edge_luminance_enabled, plan.enabled_effects.edge_luminance,
                 "bin {i}: edge_luminance mismatch"
             );
             assert_eq!(
-                cfg.atmospheric_depth_enabled,
-                plan.enabled_effects.atmospheric_depth,
+                cfg.atmospheric_depth_enabled, plan.enabled_effects.atmospheric_depth,
                 "bin {i}: atmospheric_depth mismatch"
             );
             assert_eq!(
-                cfg.fine_texture_enabled,
-                plan.enabled_effects.fine_texture,
+                cfg.fine_texture_enabled, plan.enabled_effects.fine_texture,
                 "bin {i}: fine_texture mismatch"
             );
         }
@@ -1809,10 +1808,7 @@ mod tests {
                 micro_strengths.insert(cfg.micro_contrast_config.strength.to_bits());
             }
         }
-        assert!(
-            micro_strengths.len() > 1,
-            "chaos should produce varied micro_contrast strengths"
-        );
+        assert!(micro_strengths.len() > 1, "chaos should produce varied micro_contrast strengths");
     }
 
     #[test]

@@ -27,9 +27,9 @@ pub mod error;
 pub mod histogram;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
-pub mod types;
 pub mod spectral_effects;
 pub mod spectral_output;
+pub mod types;
 pub mod velocity_hdr;
 pub mod video;
 
@@ -2017,5 +2017,23 @@ mod tests {
                 &format!("video-last-frame/stylized/threads={thread_count}"),
             );
         }
+    }
+
+    #[test]
+    fn test_rayon_pool_respects_custom_stack_size() {
+        let pool = ThreadPoolBuilder::new()
+            .stack_size(constants::THREAD_STACK_SIZE)
+            .num_threads(2)
+            .build()
+            .expect("pool with THREAD_STACK_SIZE should build");
+
+        let result = pool.install(|| {
+            let mut v = vec![0u64; 1024];
+            for (i, slot) in v.iter_mut().enumerate() {
+                *slot = i as u64;
+            }
+            v.iter().sum::<u64>()
+        });
+        assert_eq!(result, (0..1024u64).sum::<u64>());
     }
 }
