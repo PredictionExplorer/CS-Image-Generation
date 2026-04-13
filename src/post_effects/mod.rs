@@ -3,9 +3,7 @@
 //! This module provides a trait-based system for applying visual effects
 //! in a composable, modular fashion.
 
-use std::error::Error;
-#[cfg(test)]
-use std::fmt;
+use thiserror::Error;
 
 /// Type alias for pixel buffers used throughout the pipeline.
 /// Format: (R, G, B, A) with premultiplied alpha.
@@ -13,22 +11,16 @@ use std::fmt;
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
 /// Error type for post-processing pipeline failures.
-#[derive(Debug)]
-#[cfg(test)]
-pub struct PostEffectError {
-    effect_name: String,
-    message: String,
-}
+#[derive(Debug, Error)]
+pub enum PostEffectError {
+    /// An effect encountered an I/O error.
+    #[error("PostEffect I/O error: {0}")]
+    Io(#[from] std::io::Error),
 
-#[cfg(test)]
-impl fmt::Display for PostEffectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PostEffect '{}' error: {}", self.effect_name, self.message)
-    }
+    /// A named effect reported an error.
+    #[error("PostEffect '{effect_name}' error: {message}")]
+    EffectFailed { effect_name: String, message: String },
 }
-
-#[cfg(test)]
-impl Error for PostEffectError {}
 
 /// Trait for implementing post-processing effects.
 ///
@@ -49,7 +41,7 @@ pub trait PostEffect: Send + Sync {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>>;
+    ) -> Result<PixelBuffer, PostEffectError>;
 
     /// Returns whether this effect is currently enabled.
     /// Default implementation returns true.
@@ -88,7 +80,7 @@ impl PostEffectChain {
         mut buffer: PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         for effect in &self.effects {
             if effect.is_enabled() {
                 buffer = effect.process(&buffer, width, height)?;
@@ -171,13 +163,12 @@ mod tests {
             input: &PixelBuffer,
             _width: usize,
             _height: usize,
-        ) -> Result<PixelBuffer, Box<dyn Error>> {
+        ) -> Result<PixelBuffer, PostEffectError> {
             let mut output = input.clone();
             for pixel in &mut output {
                 pixel.0 += self.value;
                 pixel.1 += self.value;
                 pixel.2 += self.value;
-                // Alpha unchanged
             }
             Ok(output)
         }
@@ -240,11 +231,20 @@ mod tests {
 
     #[test]
     fn test_error_type() {
-        let error = PostEffectError {
+        let error = PostEffectError::EffectFailed {
             effect_name: "Test Effect".to_string(),
             message: "Test error".to_string(),
         };
 
         assert_eq!(format!("{}", error), "PostEffect 'Test Effect' error: Test error");
+    }
+
+    #[test]
+    fn test_post_effect_error_from_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let effect_err: PostEffectError = io_err.into();
+        let display = format!("{effect_err}");
+        assert!(display.contains("I/O error"));
+        assert!(display.contains("pipe broke"));
     }
 }

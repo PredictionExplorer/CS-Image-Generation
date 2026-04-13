@@ -98,13 +98,13 @@ pub struct OrbitInfo {
 
 impl GenerationRecord {
     /// Create a new generation record with the current timestamp
-    pub fn new(file_name: String, seed: String) -> Self {
+    pub fn new(file_name: impl Into<String>, seed: impl Into<String>) -> Self {
         let timestamp = Local::now().to_rfc3339();
 
         Self {
             timestamp,
-            file_name,
-            seed,
+            file_name: file_name.into(),
+            seed: seed.into(),
             render_config: LoggedRenderConfig::default(),
             drift_config: DriftConfig::default(),
             simulation_config: SimulationConfig::default(),
@@ -191,8 +191,8 @@ impl GenerationLogger {
     }
 
     #[cfg(test)]
-    pub fn with_paths(log_path: String, lock_path: String) -> Self {
-        Self { log_file_path: log_path, lock_file_path: lock_path }
+    pub fn with_paths(log_path: impl Into<String>, lock_path: impl Into<String>) -> Self {
+        Self { log_file_path: log_path.into(), lock_file_path: lock_path.into() }
     }
 
     /// Append a new generation record to the log, holding an exclusive file lock

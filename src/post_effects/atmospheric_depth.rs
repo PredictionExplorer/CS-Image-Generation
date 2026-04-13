@@ -4,9 +4,8 @@
 //! pixels based on perceived depth (derived from local density and luminance).
 //! Creates the impression of depth fog, aerial perspective, and volumetric atmosphere.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for atmospheric depth effect
 #[derive(Clone, Debug)]
@@ -151,7 +150,7 @@ impl PostEffect for AtmosphericDepth {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

@@ -16,6 +16,7 @@ path = "src/main.rs"
 warnings = "deny"
 
 [dependencies]
+bytemuck = "1.22"
 chrono   = "0.4.43"
 clap     = { version = "4.5.60", features = ["derive"] }
 hex      = "0.4.3"

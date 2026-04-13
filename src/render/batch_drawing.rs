@@ -11,6 +11,16 @@ use nalgebra::Vector3;
 /// Triangle vertex data for batch processing
 pub type TriangleVertex = LineVertex;
 
+pub(crate) struct BatchDrawParams {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) row_start: usize,
+    pub(crate) row_end: usize,
+    pub(crate) vertices: [TriangleVertex; 3],
+    pub(crate) hdr_multipliers: [f64; 3],
+    pub(crate) hdr_scale: f64,
+}
+
 /// Draw a complete triangle (3 line segments) in a batch for better performance
 #[inline]
 pub fn draw_triangle_batch_spectral(
@@ -23,56 +33,51 @@ pub fn draw_triangle_batch_spectral(
 ) {
     draw_triangle_batch_spectral_rows(
         accum,
-        width,
-        height,
-        0,
-        height as usize,
-        vertices,
-        hdr_multipliers,
-        hdr_scale,
+        &BatchDrawParams {
+            width,
+            height,
+            row_start: 0,
+            row_end: height as usize,
+            vertices,
+            hdr_multipliers,
+            hdr_scale,
+        },
     );
 }
 
 /// Draw a complete triangle into an owned row band of the destination buffer.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_triangle_batch_spectral_rows(
     accum: &mut [[f64; NUM_BINS]],
-    width: u32,
-    height: u32,
-    row_start: usize,
-    row_end: usize,
-    vertices: [TriangleVertex; 3],
-    hdr_multipliers: [f64; 3],
-    hdr_scale: f64,
+    params: &BatchDrawParams,
 ) {
-    let [v0, v1, v2] = vertices;
-    let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = hdr_multipliers;
+    let [v0, v1, v2] = params.vertices;
+    let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = params.hdr_multipliers;
 
     draw_line_segment_aa_spectral_rows(
         accum,
-        width,
-        height,
-        row_start,
-        row_end,
-        SpectralLineSegment { start: v0, end: v1, hdr_scale: hdr_scale * hdr_mult_01 },
+        params.width,
+        params.height,
+        params.row_start,
+        params.row_end,
+        SpectralLineSegment { start: v0, end: v1, hdr_scale: params.hdr_scale * hdr_mult_01 },
     );
 
     draw_line_segment_aa_spectral_rows(
         accum,
-        width,
-        height,
-        row_start,
-        row_end,
-        SpectralLineSegment { start: v1, end: v2, hdr_scale: hdr_scale * hdr_mult_12 },
+        params.width,
+        params.height,
+        params.row_start,
+        params.row_end,
+        SpectralLineSegment { start: v1, end: v2, hdr_scale: params.hdr_scale * hdr_mult_12 },
     );
 
     draw_line_segment_aa_spectral_rows(
         accum,
-        width,
-        height,
-        row_start,
-        row_end,
-        SpectralLineSegment { start: v2, end: v0, hdr_scale: hdr_scale * hdr_mult_20 },
+        params.width,
+        params.height,
+        params.row_start,
+        params.row_end,
+        SpectralLineSegment { start: v2, end: v0, hdr_scale: params.hdr_scale * hdr_mult_20 },
     );
 }
 

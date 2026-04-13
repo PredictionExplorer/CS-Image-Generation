@@ -3,9 +3,8 @@
 //! This effect creates a magical, lens-aberration-like glow by separating RGB channels
 //! spatially and blurring them independently, then compositing back with additive blending.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for chromatic bloom effect
 #[derive(Clone, Debug)]
@@ -245,7 +244,7 @@ impl PostEffect for ChromaticBloom {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

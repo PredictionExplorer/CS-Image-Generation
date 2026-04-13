@@ -91,6 +91,17 @@ impl BinBuffers {
     }
 }
 
+impl std::fmt::Debug for BinBuffers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinBuffers")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("num_bins", &self.buffers.len())
+            .field("linear", &self.linear)
+            .finish()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Spectral Gallery (Section 9)
 // ---------------------------------------------------------------------------
@@ -157,12 +168,13 @@ fn generate_spectral_gallery_with_buffers(
 }
 
 fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Result<()> {
+    use crate::utils::f64_to_u16_saturating;
     let pixel_count = (width * height) as usize;
     let mut raw = Vec::with_capacity(pixel_count * 3);
     for pixel in buf {
-        raw.push((pixel[0].clamp(0.0, 1.0) * 65535.0).round() as u16);
-        raw.push((pixel[1].clamp(0.0, 1.0) * 65535.0).round() as u16);
-        raw.push((pixel[2].clamp(0.0, 1.0) * 65535.0).round() as u16);
+        raw.push(f64_to_u16_saturating(f64::from(pixel[0].clamp(0.0, 1.0)) * 65535.0));
+        raw.push(f64_to_u16_saturating(f64::from(pixel[1].clamp(0.0, 1.0)) * 65535.0));
+        raw.push(f64_to_u16_saturating(f64::from(pixel[2].clamp(0.0, 1.0)) * 65535.0));
     }
 
     let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
@@ -286,6 +298,9 @@ fn generate_spectral_cycle_videos_with_buffers(
 
     let errors: std::sync::Mutex<Vec<RenderError>> = std::sync::Mutex::new(Vec::new());
 
+    let w = width as usize;
+    let h = height as usize;
+
     std::thread::scope(|s| {
         for &(name, variant) in &variants {
             let output_path = format!("{output_dir}/{name}.mp4");
@@ -297,24 +312,24 @@ fn generate_spectral_cycle_videos_with_buffers(
                 .stack_size(constants::THREAD_STACK_SIZE)
                 .spawn_scoped(s, move || {
                     info!("   Encoding {name} cycle...");
-                    if let Err(e) = encode_cycle_video(
-                        bb,
-                        &variant,
-                        dm,
-                        total_frames,
-                        width,
-                        height,
-                        &output_path,
+                    if let Err(e) = encode_cycle_video(&CycleVideoParams {
+                        bin_buffers: bb,
+                        variant: &variant,
+                        dist_map: dm,
+                        total_frames: total_frames as usize,
+                        width: w,
+                        height: h,
+                        output_path: &output_path,
                         fast_encode,
-                    ) {
-                        errs.lock().unwrap().push(e);
+                    }) {
+                        errs.lock().expect("cycle encoding error mutex poisoned").push(e);
                     }
                 })
                 .expect("failed to spawn cycle encoding thread");
         }
     });
 
-    let errs = errors.into_inner().unwrap();
+    let errs = errors.into_inner().expect("cycle encoding error mutex poisoned");
     if let Some(first_err) = errs.into_iter().next() {
         return Err(first_err);
     }
@@ -347,10 +362,35 @@ fn build_distance_map(width: usize, height: usize) -> Vec<f64> {
     map
 }
 
+/// Per-pixel output format for frame interpolation.
+///
+/// `[u16; 3]` clamps and scales to 16-bit range; `[f32; 3]` stores raw linear values.
+trait FramePixel: Copy + Default + Send + Sync {
+    fn from_rgb(r: f32, g: f32, b: f32) -> Self;
+}
+
+impl FramePixel for [u16; 3] {
+    #[inline]
+    fn from_rgb(r: f32, g: f32, b: f32) -> Self {
+        [
+            (r.clamp(0.0, 1.0) * 65535.0).round() as u16,
+            (g.clamp(0.0, 1.0) * 65535.0).round() as u16,
+            (b.clamp(0.0, 1.0) * 65535.0).round() as u16,
+        ]
+    }
+}
+
+impl FramePixel for [f32; 3] {
+    #[inline]
+    fn from_rgb(r: f32, g: f32, b: f32) -> Self {
+        [r, g, b]
+    }
+}
+
 /// Interpolate between two adjacent bin images at fractional bin index (with wrapping).
-fn lerp_bins_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u16>) {
+fn lerp_bins_frame<P: FramePixel>(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<P>) {
     let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count * 3, 0);
+    output.resize(pixel_count, P::default());
 
     let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
     let lo = wrapped.floor() as usize % NUM_BINS;
@@ -361,22 +401,25 @@ fn lerp_bins_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u16>) 
     let lo_buf = &bin_buffers.buffers[lo];
     let hi_buf = &bin_buffers.buffers[hi];
 
-    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
         let r = lo_buf[i][0] * one_minus_t + hi_buf[i][0] * t;
         let g = lo_buf[i][1] * one_minus_t + hi_buf[i][1] * t;
         let b = lo_buf[i][2] * one_minus_t + hi_buf[i][2] * t;
-        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        *pixel = P::from_rgb(r, g, b);
     });
 }
 
 /// Per-pixel bin selection for the radial variant.
-fn radial_frame(bin_buffers: &BinBuffers, base_bin: f64, dist_map: &[f64], output: &mut Vec<u16>) {
+fn radial_frame<P: FramePixel>(
+    bin_buffers: &BinBuffers,
+    base_bin: f64,
+    dist_map: &[f64],
+    output: &mut Vec<P>,
+) {
     let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count * 3, 0);
+    output.resize(pixel_count, P::default());
 
-    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
         let bin_f = base_bin - dist_map[i] * constants::RADIAL_SPREAD;
         let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
         let lo = wrapped.floor() as usize % NUM_BINS;
@@ -387,16 +430,14 @@ fn radial_frame(bin_buffers: &BinBuffers, base_bin: f64, dist_map: &[f64], outpu
         let r = bin_buffers.buffers[lo][i][0] * one_minus_t + bin_buffers.buffers[hi][i][0] * t;
         let g = bin_buffers.buffers[lo][i][1] * one_minus_t + bin_buffers.buffers[hi][i][1] * t;
         let b = bin_buffers.buffers[lo][i][2] * one_minus_t + bin_buffers.buffers[hi][i][2] * t;
-        chunk[0] = (r.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[1] = (g.clamp(0.0, 1.0) * 65535.0).round() as u16;
-        chunk[2] = (b.clamp(0.0, 1.0) * 65535.0).round() as u16;
+        *pixel = P::from_rgb(r, g, b);
     });
 }
 
 /// Complementary: average two cursors 32 bins apart.
-fn complementary_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u16>) {
+fn complementary_frame<P: FramePixel>(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<P>) {
     let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count * 3, 0);
+    output.resize(pixel_count, P::default());
 
     let half = (NUM_BINS / 2) as f64;
     let bin_a = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
@@ -410,7 +451,7 @@ fn complementary_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u1
     let hi_b = (lo_b + 1) % NUM_BINS;
     let t_b = bin_b.fract() as f32;
 
-    output.par_chunks_mut(3).enumerate().for_each(|(i, chunk)| {
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
         let ra =
             bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
         let ga =
@@ -425,211 +466,77 @@ fn complementary_frame(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<u1
         let bb =
             bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
 
-        let r = ((ra + rb) * 0.5).clamp(0.0, 1.0);
-        let g = ((ga + gb) * 0.5).clamp(0.0, 1.0);
-        let b = ((ba + bb) * 0.5).clamp(0.0, 1.0);
-
-        chunk[0] = (r * 65535.0).round() as u16;
-        chunk[1] = (g * 65535.0).round() as u16;
-        chunk[2] = (b * 65535.0).round() as u16;
+        *pixel = P::from_rgb((ra + rb) * 0.5, (ga + gb) * 0.5, (ba + bb) * 0.5);
     });
 }
 
-/// Compute the fractional bin index for a given frame and variant.
-/// Exposed for testing the cycle math without requiring video encoding.
-#[cfg(test)]
-fn cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) -> f64 {
-    let total_f = total_frames as f64;
-    let t = frame as f64 / total_f;
-    let max_bin = (NUM_BINS - 1) as f64;
 
-    match variant {
-        CycleVariant::Forward => frame as f64 * NUM_BINS as f64 / total_f,
-        CycleVariant::Reverse => NUM_BINS as f64 - (frame as f64 * NUM_BINS as f64 / total_f),
-        CycleVariant::PingPong => {
-            if t < 0.5 {
-                t * 2.0 * max_bin
-            } else {
-                (1.0 - (t - 0.5) * 2.0) * max_bin
-            }
-        }
-        CycleVariant::Ease => (1.0 - (t * 2.0 * PI).cos()) * 0.5 * NUM_BINS as f64,
-        CycleVariant::Radial => frame as f64 * NUM_BINS as f64 / total_f,
-        CycleVariant::Complementary => frame as f64 * NUM_BINS as f64 / total_f,
-    }
+struct CycleVideoParams<'a> {
+    bin_buffers: &'a BinBuffers,
+    variant: &'a CycleVariant,
+    dist_map: &'a [f64],
+    total_frames: usize,
+    width: usize,
+    height: usize,
+    output_path: &'a str,
+    fast_encode: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn encode_cycle_video(
-    bin_buffers: &BinBuffers,
-    variant: &CycleVariant,
-    dist_map: &[f64],
-    total_frames: u32,
-    width: u32,
-    height: u32,
-    output_path: &str,
-    fast_encode: bool,
-) -> Result<()> {
+fn encode_cycle_video(params: &CycleVideoParams<'_>) -> Result<()> {
     let fps = constants::DEFAULT_VIDEO_FPS;
-    let options = if fast_encode {
+    let options = if params.fast_encode {
         VideoEncodingOptions::fast_encode()
     } else {
         VideoEncodingOptions::default()
     };
+    let width = params.width as u32;
+    let height = params.height as u32;
+    let total_frames = params.total_frames as u32;
 
     create_video_from_frames_singlepass(
         width,
         height,
         fps,
         |out| {
-            let mut frame_buf: Vec<u16> = Vec::new();
-            let total_f = total_frames as f64;
-            let max_bin = (NUM_BINS - 1) as f64;
+            let mut frame_buf: Vec<[u16; 3]> = Vec::new();
 
             for frame in 0..total_frames {
-                let t = frame as f64 / total_f;
+                let bin_f = compute_cycle_bin_f(params.variant, frame, total_frames);
 
-                match variant {
-                    CycleVariant::Forward => {
-                        let bin_f = frame as f64 * NUM_BINS as f64 / total_f;
-                        lerp_bins_frame(bin_buffers, bin_f, &mut frame_buf);
-                    }
-                    CycleVariant::Reverse => {
-                        let bin_f = NUM_BINS as f64 - (frame as f64 * NUM_BINS as f64 / total_f);
-                        lerp_bins_frame(bin_buffers, bin_f, &mut frame_buf);
-                    }
-                    CycleVariant::PingPong => {
-                        let bin_f = if t < 0.5 {
-                            t * 2.0 * max_bin
-                        } else {
-                            (1.0 - (t - 0.5) * 2.0) * max_bin
-                        };
-                        lerp_bins_frame(bin_buffers, bin_f, &mut frame_buf);
-                    }
-                    CycleVariant::Ease => {
-                        let bin_f = (1.0 - (t * 2.0 * PI).cos()) * 0.5 * NUM_BINS as f64;
-                        lerp_bins_frame(bin_buffers, bin_f, &mut frame_buf);
-                    }
+                match params.variant {
                     CycleVariant::Radial => {
-                        let base_bin = frame as f64 * NUM_BINS as f64 / total_f;
-                        radial_frame(bin_buffers, base_bin, dist_map, &mut frame_buf);
+                        radial_frame(params.bin_buffers, bin_f, params.dist_map, &mut frame_buf);
                     }
                     CycleVariant::Complementary => {
-                        let bin_f = frame as f64 * NUM_BINS as f64 / total_f;
-                        complementary_frame(bin_buffers, bin_f, &mut frame_buf);
+                        complementary_frame(params.bin_buffers, bin_f, &mut frame_buf);
+                    }
+                    _ => {
+                        lerp_bins_frame(params.bin_buffers, bin_f, &mut frame_buf);
                     }
                 }
 
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(frame_buf.as_ptr() as *const u8, frame_buf.len() * 2)
-                };
+                let bytes: &[u8] = bytemuck::cast_slice(&frame_buf);
                 out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())
         },
-        output_path,
+        params.output_path,
         &options,
     )?;
 
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Float-space bin interpolation for effect-mode cycle videos
-// ---------------------------------------------------------------------------
-
-/// Interpolate between two adjacent bin images in float space (linear [f32; 3]).
-fn lerp_bins_frame_f32(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<[f32; 3]>) {
-    let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count, [0.0f32; 3]);
-
-    let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
-    let lo = wrapped.floor() as usize % NUM_BINS;
-    let hi = (lo + 1) % NUM_BINS;
-    let t = wrapped.fract() as f32;
-    let one_minus_t = 1.0 - t;
-
-    let lo_buf = &bin_buffers.buffers[lo];
-    let hi_buf = &bin_buffers.buffers[hi];
-
-    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
-        pixel[0] = lo_buf[i][0] * one_minus_t + hi_buf[i][0] * t;
-        pixel[1] = lo_buf[i][1] * one_minus_t + hi_buf[i][1] * t;
-        pixel[2] = lo_buf[i][2] * one_minus_t + hi_buf[i][2] * t;
-    });
-}
-
-/// Per-pixel bin selection for the radial variant (float space).
-fn radial_frame_f32(
-    bin_buffers: &BinBuffers,
-    base_bin: f64,
-    dist_map: &[f64],
-    output: &mut Vec<[f32; 3]>,
-) {
-    let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count, [0.0f32; 3]);
-
-    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
-        let bin_f = base_bin - dist_map[i] * constants::RADIAL_SPREAD;
-        let wrapped = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
-        let lo = wrapped.floor() as usize % NUM_BINS;
-        let hi = (lo + 1) % NUM_BINS;
-        let t = wrapped.fract() as f32;
-        let one_minus_t = 1.0 - t;
-
-        pixel[0] = bin_buffers.buffers[lo][i][0] * one_minus_t + bin_buffers.buffers[hi][i][0] * t;
-        pixel[1] = bin_buffers.buffers[lo][i][1] * one_minus_t + bin_buffers.buffers[hi][i][1] * t;
-        pixel[2] = bin_buffers.buffers[lo][i][2] * one_minus_t + bin_buffers.buffers[hi][i][2] * t;
-    });
-}
-
-/// Complementary: average two cursors 32 bins apart (float space).
-fn complementary_frame_f32(bin_buffers: &BinBuffers, bin_f: f64, output: &mut Vec<[f32; 3]>) {
-    let pixel_count = bin_buffers.pixel_count();
-    output.resize(pixel_count, [0.0f32; 3]);
-
-    let half = (NUM_BINS / 2) as f64;
-    let bin_a = ((bin_f % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
-    let bin_b = (((bin_f + half) % NUM_BINS as f64) + NUM_BINS as f64) % NUM_BINS as f64;
-
-    let lo_a = bin_a.floor() as usize % NUM_BINS;
-    let hi_a = (lo_a + 1) % NUM_BINS;
-    let t_a = bin_a.fract() as f32;
-
-    let lo_b = bin_b.floor() as usize % NUM_BINS;
-    let hi_b = (lo_b + 1) % NUM_BINS;
-    let t_b = bin_b.fract() as f32;
-
-    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
-        let ra =
-            bin_buffers.buffers[lo_a][i][0] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][0] * t_a;
-        let ga =
-            bin_buffers.buffers[lo_a][i][1] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][1] * t_a;
-        let ba =
-            bin_buffers.buffers[lo_a][i][2] * (1.0 - t_a) + bin_buffers.buffers[hi_a][i][2] * t_a;
-
-        let rb =
-            bin_buffers.buffers[lo_b][i][0] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][0] * t_b;
-        let gb =
-            bin_buffers.buffers[lo_b][i][1] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][1] * t_b;
-        let bb =
-            bin_buffers.buffers[lo_b][i][2] * (1.0 - t_b) + bin_buffers.buffers[hi_b][i][2] * t_b;
-
-        pixel[0] = (ra + rb) * 0.5;
-        pixel[1] = (ga + gb) * 0.5;
-        pixel[2] = (ba + bb) * 0.5;
-    });
-}
 
 /// Compute the float-space bin index for a cycle frame (same logic as u16 variants).
 fn compute_cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) -> f64 {
-    let total_f = total_frames as f64;
-    let t = frame as f64 / total_f;
+    let total_f = f64::from(total_frames);
+    let t = f64::from(frame) / total_f;
     let max_bin = (NUM_BINS - 1) as f64;
 
     match variant {
-        CycleVariant::Forward => frame as f64 * NUM_BINS as f64 / total_f,
-        CycleVariant::Reverse => NUM_BINS as f64 - (frame as f64 * NUM_BINS as f64 / total_f),
+        CycleVariant::Forward => f64::from(frame) * NUM_BINS as f64 / total_f,
+        CycleVariant::Reverse => NUM_BINS as f64 - (f64::from(frame) * NUM_BINS as f64 / total_f),
         CycleVariant::PingPong => {
             if t < 0.5 {
                 t * 2.0 * max_bin
@@ -639,7 +546,7 @@ fn compute_cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) ->
         }
         CycleVariant::Ease => (1.0 - (t * 2.0 * PI).cos()) * 0.5 * NUM_BINS as f64,
         CycleVariant::Radial | CycleVariant::Complementary => {
-            frame as f64 * NUM_BINS as f64 / total_f
+            f64::from(frame) * NUM_BINS as f64 / total_f
         }
     }
 }
@@ -654,20 +561,19 @@ fn compute_cycle_bin_f(variant: &CycleVariant, frame: u32, total_frames: u32) ->
 /// according to the bin's plan. For Masking mode, a two-pass approach is used:
 /// first all bins are processed, then each is blended with raw using the
 /// complementary bin's intensity as a mask.
-#[allow(clippy::too_many_arguments)]
 pub fn generate_mode_gallery(
     accum_spd: &[[f64; NUM_BINS]],
     bin_buffers_linear: &BinBuffers,
     plans: &[BinEffectPlan],
     mode: SpectralEffectMode,
     base_config: &EffectConfig,
-    width: u32,
-    height: u32,
     output_dir: &str,
 ) -> Result<()> {
     info!("   Generating {} gallery ({NUM_BINS} bin images)...", mode.display_name());
-    let w = width as usize;
-    let h = height as usize;
+    let w = bin_buffers_linear.width;
+    let h = bin_buffers_linear.height;
+    let width = w as u32;
+    let height = h as u32;
 
     if mode == SpectralEffectMode::Masking {
         let processed: Vec<Vec<[f32; 3]>> = (0..NUM_BINS)
@@ -719,21 +625,31 @@ pub fn generate_mode_gallery(
 // Effect-mode cycle video generation
 // ---------------------------------------------------------------------------
 
+struct ModeCycleVideoParams<'a> {
+    bin_buffers: &'a BinBuffers,
+    plans: &'a [BinEffectPlan],
+    mode: SpectralEffectMode,
+    base_config: &'a EffectConfig,
+    width: usize,
+    height: usize,
+    output_path: &'a str,
+    fast_encode: bool,
+}
+
 /// Generate all six cycle videos for one effect mode.
-#[allow(clippy::too_many_arguments)]
 fn generate_mode_cycle_videos_inner(
     bin_buffers_linear: &BinBuffers,
     plans: &[BinEffectPlan],
     mode: SpectralEffectMode,
     base_config: &EffectConfig,
-    width: u32,
-    height: u32,
     output_dir: &str,
     fast_encode: bool,
 ) -> Result<()> {
     info!("   Generating {} cycle videos (6 variants)...", mode.display_name());
 
     let total_frames = constants::CYCLE_TOTAL_FRAMES;
+    let w = bin_buffers_linear.width;
+    let h = bin_buffers_linear.height;
     let variants: [(&str, CycleVariant); 6] = [
         ("forward", CycleVariant::Forward),
         ("reverse", CycleVariant::Reverse),
@@ -743,7 +659,7 @@ fn generate_mode_cycle_videos_inner(
         ("complementary", CycleVariant::Complementary),
     ];
 
-    let dist_map = build_distance_map(width as usize, height as usize);
+    let dist_map = build_distance_map(w, h);
     let errors: std::sync::Mutex<Vec<RenderError>> = std::sync::Mutex::new(Vec::new());
 
     std::thread::scope(|s| {
@@ -757,26 +673,28 @@ fn generate_mode_cycle_videos_inner(
                 .stack_size(constants::THREAD_STACK_SIZE)
                 .spawn_scoped(s, move || {
                     if let Err(e) = encode_mode_cycle_video(
-                        bb,
+                        &ModeCycleVideoParams {
+                            bin_buffers: bb,
+                            plans,
+                            mode,
+                            base_config,
+                            width: w,
+                            height: h,
+                            output_path: &output_path,
+                            fast_encode,
+                        },
                         &variant,
                         dm,
                         total_frames,
-                        plans,
-                        mode,
-                        base_config,
-                        width,
-                        height,
-                        &output_path,
-                        fast_encode,
                     ) {
-                        errs.lock().unwrap().push(e);
+                        errs.lock().expect("mode cycle encoding error mutex poisoned").push(e);
                     }
                 })
                 .expect("failed to spawn mode cycle encoding thread");
         }
     });
 
-    let errs = errors.into_inner().unwrap();
+    let errs = errors.into_inner().expect("mode cycle encoding error mutex poisoned");
     if let Some(first_err) = errs.into_iter().next() {
         return Err(first_err);
     }
@@ -785,28 +703,20 @@ fn generate_mode_cycle_videos_inner(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn encode_mode_cycle_video(
-    bin_buffers: &BinBuffers,
+    params: &ModeCycleVideoParams<'_>,
     variant: &CycleVariant,
     dist_map: &[f64],
     total_frames: u32,
-    plans: &[BinEffectPlan],
-    mode: SpectralEffectMode,
-    base_config: &EffectConfig,
-    width: u32,
-    height: u32,
-    output_path: &str,
-    fast_encode: bool,
 ) -> Result<()> {
     let fps = constants::DEFAULT_VIDEO_FPS;
-    let options = if fast_encode {
+    let options = if params.fast_encode {
         VideoEncodingOptions::fast_encode()
     } else {
         VideoEncodingOptions::default()
     };
-    let w = width as usize;
-    let h = height as usize;
+    let width = params.width as u32;
+    let height = params.height as u32;
 
     create_video_from_frames_singlepass(
         width,
@@ -820,31 +730,37 @@ fn encode_mode_cycle_video(
 
                 match variant {
                     CycleVariant::Radial => {
-                        radial_frame_f32(bin_buffers, bin_f, dist_map, &mut frame_f32);
+                        radial_frame(params.bin_buffers, bin_f, dist_map, &mut frame_f32);
                     }
                     CycleVariant::Complementary => {
-                        complementary_frame_f32(bin_buffers, bin_f, &mut frame_f32);
+                        complementary_frame(params.bin_buffers, bin_f, &mut frame_f32);
                     }
                     _ => {
-                        lerp_bins_frame_f32(bin_buffers, bin_f, &mut frame_f32);
+                        lerp_bins_frame(params.bin_buffers, bin_f, &mut frame_f32);
                     }
                 }
 
-                let plan = cycle_frame_plan(mode, plans, bin_f, frame, total_frames);
-                let frame_16bit =
-                    apply_effects_to_cycle_frame(&frame_f32, w, h, &plan, base_config);
+                let plan = cycle_frame_plan(
+                    params.mode,
+                    params.plans,
+                    bin_f,
+                    frame,
+                    total_frames,
+                );
+                let frame_16bit = apply_effects_to_cycle_frame(
+                    &frame_f32,
+                    params.width,
+                    params.height,
+                    &plan,
+                    params.base_config,
+                );
 
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        frame_16bit.as_ptr() as *const u8,
-                        frame_16bit.len() * 2,
-                    )
-                };
+                let bytes: &[u8] = bytemuck::cast_slice(&frame_16bit);
                 out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
             Ok(())
         },
-        output_path,
+        params.output_path,
         &options,
     )?;
 
@@ -906,8 +822,6 @@ pub fn generate_all_spectral_outputs_with_modes(
                 &plans,
                 mode,
                 base_config,
-                width,
-                height,
                 &mode_dir,
             )?;
             generate_mode_cycle_videos_inner(
@@ -915,8 +829,6 @@ pub fn generate_all_spectral_outputs_with_modes(
                 &plans,
                 mode,
                 base_config,
-                width,
-                height,
                 &mode_dir,
                 fast_encode,
             )?;
@@ -1141,26 +1053,26 @@ mod tests {
     fn test_lerp_bins_at_integer_index() {
         let spd = make_single_bin_spd(10, 2.0);
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         lerp_bins_frame(&bb, 10.0, &mut output);
-        assert_eq!(output.len(), TEST_W * TEST_H * 3);
+        assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
     #[test]
     fn test_lerp_bins_output_length() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         lerp_bins_frame(&bb, 5.5, &mut output);
-        assert_eq!(output.len(), TEST_W * TEST_H * 3);
+        assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
     #[test]
     fn test_lerp_bins_wraps_negative() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut out_neg = Vec::new();
-        let mut out_pos = Vec::new();
+        let mut out_neg: Vec<[u16; 3]> = Vec::new();
+        let mut out_pos: Vec<[u16; 3]> = Vec::new();
         lerp_bins_frame(&bb, -1.0, &mut out_neg);
         lerp_bins_frame(&bb, (NUM_BINS - 1) as f64, &mut out_pos);
         assert_eq!(out_neg, out_pos, "wrapping should map -1 to NUM_BINS-1");
@@ -1170,8 +1082,8 @@ mod tests {
     fn test_lerp_bins_wraps_over_max() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut out_a = Vec::new();
-        let mut out_b = Vec::new();
+        let mut out_a: Vec<[u16; 3]> = Vec::new();
+        let mut out_b: Vec<[u16; 3]> = Vec::new();
         lerp_bins_frame(&bb, 0.0, &mut out_a);
         lerp_bins_frame(&bb, NUM_BINS as f64, &mut out_b);
         assert_eq!(out_a, out_b, "wrapping should map NUM_BINS to 0");
@@ -1181,7 +1093,7 @@ mod tests {
     fn test_lerp_bins_output_all_valid_u16() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         for bin_f_int in 0..NUM_BINS {
             let bin_f = bin_f_int as f64 + 0.3;
             lerp_bins_frame(&bb, bin_f, &mut output);
@@ -1196,9 +1108,9 @@ mod tests {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
         let dist_map = build_distance_map(TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         radial_frame(&bb, 10.0, &dist_map, &mut output);
-        assert_eq!(output.len(), TEST_W * TEST_H * 3);
+        assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
     #[test]
@@ -1206,8 +1118,8 @@ mod tests {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
         let dist_map = build_distance_map(TEST_W, TEST_H);
-        let mut out1 = Vec::new();
-        let mut out2 = Vec::new();
+        let mut out1: Vec<[u16; 3]> = Vec::new();
+        let mut out2: Vec<[u16; 3]> = Vec::new();
         radial_frame(&bb, 20.0, &dist_map, &mut out1);
         radial_frame(&bb, 20.0, &dist_map, &mut out2);
         assert_eq!(out1, out2);
@@ -1219,17 +1131,17 @@ mod tests {
     fn test_complementary_frame_output_length() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         complementary_frame(&bb, 5.0, &mut output);
-        assert_eq!(output.len(), TEST_W * TEST_H * 3);
+        assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
     #[test]
     fn test_complementary_frame_deterministic() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut out1 = Vec::new();
-        let mut out2 = Vec::new();
+        let mut out1: Vec<[u16; 3]> = Vec::new();
+        let mut out2: Vec<[u16; 3]> = Vec::new();
         complementary_frame(&bb, 16.0, &mut out1);
         complementary_frame(&bb, 16.0, &mut out2);
         assert_eq!(out1, out2);
@@ -1242,7 +1154,7 @@ mod tests {
         let total = constants::CYCLE_TOTAL_FRAMES;
         let mut prev = -1.0f64;
         for frame in 0..total {
-            let val = cycle_bin_f(&CycleVariant::Forward, frame, total);
+            let val = compute_cycle_bin_f(&CycleVariant::Forward, frame, total);
             assert!(val >= prev, "forward should be monotonically non-decreasing");
             prev = val;
         }
@@ -1251,8 +1163,8 @@ mod tests {
     #[test]
     fn test_forward_cycle_range() {
         let total = constants::CYCLE_TOTAL_FRAMES;
-        let first = cycle_bin_f(&CycleVariant::Forward, 0, total);
-        let last = cycle_bin_f(&CycleVariant::Forward, total - 1, total);
+        let first = compute_cycle_bin_f(&CycleVariant::Forward, 0, total);
+        let last = compute_cycle_bin_f(&CycleVariant::Forward, total - 1, total);
         assert!(first < 1.0, "first frame should be near bin 0");
         assert!(last > (NUM_BINS - 2) as f64, "last frame should be near bin {}", NUM_BINS - 1);
     }
@@ -1262,7 +1174,7 @@ mod tests {
         let total = constants::CYCLE_TOTAL_FRAMES;
         let mut prev = f64::MAX;
         for frame in 0..total {
-            let val = cycle_bin_f(&CycleVariant::Reverse, frame, total);
+            let val = compute_cycle_bin_f(&CycleVariant::Reverse, frame, total);
             assert!(val <= prev, "reverse should be monotonically non-increasing");
             prev = val;
         }
@@ -1271,8 +1183,8 @@ mod tests {
     #[test]
     fn test_pingpong_starts_and_ends_at_zero() {
         let total = constants::CYCLE_TOTAL_FRAMES;
-        let first = cycle_bin_f(&CycleVariant::PingPong, 0, total);
-        let last = cycle_bin_f(&CycleVariant::PingPong, total - 1, total);
+        let first = compute_cycle_bin_f(&CycleVariant::PingPong, 0, total);
+        let last = compute_cycle_bin_f(&CycleVariant::PingPong, total - 1, total);
         assert!(first < 1.0, "ping-pong should start near 0, got {first}");
         assert!(last < 1.0, "ping-pong should end near 0, got {last}");
     }
@@ -1281,7 +1193,7 @@ mod tests {
     fn test_pingpong_peaks_at_midpoint() {
         let total = constants::CYCLE_TOTAL_FRAMES;
         let mid = total / 2 - 1;
-        let val = cycle_bin_f(&CycleVariant::PingPong, mid, total);
+        let val = compute_cycle_bin_f(&CycleVariant::PingPong, mid, total);
         assert!(
             val > (NUM_BINS / 2) as f64,
             "ping-pong should peak near max at midpoint, got {val}"
@@ -1291,8 +1203,8 @@ mod tests {
     #[test]
     fn test_ease_cycle_starts_and_ends_near_zero() {
         let total = constants::CYCLE_TOTAL_FRAMES;
-        let first = cycle_bin_f(&CycleVariant::Ease, 0, total);
-        let last = cycle_bin_f(&CycleVariant::Ease, total - 1, total);
+        let first = compute_cycle_bin_f(&CycleVariant::Ease, 0, total);
+        let last = compute_cycle_bin_f(&CycleVariant::Ease, total - 1, total);
         assert!(first < 1.0, "ease should start near 0, got {first}");
         assert!(last < 1.0, "ease should end near 0, got {last}");
     }
@@ -1301,7 +1213,7 @@ mod tests {
     fn test_ease_cycle_peaks_at_midpoint() {
         let total = constants::CYCLE_TOTAL_FRAMES;
         let mid = total / 2;
-        let val = cycle_bin_f(&CycleVariant::Ease, mid, total);
+        let val = compute_cycle_bin_f(&CycleVariant::Ease, mid, total);
         assert!(
             val > (NUM_BINS - 2) as f64,
             "ease should peak near NUM_BINS at midpoint, got {val}"
@@ -1321,7 +1233,7 @@ mod tests {
         ];
         for variant in &variants {
             for frame in 0..total {
-                let val = cycle_bin_f(variant, frame, total);
+                let val = compute_cycle_bin_f(variant, frame, total);
                 assert!(val.is_finite(), "NaN/Inf from cycle variant at frame {frame}");
             }
         }
@@ -1331,8 +1243,8 @@ mod tests {
 
     #[test]
     fn test_gallery_writes_expected_files() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(20, 1.0);
         generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir)
@@ -1350,8 +1262,8 @@ mod tests {
 
     #[test]
     fn test_gallery_zero_energy_does_not_crash() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
         let result = generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir);
@@ -1360,8 +1272,8 @@ mod tests {
 
     #[test]
     fn test_gallery_extreme_energy_does_not_crash() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = vec![[1e6; NUM_BINS]; TEST_W * TEST_H];
         let result = generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, dir);
@@ -1432,21 +1344,24 @@ mod tests {
         }
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
 
-        let mut out_lo = Vec::new();
-        let mut out_hi = Vec::new();
-        let mut out_mid = Vec::new();
+        let mut out_lo: Vec<[u16; 3]> = Vec::new();
+        let mut out_hi: Vec<[u16; 3]> = Vec::new();
+        let mut out_mid: Vec<[u16; 3]> = Vec::new();
         lerp_bins_frame(&bb, 5.0, &mut out_lo);
         lerp_bins_frame(&bb, 6.0, &mut out_hi);
         lerp_bins_frame(&bb, 5.5, &mut out_mid);
 
         for i in 0..out_lo.len() {
-            let expected = ((out_lo[i] as f64 + out_hi[i] as f64) / 2.0).round() as u16;
-            let diff = (out_mid[i] as i32 - expected as i32).unsigned_abs();
-            assert!(
-                diff <= 1,
-                "lerp at 0.5 should be average of endpoints: pixel {i}: mid={}, expected={expected}",
-                out_mid[i]
-            );
+            for c in 0..3 {
+                let expected =
+                    ((out_lo[i][c] as f64 + out_hi[i][c] as f64) / 2.0).round() as u16;
+                let diff = (out_mid[i][c] as i32 - expected as i32).unsigned_abs();
+                assert!(
+                    diff <= 1,
+                    "lerp at 0.5 should be average: pixel {i} ch {c}: mid={}, expected={expected}",
+                    out_mid[i][c]
+                );
+            }
         }
     }
 
@@ -1454,12 +1369,12 @@ mod tests {
     fn test_lerp_bins_deterministic_under_parallelism() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut out1 = Vec::new();
-        let mut out2 = Vec::new();
+        let mut out1: Vec<[u16; 3]> = Vec::new();
+        let mut out2: Vec<[u16; 3]> = Vec::new();
         for _ in 0..5 {
             lerp_bins_frame(&bb, 17.3, &mut out1);
             lerp_bins_frame(&bb, 17.3, &mut out2);
-            assert_eq!(out1, out2, "par_chunks_mut lerp should be deterministic");
+            assert_eq!(out1, out2, "par_iter_mut lerp should be deterministic");
         }
     }
 
@@ -1470,8 +1385,8 @@ mod tests {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
         let dist_map = build_distance_map(TEST_W, TEST_H);
-        let mut out_a = Vec::new();
-        let mut out_b = Vec::new();
+        let mut out_a: Vec<[u16; 3]> = Vec::new();
+        let mut out_b: Vec<[u16; 3]> = Vec::new();
         radial_frame(&bb, 0.0, &dist_map, &mut out_a);
         radial_frame(&bb, 32.0, &dist_map, &mut out_b);
         assert_ne!(out_a, out_b, "different base bins should produce different radial frames");
@@ -1487,9 +1402,12 @@ mod tests {
             pixel[NUM_BINS / 2] = 1.0;
         }
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
+        let mut output: Vec<[u16; 3]> = Vec::new();
         complementary_frame(&bb, 0.0, &mut output);
-        let nonzero_count = output.iter().filter(|&&v| v > 0).count();
+        let nonzero_count = output
+            .iter()
+            .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+            .count();
         assert!(
             nonzero_count > 0,
             "complementary frame at bin 0 should pick up energy from bins 0 and {}",
@@ -1579,8 +1497,8 @@ mod tests {
     fn test_forward_and_reverse_are_mirror() {
         let total = constants::CYCLE_TOTAL_FRAMES;
         for frame in 0..total {
-            let fwd = cycle_bin_f(&CycleVariant::Forward, frame, total);
-            let rev = cycle_bin_f(&CycleVariant::Reverse, frame, total);
+            let fwd = compute_cycle_bin_f(&CycleVariant::Forward, frame, total);
+            let rev = compute_cycle_bin_f(&CycleVariant::Reverse, frame, total);
             let sum = fwd + rev;
             assert!(
                 (sum - NUM_BINS as f64).abs() < 1e-10,
@@ -1593,9 +1511,9 @@ mod tests {
     fn test_pingpong_is_symmetric() {
         let total = constants::CYCLE_TOTAL_FRAMES;
         for frame in 0..total / 2 {
-            let first_half = cycle_bin_f(&CycleVariant::PingPong, frame, total);
+            let first_half = compute_cycle_bin_f(&CycleVariant::PingPong, frame, total);
             let mirror_frame = total - 1 - frame;
-            let second_half = cycle_bin_f(&CycleVariant::PingPong, mirror_frame, total);
+            let second_half = compute_cycle_bin_f(&CycleVariant::PingPong, mirror_frame, total);
             assert!(
                 (first_half - second_half).abs() < 1.0,
                 "ping-pong should be symmetric: frame {frame}={first_half}, mirror {mirror_frame}={second_half}"
@@ -1607,8 +1525,8 @@ mod tests {
     fn test_ease_cycle_is_symmetric() {
         let total = constants::CYCLE_TOTAL_FRAMES;
         for frame in 1..total / 4 {
-            let val = cycle_bin_f(&CycleVariant::Ease, frame, total);
-            let mirror_val = cycle_bin_f(&CycleVariant::Ease, total - frame, total);
+            let val = compute_cycle_bin_f(&CycleVariant::Ease, frame, total);
+            let mirror_val = compute_cycle_bin_f(&CycleVariant::Ease, total - frame, total);
             assert!(
                 (val - mirror_val).abs() < 0.5,
                 "ease should be symmetric: frame {frame}={val}, mirror {}={mirror_val}",
@@ -1629,7 +1547,7 @@ mod tests {
         ];
         for variant in &variants {
             for frame in 0..total {
-                let val = cycle_bin_f(variant, frame, total);
+                let val = compute_cycle_bin_f(variant, frame, total);
                 assert!(val >= 0.0, "cycle variant at frame {frame} should be non-negative: {val}");
             }
         }
@@ -1639,8 +1557,8 @@ mod tests {
 
     #[test]
     fn test_gallery_non_square_image() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let w = 6u32;
         let h = 3u32;
@@ -1651,8 +1569,8 @@ mod tests {
 
     #[test]
     fn test_gallery_single_pixel() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = vec![[1.0f64; NUM_BINS]; 1];
         let result = generate_spectral_gallery(&spd, 1, 1, dir);
@@ -1661,8 +1579,8 @@ mod tests {
 
     #[test]
     fn test_combined_spectral_outputs_writes_gallery() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(20, 1.0);
         // generate_all_spectral_outputs also tries to encode videos which needs ffmpeg,
@@ -1683,8 +1601,8 @@ mod tests {
     fn test_shared_buffers_produce_same_gallery_as_standalone() {
         let tmp1 = tempfile::tempdir().expect("tmpdir1");
         let tmp2 = tempfile::tempdir().expect("tmpdir2");
-        let dir1 = tmp1.path().to_str().unwrap();
-        let dir2 = tmp2.path().to_str().unwrap();
+        let dir1 = tmp1.path().to_str().expect("temp directory path must be valid UTF-8");
+        let dir2 = tmp2.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(30, 2.5);
 
@@ -1851,8 +1769,8 @@ mod tests {
     fn test_lerp_bins_f32_output_length() {
         let spd = make_test_spd();
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
-        lerp_bins_frame_f32(&bb, 5.5, &mut output);
+        let mut output: Vec<[f32; 3]> = Vec::new();
+        lerp_bins_frame(&bb, 5.5, &mut output);
         assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
@@ -1860,10 +1778,10 @@ mod tests {
     fn test_lerp_bins_f32_wraps() {
         let spd = make_test_spd();
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
-        let mut out_neg = Vec::new();
-        let mut out_pos = Vec::new();
-        lerp_bins_frame_f32(&bb, -1.0, &mut out_neg);
-        lerp_bins_frame_f32(&bb, (NUM_BINS - 1) as f64, &mut out_pos);
+        let mut out_neg: Vec<[f32; 3]> = Vec::new();
+        let mut out_pos: Vec<[f32; 3]> = Vec::new();
+        lerp_bins_frame(&bb, -1.0, &mut out_neg);
+        lerp_bins_frame(&bb, (NUM_BINS - 1) as f64, &mut out_pos);
         assert_eq!(out_neg, out_pos);
     }
 
@@ -1872,8 +1790,8 @@ mod tests {
         let spd = make_test_spd();
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
         let dist_map = build_distance_map(TEST_W, TEST_H);
-        let mut output = Vec::new();
-        radial_frame_f32(&bb, 10.0, &dist_map, &mut output);
+        let mut output: Vec<[f32; 3]> = Vec::new();
+        radial_frame(&bb, 10.0, &dist_map, &mut output);
         assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
@@ -1881,8 +1799,8 @@ mod tests {
     fn test_complementary_frame_f32_output_length() {
         let spd = make_test_spd();
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
-        let mut output = Vec::new();
-        complementary_frame_f32(&bb, 5.0, &mut output);
+        let mut output: Vec<[f32; 3]> = Vec::new();
+        complementary_frame(&bb, 5.0, &mut output);
         assert_eq!(output.len(), TEST_W * TEST_H);
     }
 
@@ -1901,8 +1819,8 @@ mod tests {
 
     #[test]
     fn test_mode_gallery_default_writes_files() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(20, 1.0);
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
@@ -1915,8 +1833,6 @@ mod tests {
             &plans,
             SpectralEffectMode::Default,
             &base_config,
-            TEST_W as u32,
-            TEST_H as u32,
             dir,
         )
         .expect("default gallery should succeed");
@@ -1932,8 +1848,8 @@ mod tests {
 
     #[test]
     fn test_mode_gallery_dispersion_writes_files() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(10, 2.0);
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
@@ -1946,8 +1862,6 @@ mod tests {
             &plans,
             SpectralEffectMode::Dispersion,
             &base_config,
-            TEST_W as u32,
-            TEST_H as u32,
             dir,
         )
         .expect("dispersion gallery should succeed");
@@ -1958,8 +1872,8 @@ mod tests {
 
     #[test]
     fn test_mode_gallery_masking_writes_files() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = make_single_bin_spd(20, 1.0);
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
@@ -1972,8 +1886,6 @@ mod tests {
             &plans,
             SpectralEffectMode::Masking,
             &base_config,
-            TEST_W as u32,
-            TEST_H as u32,
             dir,
         )
         .expect("masking gallery should succeed");
@@ -1984,8 +1896,8 @@ mod tests {
 
     #[test]
     fn test_mode_gallery_zero_energy_does_not_crash() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
         let bb = BinBuffers::new_linear(&spd, TEST_W, TEST_H);
@@ -1998,8 +1910,6 @@ mod tests {
             &plans,
             SpectralEffectMode::Dispersion,
             &base_config,
-            TEST_W as u32,
-            TEST_H as u32,
             dir,
         );
         assert!(result.is_ok());
@@ -2007,8 +1917,8 @@ mod tests {
 
     #[test]
     fn test_mode_gallery_non_square() {
-        let tmp = tempfile::tempdir().expect("tmpdir");
-        let dir = tmp.path().to_str().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
 
         let w = 6;
         let h = 3;
@@ -2023,8 +1933,6 @@ mod tests {
             &plans,
             SpectralEffectMode::Cascade,
             &base_config,
-            w as u32,
-            h as u32,
             dir,
         );
         assert!(result.is_ok());

@@ -9,6 +9,7 @@ use nalgebra::Vector3;
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
 /// Encapsulates common rendering operations and coordinate transformations
+#[derive(Debug)]
 pub struct RenderContext {
     pub width: u32,
     pub height: u32,
@@ -89,8 +90,8 @@ impl BoundingBox {
     #[inline]
     pub fn world_to_pixel(&self, x: f64, y: f64, width: u32, height: u32) -> (f32, f32) {
         let (nx, ny) = self.normalize(x, y);
-        let px = nx * (width as f64);
-        let py = ny * (height as f64);
+        let px = nx * f64::from(width);
+        let py = ny * f64::from(height);
         (px as f32, py as f32)
     }
 
@@ -101,7 +102,7 @@ impl BoundingBox {
         if target_height == 0 || self.height < 1e-12 {
             return;
         }
-        let target_ar = target_width as f64 / target_height as f64;
+        let target_ar = f64::from(target_width) / f64::from(target_height);
         let bbox_ar = self.width / self.height;
 
         if bbox_ar < target_ar {

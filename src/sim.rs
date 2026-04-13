@@ -27,6 +27,9 @@ pub struct Sha3RandomByteStream {
 }
 
 impl Sha3RandomByteStream {
+    /// Initialise the stream from a byte seed and configure sampling ranges
+    /// for mass, location, and velocity.
+    #[must_use]
     pub fn new(seed: &[u8], min_mass: f64, max_mass: f64, location: f64, velocity: f64) -> Self {
         let mut hasher = Sha3_256::new();
         hasher.update(seed);
@@ -42,6 +45,7 @@ impl Sha3RandomByteStream {
             velocity_range: velocity,
         }
     }
+    /// Return the next pseudorandom byte, re-hashing when the buffer is exhausted.
     pub fn next_byte(&mut self) -> u8 {
         if self.index >= self.buffer.len() {
             self.hasher.update(&self.seed);
@@ -60,25 +64,40 @@ impl Sha3RandomByteStream {
         }
         u64::from_le_bytes(bytes)
     }
+    /// Return a uniform pseudorandom `f64` in [0, 1].
     pub fn next_f64(&mut self) -> f64 {
+        // u64→f64 may lose precision for large values; acceptable for RNG normalization
         (self.next_u64() as f64) / (u64::MAX as f64)
     }
     fn gen_range(&mut self, min: f64, max: f64) -> f64 {
         self.next_f64() * (max - min) + min
     }
+    /// Sample a mass uniformly within [`min_mass`, `max_mass`].
     pub fn random_mass(&mut self) -> f64 {
         self.gen_range(self.min_mass, self.max_mass)
     }
+    /// Sample a coordinate uniformly within ±`location_range`.
     pub fn random_location(&mut self) -> f64 {
         self.gen_range(-self.location_range, self.location_range)
     }
+    /// Sample a velocity component uniformly within ±`velocity_range`.
     pub fn random_velocity(&mut self) -> f64 {
         self.gen_range(-self.velocity_range, self.velocity_range)
     }
 }
 
+impl std::fmt::Debug for Sha3RandomByteStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sha3RandomByteStream")
+            .field("index", &self.index)
+            .field("min_mass", &self.min_mass)
+            .field("max_mass", &self.max_mass)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Single Body in the 3-body sim
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Body {
     pub mass: f64,
     pub position: Vector3<f64>,
@@ -86,6 +105,8 @@ pub struct Body {
     acceleration: Vector3<f64>,
 }
 impl Body {
+    /// Construct a body with zero initial acceleration.
+    #[must_use]
     pub fn new(mass: f64, pos: Vector3<f64>, vel: Vector3<f64>) -> Self {
         Self { mass, position: pos, velocity: vel, acceleration: Vector3::zeros() }
     }
@@ -95,7 +116,7 @@ impl Body {
     fn update_acceleration(&mut self, om: f64, op: &Vector3<f64>) {
         let dir = self.position - *op;
         let d = dir.norm();
-        if d > 1e-10 {
+        if d > crate::utils::FLOAT_EPSILON {
             self.acceleration += -G * om * dir / d.powi(3);
         }
     }
@@ -170,12 +191,25 @@ fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
     }
 }
 
-/// Recorded positions
+/// Complete simulation output: recorded position trajectories for each body.
 pub struct FullSim {
+    /// `positions[body_index][step_index]` — 3D position at each timestep.
     pub positions: Vec<Vec<Vector3<f64>>>,
 }
 
-/// warmup + record with optional early-exit checks
+impl std::fmt::Debug for FullSim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FullSim")
+            .field("num_bodies", &self.positions.len())
+            .field("num_steps", &self.positions.first().map_or(0, |p| p.len()))
+            .finish()
+    }
+}
+
+/// Run a full simulation: warm up for `steps`, then record `steps` more positions.
+///
+/// Bodies are shifted to the centre-of-mass frame before integration.
+#[must_use]
 pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
     // Ensure the initial state is expressed in the centre-of-mass (COM) frame
     shift_bodies_to_com(&mut bodies);
@@ -202,6 +236,7 @@ pub fn get_positions(mut bodies: Vec<Body>, steps: usize) -> FullSim {
 
 /// Fast trajectory simulation with early-exit for clearly bad candidates
 /// Returns None if the trajectory is clearly unsuitable (saves expensive full simulation)
+#[must_use]
 pub fn get_positions_with_early_exit(
     mut bodies: Vec<Body>,
     steps: usize,
@@ -249,7 +284,7 @@ pub fn get_positions_with_early_exit(
     Some(FullSim { positions: all })
 }
 
-/// Shift to COM
+/// Translate positions and velocities so the centre of mass is at the origin with zero momentum.
 pub fn shift_bodies_to_com(b: &mut [Body]) {
     let mt: f64 = b.iter().map(|x| x.mass).sum();
     if mt < 1e-14 {
@@ -271,7 +306,8 @@ pub fn shift_bodies_to_com(b: &mut [Body]) {
     }
 }
 
-/// Escaping check
+/// Return `true` if any body's kinetic energy exceeds its binding potential by more than `th`.
+#[must_use]
 pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
     let mut loc = b.to_vec();
     shift_bodies_to_com(&mut loc);
@@ -294,14 +330,20 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
     false
 }
 
-/// Borda result
+/// Outcome of a Borda-count trajectory search over many random orbits.
 #[derive(Clone)]
 pub struct TrajectoryResult {
+    /// Non-chaoticness score (higher = more regular orbit).
     pub chaos: f64,
+    /// Equilateralness score (higher = more triangular).
     pub equilateralness: f64,
+    /// Borda points awarded for non-chaoticness rank.
     pub chaos_pts: usize,
+    /// Borda points awarded for equilateralness rank.
     pub equil_pts: usize,
+    /// Sum of `chaos_pts` and `equil_pts`.
     pub total_score: usize,
+    /// Weighted combination of Borda points used for final ranking.
     pub total_score_weighted: f64,
     /// Original simulation index of the selected orbit.
     pub selected_index: usize,
@@ -309,7 +351,64 @@ pub struct TrajectoryResult {
     pub discarded_count: usize,
 }
 
-/// Borda search
+fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
+    Body::new(
+        rng.random_mass(),
+        Vector3::new(rng.random_location(), rng.random_location(), rng.random_location()),
+        Vector3::new(rng.random_velocity(), rng.random_velocity(), rng.random_velocity()),
+    )
+}
+
+/// Assign Borda-count points and sort trajectories by weighted score.
+///
+/// Flattens `results` (discarding `None`s), ranks by non-chaoticness and equilateralness,
+/// assigns Borda points, and returns the list sorted by descending weighted score.
+fn rank_trajectories(
+    results: Vec<Option<(TrajectoryResult, usize)>>,
+    cw: f64,
+    ew: f64,
+) -> Vec<(TrajectoryResult, usize)> {
+    fn assign(vals: &mut [(f64, usize)], hb: bool) -> Vec<usize> {
+        if hb {
+            vals.sort_by(|a, b| b.0.total_cmp(&a.0));
+        } else {
+            vals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+        let n = vals.len();
+        let mut out = vec![0; n];
+        for (r, &(_, i)) in vals.iter().enumerate() {
+            out[i] = n - r;
+        }
+        out
+    }
+
+    let mut iv: Vec<(TrajectoryResult, usize)> = results.into_iter().flatten().collect();
+    if iv.is_empty() {
+        return iv;
+    }
+
+    let mut cv = Vec::with_capacity(iv.len());
+    let mut ev = Vec::with_capacity(iv.len());
+    for (i, (t, _)) in iv.iter().enumerate() {
+        cv.push((t.chaos, i));
+        ev.push((t.equilateralness, i));
+    }
+    let cps = assign(&mut cv, false);
+    let eps = assign(&mut ev, true);
+    for (i, (t, _)) in iv.iter_mut().enumerate() {
+        t.chaos_pts = cps[i];
+        t.equil_pts = eps[i];
+        t.total_score = t.chaos_pts + t.equil_pts;
+        // usize→f64: chaos_pts/equil_pts are bounded by the number of valid trajectories
+        t.total_score_weighted = cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64);
+    }
+    iv.sort_by(|a, b| b.0.total_score_weighted.total_cmp(&a.0.total_score_weighted));
+    iv
+}
+
+/// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
+///
+/// Returns the winning initial conditions together with their [`TrajectoryResult`] scores.
 pub fn select_best_trajectory(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
@@ -323,47 +422,7 @@ pub fn select_best_trajectory(
     // the total linear momentum and the COM position are exactly zero.
     let many: Vec<Vec<Body>> = (0..num_sims)
         .map(|_| {
-            let mut v = vec![
-                Body::new(
-                    rng.random_mass(),
-                    Vector3::new(
-                        rng.random_location(),
-                        rng.random_location(),
-                        rng.random_location(),
-                    ),
-                    Vector3::new(
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                    ),
-                ),
-                Body::new(
-                    rng.random_mass(),
-                    Vector3::new(
-                        rng.random_location(),
-                        rng.random_location(),
-                        rng.random_location(),
-                    ),
-                    Vector3::new(
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                    ),
-                ),
-                Body::new(
-                    rng.random_mass(),
-                    Vector3::new(
-                        rng.random_location(),
-                        rng.random_location(),
-                        rng.random_location(),
-                    ),
-                    Vector3::new(
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                        rng.random_velocity(),
-                    ),
-                ),
-            ];
+            let mut v = vec![random_body(rng), random_body(rng), random_body(rng)];
             shift_bodies_to_com(&mut v);
             v
         })
@@ -377,6 +436,7 @@ pub fn select_best_trajectory(
         .map(|(i, b)| {
             let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
             if cnt.is_multiple_of(cs) {
+                // usize→f64: cnt and num_sims are bounded by num_sims (≤ ~10^6 in practice)
                 info!(
                     "   Borda search: {:.0}% done",
                     (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
@@ -435,11 +495,12 @@ pub fn select_best_trajectory(
         })
         .collect();
     let dtot = dc.load(Ordering::Relaxed);
+    // usize→f64: dtot and num_sims are bounded by num_sims (≤ ~10^6 in practice)
     info!(
         "   => Discarded {dtot}/{num_sims} ({:.1}%) orbits due to filters or escapes.",
         crate::render::constants::PERCENT_FACTOR * dtot as f64 / num_sims as f64
     );
-    let mut iv: Vec<(TrajectoryResult, usize)> = results.into_iter().flatten().collect();
+    let iv = rank_trajectories(results, cw, ew);
     if iv.is_empty() {
         return Err(SimulationError::NoValidOrbits {
             total_attempted: num_sims,
@@ -452,35 +513,6 @@ pub fn select_best_trajectory(
         }
         .into());
     }
-    fn assign(vals: Vec<(f64, usize)>, hb: bool) -> Vec<usize> {
-        let mut v = vals;
-        if hb {
-            v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        } else {
-            v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        }
-        let n = v.len();
-        let mut out = vec![0; n];
-        for (r, (_, i)) in v.into_iter().enumerate() {
-            out[i] = n - r;
-        }
-        out
-    }
-    let mut cv = Vec::with_capacity(iv.len());
-    let mut ev = Vec::with_capacity(iv.len());
-    for (i, (t, _)) in iv.iter().enumerate() {
-        cv.push((t.chaos, i));
-        ev.push((t.equilateralness, i));
-    }
-    let cps = assign(cv, false);
-    let eps = assign(ev, true);
-    for (i, (t, _)) in iv.iter_mut().enumerate() {
-        t.chaos_pts = cps[i];
-        t.equil_pts = eps[i];
-        t.total_score = t.chaos_pts + t.equil_pts;
-        t.total_score_weighted = cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64);
-    }
-    iv.sort_by(|a, b| b.0.total_score_weighted.partial_cmp(&a.0.total_score_weighted).unwrap());
     let bi = iv[0].1;
     let mut bt = iv[0].0.clone();
     bt.selected_index = bi;

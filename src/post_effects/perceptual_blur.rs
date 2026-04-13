@@ -3,11 +3,10 @@
 //! This effect performs blur operations in the perceptually uniform OKLab color space,
 //! resulting in more natural and vibrant color mixing compared to RGB blur.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use crate::oklab::{self, GamutMapMode};
 use crate::render::parallel_blur_2d_rgba;
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for perceptual blur effect.
 #[derive(Debug, Clone)]
@@ -70,7 +69,7 @@ impl PostEffect for PerceptualBlur {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         // Early exit if effect is disabled or has no strength
         if !self.enabled || self.config.strength <= 0.0 || self.config.radius == 0 {
             return Ok(input.clone());

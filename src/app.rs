@@ -150,11 +150,11 @@ pub fn apply_drift_transformation(
     drift_arc_fraction: Option<f64>,
     drift_orbit_eccentricity: Option<f64>,
     rng: &mut Sha3RandomByteStream,
-) -> Option<ResolvedDriftConfig> {
+) -> Result<Option<ResolvedDriftConfig>> {
     info!("STAGE 2.5/7: Resolving drift configuration...");
 
     let resolved =
-        resolve_drift_config(drift_scale, drift_arc_fraction, drift_orbit_eccentricity, rng);
+        resolve_drift_config(drift_scale, drift_arc_fraction, drift_orbit_eccentricity, rng)?;
 
     info!("Applying {} drift...", drift_mode);
     let num_steps = positions[0].len();
@@ -170,7 +170,7 @@ pub fn apply_drift_transformation(
     drift_transform.apply(positions, constants::DEFAULT_DT);
 
     info!("   => Drift applied successfully");
-    Some(resolved)
+    Ok(Some(resolved))
 }
 
 /// Generate color sequences and alpha values for bodies
@@ -582,7 +582,8 @@ mod tests {
 
         let mut positions = simulate_best_orbit(best_bodies, num_steps);
 
-        apply_drift_transformation(&mut positions, "elliptical", None, None, None, &mut rng);
+        apply_drift_transformation(&mut positions, "elliptical", None, None, None, &mut rng)
+            .expect("drift config resolution should succeed with all-None args");
 
         let enhancements = Enhancements {
             chroma_boost: false,

@@ -274,13 +274,13 @@ impl BinEffectPlan {
 // ---------------------------------------------------------------------------
 
 /// Plan for Default mode: no effects, raw bin images.
-pub fn plan_default() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_default() -> Vec<BinEffectPlan> {
     vec![BinEffectPlan::raw(); NUM_BINS]
 }
 
 /// Chromatic dispersion: bloom radius scales inversely with wavelength.
 /// Violet (bin 0) gets 3x bloom, red (bin 63) gets 1x.
-pub fn plan_dispersion() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_dispersion() -> Vec<BinEffectPlan> {
     (0..NUM_BINS)
         .map(|bin| {
             let t = bin as f64 / (NUM_BINS - 1) as f64;
@@ -298,7 +298,7 @@ pub fn plan_dispersion() -> Vec<BinEffectPlan> {
 }
 
 /// Resonance bins: RNG picks 5-8 bins for full effects; others get minimal treatment.
-pub fn plan_resonance(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
+pub(crate) fn plan_resonance(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
     let count_range =
         constants::SPECTRAL_RESONANCE_MAX_BINS - constants::SPECTRAL_RESONANCE_MIN_BINS + 1;
     let num_resonance =
@@ -333,7 +333,7 @@ pub fn plan_resonance(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
 }
 
 /// Spectral weathering: three material zones across the spectrum.
-pub fn plan_weathering() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_weathering() -> Vec<BinEffectPlan> {
     let [z1, z2] = constants::SPECTRAL_WEATHERING_ZONE_BOUNDARIES;
     (0..NUM_BINS)
         .map(|bin| {
@@ -355,7 +355,7 @@ pub fn plan_weathering() -> Vec<BinEffectPlan> {
 }
 
 /// Stochastic fingerprint: each bin gets a unique random subset of 2-4 effects.
-pub fn plan_fingerprint(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
+pub(crate) fn plan_fingerprint(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
     let min_fx = constants::SPECTRAL_FINGERPRINT_MIN_EFFECTS;
     let max_fx = constants::SPECTRAL_FINGERPRINT_MAX_EFFECTS;
     let fx_range = max_fx - min_fx + 1;
@@ -381,7 +381,7 @@ pub fn plan_fingerprint(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
 }
 
 /// Sinusoidal interference: effect strength oscillates across the spectrum.
-pub fn plan_interference() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_interference() -> Vec<BinEffectPlan> {
     let freq = constants::SPECTRAL_INTERFERENCE_FREQUENCY;
     (0..NUM_BINS)
         .map(|bin| {
@@ -399,7 +399,7 @@ pub fn plan_interference() -> Vec<BinEffectPlan> {
 
 /// Cascade: progressive effect stacking across the bin spectrum.
 /// Gallery: strength = bin / 63. Cycle videos use frame-based scaling.
-pub fn plan_cascade() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_cascade() -> Vec<BinEffectPlan> {
     (0..NUM_BINS)
         .map(|bin| {
             let strength = bin as f64 / (NUM_BINS - 1) as f64;
@@ -415,12 +415,12 @@ pub fn plan_cascade() -> Vec<BinEffectPlan> {
 
 /// Cross-spectral masking: all bins processed at full strength, then blended
 /// with raw data using complementary bin intensity as the mask.
-pub fn plan_masking() -> Vec<BinEffectPlan> {
+pub(crate) fn plan_masking() -> Vec<BinEffectPlan> {
     vec![BinEffectPlan::full(); NUM_BINS]
 }
 
 /// Gravity well: Gaussian falloff from a seed-random attractor bin.
-pub fn plan_gravity(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
+pub(crate) fn plan_gravity(rng: &mut Sha3RandomByteStream) -> Vec<BinEffectPlan> {
     let attractor = rng.next_byte() as usize % NUM_BINS;
     let sigma = constants::SPECTRAL_GRAVITY_SIGMA;
     let two_sigma_sq = 2.0 * sigma * sigma;
@@ -633,7 +633,7 @@ fn randomize_fine_texture(
 
 /// Maximum chaos: every bin gets an independent coin-flip for each effect
 /// plus fully randomized numeric parameters.
-pub fn plan_chaos(
+pub(crate) fn plan_chaos(
     rng: &mut Sha3RandomByteStream,
     base_config: &EffectConfig,
 ) -> Vec<BinEffectPlan> {
@@ -751,7 +751,7 @@ pub fn plan_chaos(
 ///
 /// `base_config` is required only for `Chaos` mode which fully randomizes
 /// per-effect parameters; other modes ignore it.
-pub fn plan_for_mode(
+pub(crate) fn plan_for_mode(
     mode: SpectralEffectMode,
     rng: &mut Sha3RandomByteStream,
     base_config: Option<&EffectConfig>,

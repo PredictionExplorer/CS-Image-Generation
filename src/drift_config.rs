@@ -4,8 +4,15 @@
 //! user-provided values or by generating random values based on the mode.
 
 use crate::drift::DriftParameters;
+use crate::error::ConfigError;
 use crate::sim::Sha3RandomByteStream;
 use tracing::info;
+
+const DRIFT_SCALE_MIN: f64 = 0.8;
+const DRIFT_SCALE_RANGE: f64 = 1.2;
+const DRIFT_ARC_FRACTION_RANGE: f64 = 0.8;
+const DRIFT_ECCENTRICITY_MIN: f64 = 0.4;
+const DRIFT_ECCENTRICITY_RANGE: f64 = 0.1;
 
 /// Resolved drift configuration ready for use
 #[derive(Debug, Clone)]
@@ -24,9 +31,9 @@ impl ResolvedDriftConfig {
 
     /// Generate random drift configuration with curated ranges.
     pub fn generate_random(rng: &mut Sha3RandomByteStream) -> Self {
-        let scale = 0.8 + rng.next_f64() * 1.2; // 0.8 to 2.0
-        let arc_fraction = rng.next_f64() * 0.8; // 0.0 to 0.8
-        let orbit_eccentricity = 0.4 + rng.next_f64() * 0.1; // 0.4 to 0.5
+        let scale = DRIFT_SCALE_MIN + rng.next_f64() * DRIFT_SCALE_RANGE; // 0.8 to 2.0
+        let arc_fraction = rng.next_f64() * DRIFT_ARC_FRACTION_RANGE; // 0.0 to 0.8
+        let orbit_eccentricity = DRIFT_ECCENTRICITY_MIN + rng.next_f64() * DRIFT_ECCENTRICITY_RANGE; // 0.4 to 0.5
 
         info!("Generated random drift parameters:");
         info!("  scale: {:.3}", scale);
@@ -42,35 +49,32 @@ impl ResolvedDriftConfig {
     }
 }
 
-/// Helper to resolve drift configuration from optional command-line args
+/// Helper to resolve drift configuration from optional command-line args.
+///
+/// Returns an error if only some drift parameters are provided (must be all or none).
 pub fn resolve_drift_config(
     scale_opt: Option<f64>,
     arc_fraction_opt: Option<f64>,
     eccentricity_opt: Option<f64>,
     rng: &mut Sha3RandomByteStream,
-) -> ResolvedDriftConfig {
+) -> std::result::Result<ResolvedDriftConfig, ConfigError> {
     match (scale_opt, arc_fraction_opt, eccentricity_opt) {
         (Some(scale), Some(arc), Some(ecc)) => {
-            // All parameters provided
             info!("Using user-specified drift parameters:");
             info!("  scale: {:.3}", scale);
             info!("  arc_fraction: {:.3}", arc);
             info!("  orbit_eccentricity: {:.3}", ecc);
-            ResolvedDriftConfig::from_values(scale, arc, ecc)
+            Ok(ResolvedDriftConfig::from_values(scale, arc, ecc))
         }
         (None, None, None) => {
-            // No parameters provided - generate random
             info!("No drift parameters specified, generating random values...");
-            ResolvedDriftConfig::generate_random(rng)
+            Ok(ResolvedDriftConfig::generate_random(rng))
         }
-        _ => {
-            // Partial specification - this is an error condition
-            panic!(
-                "Drift parameters must be either all specified or all omitted. \
-                 Provided: scale={:?}, arc_fraction={:?}, eccentricity={:?}",
-                scale_opt, arc_fraction_opt, eccentricity_opt
-            );
-        }
+        _ => Err(ConfigError::InvalidDriftConfig {
+            scale: scale_opt,
+            arc_fraction: arc_fraction_opt,
+            eccentricity: eccentricity_opt,
+        }),
     }
 }
 
@@ -110,7 +114,7 @@ mod tests {
     #[test]
     fn test_resolve_all_provided() {
         let mut rng = make_rng();
-        let config = resolve_drift_config(Some(1.0), Some(0.5), Some(0.3), &mut rng);
+        let config = resolve_drift_config(Some(1.0), Some(0.5), Some(0.3), &mut rng).unwrap();
         assert_eq!(config.scale, 1.0);
         assert!(!config.was_randomized);
     }
@@ -118,15 +122,18 @@ mod tests {
     #[test]
     fn test_resolve_none_provided() {
         let mut rng = make_rng();
-        let config = resolve_drift_config(None, None, None, &mut rng);
+        let config = resolve_drift_config(None, None, None, &mut rng).unwrap();
         assert!(config.was_randomized);
     }
 
     #[test]
-    #[should_panic(expected = "must be either all specified or all omitted")]
-    fn test_resolve_partial_panics() {
+    fn test_resolve_partial_returns_error() {
         let mut rng = make_rng();
-        resolve_drift_config(Some(1.0), None, None, &mut rng);
+        let result = resolve_drift_config(Some(1.0), None, None, &mut rng);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("must be either all specified or all omitted"));
     }
 
     #[test]

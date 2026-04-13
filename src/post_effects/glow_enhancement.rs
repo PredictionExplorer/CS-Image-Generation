@@ -4,9 +4,8 @@
 //! glow creates tight, sharp highlights on the very brightest points, adding
 //! sparkle, stars, and a sense of luminous energy. Think "lens star filter" effect.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for glow enhancement
 #[derive(Clone, Debug)]
@@ -173,7 +172,7 @@ impl PostEffect for GlowEnhancement {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

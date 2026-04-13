@@ -5,9 +5,8 @@
 //! dichroic glass, or butterfly wings. It adds subtle, sophisticated color shifts
 //! that enhance the perception of depth and material quality.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for opalescence effect
 #[derive(Clone, Debug)]
@@ -144,7 +143,7 @@ impl PostEffect for Opalescence {
         input: &PixelBuffer,
         width: usize,
         _height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

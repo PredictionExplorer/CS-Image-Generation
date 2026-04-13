@@ -118,26 +118,6 @@ fn setup_logging(level: &str) {
         .init();
 }
 
-fn resolved_perceptual_blur_radius(
-    resolved: &render::randomizable_config::ResolvedEffectConfig,
-    bloom_mode: render::BloomMode,
-) -> Option<usize> {
-    if !resolved.enable_perceptual_blur {
-        return None;
-    }
-
-    let use_gaussian_bloom = bloom_mode == render::BloomMode::Gaussian && resolved.enable_bloom;
-    let softness_stack_score = (if use_gaussian_bloom { 1.0 } else { 0.0 })
-        + if resolved.enable_chromatic_bloom { 0.8 } else { 0.0 }
-        + if resolved.enable_perceptual_blur { 0.85 } else { 0.0 }
-        + if resolved.enable_glow { 0.55 } else { 0.0 }
-        + if resolved.enable_atmospheric_depth { 0.35 } else { 0.0 };
-    let radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
-    let min_dim = resolved.width.min(resolved.height);
-
-    Some((radius_scale * min_dim as f64).round().max(1.0) as usize)
-}
-
 struct ResolvedBordaWeights {
     chaos_weight: f64,
     equil_weight: f64,
@@ -220,7 +200,7 @@ fn build_generation_log_config(
         drift_mode: args.drift.as_str().to_string(),
         bloom_mode: bloom_mode.to_string(),
         dog_strength: resolved.dog_strength,
-        dog_sigma: Some(resolved.dog_sigma_scale * min_dim as f64),
+        dog_sigma: Some(resolved.dog_sigma_scale * f64::from(min_dim)),
         dog_ratio: resolved.dog_ratio,
         hdr_mode: DEFAULT_HDR_MODE.to_string(),
         hdr_scale: render_config.hdr_scale,
@@ -229,7 +209,7 @@ fn build_generation_log_config(
         } else {
             "off".to_string()
         },
-        perceptual_blur_radius: resolved_perceptual_blur_radius(resolved, render_config.bloom_mode),
+        perceptual_blur_radius: render::compute_softness_radius(resolved, render_config.bloom_mode),
         perceptual_blur_strength: resolved.perceptual_blur_strength,
         perceptual_gamut_mode: DEFAULT_PERCEPTUAL_GAMUT_MODE.to_string(),
         min_mass: DEFAULT_MIN_MASS,
@@ -315,7 +295,7 @@ fn main() -> Result<()> {
             None,
             None,
             &mut rng,
-        )
+        )?
     } else {
         info!("STAGE 2.5/7: Drift disabled");
         None
@@ -473,7 +453,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -492,7 +472,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -502,7 +482,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
+        assert!((0.2..=125.0).contains(&ratio), "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -514,7 +494,7 @@ mod tests {
             assert_eq!(w.chaos_weight, 1.0);
             let ratio = w.equil_weight / w.chaos_weight;
             assert!(
-                ratio >= 0.2 && ratio <= 125.0,
+                (0.2..=125.0).contains(&ratio),
                 "seed {} produced ratio {} outside [0.2, 125.0]",
                 seed_byte,
                 ratio

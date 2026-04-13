@@ -62,7 +62,7 @@ impl TemporalSmoothing {
             return current;
         }
 
-        let mut prev_guard = self.previous_frame.lock().unwrap();
+        let mut prev_guard = self.previous_frame.lock().expect("temporal smoothing mutex poisoned");
 
         let result = if let Some(prev) = prev_guard.as_ref() {
             // Ensure frame sizes match
@@ -108,7 +108,7 @@ impl TemporalSmoothing {
 
     /// Reset temporal buffer (call when starting new video or after seeking)
     pub fn reset(&self) {
-        let mut prev_guard = self.previous_frame.lock().unwrap();
+        let mut prev_guard = self.previous_frame.lock().expect("temporal smoothing mutex poisoned");
         *prev_guard = None;
     }
 

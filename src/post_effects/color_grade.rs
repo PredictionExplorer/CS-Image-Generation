@@ -4,10 +4,9 @@
 //! the renders a more photographic, gallery-ready look while preserving
 //! the existing dynamic range and hue relationships.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use crate::render::{constants, parallel_blur_2d_rgba};
 use rayon::prelude::*;
-use std::error::Error;
 use std::f64::consts::TAU;
 
 fn luminance(r: f64, g: f64, b: f64) -> f64 {
@@ -194,7 +193,7 @@ impl PostEffect for CinematicColorGrade {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

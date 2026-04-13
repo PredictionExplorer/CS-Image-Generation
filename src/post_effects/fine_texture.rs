@@ -8,9 +8,8 @@
 //!
 //! These textures add a sense of physicality and craftsmanship to digital renders.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for fine texture overlay
 #[derive(Clone, Debug)]
@@ -133,7 +132,7 @@ impl PostEffect for FineTexture {
         input: &PixelBuffer,
         width: usize,
         _height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

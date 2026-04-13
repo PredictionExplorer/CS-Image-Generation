@@ -16,12 +16,14 @@ const LAMBDA_END: f64 = 700.0;
 
 /// Centre wavelength for a bin.
 #[inline]
+#[must_use]
 pub fn wavelength_nm_for_bin(bin: usize) -> f64 {
     LAMBDA_START + (bin as f64 + 0.5) * (LAMBDA_END - LAMBDA_START) / NUM_BINS as f64
 }
 
 /// Approximate (linear-sRGB) colour corresponding to a given wavelength.
 /// Formula adapted from Dan Bruton's reference (gamma removed → stay linear).
+#[must_use]
 pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
     let (r, g, b) = if (380.0..440.0).contains(&lambda) {
         (-(lambda - 440.0) / (440.0 - 380.0), 0.0, 1.0)
@@ -90,6 +92,7 @@ pub static BIN_COMBINED_LUT: Lazy<[(f64, f64, f64, f64); NUM_BINS]> = Lazy::new(
 /// - aarch64 NEON: 2 bins/iter via 128-bit FMA
 /// - Scalar fallback for all other targets
 #[inline]
+#[must_use]
 pub fn spd_to_rgba(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
     spectrum_simd::spd_to_rgba_simd(spd)
 }

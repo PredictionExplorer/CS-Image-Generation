@@ -3,10 +3,9 @@
 //! This effect remaps the luminance values of the image through carefully
 //! crafted gradient palettes to create stunning, professional color treatments.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use crate::oklab::{self, GamutMapMode};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Predefined luxury color palettes
 #[derive(Clone, Debug)]
@@ -330,7 +329,7 @@ impl PostEffect for GradientMap {
         input: &PixelBuffer,
         _width: usize,
         _height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

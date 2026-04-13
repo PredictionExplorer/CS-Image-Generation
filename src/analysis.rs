@@ -1,3 +1,5 @@
+//! Orbit quality metrics: energy, angular momentum, chaoticness, and equilateralness.
+
 use crate::sim::{Body, G};
 use crate::utils::fourier_transform;
 use nalgebra::Vector3;
@@ -21,6 +23,7 @@ fn sample_std_dev(values: &[f64]) -> f64 {
 }
 
 /// Total energy: kinetic + potential
+#[must_use]
 pub fn calculate_total_energy(bodies: &[Body]) -> f64 {
     let mut kin = 0.0;
     let mut pot = 0.0;
@@ -31,7 +34,7 @@ pub fn calculate_total_energy(bodies: &[Body]) -> f64 {
     for i in 0..n {
         for j in (i + 1)..n {
             let r = (bodies[i].position - bodies[j].position).norm();
-            if r > 1e-10 {
+            if r > crate::utils::FLOAT_EPSILON {
                 pot += -G * bodies[i].mass * bodies[j].mass / r;
             }
         }
@@ -40,6 +43,7 @@ pub fn calculate_total_energy(bodies: &[Body]) -> f64 {
 }
 
 /// Total angular momentum vector
+#[must_use]
 pub fn calculate_total_angular_momentum(bodies: &[Body]) -> Vector3<f64> {
     let mut total_l = Vector3::zeros();
     for b in bodies {
@@ -49,6 +53,7 @@ pub fn calculate_total_angular_momentum(bodies: &[Body]) -> Vector3<f64> {
 }
 
 /// A measure of "regularity" vs "chaos", smaller => more chaotic
+#[must_use]
 pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
     let len = positions[0].len();
     if len == 0 {
@@ -78,6 +83,7 @@ pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>
 }
 
 /// Score how "equilateral" the 3-body triangle is over time
+#[must_use]
 pub fn equilateralness_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
     let n = positions[0].len();
     if n < 1 {

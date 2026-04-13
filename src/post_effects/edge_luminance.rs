@@ -4,9 +4,8 @@
 //! creating a subtle highlighting that enhances the definition of forms
 //! without introducing harsh outlines. Creates a refined, gallery-quality look.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for edge luminance enhancement
 #[derive(Clone, Debug)]
@@ -166,7 +165,7 @@ impl PostEffect for EdgeLuminance {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

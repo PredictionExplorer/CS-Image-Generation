@@ -4,10 +4,9 @@
 //! OpenSimplex2S noise. The clouds slowly drift and evolve over time, adding
 //! atmospheric depth and cosmic beauty without overpowering the trajectories.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use opensimplex2::smooth;
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for nebula dust clouds effect
 #[derive(Clone, Debug)]
@@ -181,7 +180,7 @@ impl NebulaClouds {
         width: usize,
         height: usize,
         frame_number: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.enabled {
             return Ok(buffer.to_vec());
         }
@@ -241,7 +240,7 @@ impl PostEffect for NebulaClouds {
         buffer: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         // For static images, use frame 0
         self.process_with_time(buffer, width, height, 0)
     }

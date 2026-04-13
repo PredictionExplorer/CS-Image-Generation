@@ -4,9 +4,8 @@
 //! without over-sharpening or creating halos. Uses an edge-aware approach
 //! to boost detail perception while preserving smooth gradients.
 
-use super::{PixelBuffer, PostEffect};
+use super::{PixelBuffer, PostEffect, PostEffectError};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Configuration for micro-contrast enhancement
 #[derive(Clone, Debug)]
@@ -138,7 +137,7 @@ impl PostEffect for MicroContrast {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         if !self.is_enabled() {
             return Ok(input.clone());
         }

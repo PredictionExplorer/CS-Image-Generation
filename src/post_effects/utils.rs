@@ -3,11 +3,16 @@
 use super::PixelBuffer;
 use rayon::prelude::*;
 
+const HASH_SCALE_X: f64 = 12.9898;
+const HASH_SCALE_Y: f64 = 78.233;
+const HASH_FRACT_MULTIPLIER: f64 = 43758.5453;
+const HASH_TIME_SCALE: f64 = 1.57;
+
 /// A simple 2D hash to generate pseudo-random points for distance fields.
 #[inline]
 pub fn hash2(p: (f64, f64)) -> (f64, f64) {
-    let h = (p.0 * 12.9898 + p.1 * 78.233).sin() * 43758.5453;
-    (h.fract(), (h * 1.57).fract())
+    let h = (p.0 * HASH_SCALE_X + p.1 * HASH_SCALE_Y).sin() * HASH_FRACT_MULTIPLIER;
+    (h.fract(), (h * HASH_TIME_SCALE).fract())
 }
 
 /// Hermite smoothstep interpolation between two edges.

@@ -1,14 +1,14 @@
 //! Gaussian blur-based bloom effect implementation.
 
-use super::{PixelBuffer, PostEffect, utils};
+use super::{PixelBuffer, PostEffect, PostEffectError, utils};
 use crate::render::parallel_blur_2d_rgba;
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Gaussian bloom post-processing effect.
 ///
 /// Applies a Gaussian blur to create a soft glow effect, then composites
 /// it with the original image using screen blending.
+#[derive(Debug)]
 pub struct GaussianBloom {
     /// Blur radius in pixels.
     pub radius: usize,
@@ -63,7 +63,7 @@ impl PostEffect for GaussianBloom {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         let highlights = self.extract_highlights(input);
         let core_gain = self.core_gain();
 

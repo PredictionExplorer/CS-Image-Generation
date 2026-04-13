@@ -1,3 +1,5 @@
+//! Utility functions: float comparison, Fourier transforms, bounding boxes, and Gaussian kernels.
+
 use crate::render::constants;
 use nalgebra::Vector3;
 use rustfft::FftPlanner;
@@ -7,8 +9,39 @@ use smallvec::SmallVec;
 /// Standard epsilon for float comparisons
 pub const FLOAT_EPSILON: f64 = 1e-10;
 
+/// Saturating conversion from f64 to usize, clamping to `[0, usize::MAX]`.
+///
+/// Prefer this over bare `x as usize` which has undefined-ish overflow semantics.
+#[inline]
+#[must_use]
+pub fn f64_to_usize_saturating(x: f64) -> usize {
+    if x <= 0.0 {
+        0
+    } else if x >= usize::MAX as f64 {
+        usize::MAX
+    } else {
+        x as usize
+    }
+}
+
+/// Saturating conversion from f64 to u16, clamping to `[0, 65535]`.
+///
+/// Prefer this over bare `x as u16` which truncates silently.
+#[inline]
+#[must_use]
+pub fn f64_to_u16_saturating(x: f64) -> u16 {
+    if x <= 0.0 {
+        0
+    } else if x >= f64::from(u16::MAX) {
+        u16::MAX
+    } else {
+        x as u16
+    }
+}
+
 /// Check if a float is approximately zero
 #[inline]
+#[must_use]
 pub fn is_zero(x: f64) -> bool {
     x.abs() < FLOAT_EPSILON
 }
@@ -16,11 +49,13 @@ pub fn is_zero(x: f64) -> bool {
 /// Check if two floats are approximately equal
 #[cfg(test)]
 #[inline]
+#[must_use]
 pub fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() < FLOAT_EPSILON
 }
 
 /// Compute Fourier transform of a real-valued signal
+#[must_use]
 pub fn fourier_transform(input: &[f64]) -> Vec<Complex<f64>> {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(input.len());
@@ -30,6 +65,7 @@ pub fn fourier_transform(input: &[f64]) -> Vec<Complex<f64>> {
 }
 
 /// 2D bounding box: (min_x, max_x, min_y, max_y)
+#[must_use]
 pub fn bounding_box_2d(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) {
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
@@ -47,6 +83,7 @@ pub fn bounding_box_2d(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) 
 }
 
 /// 2D bounding box with padding, always non-degenerate
+#[must_use]
 pub fn bounding_box(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) {
     let (mut min_x, mut max_x, mut min_y, mut max_y) = bounding_box_2d(positions);
     if (max_x - min_x).abs() < 1e-12 {
@@ -67,6 +104,7 @@ pub fn bounding_box(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) {
 }
 
 /// Build a simple 1D Gaussian kernel
+#[must_use]
 pub fn build_gaussian_kernel(radius: usize) -> SmallVec<[f64; 32]> {
     if radius == 0 {
         return SmallVec::new();
@@ -192,9 +230,68 @@ mod tests {
         let input = vec![0.0; 10];
         let output = fourier_transform(&input);
 
-        // FFT of all zeros should be all zeros (approximately)
         for c in output {
             assert!(c.norm() < 1e-10);
         }
+    }
+
+    #[test]
+    fn test_f64_to_usize_saturating_normal() {
+        assert_eq!(f64_to_usize_saturating(0.0), 0);
+        assert_eq!(f64_to_usize_saturating(1.0), 1);
+        assert_eq!(f64_to_usize_saturating(42.0), 42);
+        assert_eq!(f64_to_usize_saturating(999.9), 999);
+    }
+
+    #[test]
+    fn test_f64_to_usize_saturating_negative_clamps_to_zero() {
+        assert_eq!(f64_to_usize_saturating(-1.0), 0);
+        assert_eq!(f64_to_usize_saturating(-1e18), 0);
+        assert_eq!(f64_to_usize_saturating(f64::NEG_INFINITY), 0);
+    }
+
+    #[test]
+    fn test_f64_to_usize_saturating_large_clamps_to_max() {
+        assert_eq!(f64_to_usize_saturating(1e30), usize::MAX);
+        assert_eq!(f64_to_usize_saturating(f64::INFINITY), usize::MAX);
+    }
+
+    #[test]
+    fn test_f64_to_usize_saturating_nan_returns_zero() {
+        assert_eq!(f64_to_usize_saturating(f64::NAN), 0);
+    }
+
+    #[test]
+    fn test_f64_to_u16_saturating_normal() {
+        assert_eq!(f64_to_u16_saturating(0.0), 0);
+        assert_eq!(f64_to_u16_saturating(1.0), 1);
+        assert_eq!(f64_to_u16_saturating(255.0), 255);
+        assert_eq!(f64_to_u16_saturating(65535.0), 65535);
+    }
+
+    #[test]
+    fn test_f64_to_u16_saturating_negative_clamps_to_zero() {
+        assert_eq!(f64_to_u16_saturating(-1.0), 0);
+        assert_eq!(f64_to_u16_saturating(-1e10), 0);
+        assert_eq!(f64_to_u16_saturating(f64::NEG_INFINITY), 0);
+    }
+
+    #[test]
+    fn test_f64_to_u16_saturating_large_clamps_to_max() {
+        assert_eq!(f64_to_u16_saturating(65536.0), u16::MAX);
+        assert_eq!(f64_to_u16_saturating(1e10), u16::MAX);
+        assert_eq!(f64_to_u16_saturating(f64::INFINITY), u16::MAX);
+    }
+
+    #[test]
+    fn test_f64_to_u16_saturating_nan_returns_zero() {
+        assert_eq!(f64_to_u16_saturating(f64::NAN), 0);
+    }
+
+    #[test]
+    fn test_f64_to_u16_saturating_truncates_fractional() {
+        assert_eq!(f64_to_u16_saturating(0.9), 0);
+        assert_eq!(f64_to_u16_saturating(255.5), 255);
+        assert_eq!(f64_to_u16_saturating(65534.999), 65534);
     }
 }

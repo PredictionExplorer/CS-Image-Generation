@@ -18,6 +18,10 @@ use crate::post_effects::{
 use crate::spectrum::{NUM_BINS, spd_to_rgba};
 use rayon::prelude::*;
 
+const LUMA_R: f64 = 0.299;
+const LUMA_G: f64 = 0.587;
+const LUMA_B: f64 = 0.114;
+
 /// Configuration for effect chain creation
 ///
 /// Controls which effects are enabled and their parameters. Effects are applied
@@ -440,7 +444,7 @@ pub fn apply_dog_bloom(
             let diff = (inner.0 - outer.0, inner.1 - outer.1, inner.2 - outer.2, inner.3 - outer.3);
 
             // Compute luminance for thresholding
-            let lum = 0.299 * diff.0 + 0.587 * diff.1 + 0.114 * diff.2;
+            let lum = LUMA_R * diff.0 + LUMA_G * diff.1 + LUMA_B * diff.2;
 
             if lum > config.threshold {
                 *dog = (
@@ -531,7 +535,7 @@ impl PostEffect for ChampleveFinish {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> std::result::Result<PixelBuffer, Box<dyn std::error::Error>> {
+    ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
         let mut buffer = input.clone();
         apply_champleve_iridescence(&mut buffer, width, height, &self.config);
         Ok(buffer)
@@ -554,7 +558,7 @@ impl PostEffect for AetherFinish {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> std::result::Result<PixelBuffer, Box<dyn std::error::Error>> {
+    ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
         let mut buffer = input.clone();
         apply_aether_weave(&mut buffer, width, height, &self.config);
         Ok(buffer)

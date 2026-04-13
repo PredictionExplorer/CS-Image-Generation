@@ -1,14 +1,14 @@
 //! Difference of Gaussians (DoG) bloom effect implementation.
 
-use super::{PixelBuffer, PostEffect, utils};
+use super::{PixelBuffer, PostEffect, PostEffectError, utils};
 use crate::render::{DogBloomConfig, apply_dog_bloom};
 use rayon::prelude::*;
-use std::error::Error;
 
 /// Difference of Gaussians bloom post-processing effect.
 ///
 /// Creates sharper, more defined bloom by subtracting two Gaussian blurs
 /// of different radii, emphasizing edges and reducing overall haziness.
+#[derive(Debug)]
 pub struct DogBloom {
     /// Configuration for the DoG algorithm.
     pub config: DogBloomConfig,
@@ -60,7 +60,7 @@ impl PostEffect for DogBloom {
         input: &PixelBuffer,
         width: usize,
         height: usize,
-    ) -> Result<PixelBuffer, Box<dyn Error>> {
+    ) -> Result<PixelBuffer, PostEffectError> {
         let highlights = self.extract_highlights(input);
         let dog_bloom = apply_dog_bloom(&highlights, width, height, &self.config);
         let core_gain = self.core_gain();

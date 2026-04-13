@@ -1088,6 +1088,7 @@ dependencies = [
 name = "three_body_problem"
 version = "1.0.0"
 dependencies = [
+ "bytemuck",
  "chrono",
  "clap",
  "hex",

@@ -12,6 +12,7 @@ pub struct EffectRandomizer<'a> {
 }
 
 impl<'a> EffectRandomizer<'a> {
+    /// Wrap a deterministic [`Sha3RandomByteStream`] for effect parameter sampling.
     pub fn new(rng: &'a mut Sha3RandomByteStream) -> Self {
         Self { rng }
     }
@@ -94,13 +95,19 @@ pub struct RandomizedParameter {
 }
 
 impl RandomizationRecord {
-    pub fn new(effect_name: String, enabled: bool, was_randomized: bool) -> Self {
-        Self { effect_name, enabled, was_randomized, parameters: Vec::new() }
+    pub fn new(effect_name: impl Into<String>, enabled: bool, was_randomized: bool) -> Self {
+        Self { effect_name: effect_name.into(), enabled, was_randomized, parameters: Vec::new() }
     }
 
-    pub fn add_float(&mut self, name: String, value: f64, was_randomized: bool, range: (f64, f64)) {
+    pub fn add_float(
+        &mut self,
+        name: impl Into<String>,
+        value: f64,
+        was_randomized: bool,
+        range: (f64, f64),
+    ) {
         self.parameters.push(RandomizedParameter {
-            name,
+            name: name.into(),
             value: format!("{:.4}", value),
             was_randomized,
             range_used: format!("[{:.4}, {:.4}]", range.0, range.1),
@@ -109,13 +116,13 @@ impl RandomizationRecord {
 
     pub fn add_int(
         &mut self,
-        name: String,
+        name: impl Into<String>,
         value: usize,
         was_randomized: bool,
         range: (usize, usize),
     ) {
         self.parameters.push(RandomizedParameter {
-            name,
+            name: name.into(),
             value: value.to_string(),
             was_randomized,
             range_used: format!("[{}, {}]", range.0, range.1),

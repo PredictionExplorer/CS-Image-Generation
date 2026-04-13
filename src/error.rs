@@ -3,163 +3,97 @@
 //! This module provides a unified error type hierarchy for all operations in the system,
 //! enabling proper error propagation and recovery instead of panics.
 
-use std::error::Error;
-use std::fmt;
+use thiserror::Error;
 
 /// Result type alias using our custom error type
 pub type Result<T> = std::result::Result<T, AppError>;
 
 /// Top-level application error encompassing all possible failure modes
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AppError {
     /// Simulation-related errors
-    Simulation(SimulationError),
+    #[error("Simulation error: {0}")]
+    Simulation(#[from] SimulationError),
 
-    /// Rendering-related errors
-    Render(RenderError),
+    /// Rendering-related errors (app-level wrapper)
+    #[error("Rendering error: {0}")]
+    Render(#[from] AppRenderError),
 
     /// Configuration and input validation errors
-    Config(ConfigError),
+    #[error("Configuration error: {0}")]
+    Config(#[from] ConfigError),
 
     /// File I/O errors
-    Io(std::io::Error),
-}
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Simulation(e) => write!(f, "Simulation error: {}", e),
-            Self::Render(e) => write!(f, "Rendering error: {}", e),
-            Self::Config(e) => write!(f, "Configuration error: {}", e),
-            Self::Io(e) => write!(f, "I/O error: {}", e),
-        }
-    }
-}
-
-impl Error for AppError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Simulation(e) => Some(e),
-            Self::Render(e) => Some(e),
-            Self::Config(e) => Some(e),
-            Self::Io(e) => Some(e),
-        }
-    }
-}
-
-impl From<std::io::Error> for AppError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<SimulationError> for AppError {
-    fn from(error: SimulationError) -> Self {
-        Self::Simulation(error)
-    }
-}
-
-impl From<RenderError> for AppError {
-    fn from(error: RenderError) -> Self {
-        Self::Render(error)
-    }
-}
-
-impl From<ConfigError> for AppError {
-    fn from(error: ConfigError) -> Self {
-        Self::Config(error)
-    }
-}
-
-impl From<crate::render::error::RenderError> for AppError {
-    fn from(error: crate::render::error::RenderError) -> Self {
-        Self::Render(RenderError::Inner(error))
-    }
+    /// Render-module internal errors
+    #[error("{0}")]
+    RenderInternal(#[from] crate::render::error::RenderError),
 }
 
 /// Errors that can occur during physics simulation
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum SimulationError {
     /// No valid orbits found after filtering and escape checks
-    NoValidOrbits { total_attempted: usize, discarded: usize, reason: String },
+    #[error(
+        "No valid orbits found after filtering {discarded}/{total_attempted} candidates. Reason: {reason}"
+    )]
+    NoValidOrbits {
+        total_attempted: usize,
+        discarded: usize,
+        reason: String,
+    },
 }
 
-impl fmt::Display for SimulationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoValidOrbits { total_attempted, discarded, reason } => {
-                write!(
-                    f,
-                    "No valid orbits found after filtering {}/{} candidates. Reason: {}",
-                    discarded, total_attempted, reason
-                )
-            }
-        }
-    }
-}
-
-impl Error for SimulationError {}
-
-/// Errors that can occur during rendering operations
-#[derive(Debug)]
-pub enum RenderError {
+/// Errors that can occur during rendering operations (app-level wrapper)
+#[derive(Debug, Error)]
+pub enum AppRenderError {
     /// Wraps the existing render::error::RenderError
-    Inner(crate::render::error::RenderError),
+    #[error("{0}")]
+    Inner(#[from] crate::render::error::RenderError),
 
     /// Invalid rendering dimensions
-    InvalidDimensions { width: u32, height: u32, reason: String },
-}
-
-impl fmt::Display for RenderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Inner(e) => write!(f, "{}", e),
-            Self::InvalidDimensions { width, height, reason } => {
-                write!(f, "Invalid dimensions {}x{}: {}", width, height, reason)
-            }
-        }
-    }
-}
-
-impl Error for RenderError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Inner(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("Invalid dimensions {width}x{height}: {reason}")]
+    InvalidDimensions {
+        width: u32,
+        height: u32,
+        reason: String,
+    },
 }
 
 /// Configuration and validation errors
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
     /// Invalid seed format
-    InvalidSeed { seed: String, error: hex::FromHexError },
+    #[error("Invalid hex seed '{seed}': {error}")]
+    InvalidSeed {
+        seed: String,
+        error: hex::FromHexError,
+    },
 
     /// File system error
-    FileSystem { operation: String, path: String, error: std::io::Error },
-}
+    #[error("Failed to {operation} '{path}': {error}")]
+    FileSystem {
+        operation: String,
+        path: String,
+        error: std::io::Error,
+    },
 
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidSeed { seed, error } => {
-                write!(f, "Invalid hex seed '{}': {}", seed, error)
-            }
-            Self::FileSystem { operation, path, error } => {
-                write!(f, "Failed to {} '{}': {}", operation, path, error)
-            }
-        }
-    }
-}
+    /// Invalid resolution format
+    #[error("Invalid resolution: {reason}")]
+    InvalidResolution { reason: String },
 
-impl Error for ConfigError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::InvalidSeed { error, .. } => Some(error),
-            Self::FileSystem { error, .. } => Some(error),
-        }
-    }
+    /// Partial drift configuration (must be all-or-nothing)
+    #[error(
+        "Drift parameters must be either all specified or all omitted. \
+         Provided: scale={scale:?}, arc_fraction={arc_fraction:?}, eccentricity={eccentricity:?}"
+    )]
+    InvalidDriftConfig {
+        scale: Option<f64>,
+        arc_fraction: Option<f64>,
+        eccentricity: Option<f64>,
+    },
 }
 
 /// Helper functions for common validation patterns
@@ -169,7 +103,7 @@ pub mod validation {
     /// Validate that dimensions are non-zero and reasonable
     pub fn validate_dimensions(width: u32, height: u32) -> Result<()> {
         if width == 0 || height == 0 {
-            return Err(RenderError::InvalidDimensions {
+            return Err(AppRenderError::InvalidDimensions {
                 width,
                 height,
                 reason: "Dimensions must be greater than zero".to_string(),
@@ -179,7 +113,7 @@ pub mod validation {
 
         const MAX_DIMENSION: u32 = 16384; // 16K
         if width > MAX_DIMENSION || height > MAX_DIMENSION {
-            return Err(RenderError::InvalidDimensions {
+            return Err(AppRenderError::InvalidDimensions {
                 width,
                 height,
                 reason: format!("Dimensions must not exceed {}", MAX_DIMENSION),
@@ -214,5 +148,41 @@ mod tests {
         let display = format!("{}", err);
         assert!(display.contains("95/100"));
         assert!(display.contains("escaped"));
+    }
+
+    #[test]
+    fn test_config_error_invalid_resolution_display() {
+        let err = ConfigError::InvalidResolution { reason: "negative width".to_string() };
+        let display = format!("{err}");
+        assert!(display.contains("Invalid resolution"));
+        assert!(display.contains("negative width"));
+    }
+
+    #[test]
+    fn test_config_error_invalid_drift_display() {
+        let err = ConfigError::InvalidDriftConfig {
+            scale: Some(1.0),
+            arc_fraction: None,
+            eccentricity: None,
+        };
+        let display = format!("{err}");
+        assert!(display.contains("must be either all specified or all omitted"));
+        assert!(display.contains("1.0"));
+    }
+
+    #[test]
+    fn test_app_error_from_config_error() {
+        let cfg_err = ConfigError::InvalidResolution { reason: "test".to_string() };
+        let app_err: AppError = cfg_err.into();
+        let display = format!("{app_err}");
+        assert!(display.contains("Configuration error"));
+    }
+
+    #[test]
+    fn test_app_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let app_err: AppError = io_err.into();
+        let display = format!("{app_err}");
+        assert!(display.contains("I/O error"));
     }
 }

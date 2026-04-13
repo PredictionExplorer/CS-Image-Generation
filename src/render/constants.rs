@@ -307,31 +307,17 @@ mod tests {
 
     #[test]
     fn test_thread_stack_size_at_least_256x_default() {
-        assert!(
-            THREAD_STACK_SIZE >= 256 * RUST_DEFAULT_STACK,
-            "THREAD_STACK_SIZE ({}) must be at least 256x Rust's default 2 MiB ({})",
-            THREAD_STACK_SIZE,
-            256 * RUST_DEFAULT_STACK,
-        );
+        const { assert!(THREAD_STACK_SIZE >= 256 * RUST_DEFAULT_STACK) };
     }
 
     #[test]
     fn test_thread_stack_size_is_power_of_two() {
-        assert!(
-            THREAD_STACK_SIZE.is_power_of_two(),
-            "THREAD_STACK_SIZE ({}) should be a power of two for alignment",
-            THREAD_STACK_SIZE,
-        );
+        const { assert!(THREAD_STACK_SIZE.is_power_of_two()) };
     }
 
     #[test]
     fn test_thread_stack_size_does_not_exceed_1_gib() {
-        let one_gib = 1024 * 1024 * 1024;
-        assert!(
-            THREAD_STACK_SIZE <= one_gib,
-            "THREAD_STACK_SIZE ({}) should not exceed 1 GiB ({})",
-            THREAD_STACK_SIZE,
-            one_gib,
-        );
+        const ONE_GIB: usize = 1024 * 1024 * 1024;
+        const { assert!(THREAD_STACK_SIZE <= ONE_GIB) };
     }
 }

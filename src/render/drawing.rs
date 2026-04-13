@@ -226,7 +226,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
 
     // Atmospheric attenuation (fog)
     let depth_fade = (-avg_z.abs() * 0.002).exp().clamp(0.05, 1.0);
-    let base_energy_mult = hdr_scale * depth_fade as f64 * energy_conservation as f64;
+    let base_energy_mult = hdr_scale * f64::from(depth_fade) * f64::from(energy_conservation);
 
     for py in min_y..=max_y {
         for px in min_x..=max_x {
@@ -246,10 +246,10 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
                 continue;
             }
 
-            let alpha = alpha0 * (1.0 - h as f64) + alpha1 * h as f64;
-            let final_energy = energy as f64 * alpha * base_energy_mult;
+            let alpha = alpha0 * (1.0 - f64::from(h)) + alpha1 * f64::from(h);
+            let final_energy = f64::from(energy) * alpha * base_energy_mult;
 
-            let bin_f = bin0_f * (1.0 - h as f64) + bin1_f * h as f64;
+            let bin_f = bin0_f * (1.0 - f64::from(h)) + bin1_f * f64::from(h);
             let bin_left = (bin_f.floor() as usize).min(NUM_BINS - 1);
             let bin_right = (bin_left + 1).min(NUM_BINS - 1);
             let w_right = bin_f.fract();
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn test_oklab_hue_to_wavelength_range() {
         for deg in (0..360).step_by(10) {
-            let rad = (deg as f64).to_radians();
+            let rad = f64::from(deg).to_radians();
             let a = 0.15 * rad.cos();
             let b = 0.15 * rad.sin();
             let wl = oklab_hue_to_wavelength(a, b);

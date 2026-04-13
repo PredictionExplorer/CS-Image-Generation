@@ -4,10 +4,13 @@
 //! including coordinate transformations, line drawing, post-processing effects, and video output.
 
 use crate::post_effects::{
-    ChromaticBloomConfig, GradientMapConfig, LuxuryPalette, NebulaCloudConfig, NebulaClouds,
+    AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
+    EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette,
+    MicroContrastConfig, NebulaCloudConfig, NebulaClouds, OpalescenceConfig,
     PerceptualBlurConfig,
 };
 use crate::spectrum::NUM_BINS;
+use crate::utils::f64_to_usize_saturating;
 use nalgebra::Vector3;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +37,7 @@ pub mod velocity_hdr;
 pub mod video;
 
 // Import from our submodules
-use self::batch_drawing::{draw_triangle_batch_spectral_rows, prepare_triangle_vertices};
+use self::batch_drawing::{BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices};
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
 use self::error::{RenderError, Result};
@@ -52,12 +55,15 @@ pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 // Re-export types from dependencies used in public API
 pub use image::{DynamicImage, ImageBuffer, Rgb};
 
-/// Rendering configuration parameters
+/// Which bloom algorithm to apply during post-processing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BloomMode {
+    /// Difference-of-Gaussians bloom (sharper, default).
     #[default]
     Dog,
+    /// Classical Gaussian blur bloom (softer glow).
     Gaussian,
+    /// Bloom disabled.
     None,
 }
 
@@ -79,9 +85,12 @@ impl BloomMode {
     }
 }
 
+/// Top-level rendering parameters that apply across the entire pipeline.
 #[derive(Clone, Copy, Debug)]
 pub struct RenderConfig {
+    /// Multiplier applied to spectral accumulation values before tone-mapping.
     pub hdr_scale: f64,
+    /// Bloom algorithm selection.
     pub bloom_mode: BloomMode,
 }
 
@@ -98,14 +107,29 @@ pub enum FinishOutputMode {
     Video,
 }
 
+/// Borrowed view of a scene's trajectory data needed for spectral rendering.
 #[derive(Clone, Copy)]
 pub struct SpectralScene<'a> {
+    /// Per-body position trajectories (indexed `[body][step]`).
     pub positions: &'a [Vec<Vector3<f64>>],
+    /// Per-body Oklab colour sequences (indexed `[body][step]`).
     pub colors: &'a [Vec<OklabColor>],
+    /// Overall opacity weight for each body's lines.
     pub body_alphas: &'a [f64],
 }
 
+impl<'a> std::fmt::Debug for SpectralScene<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpectralScene")
+            .field("num_bodies", &self.positions.len())
+            .field("num_steps", &self.positions.first().map_or(0, |p| p.len()))
+            .field("num_body_alphas", &self.body_alphas.len())
+            .finish()
+    }
+}
+
 impl<'a> SpectralScene<'a> {
+    /// Bundle trajectory positions, colours, and alpha weights into a scene view.
     pub fn new(
         positions: &'a [Vec<Vector3<f64>>],
         colors: &'a [Vec<OklabColor>],
@@ -114,26 +138,44 @@ impl<'a> SpectralScene<'a> {
         Self { positions, colors, body_alphas }
     }
 
+    /// Number of simulation timesteps recorded for each body.
     #[inline]
     pub fn step_count(self) -> usize {
         self.positions[0].len()
     }
 
+    /// Extract the three body alphas into a fixed-size array for triangle drawing.
     #[inline]
     pub fn triangle_alphas(self) -> [f64; 3] {
         [self.body_alphas[0], self.body_alphas[1], self.body_alphas[2]]
     }
 }
 
+/// Aggregated settings for a spectral render pass (effect config + render config + seeds).
 #[derive(Clone, Copy)]
 pub struct SpectralRenderSettings<'a> {
+    /// Fully-resolved effect parameters (randomised values already picked).
     pub resolved_config: &'a randomizable_config::ResolvedEffectConfig,
+    /// Core render parameters (HDR scale, bloom mode).
     pub render_config: &'a RenderConfig,
+    /// Seed for procedural noise (nebula clouds, textures).
     pub noise_seed: i32,
+    /// Whether to correct for non-square pixel aspect ratios.
     pub aspect_correction: bool,
 }
 
+impl<'a> std::fmt::Debug for SpectralRenderSettings<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpectralRenderSettings")
+            .field("render_config", &self.render_config)
+            .field("noise_seed", &self.noise_seed)
+            .field("aspect_correction", &self.aspect_correction)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a> SpectralRenderSettings<'a> {
+    /// Bundle all spectral render inputs into a single settings struct.
     pub fn new(
         resolved_config: &'a randomizable_config::ResolvedEffectConfig,
         render_config: &'a RenderConfig,
@@ -254,9 +296,9 @@ fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [
 fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [u16; 3] {
     let channels = tonemap_core(fr, fg, fb, fa, levels);
     [
-        (channels[0] * 65535.0).round().clamp(0.0, 65535.0) as u16,
-        (channels[1] * 65535.0).round().clamp(0.0, 65535.0) as u16,
-        (channels[2] * 65535.0).round().clamp(0.0, 65535.0) as u16,
+        crate::utils::f64_to_u16_saturating((channels[0] * 65535.0).round()),
+        crate::utils::f64_to_u16_saturating((channels[1] * 65535.0).round()),
+        crate::utils::f64_to_u16_saturating((channels[2] * 65535.0).round()),
     ]
 }
 
@@ -303,15 +345,34 @@ fn generate_nebula_background(
     height: usize,
     frame_number: usize,
     config: &NebulaCloudConfig,
-) -> PixelBuffer {
-    // Start with empty buffer (black background)
+) -> Result<PixelBuffer> {
     let background = vec![(0.0, 0.0, 0.0, 0.0); width * height];
-
-    // Apply nebula effect (which adds color without needing alpha tricks)
     let nebula = NebulaClouds::new(config.clone());
     nebula
         .process_with_time(&background, width, height, frame_number)
-        .expect("Failed to generate nebula background")
+        .map_err(|e| RenderError::EffectChain(e.to_string()))
+}
+
+fn build_nebula_config(
+    resolved_config: &randomizable_config::ResolvedEffectConfig,
+    noise_seed: i32,
+) -> NebulaCloudConfig {
+    NebulaCloudConfig {
+        strength: resolved_config.nebula_strength,
+        octaves: resolved_config.nebula_octaves,
+        base_frequency: resolved_config.nebula_base_frequency,
+        lacunarity: 2.0,
+        persistence: 0.5,
+        noise_seed: noise_seed as i64,
+        colors: [
+            [0.08, 0.12, 0.22],
+            [0.15, 0.08, 0.25],
+            [0.25, 0.12, 0.18],
+            [0.12, 0.15, 0.28],
+        ],
+        time_scale: 1.0,
+        edge_fade: 0.3,
+    }
 }
 
 /// Composite background and foreground buffers using a standard premultiplied "over" operator.
@@ -340,22 +401,226 @@ fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> Pixe
         .collect()
 }
 
-/// Build effect configuration from resolved randomizable config
-///
-/// Creates a fully configured EffectConfig from a ResolvedEffectConfig with all
-/// parameters determined (either explicitly set or randomized).
+/// Derive the perceptual-blur radius (in pixels) after accounting for the combined
+/// softness of all enabled blur/bloom effects. Returns `None` when blur is disabled.
+pub fn compute_softness_radius(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    bloom_mode: BloomMode,
+) -> Option<usize> {
+    if !resolved.enable_perceptual_blur {
+        return None;
+    }
+
+    let use_gaussian_bloom = bloom_mode == BloomMode::Gaussian && resolved.enable_bloom;
+    let softness_stack_score = (if use_gaussian_bloom { 1.0 } else { 0.0 })
+        + if resolved.enable_chromatic_bloom { 0.8 } else { 0.0 }
+        + if resolved.enable_perceptual_blur { 0.85 } else { 0.0 }
+        + if resolved.enable_glow { 0.55 } else { 0.0 }
+        + if resolved.enable_atmospheric_depth { 0.35 } else { 0.0 };
+    let radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
+    let min_dim = resolved.width.min(resolved.height);
+
+    Some(f64_to_usize_saturating(
+        (radius_scale * f64::from(min_dim)).round().max(1.0),
+    ))
+}
+
+fn build_dog_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    min_dim: usize,
+) -> DogBloomConfig {
+    let dog_inner_sigma = resolved.dog_sigma_scale * min_dim as f64;
+    let dog_threshold = (0.012_f64
+        + if resolved.enable_glow { 0.003_f64 } else { 0.0 }
+        + if resolved.enable_chromatic_bloom { 0.004_f64 } else { 0.0 }
+        + if resolved.enable_perceptual_blur { 0.004_f64 } else { 0.0 })
+    .min(0.028_f64);
+
+    DogBloomConfig {
+        inner_sigma: dog_inner_sigma,
+        outer_ratio: resolved.dog_ratio,
+        strength: resolved.dog_strength,
+        threshold: dog_threshold,
+    }
+}
+
+fn build_perceptual_blur_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    bloom_mode: BloomMode,
+) -> Option<PerceptualBlurConfig> {
+    use crate::oklab::GamutMapMode;
+    compute_softness_radius(resolved, bloom_mode).map(|radius| PerceptualBlurConfig {
+        radius,
+        strength: resolved.perceptual_blur_strength,
+        gamut_mode: GamutMapMode::PreserveHue,
+    })
+}
+
+fn build_chromatic_bloom_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    min_dim: usize,
+) -> ChromaticBloomConfig {
+    let radius = f64_to_usize_saturating(
+        (resolved.chromatic_bloom_radius_scale * min_dim as f64).round(),
+    );
+    let separation = resolved.chromatic_bloom_separation_scale * min_dim as f64;
+    ChromaticBloomConfig {
+        radius,
+        strength: resolved.chromatic_bloom_strength,
+        separation,
+        threshold: resolved.chromatic_bloom_threshold,
+    }
+}
+
+fn build_color_grade_params(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    min_dim: usize,
+) -> crate::post_effects::ColorGradeParams {
+    crate::post_effects::ColorGradeParams {
+        strength: resolved.color_grade_strength,
+        vignette_strength: resolved.vignette_strength,
+        vignette_softness: resolved.vignette_softness,
+        vibrance: resolved.vibrance,
+        clarity_strength: resolved.clarity_strength,
+        clarity_radius: (0.0028 * min_dim as f64).round().max(1.0) as usize,
+        tone_curve: resolved.tone_curve_strength,
+        shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
+        highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
+        palette_wave_strength: 0.25,
+    }
+}
+
+fn build_glow_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    min_dim: usize,
+) -> crate::post_effects::GlowEnhancementConfig {
+    let glow_radius = (resolved.glow_radius_scale * min_dim as f64).round() as usize;
+    crate::post_effects::GlowEnhancementConfig {
+        strength: resolved.glow_strength,
+        threshold: resolved.glow_threshold,
+        radius: glow_radius,
+        sharpness: resolved.glow_sharpness,
+        saturation_boost: resolved.glow_saturation_boost,
+    }
+}
+
+fn build_champleve_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> ChampleveConfig {
+    ChampleveConfig {
+        cell_density: constants::DEFAULT_CHAMPLEVE_CELL_DENSITY,
+        flow_alignment: resolved.champleve_flow_alignment,
+        interference_amplitude: resolved.champleve_interference_amplitude,
+        interference_frequency: constants::DEFAULT_CHAMPLEVE_INTERFERENCE_FREQUENCY,
+        rim_intensity: resolved.champleve_rim_intensity,
+        rim_warmth: resolved.champleve_rim_warmth,
+        rim_sharpness: constants::DEFAULT_CHAMPLEVE_RIM_SHARPNESS,
+        interior_lift: resolved.champleve_interior_lift,
+        anisotropy: constants::DEFAULT_CHAMPLEVE_ANISOTROPY,
+        cell_softness: constants::DEFAULT_CHAMPLEVE_CELL_SOFTNESS,
+    }
+}
+
+fn build_aether_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> AetherConfig {
+    AetherConfig {
+        filament_density: constants::DEFAULT_AETHER_FILAMENT_DENSITY,
+        flow_alignment: resolved.aether_flow_alignment,
+        scattering_strength: resolved.aether_scattering_strength,
+        scattering_falloff: constants::DEFAULT_AETHER_SCATTERING_FALLOFF,
+        iridescence_amplitude: resolved.aether_iridescence_amplitude,
+        iridescence_frequency: constants::DEFAULT_AETHER_IRIDESCENCE_FREQUENCY,
+        caustic_strength: resolved.aether_caustic_strength,
+        caustic_softness: constants::DEFAULT_AETHER_CAUSTIC_SOFTNESS,
+        luxury_mode: true,
+    }
+}
+
+fn build_opalescence_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    width: usize,
+    height: usize,
+) -> OpalescenceConfig {
+    let scale_abs = resolved.opalescence_scale * ((width * height) as f64).sqrt();
+    OpalescenceConfig {
+        strength: resolved.opalescence_strength,
+        scale: scale_abs,
+        layers: resolved.opalescence_layers,
+        chromatic_shift: 0.5,
+        angle_sensitivity: 0.8,
+        pearl_sheen: 0.3,
+    }
+}
+
+fn build_edge_luminance_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> EdgeLuminanceConfig {
+    EdgeLuminanceConfig {
+        strength: resolved.edge_luminance_strength,
+        threshold: resolved.edge_luminance_threshold,
+        brightness_boost: resolved.edge_luminance_brightness_boost,
+        bright_edges_only: true,
+        min_luminance: 0.2,
+    }
+}
+
+fn build_micro_contrast_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> MicroContrastConfig {
+    MicroContrastConfig {
+        strength: resolved.micro_contrast_strength,
+        radius: resolved.micro_contrast_radius,
+        edge_threshold: 0.15,
+        luminance_weight: 0.7,
+    }
+}
+
+fn build_atmospheric_depth_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> AtmosphericDepthConfig {
+    AtmosphericDepthConfig {
+        strength: resolved.atmospheric_depth_strength,
+        fog_color: (
+            resolved.atmospheric_fog_color_r,
+            resolved.atmospheric_fog_color_g,
+            resolved.atmospheric_fog_color_b,
+        ),
+        density_threshold: 0.15,
+        desaturation: resolved.atmospheric_desaturation,
+        darkening: resolved.atmospheric_darkening,
+        density_radius: 3,
+    }
+}
+
+fn build_fine_texture_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+    output_mode: FinishOutputMode,
+) -> (bool, FineTextureConfig) {
+    let width = resolved.width as usize;
+    let height = resolved.height as usize;
+    let scale_abs = resolved.fine_texture_scale * ((width * height) as f64).sqrt();
+    let min_dim = resolved.width.min(resolved.height);
+    let enabled = resolved.enable_fine_texture && min_dim >= 720;
+    let strength_scale = if output_mode == FinishOutputMode::Video { 0.6 } else { 1.0 };
+    (
+        enabled,
+        FineTextureConfig {
+            strength: resolved.fine_texture_strength * strength_scale,
+            scale: scale_abs,
+            contrast: resolved.fine_texture_contrast,
+            anisotropy: 0.3,
+            angle: 0.0,
+        },
+    )
+}
+
+/// Build a fully populated [`EffectConfig`] from resolved parameters and render settings.
 pub fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
     output_mode: FinishOutputMode,
 ) -> EffectConfig {
-    use crate::oklab::GamutMapMode;
-    use crate::post_effects::{
-        AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ColorGradeParams,
-        EdgeLuminanceConfig, FineTextureConfig, GlowEnhancementConfig, MicroContrastConfig,
-        OpalescenceConfig,
-    };
-
     let width = resolved.width as usize;
     let height = resolved.height as usize;
     let min_dim = width.min(height);
@@ -363,64 +628,16 @@ pub fn build_effect_config_from_resolved(
     let use_gaussian_bloom =
         resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Gaussian);
     let use_dog_bloom = resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Dog);
-    let softness_stack_score = if resolved.enable_bloom { 1.0 } else { 0.0 }
-        + if resolved.enable_chromatic_bloom { 0.95 } else { 0.0 }
-        + if resolved.enable_perceptual_blur { 0.85 } else { 0.0 }
-        + if resolved.enable_glow { 0.55 } else { 0.0 }
-        + if resolved.enable_atmospheric_depth { 0.35 } else { 0.0 };
 
     let blur_radius_px = if use_gaussian_bloom {
         (resolved.blur_radius_scale * min_dim as f64).round() as usize
     } else {
         0
     };
-    let dog_inner_sigma = resolved.dog_sigma_scale * min_dim as f64;
-    let glow_radius = (resolved.glow_radius_scale * min_dim as f64).round() as usize;
-    let chromatic_bloom_radius =
-        (resolved.chromatic_bloom_radius_scale * min_dim as f64).round() as usize;
-    let chromatic_bloom_separation = resolved.chromatic_bloom_separation_scale * min_dim as f64;
-    let opalescence_scale_abs = resolved.opalescence_scale * ((width * height) as f64).sqrt();
-    let fine_texture_scale_abs = resolved.fine_texture_scale * ((width * height) as f64).sqrt();
-    let dog_threshold = (0.012_f64
-        + if resolved.enable_glow { 0.003_f64 } else { 0.0 }
-        + if resolved.enable_chromatic_bloom { 0.004_f64 } else { 0.0 }
-        + if resolved.enable_perceptual_blur { 0.004_f64 } else { 0.0 })
-    .min(0.028_f64);
-
-    // Build DoG config from resolved parameters
-    let dog_config = DogBloomConfig {
-        inner_sigma: dog_inner_sigma,
-        outer_ratio: resolved.dog_ratio,
-        strength: resolved.dog_strength,
-        threshold: dog_threshold,
-    };
-
-    // Build perceptual blur config if enabled
-    let perceptual_blur_config = if resolved.enable_perceptual_blur {
-        let perceptual_radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
-        let perceptual_radius =
-            (perceptual_radius_scale * min_dim as f64).round().max(1.0) as usize;
-        Some(PerceptualBlurConfig {
-            radius: perceptual_radius,
-            strength: resolved.perceptual_blur_strength,
-            gamut_mode: GamutMapMode::PreserveHue,
-        })
-    } else {
-        None
-    };
-
-    let gradient_map_enabled = resolved.enable_gradient_map;
-    let gradient_map_config = GradientMapConfig {
-        palette: LuxuryPalette::from_index(resolved.gradient_map_palette),
-        strength: resolved.gradient_map_strength,
-        hue_preservation: resolved.gradient_map_hue_preservation,
-    };
-    let texture_min_dim = resolved.width.min(resolved.height);
-    let texture_enabled = resolved.enable_fine_texture && texture_min_dim >= 720;
-    let texture_strength_scale = if output_mode == FinishOutputMode::Video { 0.6 } else { 1.0 };
+    let (fine_texture_enabled, fine_texture_config) =
+        build_fine_texture_config(resolved, output_mode);
 
     EffectConfig {
-        // Core bloom and blur
         bloom_mode: if use_dog_bloom {
             BloomMode::Dog.as_str().to_string()
         } else if use_gaussian_bloom {
@@ -431,117 +648,39 @@ pub fn build_effect_config_from_resolved(
         blur_radius_px,
         blur_strength: resolved.blur_strength,
         blur_core_brightness: resolved.blur_core_brightness,
-        dog_config,
+        dog_config: build_dog_config(resolved, min_dim),
         perceptual_blur_enabled: resolved.enable_perceptual_blur,
-        perceptual_blur_config,
+        perceptual_blur_config: build_perceptual_blur_config(resolved, render_config.bloom_mode),
 
-        // Color manipulation
         color_grade_enabled: resolved.enable_color_grade,
-        color_grade_params: ColorGradeParams {
-            strength: resolved.color_grade_strength,
-            vignette_strength: resolved.vignette_strength,
-            vignette_softness: resolved.vignette_softness,
-            vibrance: resolved.vibrance,
-            clarity_strength: resolved.clarity_strength,
-            clarity_radius: (0.0028 * min_dim as f64).round().max(1.0) as usize,
-            tone_curve: resolved.tone_curve_strength,
-            shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
-            highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
-            palette_wave_strength: 0.25,
+        color_grade_params: build_color_grade_params(resolved, min_dim),
+        gradient_map_enabled: resolved.enable_gradient_map,
+        gradient_map_config: GradientMapConfig {
+            palette: LuxuryPalette::from_index(resolved.gradient_map_palette),
+            strength: resolved.gradient_map_strength,
+            hue_preservation: resolved.gradient_map_hue_preservation,
         },
-        gradient_map_enabled,
-        gradient_map_config,
 
-        // Material and iridescence
         champleve_enabled: resolved.enable_champleve,
-        champleve_config: ChampleveConfig {
-            cell_density: constants::DEFAULT_CHAMPLEVE_CELL_DENSITY,
-            flow_alignment: resolved.champleve_flow_alignment,
-            interference_amplitude: resolved.champleve_interference_amplitude,
-            interference_frequency: constants::DEFAULT_CHAMPLEVE_INTERFERENCE_FREQUENCY,
-            rim_intensity: resolved.champleve_rim_intensity,
-            rim_warmth: resolved.champleve_rim_warmth,
-            rim_sharpness: constants::DEFAULT_CHAMPLEVE_RIM_SHARPNESS,
-            interior_lift: resolved.champleve_interior_lift,
-            anisotropy: constants::DEFAULT_CHAMPLEVE_ANISOTROPY,
-            cell_softness: constants::DEFAULT_CHAMPLEVE_CELL_SOFTNESS,
-        },
+        champleve_config: build_champleve_config(resolved),
         aether_enabled: resolved.enable_aether,
-        aether_config: AetherConfig {
-            filament_density: constants::DEFAULT_AETHER_FILAMENT_DENSITY,
-            flow_alignment: resolved.aether_flow_alignment,
-            scattering_strength: resolved.aether_scattering_strength,
-            scattering_falloff: constants::DEFAULT_AETHER_SCATTERING_FALLOFF,
-            iridescence_amplitude: resolved.aether_iridescence_amplitude,
-            iridescence_frequency: constants::DEFAULT_AETHER_IRIDESCENCE_FREQUENCY,
-            caustic_strength: resolved.aether_caustic_strength,
-            caustic_softness: constants::DEFAULT_AETHER_CAUSTIC_SOFTNESS,
-            luxury_mode: true,
-        },
+        aether_config: build_aether_config(resolved),
         chromatic_bloom_enabled: resolved.enable_chromatic_bloom,
-        chromatic_bloom_config: ChromaticBloomConfig {
-            radius: chromatic_bloom_radius,
-            strength: resolved.chromatic_bloom_strength,
-            separation: chromatic_bloom_separation,
-            threshold: resolved.chromatic_bloom_threshold,
-        },
+        chromatic_bloom_config: build_chromatic_bloom_config(resolved, min_dim),
         opalescence_enabled: resolved.enable_opalescence,
-        opalescence_config: OpalescenceConfig {
-            strength: resolved.opalescence_strength,
-            scale: opalescence_scale_abs,
-            layers: resolved.opalescence_layers,
-            chromatic_shift: 0.5,   // Fixed
-            angle_sensitivity: 0.8, // Fixed
-            pearl_sheen: 0.3,       // Fixed
-        },
+        opalescence_config: build_opalescence_config(resolved, width, height),
 
-        // Detail and clarity
         edge_luminance_enabled: resolved.enable_edge_luminance,
-        edge_luminance_config: EdgeLuminanceConfig {
-            strength: resolved.edge_luminance_strength,
-            threshold: resolved.edge_luminance_threshold,
-            brightness_boost: resolved.edge_luminance_brightness_boost,
-            bright_edges_only: true, // Fixed
-            min_luminance: 0.2,      // Fixed
-        },
+        edge_luminance_config: build_edge_luminance_config(resolved),
         micro_contrast_enabled: resolved.enable_micro_contrast,
-        micro_contrast_config: MicroContrastConfig {
-            strength: resolved.micro_contrast_strength,
-            radius: resolved.micro_contrast_radius,
-            edge_threshold: 0.15,  // Fixed
-            luminance_weight: 0.7, // Fixed
-        },
+        micro_contrast_config: build_micro_contrast_config(resolved),
         glow_enhancement_enabled: resolved.enable_glow,
-        glow_enhancement_config: GlowEnhancementConfig {
-            strength: resolved.glow_strength,
-            threshold: resolved.glow_threshold,
-            radius: glow_radius,
-            sharpness: resolved.glow_sharpness,
-            saturation_boost: resolved.glow_saturation_boost,
-        },
+        glow_enhancement_config: build_glow_config(resolved, min_dim),
 
-        // Atmospheric and surface
         atmospheric_depth_enabled: resolved.enable_atmospheric_depth,
-        atmospheric_depth_config: AtmosphericDepthConfig {
-            strength: resolved.atmospheric_depth_strength,
-            fog_color: (
-                resolved.atmospheric_fog_color_r,
-                resolved.atmospheric_fog_color_g,
-                resolved.atmospheric_fog_color_b,
-            ),
-            density_threshold: 0.15, // Fixed
-            desaturation: resolved.atmospheric_desaturation,
-            darkening: resolved.atmospheric_darkening,
-            density_radius: 3, // Fixed
-        },
-        fine_texture_enabled: texture_enabled,
-        fine_texture_config: FineTextureConfig {
-            strength: resolved.fine_texture_strength * texture_strength_scale,
-            scale: fine_texture_scale_abs,
-            contrast: resolved.fine_texture_contrast,
-            anisotropy: 0.3, // Fixed
-            angle: 0.0,      // Fixed
-        },
+        atmospheric_depth_config: build_atmospheric_depth_config(resolved),
+        fine_texture_enabled,
+        fine_texture_config,
     }
 }
 
@@ -611,74 +750,69 @@ fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     checkpoints
 }
 
-#[allow(clippy::too_many_arguments)]
-fn accumulate_spectral_steps_into_rows(
-    accum_spd: &mut [[f64; NUM_BINS]],
-    scene: SpectralScene<'_>,
-    ctx: &RenderContext,
-    velocity_calc: &velocity_hdr::VelocityHdrCalculator<'_>,
+struct AccumulationParams<'a> {
+    scene: SpectralScene<'a>,
+    ctx: &'a RenderContext,
+    velocity_calc: &'a velocity_hdr::VelocityHdrCalculator<'a>,
     step_start: usize,
     step_end: usize,
+    hdr_scale: f64,
+}
+
+fn accumulate_spectral_steps_into_rows(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
     row_start: usize,
     row_end: usize,
-    hdr_scale: f64,
 ) {
-    if step_start >= step_end || row_start >= row_end {
+    if params.step_start >= params.step_end || row_start >= row_end {
         return;
     }
 
-    let triangle_alphas = scene.triangle_alphas();
-    for step in step_start..step_end {
-        let vertices =
-            prepare_triangle_vertices(scene.positions, scene.colors, &triangle_alphas, step, ctx);
+    let triangle_alphas = params.scene.triangle_alphas();
+    for step in params.step_start..params.step_end {
+        let vertices = prepare_triangle_vertices(
+            params.scene.positions,
+            params.scene.colors,
+            &triangle_alphas,
+            step,
+            params.ctx,
+        );
 
-        let hdr_mult_01 = velocity_calc.compute_segment_multiplier(step, 0, 1);
-        let hdr_mult_12 = velocity_calc.compute_segment_multiplier(step, 1, 2);
-        let hdr_mult_20 = velocity_calc.compute_segment_multiplier(step, 2, 0);
+        let hdr_mult_01 = params.velocity_calc.compute_segment_multiplier(step, 0, 1);
+        let hdr_mult_12 = params.velocity_calc.compute_segment_multiplier(step, 1, 2);
+        let hdr_mult_20 = params.velocity_calc.compute_segment_multiplier(step, 2, 0);
 
         draw_triangle_batch_spectral_rows(
             accum_spd,
-            ctx.width,
-            ctx.height,
-            row_start,
-            row_end,
-            vertices,
-            [hdr_mult_01, hdr_mult_12, hdr_mult_20],
-            hdr_scale,
+            &BatchDrawParams {
+                width: params.ctx.width,
+                height: params.ctx.height,
+                row_start,
+                row_end,
+                vertices,
+                hdr_multipliers: [hdr_mult_01, hdr_mult_12, hdr_mult_20],
+                hdr_scale: params.hdr_scale,
+            },
         );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
-    scene: SpectralScene<'_>,
-    ctx: &RenderContext,
-    velocity_calc: &velocity_hdr::VelocityHdrCalculator<'_>,
-    step_start: usize,
-    step_end: usize,
-    hdr_scale: f64,
+    params: &AccumulationParams<'_>,
     backend: AccumulationBackend,
 ) {
-    if step_start >= step_end || accum_spd.is_empty() {
+    if params.step_start >= params.step_end || accum_spd.is_empty() {
         return;
     }
 
     match backend {
         AccumulationBackend::ParallelScanlines => {
+            let ctx = params.ctx;
             let band_count = ctx.height_usize.min(rayon::current_num_threads().max(1));
             if band_count <= 1 {
-                accumulate_spectral_steps_into_rows(
-                    accum_spd,
-                    scene,
-                    ctx,
-                    velocity_calc,
-                    step_start,
-                    step_end,
-                    0,
-                    ctx.height_usize,
-                    hdr_scale,
-                );
+                accumulate_spectral_steps_into_rows(accum_spd, params, 0, ctx.height_usize);
                 return;
             }
 
@@ -687,31 +821,16 @@ fn accumulate_spectral_steps(
             accum_spd.par_chunks_mut(pixels_per_band).enumerate().for_each(|(band_idx, band)| {
                 let row_start = band_idx * rows_per_band;
                 let row_end = row_start + band.len() / ctx.width_usize;
-                accumulate_spectral_steps_into_rows(
-                    band,
-                    scene,
-                    ctx,
-                    velocity_calc,
-                    step_start,
-                    step_end,
-                    row_start,
-                    row_end,
-                    hdr_scale,
-                );
+                accumulate_spectral_steps_into_rows(band, params, row_start, row_end);
             });
         }
         #[cfg(test)]
         AccumulationBackend::SerialReference => {
             accumulate_spectral_steps_into_rows(
                 accum_spd,
-                scene,
-                ctx,
-                velocity_calc,
-                step_start,
-                step_end,
+                params,
                 0,
-                ctx.height_usize,
-                hdr_scale,
+                params.ctx.height_usize,
             );
         }
     }
@@ -749,12 +868,14 @@ fn pass_1_build_histogram_spectral_with_backend(
 
         accumulate_spectral_steps(
             &mut accum_spd,
-            scene,
-            &ctx,
-            &velocity_calc,
-            step_start,
-            checkpoint_step + 1,
-            render_config.hdr_scale,
+            &AccumulationParams {
+                scene,
+                ctx: &ctx,
+                velocity_calc: &velocity_calc,
+                step_start,
+                step_end: checkpoint_step + 1,
+                hdr_scale: render_config.hdr_scale,
+            },
             backend,
         );
 
@@ -766,7 +887,7 @@ fn pass_1_build_histogram_spectral_with_backend(
         let rgba_buffer = std::mem::take(&mut accum_rgba);
         let trajectory_proxy = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
-            .expect("Failed to process frame during spectral histogram pass");
+            .expect("effect chain invariant: histogram-pass trajectory processing must not fail");
         accum_rgba.clear();
         accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
@@ -812,6 +933,10 @@ pub(crate) fn pass_1_build_histogram_spectral_serial_reference(
 }
 
 #[cfg(test)]
+// Parameter count is inherently high: mixes owned accumulation state (`accum_spd`),
+// a generic `frame_sink` closure, and several borrowed config/output refs that cannot
+// be bundled into a single struct without introducing a lifetime-heavy wrapper around
+// the `FnMut` sink.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pass_2_write_frames_spectral_serial_reference(
     scene: SpectralScene<'_>,
@@ -841,6 +966,10 @@ pub(crate) fn pass_2_write_frames_spectral_serial_reference(
 ///
 /// The caller-provided `accum_spd` buffer is populated incrementally and contains
 /// the fully accumulated spectral data when this function returns.
+// Parameter count is inherently high: mixes owned accumulation state (`accum_spd`),
+// a generic `frame_sink` closure, and several borrowed config/output refs that cannot
+// be bundled into a single struct without introducing a lifetime-heavy wrapper around
+// the `FnMut` sink.
 #[allow(clippy::too_many_arguments)]
 fn pass_2_write_frames_spectral_with_backend(
     scene: SpectralScene<'_>,
@@ -866,17 +995,7 @@ fn pass_2_write_frames_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let nebula_config = NebulaCloudConfig {
-        strength: resolved_config.nebula_strength,
-        octaves: resolved_config.nebula_octaves,
-        base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,
-        persistence: 0.5,
-        noise_seed: noise_seed as i64,
-        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
-        time_scale: 1.0,
-        edge_fade: 0.3,
-    };
+    let nebula_config = build_nebula_config(resolved_config, noise_seed);
 
     let total_steps = scene.step_count();
     let checkpoints = checkpoint_steps(total_steps, frame_interval);
@@ -904,12 +1023,14 @@ fn pass_2_write_frames_spectral_with_backend(
 
         accumulate_spectral_steps(
             accum_spd,
-            scene,
-            &ctx,
-            &velocity_calc,
-            step_start,
-            checkpoint_step + 1,
-            render_config.hdr_scale,
+            &AccumulationParams {
+                scene,
+                ctx: &ctx,
+                velocity_calc: &velocity_calc,
+                step_start,
+                step_end: checkpoint_step + 1,
+                hdr_scale: render_config.hdr_scale,
+            },
             backend,
         );
 
@@ -921,7 +1042,7 @@ fn pass_2_write_frames_spectral_with_backend(
         let rgba_buffer = std::mem::take(&mut accum_rgba);
         let mut trajectory_pixels = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
-            .expect("Failed to process frame during spectral render pass");
+            .map_err(|e| RenderError::EffectChain(e.to_string()))?;
 
         let generated_nebula;
         let nebula_ref = if resolved_config.nebula_strength > 0.0 {
@@ -930,7 +1051,7 @@ fn pass_2_write_frames_spectral_with_backend(
                 height as usize,
                 checkpoint_step / frame_interval,
                 &nebula_config,
-            );
+            )?;
             &generated_nebula
         } else {
             &empty_background
@@ -952,11 +1073,9 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let final_display = finish_pipeline
             .process_image(smoothed_display, width as usize, height as usize, &frame_params)
-            .expect("Failed to process final image finish during spectral render pass");
+            .map_err(|e| RenderError::EffectChain(e.to_string()))?;
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
-        let buf_bytes = unsafe {
-            std::slice::from_raw_parts(buf_16bit.as_ptr() as *const u8, buf_16bit.len() * 2)
-        };
+        let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
         frame_sink(buf_bytes)?;
         if checkpoint_step + 1 == total_steps {
@@ -970,6 +1089,8 @@ fn pass_2_write_frames_spectral_with_backend(
     Ok(())
 }
 
+/// Pass 2: render frames with spectral accumulation and feed 16-bit bytes to `frame_sink`.
+// See `pass_2_write_frames_spectral_with_backend` for rationale.
 #[allow(clippy::too_many_arguments)]
 pub fn pass_2_write_frames_spectral(
     scene: SpectralScene<'_>,
@@ -1045,17 +1166,7 @@ fn render_final_frame_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let nebula_config = NebulaCloudConfig {
-        strength: resolved_config.nebula_strength,
-        octaves: resolved_config.nebula_octaves,
-        base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,
-        persistence: 0.5,
-        noise_seed: noise_seed as i64,
-        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
-        time_scale: 1.0,
-        edge_fade: 0.3,
-    };
+    let nebula_config = build_nebula_config(resolved_config, noise_seed);
 
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
@@ -1064,12 +1175,14 @@ fn render_final_frame_spectral_with_backend(
 
     accumulate_spectral_steps(
         &mut accum_spd,
-        scene,
-        &ctx,
-        &velocity_calc,
-        0,
-        total_steps,
-        render_config.hdr_scale,
+        &AccumulationParams {
+            scene,
+            ctx: &ctx,
+            velocity_calc: &velocity_calc,
+            step_start: 0,
+            step_end: total_steps,
+            hdr_scale: render_config.hdr_scale,
+        },
         backend,
     );
 
@@ -1081,7 +1194,7 @@ fn render_final_frame_spectral_with_backend(
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .expect("Failed to process final preview frame");
+        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
 
     let nebula_background = if resolved_config.nebula_strength > 0.0 {
         generate_nebula_background(
@@ -1089,7 +1202,7 @@ fn render_final_frame_spectral_with_backend(
             height as usize,
             preview_frame_number,
             &nebula_config,
-        )
+        )?
     } else {
         empty_background
     };
@@ -1098,7 +1211,7 @@ fn render_final_frame_spectral_with_backend(
     let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .expect("Failed to process final image finish for preview frame");
+        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
@@ -1159,23 +1272,7 @@ fn render_single_frame_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    // Create nebula configuration
-    let nebula_config = NebulaCloudConfig {
-        strength: resolved_config.nebula_strength,
-        octaves: resolved_config.nebula_octaves,
-        base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,  // Fixed
-        persistence: 0.5, // Fixed
-        noise_seed: noise_seed as i64,
-        colors: [
-            [0.08, 0.12, 0.22], // Deep blue
-            [0.15, 0.08, 0.25], // Purple
-            [0.25, 0.12, 0.18], // Magenta
-            [0.12, 0.15, 0.28], // Blue-violet
-        ],
-        time_scale: 1.0, // Fixed
-        edge_fade: 0.3,  // Fixed
-    };
+    let nebula_config = build_nebula_config(resolved_config, noise_seed);
 
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
@@ -1192,12 +1289,14 @@ fn render_single_frame_spectral_with_backend(
 
     accumulate_spectral_steps(
         &mut accum_spd,
-        scene,
-        &ctx,
-        &velocity_calc,
-        0,
-        first_frame_step + 1,
-        render_config.hdr_scale,
+        &AccumulationParams {
+            scene,
+            ctx: &ctx,
+            velocity_calc: &velocity_calc,
+            step_start: 0,
+            step_end: first_frame_step + 1,
+            hdr_scale: render_config.hdr_scale,
+        },
         backend,
     );
 
@@ -1208,21 +1307,19 @@ fn render_single_frame_spectral_with_backend(
     let frame_params = FrameParams { frame_number: 0, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .expect("Failed to process test frame");
+        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
 
-    // Generate nebula background for frame 0 (with zero-overhead check)
     let nebula_background = if resolved_config.nebula_strength > 0.0 {
-        generate_nebula_background(width as usize, height as usize, 0, &nebula_config)
+        generate_nebula_background(width as usize, height as usize, 0, &nebula_config)?
     } else {
-        empty_background // Reuse pre-allocated empty buffer (zero overhead)
+        empty_background
     };
 
-    // Composite nebula under trajectories
     let composited = composite_buffers(&nebula_background, &trajectory_pixels);
     let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .expect("Failed to process final image finish");
+        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
 
     // Quantize display buffer to 16-bit
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
@@ -1327,6 +1424,9 @@ mod tests {
         image.as_raw().iter().map(|&channel| channel as u64).sum()
     }
 
+    type SceneData = (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>);
+    type CapturedFrameResult = (Vec<u8>, Option<ImageBuffer<Rgb<u16>, Vec<u16>>>);
+
     fn assert_frame_bytes_eq(actual: &[u8], expected: &[u8], label: &str) {
         assert_eq!(actual.len(), expected.len(), "{label}: frame byte lengths differ");
         if actual != expected {
@@ -1376,8 +1476,7 @@ mod tests {
         assert_eq!(actual.as_raw(), expected.as_raw(), "{label}: 16-bit image buffers differed");
     }
 
-    #[allow(clippy::type_complexity)]
-    fn sample_scene() -> (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>) {
+    fn sample_scene() -> SceneData {
         let positions = vec![
             vec![
                 Vector3::new(0.10, 0.10, -0.30),
@@ -1483,8 +1582,7 @@ mod tests {
         enable_temporal_smoothing: bool,
         serial_reference: bool,
         thread_count: usize,
-    ) -> (Vec<u8>, Option<ImageBuffer<Rgb<u16>, Vec<u16>>>) {
-        #![allow(clippy::type_complexity)]
+    ) -> CapturedFrameResult {
         let mut frame_bytes = Vec::new();
         let mut last_frame = None;
 
@@ -1738,15 +1836,19 @@ mod tests {
         let velocity_calc =
             velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
 
+        let accum_params = AccumulationParams {
+            scene,
+            ctx: &ctx,
+            velocity_calc: &velocity_calc,
+            step_start: 0,
+            step_end: scene.step_count(),
+            hdr_scale: render_config.hdr_scale,
+        };
+
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
         accumulate_spectral_steps(
             &mut serial,
-            scene,
-            &ctx,
-            &velocity_calc,
-            0,
-            scene.step_count(),
-            render_config.hdr_scale,
+            &accum_params,
             AccumulationBackend::SerialReference,
         );
 
@@ -1759,12 +1861,7 @@ mod tests {
                 .install(|| {
                     accumulate_spectral_steps(
                         &mut parallel,
-                        scene,
-                        &ctx,
-                        &velocity_calc,
-                        0,
-                        scene.step_count(),
-                        render_config.hdr_scale,
+                        &accum_params,
                         AccumulationBackend::ParallelScanlines,
                     );
                 });
@@ -2035,5 +2132,41 @@ mod tests {
             v.iter().sum::<u64>()
         });
         assert_eq!(result, (0..1024u64).sum::<u64>());
+    }
+
+    #[test]
+    fn test_compute_softness_radius_disabled() {
+        let mut cfg = baseline_resolved_config(1920, 1080);
+        cfg.enable_perceptual_blur = false;
+        assert!(compute_softness_radius(&cfg, BloomMode::Dog).is_none());
+    }
+
+    #[test]
+    fn test_compute_softness_radius_enabled_returns_some() {
+        let mut cfg = baseline_resolved_config(1920, 1080);
+        cfg.enable_perceptual_blur = true;
+        let radius = compute_softness_radius(&cfg, BloomMode::Dog);
+        assert!(radius.is_some());
+        assert!(radius.unwrap() >= 1);
+    }
+
+    #[test]
+    fn test_compute_softness_radius_high_softness_uses_smaller_scale() {
+        let mut low = baseline_resolved_config(1920, 1080);
+        low.enable_perceptual_blur = true;
+
+        let mut high = low.clone();
+        high.enable_chromatic_bloom = true;
+        high.enable_glow = true;
+        high.enable_atmospheric_depth = true;
+
+        let r_low = compute_softness_radius(&low, BloomMode::Dog).unwrap();
+        let r_high = compute_softness_radius(&high, BloomMode::Dog).unwrap();
+        assert!(
+            r_high <= r_low,
+            "higher softness stack should produce equal or smaller radius: {} vs {}",
+            r_high,
+            r_low,
+        );
     }
 }
