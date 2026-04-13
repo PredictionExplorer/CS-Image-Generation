@@ -473,7 +473,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -492,7 +492,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!(ratio >= 0.05 && ratio <= 20.0, "ratio {} outside [0.05, 20.0]", ratio);
+        assert!(ratio >= 0.2 && ratio <= 125.0, "ratio {} outside [0.2, 125.0]", ratio);
     }
 
     #[test]
@@ -514,8 +514,8 @@ mod tests {
             assert_eq!(w.chaos_weight, 1.0);
             let ratio = w.equil_weight / w.chaos_weight;
             assert!(
-                ratio >= 0.05 && ratio <= 20.0,
-                "seed {} produced ratio {} outside [0.05, 20.0]",
+                ratio >= 0.2 && ratio <= 125.0,
+                "seed {} produced ratio {} outside [0.2, 125.0]",
                 seed_byte,
                 ratio
             );
