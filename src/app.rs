@@ -709,6 +709,13 @@ mod tests {
         let _ = fs::remove_dir_all("output/seed_idem");
     }
 
+    proptest::proptest! {
+        #[test]
+        fn proptest_parse_seed_never_panics(input in "\\PC*") {
+            let _ = parse_seed(&input);
+        }
+    }
+
     #[test]
     fn test_end_to_end_pipeline_parallel_matches_serial_reference() {
         for seed in [[0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {

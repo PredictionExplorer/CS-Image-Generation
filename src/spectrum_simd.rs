@@ -696,6 +696,27 @@ mod tests {
         }
     }
 
+    proptest::proptest! {
+        #[test]
+        fn proptest_spd_to_rgba_never_panics_and_output_is_valid(
+            values in proptest::collection::vec(proptest::num::f64::ANY, 64)
+        ) {
+            let mut spd = [0.0f64; NUM_BINS];
+            for (i, &v) in values.iter().enumerate() {
+                spd[i] = v;
+            }
+            let (r, g, b, a) = spd_to_rgba_simd(&spd);
+            proptest::prop_assert!(!r.is_nan(), "R was NaN");
+            proptest::prop_assert!(!g.is_nan(), "G was NaN");
+            proptest::prop_assert!(!b.is_nan(), "B was NaN");
+            proptest::prop_assert!(!a.is_nan(), "A was NaN");
+            proptest::prop_assert!(r >= 0.0, "R was negative: {r}");
+            proptest::prop_assert!(g >= 0.0, "G was negative: {g}");
+            proptest::prop_assert!(b >= 0.0, "B was negative: {b}");
+            proptest::prop_assert!(a >= 0.0, "A was negative: {a}");
+        }
+    }
+
     #[test]
     fn test_output_always_valid_for_random_like_inputs() {
         let mut seed = 12345u64;
