@@ -246,10 +246,6 @@ pub const SWEEP_BIN_END: usize = 59;
 /// Gaussian kernel sigma (in bin-units) for multi-bin blending during the sweep.
 pub const SWEEP_GAUSSIAN_SIGMA: f64 = 2.5;
 
-/// Number of frames used for the fade-in from (and fade-out to) the full-spectrum
-/// composite at each end of the sweep video (~0.75 s at 60 fps).
-pub const SWEEP_FADE_FRAMES: u32 = 45;
-
 /// Gaussian bloom blur radius (pixels) applied to each sweep frame.
 pub const SWEEP_BLOOM_RADIUS: usize = 12;
 

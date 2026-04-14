@@ -62,7 +62,36 @@ impl BinBuffers {
         self.width * self.height
     }
 
+    /// Return the first and last bin indices that contain visible energy.
+    ///
+    /// A bin is considered active when at least one pixel has an RGB component
+    /// above a small threshold.  The result is padded by 2 bins on each side
+    /// and clamped to `[0, NUM_BINS - 1]`, falling back to the static
+    /// `SWEEP_BIN_START..=SWEEP_BIN_END` range when no bins are active.
+    #[must_use]
+    pub fn active_bin_range(&self) -> (usize, usize) {
+        const THRESHOLD: f32 = 1e-4;
+        const PAD: usize = 2;
+
+        let first_active = self.buffers.iter().position(|buf| {
+            buf.iter().any(|px| px[0] > THRESHOLD || px[1] > THRESHOLD || px[2] > THRESHOLD)
+        });
+        let last_active = self.buffers.iter().rposition(|buf| {
+            buf.iter().any(|px| px[0] > THRESHOLD || px[1] > THRESHOLD || px[2] > THRESHOLD)
+        });
+
+        match (first_active, last_active) {
+            (Some(lo), Some(hi)) => {
+                let lo = lo.saturating_sub(PAD);
+                let hi = (hi + PAD).min(NUM_BINS - 1);
+                (lo, hi)
+            }
+            _ => (constants::SWEEP_BIN_START, constants::SWEEP_BIN_END),
+        }
+    }
+
     /// Average all bin images into a single full-spectrum composite `PixelBuffer`.
+    #[cfg(test)]
     fn composite(&self) -> PixelBuffer {
         let pixel_count = self.pixel_count();
         let inv_bins = 1.0 / NUM_BINS as f64;
@@ -205,28 +234,6 @@ fn gaussian_blend_to_pixelbuffer(
     });
 }
 
-/// Hermite smoothstep: 0 at `edge0`, 1 at `edge1`, smooth in between.
-fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// Linearly blend two `PixelBuffer`s: returns `a*(1-t) + b*t`.
-fn blend_pixelbuffers(a: &PixelBuffer, b: &PixelBuffer, t: f64) -> PixelBuffer {
-    let one_minus_t = 1.0 - t;
-    a.par_iter()
-        .zip(b.par_iter())
-        .map(|(&(ar, ag, ab, aa), &(br, bg, bb, ba))| {
-            (
-                ar * one_minus_t + br * t,
-                ag * one_minus_t + bg * t,
-                ab * one_minus_t + bb * t,
-                aa * one_minus_t + ba * t,
-            )
-        })
-        .collect()
-}
-
 /// Convert a `PixelBuffer` to packed 16-bit RGB for the ffmpeg `rgb48le` pipe.
 fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf = vec![0u16; pixels.len() * 3];
@@ -241,8 +248,9 @@ fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
 /// Generate a single spectral sweep video (violet to red) at the given path.
 ///
 /// The sweep applies cosine easing for smooth pacing, Gaussian bloom and
-/// subtle colour grading (vignette + vibrance) per frame, and fades in from
-/// / out to a full-spectrum composite at each end.
+/// subtle colour grading (vignette + vibrance) per frame.  The bin range is
+/// determined dynamically from actual scene energy so that only bins with
+/// visible content are swept.
 pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,
@@ -252,6 +260,9 @@ pub fn generate_spectral_sweep_video(
 ) -> Result<()> {
     info!("Building BinBuffers for spectral sweep ({NUM_BINS} bins)...");
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+
+    let (active_start, active_end) = bin_buffers.active_bin_range();
+    info!("   Active bin range: {active_start}..={active_end}");
 
     let w = width as usize;
     let h = height as usize;
@@ -275,12 +286,8 @@ pub fn generate_spectral_sweep_video(
         palette_wave_strength: 0.0,
     });
 
-    let composite = bin_buffers.composite();
-    let processed_composite = apply_sweep_effects(&bloom, &color_grade, &composite, w, h)?;
-
     info!("Encoding spectral sweep video...");
     let total_frames = constants::CYCLE_TOTAL_FRAMES;
-    let fade_frames = constants::SWEEP_FADE_FRAMES;
     let fps = constants::DEFAULT_VIDEO_FPS;
     let options = if fast_encode {
         VideoEncodingOptions::fast_encode()
@@ -294,8 +301,8 @@ pub fn generate_spectral_sweep_video(
         fps,
         |out| {
             let mut frame_buf: PixelBuffer = Vec::new();
-            let start = constants::SWEEP_BIN_START as f64;
-            let end = constants::SWEEP_BIN_END as f64;
+            let start = active_start as f64;
+            let end = active_end as f64;
             let sigma = constants::SWEEP_GAUSSIAN_SIGMA;
 
             for frame in 0..total_frames {
@@ -308,21 +315,7 @@ pub fn generate_spectral_sweep_video(
                 let processed = apply_sweep_effects(&bloom, &color_grade, &frame_buf, w, h)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-                let final_frame = if frame < fade_frames {
-                    let fade_t = smoothstep(0.0, f64::from(fade_frames), f64::from(frame));
-                    blend_pixelbuffers(&processed_composite, &processed, fade_t)
-                } else if frame >= total_frames - fade_frames {
-                    let fade_t = smoothstep(
-                        0.0,
-                        f64::from(fade_frames),
-                        f64::from(total_frames - 1 - frame),
-                    );
-                    blend_pixelbuffers(&processed_composite, &processed, fade_t)
-                } else {
-                    processed
-                };
-
-                let quantized = quantize_to_u16_rgb(&final_frame);
+                let quantized = quantize_to_u16_rgb(&processed);
                 let bytes: &[u8] = bytemuck::cast_slice(&quantized);
                 out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             }
@@ -989,11 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sweep_fade_frames_fits_in_total() {
-        const { assert!(constants::SWEEP_FADE_FRAMES < constants::CYCLE_TOTAL_FRAMES / 2) };
-    }
-
-    #[test]
     fn test_sweep_bloom_constants_positive() {
         const { assert!(constants::SWEEP_BLOOM_RADIUS > 0) };
         const { assert!(constants::SWEEP_BLOOM_STRENGTH > 0.0) };
@@ -1082,60 +1070,48 @@ mod tests {
         }
     }
 
-    // -- smoothstep ---------------------------------------------------------
+    // -- active_bin_range ---------------------------------------------------
 
     #[test]
-    fn test_smoothstep_boundaries() {
-        assert!((smoothstep(0.0, 1.0, 0.0)).abs() < 1e-10, "should be 0 at edge0");
-        assert!((smoothstep(0.0, 1.0, 1.0) - 1.0).abs() < 1e-10, "should be 1 at edge1");
+    fn test_active_bin_range_single_bin() {
+        let spd = make_single_bin_spd(30, 1.0);
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let (lo, hi) = bb.active_bin_range();
+        assert!(lo <= 30, "lo should be at or before the active bin");
+        assert!(hi >= 30, "hi should be at or after the active bin");
+        assert!(lo >= 28, "padding should not extend more than 2 bins below");
+        assert!(hi <= 32, "padding should not extend more than 2 bins above");
     }
 
     #[test]
-    fn test_smoothstep_midpoint() {
-        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-10, "should be 0.5 at midpoint");
+    fn test_active_bin_range_zero_energy_returns_fallback() {
+        let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let (lo, hi) = bb.active_bin_range();
+        assert_eq!(lo, constants::SWEEP_BIN_START);
+        assert_eq!(hi, constants::SWEEP_BIN_END);
     }
 
     #[test]
-    fn test_smoothstep_clamps_outside_range() {
-        assert!(smoothstep(0.0, 1.0, -1.0).abs() < 1e-10);
-        assert!((smoothstep(0.0, 1.0, 2.0) - 1.0).abs() < 1e-10);
-    }
-
-    // -- blend_pixelbuffers -------------------------------------------------
-
-    #[test]
-    fn test_blend_pixelbuffers_identity_at_zero() {
-        let a: PixelBuffer = vec![(1.0, 0.5, 0.0, 1.0); 4];
-        let b: PixelBuffer = vec![(0.0, 0.5, 1.0, 1.0); 4];
-        let blended = blend_pixelbuffers(&a, &b, 0.0);
-        for (ap, bp) in a.iter().zip(blended.iter()) {
-            assert!((ap.0 - bp.0).abs() < 1e-10);
-            assert!((ap.1 - bp.1).abs() < 1e-10);
-            assert!((ap.2 - bp.2).abs() < 1e-10);
-        }
+    fn test_active_bin_range_full_spectrum() {
+        let spd = vec![[1.0f64; NUM_BINS]; TEST_W * TEST_H];
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let (lo, hi) = bb.active_bin_range();
+        assert!(lo <= 2, "all bins active should start near 0");
+        assert!(hi >= NUM_BINS - 3, "all bins active should end near last bin");
     }
 
     #[test]
-    fn test_blend_pixelbuffers_identity_at_one() {
-        let a: PixelBuffer = vec![(1.0, 0.5, 0.0, 1.0); 4];
-        let b: PixelBuffer = vec![(0.0, 0.5, 1.0, 1.0); 4];
-        let blended = blend_pixelbuffers(&a, &b, 1.0);
-        for (bp_orig, bp) in b.iter().zip(blended.iter()) {
-            assert!((bp_orig.0 - bp.0).abs() < 1e-10);
-            assert!((bp_orig.1 - bp.1).abs() < 1e-10);
-            assert!((bp_orig.2 - bp.2).abs() < 1e-10);
-        }
-    }
+    fn test_active_bin_range_edge_bins() {
+        let spd = make_single_bin_spd(0, 1.0);
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let (lo, _) = bb.active_bin_range();
+        assert_eq!(lo, 0, "should clamp to 0, not underflow");
 
-    #[test]
-    fn test_blend_pixelbuffers_midpoint() {
-        let a: PixelBuffer = vec![(1.0, 0.0, 0.0, 1.0); 4];
-        let b: PixelBuffer = vec![(0.0, 1.0, 0.0, 1.0); 4];
-        let blended = blend_pixelbuffers(&a, &b, 0.5);
-        for &(r, g, _b, _a) in &blended {
-            assert!((r - 0.5).abs() < 1e-10);
-            assert!((g - 0.5).abs() < 1e-10);
-        }
+        let spd = make_single_bin_spd(NUM_BINS - 1, 1.0);
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let (_, hi) = bb.active_bin_range();
+        assert_eq!(hi, NUM_BINS - 1, "should clamp to last bin");
     }
 
     // -- quantize_to_u16_rgb ------------------------------------------------
