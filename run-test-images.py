@@ -30,9 +30,6 @@ LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400   # seconds per simulation (24 hours)
 REPORT_EVERY = 3      # print a status line every N completions
 
-TEST_SIMS = 1_000
-TEST_STEPS = 100_000
-
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -95,9 +92,6 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
         binary,
         "--seed", seed,
         "--output", seed,
-        "--sims", str(TEST_SIMS),
-        "--steps", str(TEST_STEPS),
-        "--fast-encode",
     ]
 
     logger.debug("[%d] START %s  cmd=%s", run_id, seed, " ".join(cmd))
