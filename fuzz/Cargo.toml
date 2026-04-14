@@ -1,0 +1,27 @@
+[package]
+name = "three_body_problem-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.three_body_problem]
+path = ".."
+
+[[bin]]
+name = "fuzz_parse_seed"
+path = "fuzz_targets/parse_seed.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_spd_to_rgba"
+path = "fuzz_targets/spd_to_rgba.rs"
+doc = false
+
+[workspace]
+members = ["."]

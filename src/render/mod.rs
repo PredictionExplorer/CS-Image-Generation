@@ -324,7 +324,7 @@ pub fn save_image_as_png_16bit(
     path: &str,
 ) -> Result<()> {
     let dyn_img = DynamicImage::ImageRgb16(rgb_img.clone());
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
+    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
     info!("   Saved 16-bit PNG (sRGB assumed) => {path}");
     Ok(())
 }
@@ -360,9 +360,9 @@ fn generate_nebula_background(
 ) -> Result<PixelBuffer> {
     let background = vec![(0.0, 0.0, 0.0, 0.0); width * height];
     let nebula = NebulaClouds::new(config.clone());
-    nebula
-        .process_with_time(&background, width, height, frame_number)
-        .map_err(|e| RenderError::EffectChain(e.to_string()))
+    nebula.process_with_time(&background, width, height, frame_number).map_err(|e| {
+        RenderError::EffectChain { effect_name: "nebula_clouds".into(), reason: e.to_string() }
+    })
 }
 
 fn build_nebula_config(
@@ -1043,7 +1043,10 @@ fn pass_2_write_frames_spectral_with_backend(
         let rgba_buffer = std::mem::take(&mut accum_rgba);
         let mut trajectory_pixels = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
-            .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+            .map_err(|e| RenderError::EffectChain {
+                effect_name: "trajectory_chain".into(),
+                reason: e.to_string(),
+            })?;
 
         let generated_nebula;
         let nebula_ref = if resolved_config.nebula_strength > 0.0 {
@@ -1074,7 +1077,10 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let final_display = finish_pipeline
             .process_image(smoothed_display, width as usize, height as usize, &frame_params)
-            .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+            .map_err(|e| RenderError::EffectChain {
+                effect_name: "image_chain".into(),
+                reason: e.to_string(),
+            })?;
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
         let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
@@ -1177,7 +1183,10 @@ fn render_final_frame_spectral_with_backend(
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+        .map_err(|e| RenderError::EffectChain {
+            effect_name: "trajectory_chain".into(),
+            reason: e.to_string(),
+        })?;
 
     let nebula_background = if resolved_config.nebula_strength > 0.0 {
         generate_nebula_background(
@@ -1194,11 +1203,14 @@ fn render_final_frame_spectral_with_backend(
     let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+        .map_err(|e| RenderError::EffectChain {
+            effect_name: "image_chain".into(),
+            reason: e.to_string(),
+        })?;
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
-    ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
-        RenderError::ImageEncoding("Failed to create 16-bit image buffer".to_string())
+    ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
+        reason: "Failed to create 16-bit image buffer".into(),
     })
 }
 
@@ -1290,7 +1302,10 @@ fn render_single_frame_spectral_with_backend(
     let frame_params = FrameParams { frame_number: 0, density: None };
     let trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+        .map_err(|e| RenderError::EffectChain {
+            effect_name: "trajectory_chain".into(),
+            reason: e.to_string(),
+        })?;
 
     let nebula_background = if resolved_config.nebula_strength > 0.0 {
         generate_nebula_background(width as usize, height as usize, 0, &nebula_config)?
@@ -1302,14 +1317,17 @@ fn render_single_frame_spectral_with_backend(
     let display_buffer = tonemap_to_display_buffer(&composited, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain(e.to_string()))?;
+        .map_err(|e| RenderError::EffectChain {
+            effect_name: "image_chain".into(),
+            reason: e.to_string(),
+        })?;
 
     // Quantize display buffer to 16-bit
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     // Create ImageBuffer and return
     let image = ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| {
-        RenderError::ImageEncoding("Failed to create 16-bit image buffer".to_string())
+        RenderError::ImageEncoding { reason: "Failed to create 16-bit image buffer".into() }
     })?;
 
     Ok(image)

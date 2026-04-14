@@ -420,7 +420,6 @@ pub fn select_best_trajectory(
     ew: f64,
     th: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
-    info!("STAGE 1/7: Borda search over {num_sims} random orbits...");
     // Generate random triples and immediately transform them to the COM frame so
     // the total linear momentum and the COM position are exactly zero.
     let many: Vec<Vec<Body>> = (0..num_sims)

@@ -6,16 +6,26 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum RenderError {
     /// A post-processing effect chain step failed.
-    #[error("Effect chain failed: {0}")]
-    EffectChain(String),
+    #[error("Effect '{effect_name}' failed: {reason}")]
+    EffectChain {
+        /// Name of the effect that failed.
+        effect_name: String,
+        /// Description of the failure.
+        reason: String,
+    },
 
     /// Video encoder encountered an I/O failure.
     #[error("Video encoding failed")]
     VideoEncoding(#[from] std::io::Error),
 
     /// Render configuration is invalid or inconsistent.
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(String),
+    #[error("Invalid configuration for '{parameter}': {reason}")]
+    InvalidConfig {
+        /// Name of the invalid parameter.
+        parameter: String,
+        /// Why the value is invalid.
+        reason: String,
+    },
 
     /// Output dimensions are zero or otherwise unsupported.
     #[error("Invalid dimensions: width={width}, height={height}")]
@@ -27,8 +37,11 @@ pub enum RenderError {
     },
 
     /// Image file encoding (e.g. PNG write) failed.
-    #[error("Image encoding failed: {0}")]
-    ImageEncoding(String),
+    #[error("Image encoding failed: {reason}")]
+    ImageEncoding {
+        /// Description of the encoding failure.
+        reason: String,
+    },
 }
 
 /// Convenience type alias
@@ -40,8 +53,9 @@ mod tests {
 
     #[test]
     fn test_effect_chain_display() {
-        let err = RenderError::EffectChain("blur failed".into());
-        assert_eq!(err.to_string(), "Effect chain failed: blur failed");
+        let err =
+            RenderError::EffectChain { effect_name: "blur".into(), reason: "blur failed".into() };
+        assert_eq!(err.to_string(), "Effect 'blur' failed: blur failed");
     }
 
     #[test]
@@ -54,8 +68,11 @@ mod tests {
 
     #[test]
     fn test_invalid_config_display() {
-        let err = RenderError::InvalidConfig("bad param".into());
-        assert_eq!(err.to_string(), "Invalid configuration: bad param");
+        let err = RenderError::InvalidConfig {
+            parameter: "frame_rate".into(),
+            reason: "bad param".into(),
+        };
+        assert_eq!(err.to_string(), "Invalid configuration for 'frame_rate': bad param");
     }
 
     #[test]
@@ -66,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_image_encoding_display() {
-        let err = RenderError::ImageEncoding("PNG write failed".into());
+        let err = RenderError::ImageEncoding { reason: "PNG write failed".into() };
         assert_eq!(err.to_string(), "Image encoding failed: PNG write failed");
     }
 
@@ -75,7 +92,8 @@ mod tests {
         let ok: Result<i32> = Ok(42);
         assert!(ok.is_ok());
 
-        let err: Result<i32> = Err(RenderError::EffectChain("test".into()));
+        let err: Result<i32> =
+            Err(RenderError::EffectChain { effect_name: "test".into(), reason: "test".into() });
         assert!(err.is_err());
     }
 }

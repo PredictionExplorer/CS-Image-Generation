@@ -9,12 +9,14 @@ use three_body_problem::{
     sim::Sha3RandomByteStream,
     spectrum_simd,
 };
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_OUTPUT_NAME: &str = "output";
 const DEFAULT_NUM_SIMS: usize = 100_000;
 const DEFAULT_NUM_STEPS: usize = 1_000_000;
+const MAX_NUM_SIMS: usize = 10_000_000;
+const MAX_NUM_STEPS: usize = 100_000_000;
 const DEFAULT_RESOLUTION: &str = "1920x1080";
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_LOCATION: f64 = 300.0;
@@ -80,10 +82,10 @@ struct Args {
     #[arg(short, long, default_value = DEFAULT_OUTPUT_NAME)]
     output: String,
 
-    #[arg(long, default_value_t = DEFAULT_NUM_SIMS)]
+    #[arg(long, default_value_t = DEFAULT_NUM_SIMS, value_parser = parse_bounded_sims)]
     sims: usize,
 
-    #[arg(long, default_value_t = DEFAULT_NUM_STEPS)]
+    #[arg(long, default_value_t = DEFAULT_NUM_STEPS, value_parser = parse_bounded_steps)]
     steps: usize,
 
     #[arg(short = 'r', long, default_value = DEFAULT_RESOLUTION, value_parser = parse_resolution)]
@@ -107,6 +109,22 @@ struct Args {
     /// Omit to randomize from a curated range.
     #[arg(long)]
     equil_weight: Option<f64>,
+}
+
+fn parse_bounded_sims(value: &str) -> std::result::Result<usize, String> {
+    let n: usize = value.parse().map_err(|_| "sims must be a positive integer".to_string())?;
+    if n == 0 || n > MAX_NUM_SIMS {
+        return Err(format!("sims must be between 1 and {MAX_NUM_SIMS}"));
+    }
+    Ok(n)
+}
+
+fn parse_bounded_steps(value: &str) -> std::result::Result<usize, String> {
+    let n: usize = value.parse().map_err(|_| "steps must be a positive integer".to_string())?;
+    if n == 0 || n > MAX_NUM_STEPS {
+        return Err(format!("steps must be between 1 and {MAX_NUM_STEPS}"));
+    }
+    Ok(n)
 }
 
 fn setup_logging(level: &str) {
@@ -228,7 +246,7 @@ fn main() -> Result<()> {
     ThreadPoolBuilder::new()
         .stack_size(render::constants::THREAD_STACK_SIZE)
         .build_global()
-        .expect("failed to initialize global thread pool");
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     let args = Args::parse();
 
@@ -378,7 +396,7 @@ fn main() -> Result<()> {
 
     let generation_log_config =
         build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights);
-    app::log_generation(
+    if let Err(e) = app::log_generation(
         &generation_log_config,
         &args.output,
         hex_seed,
@@ -386,7 +404,9 @@ fn main() -> Result<()> {
         args.sims,
         &best_info,
         Some(&randomization_log),
-    );
+    ) {
+        warn!("Generation logging failed (non-fatal): {e}");
+    }
 
     Ok(())
 }

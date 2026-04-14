@@ -1,3 +1,4 @@
+use crate::error::ConfigError;
 use crate::sim::Sha3RandomByteStream;
 use nalgebra::{Matrix3, Vector3};
 use std::f64::consts::PI;
@@ -227,22 +228,23 @@ impl DriftTransform for EllipticalDrift {
     }
 }
 
-/// Parse drift mode from string
+/// Parse drift mode from string, returning an error for unrecognised values.
 pub fn parse_drift_mode(
     mode: &str,
     rng: &mut Sha3RandomByteStream,
     params: DriftParameters,
     num_steps: usize,
-) -> Box<dyn DriftTransform> {
+) -> std::result::Result<Box<dyn DriftTransform>, ConfigError> {
     match mode.to_lowercase().as_str() {
-        "none" => Box::new(NoDrift),
-        "brownian" => Box::new(BrownianDrift::new(rng, params.scale, num_steps)),
-        "linear" => Box::new(LinearDrift::new(rng, params.scale)),
-        "elliptical" | "ellipse" => Box::new(EllipticalDrift::new(rng, params)),
-        _ => {
-            warn!("Unknown drift mode '{}'", mode);
-            Box::new(BrownianDrift::new(rng, params.scale, num_steps))
-        }
+        "none" => Ok(Box::new(NoDrift)),
+        "brownian" => Ok(Box::new(BrownianDrift::new(rng, params.scale, num_steps))),
+        "linear" => Ok(Box::new(LinearDrift::new(rng, params.scale))),
+        "elliptical" | "ellipse" => Ok(Box::new(EllipticalDrift::new(rng, params))),
+        _ => Err(ConfigError::InvalidResolution {
+            reason: format!(
+                "Unknown drift mode '{mode}'. Valid modes: none, brownian, linear, elliptical"
+            ),
+        }),
     }
 }
 
@@ -387,7 +389,7 @@ mod tests {
     fn test_parse_drift_mode_none() {
         let mut rng = make_rng();
         let params = DriftParameters::new(1.0, 0.5, 0.1);
-        let mut drift = parse_drift_mode("none", &mut rng, params, 100);
+        let mut drift = parse_drift_mode("none", &mut rng, params, 100).expect("valid mode");
         let mut positions = test_bodies();
         let original = positions.clone();
         drift.apply(&mut positions, 0.001);
@@ -398,7 +400,7 @@ mod tests {
     fn test_parse_drift_mode_brownian() {
         let mut rng = make_rng();
         let params = DriftParameters::new(1.0, 0.5, 0.1);
-        let mut drift = parse_drift_mode("brownian", &mut rng, params, 3);
+        let mut drift = parse_drift_mode("brownian", &mut rng, params, 3).expect("valid mode");
         let mut positions = test_bodies();
         let original = positions.clone();
         drift.apply(&mut positions, 0.001);
@@ -409,10 +411,9 @@ mod tests {
     fn test_parse_drift_mode_linear() {
         let mut rng = make_rng();
         let params = DriftParameters::new(1.0, 0.5, 0.1);
-        let mut drift = parse_drift_mode("linear", &mut rng, params, 3);
+        let mut drift = parse_drift_mode("linear", &mut rng, params, 3).expect("valid mode");
         let mut positions = test_bodies();
         drift.apply(&mut positions, 0.001);
-        // Step 0 has zero offset from linear drift, but later steps should differ
         let initial_step1 = Vector3::new(1.0, 0.0, 0.0);
         assert_ne!(positions[0][1], initial_step1, "LinearDrift should offset later steps");
     }
@@ -421,7 +422,7 @@ mod tests {
     fn test_parse_drift_mode_elliptical() {
         let mut rng = make_rng();
         let params = DriftParameters::new(1.0, 0.25, 0.1);
-        let mut drift = parse_drift_mode("elliptical", &mut rng, params, 3);
+        let mut drift = parse_drift_mode("elliptical", &mut rng, params, 3).expect("valid mode");
         let mut positions = test_bodies();
         drift.apply(&mut positions, 0.001);
         let initial = Vector3::new(1.0, 0.0, 0.0);
@@ -429,14 +430,11 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_drift_mode_unknown_defaults_to_brownian() {
+    fn test_parse_drift_mode_unknown_returns_error() {
         let mut rng = make_rng();
         let params = DriftParameters::new(1.0, 0.5, 0.1);
-        let mut drift = parse_drift_mode("unknown_xyz", &mut rng, params, 3);
-        let mut positions = test_bodies();
-        let original = positions.clone();
-        drift.apply(&mut positions, 0.001);
-        assert_ne!(positions, original, "Unknown mode defaults to brownian");
+        let result = parse_drift_mode("unknown_xyz", &mut rng, params, 3);
+        assert!(result.is_err(), "Unknown mode should return an error");
     }
 
     #[test]

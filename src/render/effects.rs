@@ -251,9 +251,10 @@ impl FinishEffectPipeline {
         height: usize,
         _params: &FrameParams,
     ) -> Result<PixelBuffer> {
-        self.trajectory_chain
-            .process(buffer, width, height)
-            .map_err(|e| RenderError::EffectChain(e.to_string()))
+        self.trajectory_chain.process(buffer, width, height).map_err(|e| RenderError::EffectChain {
+            effect_name: "trajectory_chain".into(),
+            reason: e.to_string(),
+        })
     }
 
     /// Process the fully composited display image through the final image chain.
@@ -264,9 +265,10 @@ impl FinishEffectPipeline {
         height: usize,
         _params: &FrameParams,
     ) -> Result<PixelBuffer> {
-        self.image_chain
-            .process(buffer, width, height)
-            .map_err(|e| RenderError::EffectChain(e.to_string()))
+        self.image_chain.process(buffer, width, height).map_err(|e| RenderError::EffectChain {
+            effect_name: "image_chain".into(),
+            reason: e.to_string(),
+        })
     }
 
     /// Number of effects in the trajectory processing chain

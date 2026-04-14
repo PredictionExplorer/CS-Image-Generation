@@ -16,6 +16,15 @@ generation_log.json.lock
 
 # Python
 __pycache__/
+.venv/
+venv/
 
 # Rust build artifacts
 target/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -239,37 +239,31 @@ impl GenerationLogger {
 
     /// Append a new generation record to the log, holding an exclusive file lock
     /// for the entire read-modify-write cycle to prevent data loss under concurrency.
-    pub fn log_generation(&self, record: GenerationRecord) {
-        let lock_file = match OpenOptions::new()
+    pub fn log_generation(&self, record: GenerationRecord) -> crate::error::Result<()> {
+        let lock_file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&self.lock_file_path)
-        {
-            Ok(f) => f,
-            Err(e) => {
+            .map_err(|e| {
                 error!("Failed to create lock file {}: {}", self.lock_file_path, e);
-                return;
-            }
-        };
+                e
+            })?;
 
-        if let Err(e) = lock_file.lock() {
+        lock_file.lock().map_err(|e| {
             error!("Failed to acquire lock on {}: {}", self.lock_file_path, e);
-            return;
-        }
+            e
+        })?;
 
         // ---- Critical section: exclusive lock held ----
-        let result = self.locked_append(&record);
+        self.locked_append(&record).map_err(|e| {
+            error!("Failed to save generation log: {}", e);
+            e
+        })?;
         // ---- End critical section (lock released on drop) ----
 
-        match result {
-            Ok(()) => {
-                info!("Generation logged: {}", record.file_name);
-            }
-            Err(e) => {
-                error!("Failed to save generation log: {}", e);
-            }
-        }
+        info!("Generation logged: {}", record.file_name);
+        Ok(())
     }
 
     /// Perform the actual read-modify-write while the caller holds the lock.
@@ -370,9 +364,9 @@ mod tests {
         let paths = temp_paths("seq");
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
 
-        logger.log_generation(make_record("first"));
-        logger.log_generation(make_record("second"));
-        logger.log_generation(make_record("third"));
+        logger.log_generation(make_record("first")).expect("log first");
+        logger.log_generation(make_record("second")).expect("log second");
+        logger.log_generation(make_record("third")).expect("log third");
 
         let records = logger.load_records();
         assert_eq!(records.len(), 3);
@@ -403,7 +397,7 @@ mod tests {
                     for w in 0..writes_per_thread {
                         let logger = GenerationLogger::with_paths(lp.clone(), lkp.clone());
                         let name = format!("t{tid}_w{w}");
-                        logger.log_generation(make_record(&name));
+                        logger.log_generation(make_record(&name)).expect("log generation");
                     }
                 })
             })
@@ -436,7 +430,7 @@ mod tests {
         let records = logger.load_records();
         assert!(records.is_empty());
 
-        logger.log_generation(make_record("after_empty"));
+        logger.log_generation(make_record("after_empty")).expect("log after empty");
         let records = logger.load_records();
         assert_eq!(records.len(), 1);
 
@@ -449,7 +443,7 @@ mod tests {
         std::fs::write(&paths.0, "this is not json").expect("failed to write test data");
 
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
-        logger.log_generation(make_record("fresh_start"));
+        logger.log_generation(make_record("fresh_start")).expect("log fresh start");
 
         let records = logger.load_records();
         assert_eq!(records.len(), 1, "should recover with a fresh log");
@@ -475,7 +469,7 @@ mod tests {
         let _ = std::fs::remove_file(&paths.0);
 
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
-        logger.log_generation(make_record("brand_new"));
+        logger.log_generation(make_record("brand_new")).expect("log brand new");
 
         let records = logger.load_records();
         assert_eq!(records.len(), 1);

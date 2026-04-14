@@ -54,14 +54,22 @@ pub fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() < FLOAT_EPSILON
 }
 
-/// Compute Fourier transform of a real-valued signal
+/// Compute Fourier transform of a real-valued signal.
+///
+/// Reuses a thread-local `FftPlanner` to avoid repeated allocation when called
+/// many times with the same (or different) input lengths.
 #[must_use]
 pub fn fourier_transform(input: &[f64]) -> Vec<Complex<f64>> {
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(input.len());
-    let mut data: Vec<_> = input.iter().map(|&x| Complex::new(x, 0.0)).collect();
-    fft.process(&mut data);
-    data
+    use std::cell::RefCell;
+    thread_local! {
+        static PLANNER: RefCell<FftPlanner<f64>> = RefCell::new(FftPlanner::new());
+    }
+    PLANNER.with(|planner| {
+        let fft = planner.borrow_mut().plan_fft_forward(input.len());
+        let mut data: Vec<_> = input.iter().map(|&x| Complex::new(x, 0.0)).collect();
+        fft.process(&mut data);
+        data
+    })
 }
 
 /// 2D bounding box: (`min_x`, `max_x`, `min_y`, `max_y`)

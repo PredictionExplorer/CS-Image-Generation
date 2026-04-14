@@ -112,7 +112,16 @@ pub struct GenerationLogConfig {
 /// Initialize per-seed output directory structure:
 ///   output/{seed}/
 ///   output/{seed}/spectral/
+///
+/// Rejects output names containing path separators or `..` to prevent directory traversal.
 pub fn setup_seed_directory(seed: &str) -> Result<String> {
+    if seed.contains("..") || seed.contains('/') || seed.contains('\\') {
+        return Err(ConfigError::InvalidResolution {
+            reason: format!("Output name '{seed}' must not contain path separators or '..'"),
+        }
+        .into());
+    }
+
     let seed_dir = format!("output/{seed}");
     let spectral_dir = format!("{seed_dir}/spectral");
 
@@ -199,7 +208,7 @@ pub fn apply_drift_transformation(
         warn!("Elliptical drift requested with zero arc fraction; skipping motion");
     }
 
-    let mut drift_transform = parse_drift_mode(drift_mode, rng, drift_params, num_steps);
+    let mut drift_transform = parse_drift_mode(drift_mode, rng, drift_params, num_steps)?;
     drift_transform.apply(positions, constants::DEFAULT_DT);
 
     info!("   => Drift applied successfully");
@@ -371,7 +380,9 @@ pub fn generate_spectral_sweep_video(
     )?)
 }
 
-/// Log generation parameters for reproducibility
+/// Log generation parameters for reproducibility.
+///
+/// Returns `Ok(())` on success, or an `Err` describing the I/O or serialisation failure.
 pub fn log_generation(
     config: &GenerationLogConfig,
     file_name: &str,
@@ -380,7 +391,7 @@ pub fn log_generation(
     num_sims: usize,
     best_info: &TrajectoryResult,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
-) {
+) -> Result<()> {
     let logger = GenerationLogger::new();
 
     let mut record = GenerationRecord::new(file_name.to_string(), format!("0x{seed}"));
@@ -447,7 +458,7 @@ pub fn log_generation(
     // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
 
-    logger.log_generation(record);
+    logger.log_generation(record)
 }
 
 #[cfg(test)]

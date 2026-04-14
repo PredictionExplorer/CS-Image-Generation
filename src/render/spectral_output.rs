@@ -133,12 +133,12 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
     }
 
     let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
-        .ok_or_else(|| {
-            RenderError::InvalidConfig("Failed to create bin image buffer".to_string())
+        .ok_or_else(|| RenderError::ImageEncoding {
+            reason: "Failed to create bin image buffer".into(),
         })?;
 
     let dyn_img = image::DynamicImage::ImageRgb16(img);
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding(e.to_string()))?;
+    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
     Ok(())
 }
 
@@ -344,9 +344,14 @@ fn apply_sweep_effects(
     w: usize,
     h: usize,
 ) -> Result<PixelBuffer> {
-    let bloomed =
-        bloom.process(buf, w, h).map_err(|e| RenderError::InvalidConfig(e.to_string()))?;
-    color_grade.process(&bloomed, w, h).map_err(|e| RenderError::InvalidConfig(e.to_string()))
+    let bloomed = bloom.process(buf, w, h).map_err(|e| RenderError::EffectChain {
+        effect_name: "gaussian_bloom".into(),
+        reason: e.to_string(),
+    })?;
+    color_grade.process(&bloomed, w, h).map_err(|e| RenderError::EffectChain {
+        effect_name: "color_grade".into(),
+        reason: e.to_string(),
+    })
 }
 
 #[cfg(test)]

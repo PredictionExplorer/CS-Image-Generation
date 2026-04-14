@@ -231,7 +231,10 @@ pub fn create_video_from_frames_singlepass(
     }
 
     if frame_rate == 0 {
-        return Err(RenderError::InvalidConfig("Frame rate must be greater than 0".to_string()));
+        return Err(RenderError::InvalidConfig {
+            parameter: "frame_rate".into(),
+            reason: "must be greater than 0".into(),
+        });
     }
 
     info!("Encoding video with codec: {}, pixel format: {}", options.codec, options.pixel_format);

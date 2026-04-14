@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-commit hook: runs formatting and lint checks before each commit.
+# To install: git config core.hooksPath .githooks
+
+set -e
+
+echo "Running cargo fmt --check..."
+cargo fmt --all -- --check
+
+echo "Running cargo clippy..."
+cargo clippy --all-targets -- -D warnings
+
+echo "Pre-commit checks passed."
