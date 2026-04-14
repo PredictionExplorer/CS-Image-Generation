@@ -14,5 +14,8 @@ generation_log.json.lock
 # macOS
 .DS_Store
 
+# Python
+__pycache__/
+
 # Rust build artifacts
 target/

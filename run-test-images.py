@@ -10,76 +10,97 @@ Screen: compact progress line every few completions.
 File:   full subprocess output written to run.log for debugging.
 """
 
+from __future__ import annotations
+
 import concurrent.futures
 import logging
-import os
 import secrets
 import signal
 import subprocess
 import sys
 import time
+import typing
 from pathlib import Path
+
+from _utils import check_ffmpeg, fmt_duration, resolve_binary
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
-SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
-REPORT_EVERY = 3     # print a status line every N completions
+SIM_TIMEOUT = 86400   # seconds per simulation (24 hours)
+REPORT_EVERY = 3      # print a status line every N completions
+
+TEST_SIMS = 1_000
+TEST_STEPS = 100_000
+
 
 # ---------------------------------------------------------------------------
-# Logging setup: file gets everything, console gets one-liners
+# Logging setup
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger("run")
-logger.setLevel(logging.DEBUG)
 
-_file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
-_file_handler.setLevel(logging.DEBUG)
-_file_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)-5s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-)
-logger.addHandler(_file_handler)
+
+def setup_logging() -> None:
+    """Configure file + console logging (called once from main)."""
+    logger.setLevel(logging.DEBUG)
+
+    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)-5s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logger.addHandler(fh)
+
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+
+class SimResult(typing.NamedTuple):
+    success: bool
+    seed: str
+    elapsed: float
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def check_prerequisites() -> None:
-    if not os.path.isfile(BINARY):
-        print(f"Error: binary not found at {BINARY}")
-        print("Build it first:  cargo build --release")
-        sys.exit(1)
-    if not os.access(BINARY, os.X_OK):
-        print(f"Error: {BINARY} is not executable")
-        sys.exit(1)
+
+def check_prerequisites() -> Path:
+    """Validate binary and ffmpeg, ensure output dir exists. Returns binary path."""
+    binary = resolve_binary(BINARY)
+    check_ffmpeg()
     Path("output").mkdir(exist_ok=True)
+    return binary
 
 
 def random_seed() -> str:
     return "0x" + secrets.token_hex(6)
 
 
-def fmt_duration(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    if h:
-        return f"{h}h{m:02d}m{s:02d}s"
-    if m:
-        return f"{m}m{s:02d}s"
-    return f"{s}s"
-
-
 # ---------------------------------------------------------------------------
 # Single simulation
 # ---------------------------------------------------------------------------
 
-def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
-    """Returns (success, seed, elapsed_secs)."""
-    filename = seed[2:]
-    cmd = [BINARY, "--seed", seed, "--output", filename]
 
-    logger.debug(f"[{run_id}] START {seed}  cmd={' '.join(cmd)}")
+def run_one(binary: str, seed: str, run_id: int) -> SimResult:
+    """Run the generator for a single seed and return the outcome."""
+    cmd = [
+        binary,
+        "--seed", seed,
+        "--output", seed,
+        "--sims", str(TEST_SIMS),
+        "--steps", str(TEST_STEPS),
+        "--fast-encode",
+    ]
+
+    logger.debug("[%d] START %s  cmd=%s", run_id, seed, " ".join(cmd))
     t0 = time.monotonic()
 
     try:
@@ -87,43 +108,50 @@ def run_one(seed: str, run_id: int) -> tuple[bool, str, float]:
         elapsed = time.monotonic() - t0
 
         if proc.stdout:
-            logger.debug(f"[{run_id}] stdout:\n{proc.stdout.rstrip()}")
+            logger.debug("[%d] stdout:\n%s", run_id, proc.stdout.rstrip())
         if proc.stderr:
-            logger.debug(f"[{run_id}] stderr:\n{proc.stderr.rstrip()}")
+            logger.debug("[%d] stderr:\n%s", run_id, proc.stderr.rstrip())
 
         if proc.returncode == 0:
-            logger.info(f"[{run_id}] OK    {seed}  ({fmt_duration(elapsed)})")
-            return (True, seed, elapsed)
+            logger.info("[%d] OK    %s  (%s)", run_id, seed, fmt_duration(elapsed))
+            return SimResult(True, seed, elapsed)
 
-        logger.warning(f"[{run_id}] FAIL  {seed}  exit={proc.returncode}  ({fmt_duration(elapsed)})")
-        return (False, seed, elapsed)
+        logger.warning(
+            "[%d] FAIL  %s  exit=%d  (%s)",
+            run_id, seed, proc.returncode, fmt_duration(elapsed),
+        )
+        return SimResult(False, seed, elapsed)
 
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - t0
-        logger.error(f"[{run_id}] TIMEOUT {seed}  ({fmt_duration(elapsed)})")
-        return (False, seed, elapsed)
+        logger.error("[%d] TIMEOUT %s  (%s)", run_id, seed, fmt_duration(elapsed))
+        return SimResult(False, seed, elapsed)
 
     except OSError as exc:
         elapsed = time.monotonic() - t0
-        logger.error(f"[{run_id}] OS ERROR {seed}: {exc}")
-        return (False, seed, elapsed)
+        logger.error("[%d] OS ERROR %s: %s", run_id, seed, exc)
+        return SimResult(False, seed, elapsed)
 
     except Exception as exc:
         elapsed = time.monotonic() - t0
-        logger.error(f"[{run_id}] UNEXPECTED {seed}: {exc}")
-        return (False, seed, elapsed)
+        logger.error("[%d] UNEXPECTED %s: %s", run_id, seed, exc)
+        return SimResult(False, seed, elapsed)
 
 
 # ---------------------------------------------------------------------------
-# Main loop — rolling pool keeps all slots busy at all times
+# Main loop -- rolling pool keeps all slots busy at all times
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    check_prerequisites()
 
-    logger.info(f"{'=' * 60}")
-    logger.info(f"Session started  concurrency={CONCURRENT_SIMS}")
-    logger.info(f"{'=' * 60}")
+def main() -> int:
+    binary = check_prerequisites()
+    setup_logging()
+
+    binary_str = str(binary)
+
+    logger.info("=" * 60)
+    logger.info("Session started  concurrency=%d", CONCURRENT_SIMS)
+    logger.info("=" * 60)
 
     print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
     print(f"Detailed logs -> {LOG_FILE}")
@@ -135,12 +163,12 @@ def main() -> None:
     completions_since_report = 0
     t_session = time.monotonic()
 
-    in_flight: dict[concurrent.futures.Future, tuple[int, str]] = {}
+    in_flight: dict[concurrent.futures.Future[SimResult], tuple[int, str]] = {}
 
     shutdown = False
     orig_sigint = signal.getsignal(signal.SIGINT)
 
-    def on_sigint(_sig, _frame):
+    def on_sigint(_sig: int, _frame: object) -> None:
         nonlocal shutdown
         if shutdown:
             signal.signal(signal.SIGINT, orig_sigint)
@@ -150,14 +178,14 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, on_sigint)
 
-    def submit_next(pool):
+    def submit_next(pool: concurrent.futures.ThreadPoolExecutor) -> None:
         nonlocal run_id
         seed = random_seed()
         run_id += 1
-        fut = pool.submit(run_one, seed, run_id)
+        fut = pool.submit(run_one, binary_str, seed, run_id)
         in_flight[fut] = (run_id, seed)
 
-    def print_status():
+    def print_status() -> None:
         total = ok_total + fail_total
         elapsed = fmt_duration(time.monotonic() - t_session)
         line = f"  completed {total}  (+{ok_total} ok"
@@ -165,7 +193,7 @@ def main() -> None:
             line += f"  -{fail_total} fail"
         line += f")  {elapsed}"
         print(line)
-        logger.info(line)
+        logger.info("%s", line)
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_SIMS) as pool:
@@ -178,10 +206,15 @@ def main() -> None:
                 )
 
                 for fut in done:
-                    success, _seed, _elapsed = fut.result()
+                    try:
+                        result = fut.result()
+                    except Exception:
+                        logger.exception("Unhandled exception from worker")
+                        result = SimResult(False, in_flight[fut][1], 0.0)
+
                     del in_flight[fut]
 
-                    if success:
+                    if result.success:
                         ok_total += 1
                     else:
                         fail_total += 1
@@ -204,9 +237,11 @@ def main() -> None:
 
         summary = f"\nDone: {ok_total} ok, {fail_total} failed / {total} total in {elapsed}"
         print(summary)
-        logger.info(summary)
+        logger.info("%s", summary)
         logger.info("Session ended\n")
+
+    return 1 if fail_total > 0 else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

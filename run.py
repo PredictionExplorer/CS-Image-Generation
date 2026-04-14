@@ -27,6 +27,8 @@ import logging
 import logging.handlers
 import os
 import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -34,6 +36,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from _utils import GENERATOR_CANDIDATES, check_ffmpeg, fmt_duration
 
 # ---------------------------------------------------------------------------
 # Defaults (non-sensitive only; deployment values come from .env / env vars)
@@ -52,10 +56,6 @@ SSH_BASE_OPTS = [
     "-o", "StrictHostKeyChecking=accept-new",
 ]
 
-GENERATOR_CANDIDATES = [
-    "./target/release/three_body_problem",
-    "./three_body_problem",
-]
 
 # Environment variable names for required config
 ENV_SSH_HOST = "COSMICSIG_SSH_HOST"
@@ -148,16 +148,6 @@ def install_signal_handlers() -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def fmt_duration(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    if h:
-        return f"{h}h{m:02d}m{s:02d}s"
-    if m:
-        return f"{m}m{s:02d}s"
-    return f"{s}s"
 
 
 def ssh_opts() -> list[str]:
@@ -269,7 +259,8 @@ def fetch_token_seeds(api_base_url: str, retries: int = 3) -> list[str]:
 
 def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]:
     """List all filenames in the remote asset directory via a single SSH call."""
-    cmd = ssh_cmd(ssh_host, ssh_user) + [f"ls -1 -- {remote_dir}/ 2>/dev/null || true"]
+    quoted_dir = shlex.quote(remote_dir)
+    cmd = ssh_cmd(ssh_host, ssh_user) + [f"ls -1 -- {quoted_dir}/ 2>/dev/null || true"]
 
     try:
         result = run_subprocess(cmd, timeout=30, label="ssh-ls")
@@ -308,18 +299,17 @@ def find_missing_seeds(seeds: list[str], remote_files: set[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def resolve_generator(generator_arg: str | None) -> str | None:
-    """Find the generator binary. Returns command string or None."""
-    candidates = [generator_arg] if generator_arg else GENERATOR_CANDIDATES
+def resolve_generator(generator_arg: str | None) -> list[str] | None:
+    """Find the generator binary. Returns argv prefix list or None."""
+    candidates = [generator_arg] if generator_arg else list(GENERATOR_CANDIDATES)
 
     for cand in candidates:
-        if not os.path.isfile(cand):
+        if not cand or not os.path.isfile(cand):
             continue
         if os.access(cand, os.X_OK):
             log.info("Using generator: %s", cand)
-            return cand
-        log.info("Found %s (not executable) -- will invoke via python3", cand)
-        return f"python3 {cand}"
+            return [cand]
+        log.warning("Found %s but it is not executable -- skipping", cand)
 
     log.warning(
         "Generator not found. Tried: %s",
@@ -333,8 +323,8 @@ def resolve_generator(generator_arg: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def generate(exec_cmd: str, seed: str, timeout: int) -> bool:
-    cmd_parts = exec_cmd.split() + ["--seed", f"0x{seed}", "--output", f"0x{seed}"]
+def generate(exec_cmd: list[str], seed: str, timeout: int) -> bool:
+    cmd_parts = exec_cmd + ["--seed", f"0x{seed}", "--output", f"0x{seed}"]
     log.info("GENERATE  seed=0x%s", seed)
 
     try:
@@ -379,12 +369,12 @@ def upload_file(
     cmd = ["scp"] + ssh_opts() + [str(local_path), f"{ssh_user}@{ssh_host}:{remote_path}"]
 
     for attempt in range(1, retries + 1):
+        backoff = 2 ** attempt
         log.info("UPLOAD (attempt %d/%d)  %s -> %s", attempt, retries, local_path.name, remote_path)
         try:
             result = run_subprocess(cmd, timeout=300, label=f"scp-{local_path.name}")
         except (subprocess.TimeoutExpired, OSError):
             if attempt < retries:
-                backoff = 5 * attempt
                 log.info("Retrying SCP in %ds ...", backoff)
                 time.sleep(backoff)
             continue
@@ -398,7 +388,6 @@ def upload_file(
             attempt, retries, result.returncode, result.stderr.strip()[:300],
         )
         if attempt < retries:
-            backoff = 5 * attempt
             log.info("Retrying SCP in %ds ...", backoff)
             time.sleep(backoff)
 
@@ -406,20 +395,21 @@ def upload_file(
     return False
 
 
-def cleanup_local_files(*paths: Path | None) -> None:
-    for p in paths:
-        if p is None or not p.is_file():
-            continue
-        try:
-            p.unlink()
-            log.debug("Cleaned up local file: %s", p)
-        except OSError as exc:
-            log.warning("Failed to remove %s: %s", p, exc)
+def cleanup_seed_dir(seed: str) -> None:
+    """Remove the entire per-seed output directory tree."""
+    seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
+    if not seed_dir.is_dir():
+        return
+    try:
+        shutil.rmtree(seed_dir)
+        log.debug("Cleaned up seed directory: %s", seed_dir)
+    except OSError as exc:
+        log.warning("Failed to remove %s: %s", seed_dir, exc)
 
 
 def process_seed(
     seed: str,
-    exec_cmd: str,
+    exec_cmd: list[str],
     ssh_host: str,
     ssh_user: str,
     remote_dir: str,
@@ -438,7 +428,7 @@ def process_seed(
 
     img_path, vid_path = find_local_files(seed)
     if img_path is None or vid_path is None:
-        cleanup_local_files(img_path, vid_path)
+        cleanup_seed_dir(seed)
         return False
 
     remote_img = f"{remote_dir}/0x{seed}.png"
@@ -448,7 +438,7 @@ def process_seed(
     vid_ok = upload_file(ssh_host, ssh_user, vid_path, remote_vid)
 
     if img_ok and vid_ok:
-        cleanup_local_files(img_path, vid_path)
+        cleanup_seed_dir(seed)
         elapsed = time.monotonic() - t0
         log.info("OK  seed=0x%s  (total %s)", seed, fmt_duration(elapsed))
         return True
@@ -491,7 +481,8 @@ def preflight(ssh_host: str, ssh_user: str, remote_dir: str, api_url: str) -> bo
 
     # 2. Remote directory exists and is writable
     log.info("[preflight] Testing write access to %s:%s ...", ssh_host, remote_dir)
-    probe = f"{remote_dir}/.preflight_probe_{os.getpid()}"
+    quoted_dir = shlex.quote(remote_dir)
+    probe = f"{quoted_dir}/.preflight_probe_{os.getpid()}"
     write_cmd = f"touch {probe} && rm -f {probe}"
     try:
         result = run_subprocess(
@@ -529,9 +520,16 @@ def preflight(ssh_host: str, ssh_user: str, remote_dir: str, api_url: str) -> bo
     # 4. Generator binary
     generator = resolve_generator(None)
     if generator:
-        log.info("[preflight] Generator binary: OK (%s)", generator)
+        log.info("[preflight] Generator binary: OK (%s)", generator[0])
     else:
         log.warning("[preflight] Generator binary: NOT FOUND")
+        all_ok = False
+
+    # 5. FFmpeg (required by the Rust generator for MP4 encoding)
+    if shutil.which("ffmpeg"):
+        log.info("[preflight] ffmpeg: OK")
+    else:
+        log.error("[preflight] ffmpeg: NOT FOUND (required for MP4 encoding)")
         all_ok = False
 
     if all_ok:
