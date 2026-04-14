@@ -2,8 +2,6 @@
 .env
 
 # Generated assets
-pics/
-vids/
 output/
 
 # Log files

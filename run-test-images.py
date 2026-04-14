@@ -53,8 +53,7 @@ def check_prerequisites() -> None:
     if not os.access(BINARY, os.X_OK):
         print(f"Error: {BINARY} is not executable")
         sys.exit(1)
-    for d in ("pics", "vids"):
-        Path(d).mkdir(exist_ok=True)
+    Path("output").mkdir(exist_ok=True)
 
 
 def random_seed() -> str:

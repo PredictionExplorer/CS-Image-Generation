@@ -8,7 +8,7 @@ Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 
 - Selects the strongest orbit with a Borda-style score
 - Renders spectral trails with SIMD acceleration
 - Applies a curated post-processing pipeline
-- Writes outputs to `pics/` and `vids/`
+- Writes outputs to `output/<name>/`
 
 ## Requirements
 
@@ -74,8 +74,8 @@ CLI reference:
 
 ## Outputs
 
-- `pics/<output>.png`
-- `vids/<output>.mp4`
+- `output/<name>/image.png`
+- `output/<name>/video.mp4`
 - `generation_log.json` for reproducibility metadata
 
 ## Automation
@@ -242,7 +242,7 @@ sudo systemctl disable --now cosmicsig-sync.timer
 python3 run-test-images.py
 ```
 
-Press Ctrl+C to stop gracefully after the current jobs finish. Output lands in `pics/` and `vids/` as usual.
+Press Ctrl+C to stop gracefully after the current jobs finish. Output lands in `output/<seed>/`.
 
 ## Reference Image Verification
 
@@ -258,7 +258,7 @@ cd ci/reference
 This creates `baseline_512x288.png` and a companion `.json` with the parameters and hash. To verify a test image against the baseline:
 
 ```bash
-python3 ci/verify_reference.py pics/test.png
+python3 ci/verify_reference.py output/test/image.png
 ```
 
 ## Development

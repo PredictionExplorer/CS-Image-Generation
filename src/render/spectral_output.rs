@@ -230,13 +230,11 @@ fn blend_pixelbuffers(a: &PixelBuffer, b: &PixelBuffer, t: f64) -> PixelBuffer {
 /// Convert a `PixelBuffer` to packed 16-bit RGB for the ffmpeg `rgb48le` pipe.
 fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf = vec![0u16; pixels.len() * 3];
-    buf.par_chunks_mut(3)
-        .zip(pixels.par_iter())
-        .for_each(|(chunk, &(r, g, b, _a))| {
-            chunk[0] = (r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-            chunk[1] = (g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-            chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-        });
+    buf.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
+        chunk[0] = (r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[1] = (g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+    });
     buf
 }
 
@@ -302,8 +300,7 @@ pub fn generate_spectral_sweep_video(
 
             for frame in 0..total_frames {
                 let t_linear = f64::from(frame) / f64::from(total_frames - 1);
-                let t_eased =
-                    (1.0 - (t_linear * std::f64::consts::PI).cos()) * 0.5;
+                let t_eased = (1.0 - (t_linear * std::f64::consts::PI).cos()) * 0.5;
                 let bin_f = start + t_eased * (end - start);
 
                 gaussian_blend_to_pixelbuffer(&bin_buffers, bin_f, sigma, &mut frame_buf);
@@ -312,8 +309,7 @@ pub fn generate_spectral_sweep_video(
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
                 let final_frame = if frame < fade_frames {
-                    let fade_t =
-                        smoothstep(0.0, f64::from(fade_frames), f64::from(frame));
+                    let fade_t = smoothstep(0.0, f64::from(fade_frames), f64::from(frame));
                     blend_pixelbuffers(&processed_composite, &processed, fade_t)
                 } else if frame >= total_frames - fade_frames {
                     let fade_t = smoothstep(
@@ -348,12 +344,9 @@ fn apply_sweep_effects(
     w: usize,
     h: usize,
 ) -> Result<PixelBuffer> {
-    let bloomed = bloom
-        .process(buf, w, h)
-        .map_err(|e| RenderError::InvalidConfig(e.to_string()))?;
-    color_grade
-        .process(&bloomed, w, h)
-        .map_err(|e| RenderError::InvalidConfig(e.to_string()))
+    let bloomed =
+        bloom.process(buf, w, h).map_err(|e| RenderError::InvalidConfig(e.to_string()))?;
+    color_grade.process(&bloomed, w, h).map_err(|e| RenderError::InvalidConfig(e.to_string()))
 }
 
 #[cfg(test)]
@@ -1019,10 +1012,7 @@ mod tests {
     fn test_blend_weights_sum_to_one() {
         let bw = BlendWeights::compute(30.0, 2.5);
         let sum: f32 = bw.weights.iter().sum();
-        assert!(
-            (sum - 1.0).abs() < 1e-5,
-            "weights should sum to ~1.0, got {sum}"
-        );
+        assert!((sum - 1.0).abs() < 1e-5, "weights should sum to ~1.0, got {sum}");
     }
 
     #[test]
@@ -1031,10 +1021,7 @@ mod tests {
         let center_idx = 30 - bw.lo;
         if center_idx > 0 && center_idx < bw.weights.len() - 1 {
             let diff = (bw.weights[center_idx - 1] - bw.weights[center_idx + 1]).abs();
-            assert!(
-                diff < 1e-6,
-                "weights should be symmetric about the integer centre"
-            );
+            assert!(diff < 1e-6, "weights should be symmetric about the integer centre");
         }
     }
 
@@ -1044,10 +1031,7 @@ mod tests {
         let center_idx = 30 - bw.lo;
         for (j, &w) in bw.weights.iter().enumerate() {
             if j != center_idx {
-                assert!(
-                    w <= bw.weights[center_idx],
-                    "centre weight should be the maximum"
-                );
+                assert!(w <= bw.weights[center_idx], "centre weight should be the maximum");
             }
         }
     }
@@ -1103,10 +1087,7 @@ mod tests {
 
     #[test]
     fn test_smoothstep_midpoint() {
-        assert!(
-            (smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-10,
-            "should be 0.5 at midpoint"
-        );
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-10, "should be 0.5 at midpoint");
     }
 
     #[test]
@@ -1224,10 +1205,7 @@ mod tests {
                     .enumerate()
             {
                 let diff = (i32::from(*a) - i32::from(*b)).unsigned_abs();
-                assert!(
-                    diff <= 1,
-                    "pixel {i} ch {c}: u16={a} vs pixelbuf-quantized={b}"
-                );
+                assert!(diff <= 1, "pixel {i} ch {c}: u16={a} vs pixelbuf-quantized={b}");
             }
         }
     }
@@ -1248,10 +1226,7 @@ mod tests {
     fn test_cosine_easing_midpoint() {
         let t = 0.5f64;
         let eased = (1.0 - (t * std::f64::consts::PI).cos()) * 0.5;
-        assert!(
-            (eased - 0.5).abs() < 1e-10,
-            "eased(0.5) should be 0.5, got {eased}"
-        );
+        assert!((eased - 0.5).abs() < 1e-10, "eased(0.5) should be 0.5, got {eased}");
     }
 
     #[test]
@@ -1261,10 +1236,7 @@ mod tests {
         for i in 0..=steps {
             let t = f64::from(i) / f64::from(steps);
             let eased = (1.0 - (t * std::f64::consts::PI).cos()) * 0.5;
-            assert!(
-                eased >= prev - 1e-15,
-                "cosine easing should be monotonic at step {i}"
-            );
+            assert!(eased >= prev - 1e-15, "cosine easing should be monotonic at step {i}");
             prev = eased;
         }
     }
