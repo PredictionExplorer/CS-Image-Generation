@@ -2,6 +2,8 @@
 
 Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 MP4 from a single run.
 
+The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`). Your checkout directory may use a different name (for example `CS-Image-Generation`).
+
 ## What It Does
 
 - Simulates large batches of random three-body systems
@@ -12,9 +14,9 @@ Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 
 
 ## Requirements
 
-- Rust 1.94+
+- Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
 - FFmpeg (for video encoding)
-- Python 3.10+ (only needed for `run.py` and `run-test-images.py`)
+- Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. Separate optional dev packages (Ruff, Mypy) apply when you run Python quality checks or CI; see [Development](#development).
 - Git
 
 ### Installing on Ubuntu
@@ -32,13 +34,15 @@ The correct Rust toolchain version is pinned in `rust-toolchain.toml` and will b
 
 ## Build
 
-Clone the repository and build:
+From a Git checkout, clone then build (replace the URL with yours):
 
 ```bash
-git clone <repo-url> CS-Image-Generation
+git clone <your-repo-url> CS-Image-Generation
 cd CS-Image-Generation
 cargo build --release
 ```
+
+If you already have the source tree (for example from an archive or IPFS), open that directory and run `cargo build --release` there instead of cloning.
 
 The project is tuned for release builds with LTO, a single codegen unit, `panic = abort`, and native CPU flags from `.cargo/config.toml`. On x86_64, AVX2 and FMA are enabled automatically.
 
@@ -69,20 +73,27 @@ CLI reference:
 | `--steps` | `1000000` | Simulation steps per orbit |
 | `-r, --resolution` | `1920x1080` | Output resolution as `WIDTHxHEIGHT` |
 | `--drift` | `elliptical` | Camera drift mode: `none`, `linear`, `brownian`, `elliptical` |
+| `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
+| `--equil-weight` | random | Borda weight for equilateralness; omit to sample from a curated range |
 | `--fast-encode` | off | Use faster (lower quality) video encoding |
 | `--log-level` | `info` | Tracing log level (`error`, `warn`, `info`, `debug`, `trace`) |
 
 ## Outputs
 
-- `output/<name>/image.png`
-- `output/<name>/video.mp4`
-- `generation_log.json` for reproducibility metadata
+Under `output/<name>/` (default name `output`, so default paths look like `output/output/...` unless you pass `--output`):
+
+- `image.png` — 16-bit still frame
+- `video.mp4` — main H.265 trajectory video
+- `spectral/` — 64 per-wavelength-bin 16-bit PNGs (`00_…nm.png` … `63_…nm.png`)
+- `spectral_sweep.mp4` — spectral sweep through active bins (Gaussian blend + cosine easing)
+
+`generation_log.json` is written in the **process working directory** (typically the repo root when you run the binary from there), not under `output/<name>/`. It records reproducibility metadata for each run.
 
 ## Automation
 
 `run.py` is the deployment helper that keeps a remote server in sync. Each run it:
 
-1. Fetches the current list of token seeds from the CosmicSignature API.
+1. Fetches the current list of CosmicSignature token seeds from the CosmicGame HTTP API.
 2. Checks which `0x<seed>.png` / `0x<seed>.mp4` files already exist on the remote server (via SSH).
 3. Generates missing assets locally with the Rust binary.
 4. Uploads the new files to the remote server via SCP.
@@ -93,14 +104,14 @@ It also supports `--dry-run` (report what's missing without generating or upload
 ### How the Two Machines Relate
 
 ```text
-┌─────────────────────────┐         SSH / SCP         ┌──────────────────────────┐
-│    Generator Machine    │ ──────────────────────────▶│     Remote Server        │
-│  (Ubuntu, runs run.py)  │                            │  (any Linux with sshd)   │
-│                         │                            │                          │
-│  • Rust binary          │   uploads .png and .mp4    │  • Stores asset files    │
-│  • run.py + systemd     │   to COSMICSIG_REMOTE_DIR  │  • Web server (nginx)    │
-│  • All CPU-heavy work   │                            │    serves them to users  │
-└─────────────────────────┘                            └──────────────────────────┘
+┌─────────────────────────┐       SSH / SCP        ┌──────────────────────────┐
+│    Generator Machine    │ ──────────────────────▶│     Remote Server        │
+│  (Ubuntu, runs run.py)  │                        │  (any Linux with sshd)   │
+│                         │                        │                          │
+│  • Rust binary          │  uploads .png and .mp4 │  • Stores asset files    │
+│  • run.py + systemd     │  to COSMICSIG_REMOTE_DIR │  • Web server (nginx)    │
+│  • All CPU-heavy work   │                        │    serves them to users  │
+└─────────────────────────┘                        └──────────────────────────┘
 ```
 
 The generator machine does all the compute. The remote server only stores and serves the finished files. They can be the same machine, but in a typical deployment they are separate.
@@ -159,18 +170,18 @@ COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 |----------|------------------|
 | `COSMICSIG_SSH_HOST` | IP address or hostname of the remote server |
 | `COSMICSIG_SSH_USER` | SSH user on the remote server (must accept your key) |
-| `COSMICSIG_API_URL` | CosmicGame API base URL, no trailing slash |
+| `COSMICSIG_API_URL` | CosmicGame API base URL (CosmicSignature token list), no trailing slash |
 | `COSMICSIG_REMOTE_DIR` | Absolute path on the remote server where PNG/MP4 files are stored |
 
 **5. Run the preflight check**
 
-This tests SSH connectivity, remote write permissions, API reachability, and that the generator binary exists:
+This tests SSH connectivity, remote write permissions, API reachability, that the release generator binary exists, and that `ffmpeg` is on `PATH`:
 
 ```bash
 python3 run.py --preflight
 ```
 
-All four checks should print `OK`. Fix any failures before continuing.
+All five checks should report success in the log (`OK` lines for SSH, remote write, API, generator binary, and ffmpeg). Fix any failures before continuing.
 
 **6. Do a dry run (optional)**
 
@@ -255,23 +266,84 @@ cd ci/reference
 ./generate_reference.sh
 ```
 
-This creates `baseline_512x288.png` and a companion `.json` with the parameters and hash. To verify a test image against the baseline:
+This creates `baseline_512x288.png` and a companion `.json` with the parameters and hash. From the **repository root**, verify a test image against the default baseline:
 
 ```bash
 python3 ci/verify_reference.py output/test/image.png
 ```
 
+Pass a second path if your reference image or JSON lives elsewhere. Run with no arguments to print a short usage line.
+
 ## Development
 
-Format, lint, and test before pushing:
+This section covers local checks before you push. **Continuous integration** on GitHub runs the same ideas in automated jobs; see [`ci/README.md`](ci/README.md) for the full job list (Rust fmt, Clippy, tests, benchmarks, docs, audit, coverage, and Python).
+
+### Rust
+
+Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 
 ```bash
-cargo fmt --check
-cargo clippy -- -D warnings
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-Formatting rules are defined in `rustfmt.toml` (100-char line width, 4-space indentation). The project treats all warnings as errors (`[lints.rust] warnings = "deny"`).
+Formatting rules live in [`rustfmt.toml`](rustfmt.toml) (100-character lines, 4-space indentation). The crate denies Rust warnings and missing public docs (`[lints.rust]` in [`Cargo.toml`](Cargo.toml): `warnings = "deny"`, `missing_docs = "deny"`).
+
+If you use [just](https://github.com/casey/just): `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just all` runs `check` then `test`.
+
+### Python scripts (runtime)
+
+These files are **stdlib-only**; you do not install anything from PyPI to execute them:
+
+| Script | Role |
+|--------|------|
+| [`run.py`](run.py) | Sync CosmicSignature assets with a remote host (SSH/SCP + API). |
+| [`run-test-images.py`](run-test-images.py) | Long-running random-seed generator for QA. |
+| [`ci/verify_reference.py`](ci/verify_reference.py) | Compare a PNG to the CI reference hash. |
+
+Use `python3 …` from the repository root (or `cd` as shown in each section). Deployment configuration for `run.py` is described under [Automation](#automation).
+
+### Python quality (Ruff + Mypy)
+
+Separate from *running* the scripts, the repo pins **developer** tools so formatting, lint, and static typing stay consistent:
+
+| Tool | Role |
+|------|------|
+| [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the four Python files (replaces a pile of flake8/isort/black-style checks in one fast binary). |
+| [Mypy](https://mypy.readthedocs.io/) | Strict type-checking for the same files. |
+
+Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `run.py`, `run-test-images.py`, and `ci/verify_reference.py`.
+
+**Install the dev tools** (recommended: virtual environment so you do not fight [PEP 668](https://peps.python.org/pep-0668/) on Homebrew or Debian `externally-managed-environment`):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+The `[dev]` extra installs pinned **Ruff** and **Mypy** versions declared in `pyproject.toml`. The editable install also exposes the small `_utils` module the same way `run.py` expects when run from the repo root.
+
+**Run checks** (same three steps as CI):
+
+```bash
+just py-check
+```
+
+That runs, in order: `ruff format --check .`, `ruff check .`, and `mypy`. To apply Ruff’s formatter without checking: `just py-fmt` (equivalent to `ruff format .`).
+
+**Git hook:** If you use [`.githooks/pre-commit`](.githooks/pre-commit) (`git config core.hooksPath .githooks`), each commit runs **Rust** fmt + Clippy, then **Python** Ruff + Mypy. The hook calls `ruff` and `mypy` on your `PATH`, so activate the venv (above) in terminals where you commit, or install the tools into an environment that is always on your `PATH`.
+
+**CI:** The workflow job **Python (ruff + mypy)** uses Ubuntu, **Python 3.12**, `pip install ".[dev]"`, then the same three commands as `just py-check`. Mypy is configured with `python_version = "3.10"` in `pyproject.toml`, so types stay compatible with the stated minimum interpreter.
+
+## Algorithm
+
+For a detailed description of the spectral pipeline (SPD buffer, accumulation, gallery, and spectral sweep video), see [docs/spectral-algorithm.md](docs/spectral-algorithm.md).
+
+## License
+
+This repository does not ship an SPDX `LICENSE` file. Before redistributing or pinning a build to IPFS for others to reuse, add a license you are comfortable with (for example MIT or Apache-2.0) so terms are explicit.
 
 ## Project Layout
 
@@ -284,9 +356,13 @@ src/post_effects/        Post-processing effects
 src/spectrum.rs          Spectral conversion
 src/spectrum_simd.rs     SIMD spectral fast paths
 src/oklab.rs             OKLab utilities
+_utils.py                Shared helpers imported by `run.py` / `run-test-images.py`
 run.py                   Automated generation and upload
 run-test-images.py       Batch random-seed test runner
+pyproject.toml           Python dev tooling (Ruff, Mypy) and optional `[dev]` deps
+justfile                 `just` recipes (`check`, `test`, `py-check`, …)
 ci/                      Reference-image verification tooling
+docs/                    Long-form algorithm documentation
 .cargo/config.toml       Native CPU flags and SIMD features
 cosmicsig-sync.service   Systemd service unit for run.py
 cosmicsig-sync.timer     Systemd timer (every 5 minutes)

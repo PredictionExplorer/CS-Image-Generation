@@ -19,7 +19,7 @@ fn run_binary(args: &[&str]) -> std::process::Output {
 #[test]
 fn help_flag_exits_successfully() {
     let output = run_binary(&["--help"]);
-    assert!(output.status.success(), "---help should exit 0");
+    assert!(output.status.success(), "--help should exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage"), "help output should contain Usage");
 }

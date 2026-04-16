@@ -25,13 +25,14 @@ This will create:
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 
-1. **Formatting** — `cargo fmt --all -- --check`
-2. **Linting** — `cargo clippy --all-targets -- -D warnings`
-3. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
-4. **Benchmarks** — compile-check with `cargo bench --no-run`
-5. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
-6. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
-7. **Coverage** — `cargo-llvm-cov` with LCOV output uploaded as artifact
+1. **Python** — `ruff format --check`, `ruff check`, and `mypy` on the repository scripts (`pyproject.toml`)
+2. **Formatting** — `cargo fmt --all -- --check`
+3. **Linting** — `cargo clippy --all-targets -- -D warnings`
+4. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
+5. **Benchmarks** — compile-check with `cargo bench --no-run`
+6. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
+7. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
+8. **Coverage** — `cargo-llvm-cov` with LCOV output uploaded as artifact
 
 Additional automation:
 - **Dependabot** (`.github/dependabot.yml`) — weekly Cargo and GitHub Actions dependency updates
@@ -42,9 +43,10 @@ Additional automation:
 Install [just](https://github.com/casey/just) and run:
 
 ```bash
-just check   # fmt + clippy
-just test    # full test suite
-just all     # check + test
+just check    # fmt + clippy
+just py-check # ruff + mypy (after `pip install -e ".[dev]"` in a venv)
+just test     # full test suite
+just all      # check + test
 ```
 
 A pre-commit hook is available at `.githooks/pre-commit`. Enable it with:

@@ -18,7 +18,7 @@ full resolution.
 7. [Still Image Output](#7-still-image-output)
 8. [Main Video Output](#8-main-video-output)
 9. [Spectral Gallery (Per-Bin Images)](#9-spectral-gallery)
-10. [Spectral Cycle Videos (6 Variants)](#10-spectral-cycle-videos)
+10. [Spectral Sweep Video](#10-spectral-sweep-video)
 11. [Constants Reference](#11-constants-reference)
 
 ---
@@ -51,9 +51,9 @@ an array of energy values across wavelength bins.
 ### Layout
 
 ```
-accum_spd: Vec<[f32; 64]>   // one [f32; 64] per pixel, row-major order
-                              // total size: width * height * 64 * 4 bytes
-                              // at 1080p: ~500 MB
+accum_spd: Vec<[f64; 64]>   // one [f64; 64] per pixel, row-major order
+                              // total size: width * height * 64 * 8 bytes
+                              // at 1080p: ~1.0 GiB (1920 * 1080 * 64 * 8)
 ```
 
 ### Bin Parameters
@@ -542,7 +542,7 @@ for each pixel:
 To produce a single spectral image (16-bit PNG):
 
 ```
-1. Initialize accum_spd to zeros: Vec<[f32; 64]> of size width * height
+1. Initialize accum_spd to zeros: Vec<[f64; 64]> of size width * height
 2. Accumulate all simulation steps (0..total_steps) into accum_spd
 3. convert_spd_buffer_to_rgba(accum_spd) -> linear RGBA buffer
 4. process_trajectory(rgba_buffer)         -> post-processed RGBA
@@ -619,8 +619,7 @@ and the FFmpeg writer thread to keep CPU cores busy while the encoder drains.
 ## 9. Spectral Gallery
 
 The spectral gallery produces 64 individual 16-bit PNGs, one per wavelength
-bin, plus a dominant-wavelength heatmap. These reveal which parts of the image
-contain energy at each wavelength.
+bin. These reveal which parts of the image contain energy at each wavelength.
 
 ### Per-Bin Image Algorithm
 
@@ -672,209 +671,79 @@ if 645 <= lambda <= 700: factor = 0.3 + 0.7 * (700 - lambda) / 55
 
 Final: `(R * factor, G * factor, B * factor)`
 
-### Dominant-Wavelength Heatmap
-
-An additional image where each pixel is colored by its dominant (highest-energy)
-bin, with brightness scaled logarithmically:
-
-```
-max_total = max(sum(spd) for all pixels)
-log_denom = ln(1 + max_total)
-
-for each pixel:
-    dominant_bin = argmax(spd[0..64])
-    t = dominant_bin / 63.0
-    (r, g, b) = heatmap_color(t)    // violet-blue-green-red gradient
-    brightness = ln(1 + sum(spd)) / log_denom
-
-    output = ((r * brightness)^(1/2.2), (g * brightness)^(1/2.2), (b * brightness)^(1/2.2))
-```
-
 ---
 
-## 10. Spectral Cycle Videos
+## 10. Spectral Sweep Video
 
-Six video variants animate a continuous sweep through the 64 wavelength bins.
-They share a common setup and differ only in how the bin index evolves over time.
+After the main still image and gallery, the pipeline can encode **one**
+spectral sweep video (`spectral_sweep.mp4`). It animates a smooth sweep through
+wavelength bins using precomputed bin images, **Gaussian blending** across bins
+(not simple two-bin linear interpolation), **cosine easing** over time, and a
+dynamic **active bin range** so mostly-empty bins at the spectrum edges can be
+skipped.
 
-### 10.1 Shared Setup: BinBuffers
+### 10.1 Shared setup: `BinBuffers`
 
-Before generating any cycle video, precompute 64 "bin images" -- one per
-wavelength bin. Each bin image shows that bin's energy distribution, tinted by
-its wavelength color.
+The same per-bin float RGB images as in Section 9 are built from the fully
+accumulated SPD buffer (after energy-density redshift): for each bin, normalize
+that bin's energy across all pixels, tint by `wavelength_to_rgb`, and apply
+display gamma. The result is 64 parallel buffers of `[f32; 3]` per pixel.
 
-```
-1. Start with the fully accumulated SPD buffer (all timesteps)
-2. Apply energy-density redshift
+### 10.2 Active bin range
 
-3. For each bin in 0..64 (in parallel):
-    wavelength = 380.0 + (bin + 0.5) * 5.0
-    (tint_r, tint_g, tint_b) = wavelength_to_rgb(wavelength)
+Before choosing the sweep endpoints, the implementation scans the bin buffers to
+find the first and last bins with visible RGB energy (above a small threshold),
+pads by two bins on each side, and clamps to `[0, NUM_BINS - 1]`. If no bin
+looks active, it falls back to fixed defaults (`SWEEP_BIN_START` ..
+`SWEEP_BIN_END`, currently 4..=59). The sweep only traverses this inclusive
+range `[active_start, active_end]`, not necessarily the full 0..63 span.
 
-    max_val = max(accum_spd[pixel][bin] for all pixels)
-    max_val = max(max_val, 1e-10)
+### 10.3 Time easing and centre bin
 
-    for each pixel:
-        normalized = clamp(accum_spd[pixel][bin] / max_val, 0, 1)
-        buffer[bin][pixel] = [
-            (normalized * tint_r) ^ (1/2.2),
-            (normalized * tint_g) ^ (1/2.2),
-            (normalized * tint_b) ^ (1/2.2),
-        ]
-```
+Let `total_frames` be `CYCLE_TOTAL_FRAMES` (720), `frame` in `0..total_frames`,
+and `t_linear = frame / (total_frames - 1)`.
 
-This produces `BinBuffers`: 64 float RGB images stored in memory.
-
-### 10.2 Frame Interpolation (lerp_bins)
-
-Given a fractional bin index `bin_f`, produce a frame by linearly interpolating
-between the two nearest bin images:
+Cosine easing (slow at the ends of the sweep):
 
 ```
-bin_f = bin_f mod 64              // wrapping (allows negative and > 64)
-lo = floor(bin_f) mod 64
-hi = (lo + 1) mod 64
-t  = fract(bin_f)
-
-for each pixel:
-    R = buffers[lo][pixel].R * (1 - t) + buffers[hi][pixel].R * t
-    G = buffers[lo][pixel].G * (1 - t) + buffers[hi][pixel].G * t
-    B = buffers[lo][pixel].B * (1 - t) + buffers[hi][pixel].B * t
-
-    // Quantize to 16-bit
-    output = (clamp(R, 0, 1) * 65535, clamp(G, 0, 1) * 65535, clamp(B, 0, 1) * 65535)
+t_eased = (1.0 - cos(t_linear * pi)) * 0.5    // 0 at first frame, 1 at last
 ```
 
-### 10.3 Video Parameters
-
-| Parameter | Value |
-|-----------|-------|
-| Duration | 12.0 seconds |
-| FPS | 60 |
-| Total frames | 720 |
-| Pixel format | rgb48le (16-bit RGB) |
-| Codec | HEVC (same as main video) |
-
-### 10.4 The Six Variants
-
-All variants compute a fractional bin index `bin_f` for each frame, then call
-`lerp_bins(bin_f)` (or `per_pixel_bin_select` for radial) to produce the frame.
-
-Let `frame` be the current frame index (0 to 719) and
-`t = frame / total_frames` (normalized time, 0 to ~1).
-
----
-
-#### Variant 1: Forward Cycle
-
-A linear sweep from violet (bin 0) to red (bin 63):
+Fractional centre bin (within the active range):
 
 ```
-bin_f = frame * 64 / 720
+bin_f = active_start + t_eased * (active_end - active_start)
 ```
 
-Produces a smooth, constant-speed scan through the entire spectrum.
+### 10.4 Gaussian blend per frame
 
----
+For each frame, every pixel gets a weighted sum of nearby bin images. Weights
+are a **normalized Gaussian** over bin index centred at `bin_f` with standard
+deviation `SWEEP_GAUSSIAN_SIGMA` (bins within about `3 * sigma` of the centre
+contribute). This produces smooth transitions between wavelength-dominated looks
+without hard banding.
 
-#### Variant 2: Reverse Cycle
+The blended linear RGB is then run through **Gaussian bloom** and **cinematic
+colour grade** (vignette, vibrance) tuned for the sweep (`SWEEP_BLOOM_*`,
+`SWEEP_VIGNETTE_*`, `SWEEP_VIBRANCE` in `render/constants.rs`), quantized to
+16-bit RGB (`rgb48le`), and piped to FFmpeg like the main video.
 
-A linear sweep from red to violet:
+### 10.5 Video parameters
 
-```
-bin_f = 64 - (frame * 64 / 720)
-```
+| Parameter | Value | Source constant |
+|-----------|-------|------------------|
+| Duration | 12.0 s | `CYCLE_DURATION_SECONDS` |
+| FPS | 60 | `DEFAULT_VIDEO_FPS` |
+| Total frames | 720 | `CYCLE_TOTAL_FRAMES` |
+| Gaussian sigma (bins) | 2.5 | `SWEEP_GAUSSIAN_SIGMA` |
+| Pixel format | rgb48le | same as main video path |
+| Codec | HEVC (libx265) | same options as main encode / fast-encode mode |
 
----
+### 10.6 Encoding
 
-#### Variant 3: Ping-Pong Cycle
-
-Sweeps from violet to red in the first half, then back to violet:
-
-```
-max_bin = 63.0
-if t < 0.5:
-    bin_f = t * 2.0 * max_bin          // 0 -> 63 in first 6 seconds
-else:
-    bin_f = (1.0 - (t - 0.5) * 2.0) * max_bin   // 63 -> 0 in last 6 seconds
-```
-
----
-
-#### Variant 4: Ease Cycle
-
-Uses cosine easing so the sweep lingers at the violet and red extremes:
-
-```
-bin_f = (1.0 - cos(t * 2 * pi)) * 0.5 * 64
-```
-
-This is a single full cosine period, producing slow-fast-slow motion. The sweep
-moves slowest near bin 0 and bin 64, fastest through the middle greens.
-
----
-
-#### Variant 5: Radial Cycle
-
-Creates concentric rings of different wavelengths radiating from the image
-center. Each pixel gets its own bin index based on distance from center.
-
-**Precompute distance map:**
-
-```
-cx = (width - 1) / 2.0
-cy = (height - 1) / 2.0
-max_dist = sqrt(cx*cx + cy*cy)
-
-for each pixel (x, y):
-    dist_map[pixel] = sqrt((x-cx)^2 + (y-cy)^2) / max_dist   // [0, 1]
-```
-
-**Per frame:**
-
-```
-RADIAL_SPREAD = 24.0
-base_bin = frame * 64 / 720
-
-for each pixel:
-    bin_map[pixel] = base_bin - dist_map[pixel] * RADIAL_SPREAD
-```
-
-Then call `per_pixel_bin_select(bin_map)` which applies `lerp_bins` per pixel
-using each pixel's individual fractional bin index (with wrapping via
-`rem_euclid`).
-
-This creates a rainbow ring pattern that sweeps outward through the spectrum.
-
----
-
-#### Variant 6: Complementary Cycle
-
-Two cursors sweep simultaneously, half a spectrum apart (32 bins), and their
-results are averaged per pixel:
-
-```
-half = 32.0
-bin_f = frame * 64 / 720
-
-frame_A = lerp_bins(bin_f)          // primary cursor
-frame_B = lerp_bins(bin_f + half)   // complementary cursor
-
-for each channel value:
-    output = (frame_A + frame_B) / 2     // u16 average, clamped to 65535
-```
-
-This produces color combinations from opposite sides of the spectrum
-(e.g., violet + yellow-green, blue + orange).
-
----
-
-### 10.5 Video Encoding
-
-Each variant's frames are written as raw `rgb48le` bytes to FFmpeg stdin via
-`create_video_from_frames_singlepass`, using the same encoding options as the
-main video (HEVC, CRF 17, or fast hardware-accelerated mode). All six variants
-can be encoded in parallel since they only read from the shared `BinBuffers`.
+Frames are written as raw `rgb48le` bytes to FFmpeg stdin via
+`create_video_from_frames_singlepass`, reusing the same encoding profile as the
+main trajectory video (default quality vs `--fast-encode`).
 
 ---
 
@@ -909,8 +778,10 @@ can be encoded in parallel since they only read from the shared `BinBuffers`.
 | `DEFAULT_VIDEO_FPS` | 60 | Frames per second |
 | `DEFAULT_TARGET_FRAMES` | 1800 | Target frame count (30 seconds) |
 | `DEFAULT_DT` | 0.001 | Simulation timestep |
-| `CYCLE_DURATION_SECONDS` | 12.0 | Spectral cycle video duration |
-| `RADIAL_SPREAD` | 24.0 | Bin offset range for radial variant |
+| `CYCLE_DURATION_SECONDS` | 12.0 | Spectral sweep video duration |
+| `CYCLE_TOTAL_FRAMES` | 720 | Spectral sweep frame count (`duration * fps`) |
+| `SWEEP_BIN_START` / `SWEEP_BIN_END` | 4 / 59 | Fallback active bin range when energy detection finds nothing |
+| `SWEEP_GAUSSIAN_SIGMA` | 2.5 | Bin-domain Gaussian width for sweep frame blending |
 | `DISPLAY_GAMMA` | 2.2 | Gamma for spectral gallery/bin images |
 
 ### Line Splatting Parameters

@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
 """CI verification script for comparing generated images against reference images."""
 
-import sys
 import hashlib
 import json
+import sys
 from pathlib import Path
+from typing import TypedDict, cast
+
+
+class ReferenceMetadata(TypedDict, total=False):
+    """Subset of keys stored in reference baseline JSON."""
+
+    sha256: str
 
 
 def calculate_sha256(filepath: Path) -> str:
     sha256_hash = hashlib.sha256()
-    with open(filepath, "rb") as f:
+    with filepath.open("rb") as f:
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
 
-def load_reference_metadata(ref_path: Path) -> dict:
-    json_path = ref_path.with_suffix('.json')
+def load_reference_metadata(ref_path: Path) -> ReferenceMetadata:
+    json_path = ref_path.with_suffix(".json")
     if not json_path.exists():
         raise FileNotFoundError(f"Reference metadata not found: {json_path}")
 
-    with open(json_path, 'r') as f:
-        return json.load(f)
+    with json_path.open(encoding="utf-8") as f:
+        raw: object = json.load(f)
+        if not isinstance(raw, dict):
+            raise ValueError(f"Reference metadata is not a JSON object: {json_path}")
+        return cast(ReferenceMetadata, raw)
 
 
 def verify_image(test_image_path: Path, reference_image_path: Path) -> bool:
@@ -38,18 +48,18 @@ def verify_image(test_image_path: Path, reference_image_path: Path) -> bool:
 
     try:
         metadata = load_reference_metadata(reference_image_path)
-        expected_hash = metadata.get('sha256', ref_hash)
+        expected_hash = metadata.get("sha256", ref_hash)
     except Exception as e:
         print(f"WARNING: Could not load reference metadata: {e}")
         expected_hash = ref_hash
 
     if test_hash == expected_hash:
-        print(f"✓ Image verification PASSED")
+        print("✓ Image verification PASSED")
         print(f"  Test hash:      {test_hash}")
         print(f"  Expected hash:  {expected_hash}")
         return True
     else:
-        print(f"✗ Image verification FAILED")
+        print("✗ Image verification FAILED")
         print(f"  Test hash:      {test_hash}")
         print(f"  Expected hash:  {expected_hash}")
 
@@ -63,7 +73,7 @@ def verify_image(test_image_path: Path, reference_image_path: Path) -> bool:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: python verify_reference.py <test_image_path> [reference_image_path]")
+        print("Usage: python3 ci/verify_reference.py <test_image_path> [reference_image_path]")
         sys.exit(1)
 
     test_image_path = Path(sys.argv[1])

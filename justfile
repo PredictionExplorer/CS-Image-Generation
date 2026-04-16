@@ -6,6 +6,15 @@ check:
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings
 
+# Python: ruff + mypy (requires dev tools on PATH, e.g. `pip install -e ".[dev]"` in a venv)
+py-check:
+    ruff format --check .
+    ruff check .
+    mypy
+
+py-fmt:
+    ruff format .
+
 # Run the full test suite in release mode
 test:
     cargo test --release

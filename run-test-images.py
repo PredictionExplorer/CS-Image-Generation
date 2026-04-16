@@ -27,8 +27,8 @@ from _utils import check_ffmpeg, fmt_duration, resolve_binary
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
-SIM_TIMEOUT = 86400   # seconds per simulation (24 hours)
-REPORT_EVERY = 3      # print a status line every N completions
+SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
+REPORT_EVERY = 3  # print a status line every N completions
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +90,10 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
     """Run the generator for a single seed and return the outcome."""
     cmd = [
         binary,
-        "--seed", seed,
-        "--output", seed,
+        "--seed",
+        seed,
+        "--output",
+        seed,
     ]
 
     logger.debug("[%d] START %s  cmd=%s", run_id, seed, " ".join(cmd))
@@ -112,7 +114,10 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
 
         logger.warning(
             "[%d] FAIL  %s  exit=%d  (%s)",
-            run_id, seed, proc.returncode, fmt_duration(elapsed),
+            run_id,
+            seed,
+            proc.returncode,
+            fmt_duration(elapsed),
         )
         return SimResult(False, seed, elapsed)
 

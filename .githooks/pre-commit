@@ -10,4 +10,13 @@ cargo fmt --all -- --check
 echo "Running cargo clippy..."
 cargo clippy --all-targets -- -D warnings
 
+echo "Running ruff format --check..."
+ruff format --check .
+
+echo "Running ruff check..."
+ruff check .
+
+echo "Running mypy..."
+mypy
+
 echo "Pre-commit checks passed."

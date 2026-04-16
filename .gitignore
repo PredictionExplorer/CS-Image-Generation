@@ -18,6 +18,7 @@ generation_log.json.lock
 __pycache__/
 .venv/
 venv/
+*.egg-info/
 
 # Rust build artifacts
 target/
