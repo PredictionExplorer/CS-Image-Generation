@@ -4,7 +4,9 @@
 //! with support for explicit user values or random generation.
 
 use super::effect_randomizer::{EffectRandomizer, RandomizationLog, RandomizationRecord};
+use super::mood::MoodBiases;
 use super::parameter_descriptors as pd;
+use super::pipeline_flags;
 use crate::sim::Sha3RandomByteStream;
 
 /// Complete configuration for all randomizable effect parameters.
@@ -177,11 +179,12 @@ impl RandomizableEffectConfig {
         width: u32,
         height: u32,
     ) -> (ResolvedEffectConfig, RandomizationLog) {
+        let biases = pipeline_flags::current_mood_biases();
         let mut randomizer = EffectRandomizer::new(rng);
         let mut log = RandomizationLog::new();
         let mut resolved = ResolvedEffectConfig { width, height, ..Default::default() };
 
-        self.resolve_enable_flags(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_enable_flags(&mut resolved, &biases, &mut randomizer, &mut log);
         self.resolve_bloom_glow_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_chromatic_bloom_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_color_grade_params(&mut resolved, &mut randomizer, &mut log);
@@ -191,6 +194,8 @@ impl RandomizableEffectConfig {
         self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
 
+        apply_mood_strength_scales(&mut resolved, &biases);
+
         let resolved = apply_conflict_detection(resolved, &mut log);
         (resolved, log)
     }
@@ -198,90 +203,146 @@ impl RandomizableEffectConfig {
     fn resolve_enable_flags(
         &self,
         resolved: &mut ResolvedEffectConfig,
+        biases: &MoodBiases,
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.enable_bloom =
-            self.resolve_enable("bloom", self.enable_bloom, pd::ENABLE_PROB_BLOOM, randomizer, log);
-        resolved.enable_glow =
-            self.resolve_enable("glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log);
+        let bias_prob =
+            |base: f64, bias: f64| (base * bias).clamp(0.0, 1.0);
+        resolved.enable_bloom = self.resolve_enable(
+            "bloom",
+            self.enable_bloom,
+            bias_prob(pd::ENABLE_PROB_BLOOM, biases.bloom),
+            randomizer,
+            log,
+        );
+        resolved.enable_glow = self.resolve_enable(
+            "glow",
+            self.enable_glow,
+            bias_prob(pd::ENABLE_PROB_GLOW, biases.glow),
+            randomizer,
+            log,
+        );
         resolved.enable_chromatic_bloom = self.resolve_enable(
             "chromatic_bloom",
             self.enable_chromatic_bloom,
-            pd::ENABLE_PROB_CHROMATIC_BLOOM,
+            bias_prob(pd::ENABLE_PROB_CHROMATIC_BLOOM, biases.chromatic_bloom),
             randomizer,
             log,
         );
         resolved.enable_perceptual_blur = self.resolve_enable(
             "perceptual_blur",
             self.enable_perceptual_blur,
-            pd::ENABLE_PROB_PERCEPTUAL_BLUR,
+            bias_prob(pd::ENABLE_PROB_PERCEPTUAL_BLUR, biases.perceptual_blur),
             randomizer,
             log,
         );
         resolved.enable_micro_contrast = self.resolve_enable(
             "micro_contrast",
             self.enable_micro_contrast,
-            pd::ENABLE_PROB_MICRO_CONTRAST,
+            bias_prob(pd::ENABLE_PROB_MICRO_CONTRAST, biases.micro_contrast),
             randomizer,
             log,
         );
         resolved.enable_gradient_map = self.resolve_enable(
             "gradient_map",
             self.enable_gradient_map,
-            pd::ENABLE_PROB_GRADIENT_MAP,
+            bias_prob(pd::ENABLE_PROB_GRADIENT_MAP, biases.gradient_map),
             randomizer,
             log,
         );
         resolved.enable_color_grade = self.resolve_enable(
             "color_grade",
             self.enable_color_grade,
-            pd::ENABLE_PROB_COLOR_GRADE,
+            bias_prob(pd::ENABLE_PROB_COLOR_GRADE, biases.color_grade),
             randomizer,
             log,
         );
         resolved.enable_champleve = self.resolve_enable(
             "champleve",
             self.enable_champleve,
-            pd::ENABLE_PROB_CHAMPLEVE,
+            bias_prob(pd::ENABLE_PROB_CHAMPLEVE, biases.champleve),
             randomizer,
             log,
         );
         resolved.enable_aether = self.resolve_enable(
             "aether",
             self.enable_aether,
-            pd::ENABLE_PROB_AETHER,
+            bias_prob(pd::ENABLE_PROB_AETHER, biases.aether),
             randomizer,
             log,
         );
         resolved.enable_opalescence = self.resolve_enable(
             "opalescence",
             self.enable_opalescence,
-            pd::ENABLE_PROB_OPALESCENCE,
+            bias_prob(pd::ENABLE_PROB_OPALESCENCE, biases.opalescence),
             randomizer,
             log,
         );
         resolved.enable_edge_luminance = self.resolve_enable(
             "edge_luminance",
             self.enable_edge_luminance,
-            pd::ENABLE_PROB_EDGE_LUMINANCE,
+            bias_prob(pd::ENABLE_PROB_EDGE_LUMINANCE, biases.edge_luminance),
             randomizer,
             log,
         );
         resolved.enable_atmospheric_depth = self.resolve_enable(
             "atmospheric_depth",
             self.enable_atmospheric_depth,
-            pd::ENABLE_PROB_ATMOSPHERIC_DEPTH,
+            bias_prob(pd::ENABLE_PROB_ATMOSPHERIC_DEPTH, biases.atmospheric_depth),
             randomizer,
             log,
         );
         resolved.enable_fine_texture = self.resolve_enable(
             "fine_texture",
             self.enable_fine_texture,
-            pd::ENABLE_PROB_FINE_TEXTURE,
+            bias_prob(pd::ENABLE_PROB_FINE_TEXTURE, biases.fine_texture),
             randomizer,
             log,
         );
+        // Mood-driven new effects. These are not exposed in the CLI config
+        // structure (yet); the probability is the mood bias itself, which for
+        // classic behaviour is `0.0`.
+        resolved.enable_bloom_pyramid =
+            self.resolve_enable("bloom_pyramid", None, biases.bloom_pyramid.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_anamorphic_flare = self.resolve_enable(
+            "anamorphic_flare",
+            None,
+            biases.anamorphic_flare.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
+        resolved.enable_god_rays =
+            self.resolve_enable("god_rays", None, biases.god_rays.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_rim_light =
+            self.resolve_enable("rim_light", None, biases.rim_light.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_star_field =
+            self.resolve_enable("star_field", None, biases.star_field.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_diffraction_spikes = self.resolve_enable(
+            "diffraction_spikes",
+            None,
+            biases.diffraction_spikes.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
+        resolved.enable_airy_disc =
+            self.resolve_enable("airy_disc", None, biases.airy_disc.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_nebula_tint = self.resolve_enable(
+            "nebula_tint",
+            None,
+            biases.nebula_tint.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
+        resolved.enable_palette_harmony = self.resolve_enable(
+            "palette_harmony",
+            None,
+            biases.palette_harmony.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
+        resolved.enable_glaze =
+            self.resolve_enable("glaze", None, biases.glaze.clamp(0.0, 1.0), randomizer, log);
     }
 
     fn resolve_bloom_glow_params(
@@ -883,6 +944,27 @@ pub struct ResolvedEffectConfig {
     /// Whether fine texture is enabled.
     pub enable_fine_texture: bool,
 
+    /// Whether the multi-tier bloom pyramid is enabled (mood-driven).
+    pub enable_bloom_pyramid: bool,
+    /// Whether the wide anamorphic lens flare is enabled (mood-driven).
+    pub enable_anamorphic_flare: bool,
+    /// Whether volumetric god rays are enabled (mood-driven).
+    pub enable_god_rays: bool,
+    /// Whether rim-lit body spheres are enabled (mood-driven).
+    pub enable_rim_light: bool,
+    /// Whether a procedural star field is composited (mood-driven).
+    pub enable_star_field: bool,
+    /// Whether diffraction spikes are drawn on bright pixels (mood-driven).
+    pub enable_diffraction_spikes: bool,
+    /// Whether body cores use an airy-disc PSF (mood-driven).
+    pub enable_airy_disc: bool,
+    /// Whether the nebula background is tinted by the scene SPD (mood-driven).
+    pub enable_nebula_tint: bool,
+    /// Whether the `OKLab` palette harmonizer is applied (mood-driven).
+    pub enable_palette_harmony: bool,
+    /// Whether the warm-tinted glaze highlight pass runs (mood-driven).
+    pub enable_glaze: bool,
+
     /// Resolved bloom blur strength.
     pub blur_strength: f64,
     /// Resolved bloom blur radius scale.
@@ -997,6 +1079,35 @@ pub struct ResolvedEffectConfig {
     pub nebula_octaves: usize,
     /// Resolved nebula base frequency.
     pub nebula_base_frequency: f64,
+}
+
+/// Apply per-mood strength scales to resolved parameters.
+///
+/// The enable flags already picked which effects run; this tweaks intensity
+/// so each mood has the right *feel*: cinematic boosts bloom and vignette,
+/// cosmic slightly lifts saturation for colourful star/nebula fields, and
+/// painterly keeps bloom modest so opalescence/aether can breathe.
+fn apply_mood_strength_scales(
+    config: &mut ResolvedEffectConfig,
+    biases: &MoodBiases,
+) {
+    // Bloom family
+    config.blur_strength *= biases.bloom_strength_scale;
+    config.dog_strength *= biases.bloom_strength_scale;
+    config.chromatic_bloom_strength *= biases.bloom_strength_scale;
+    config.glow_strength *= biases.bloom_strength_scale;
+
+    // Color grade family
+    config.vibrance *= biases.color_saturation_scale;
+    config.vignette_strength *= biases.vignette_scale;
+
+    // Keep everything in sensible bounds after the scale.
+    config.blur_strength = config.blur_strength.clamp(0.0, 64.0);
+    config.dog_strength = config.dog_strength.clamp(0.0, 6.0);
+    config.chromatic_bloom_strength = config.chromatic_bloom_strength.clamp(0.0, 3.0);
+    config.glow_strength = config.glow_strength.clamp(0.0, 5.0);
+    config.vibrance = config.vibrance.clamp(0.0, 3.0);
+    config.vignette_strength = config.vignette_strength.clamp(0.0, 1.5);
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
@@ -1257,6 +1368,16 @@ mod tests {
             enable_edge_luminance: false,
             enable_atmospheric_depth: false,
             enable_fine_texture: false,
+            enable_bloom_pyramid: false,
+            enable_anamorphic_flare: false,
+            enable_god_rays: false,
+            enable_rim_light: false,
+            enable_star_field: false,
+            enable_diffraction_spikes: false,
+            enable_airy_disc: false,
+            enable_nebula_tint: false,
+            enable_palette_harmony: false,
+            enable_glaze: false,
             blur_radius_scale: 0.02,
             blur_strength: 10.0,
             blur_core_brightness: 10.0,

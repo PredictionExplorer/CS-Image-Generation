@@ -40,6 +40,14 @@ pub struct GenerationRecord {
     /// Randomization log (if any parameters were randomized)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub randomization_log: Option<crate::render::effect_randomizer::RandomizationLog>,
+
+    /// Mood preset chosen for this render (cinematic, cosmic, painterly).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mood: String,
+
+    /// Framing mode used for the camera (auto, classic).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub framing: String,
 }
 
 /// Snapshot of render pipeline settings written to the generation log.
@@ -148,6 +156,8 @@ impl GenerationRecord {
             simulation_config: SimulationConfig::default(),
             orbit_info: OrbitInfo::default(),
             randomization_log: None,
+            mood: String::new(),
+            framing: String::new(),
         }
     }
 }

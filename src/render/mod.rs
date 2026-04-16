@@ -31,6 +31,7 @@ pub mod effects;
 pub mod error;
 pub mod hero_outputs;
 pub mod histogram;
+pub mod mood;
 pub mod parameter_descriptors;
 pub mod pipeline_flags;
 pub mod randomizable_config;
@@ -428,6 +429,22 @@ fn build_nebula_config(
     resolved_config: &randomizable_config::ResolvedEffectConfig,
     noise_seed: i32,
 ) -> NebulaCloudConfig {
+    // Cosmic-mood renders with `enable_nebula_tint` use the richer cosmic palette.
+    if resolved_config.enable_nebula_tint {
+        let mut cfg = NebulaCloudConfig::cosmic_mode(
+            resolved_config.width as usize,
+            resolved_config.height as usize,
+            noise_seed,
+            resolved_config.nebula_strength.max(0.12),
+        );
+        // Deterministic per-seed hue shift so different seeds feel different.
+        let shift = f64::from((noise_seed as u32).wrapping_mul(2654435761) >> 24) / 255.0;
+        cfg.rotate_hue(shift);
+        cfg.octaves = resolved_config.nebula_octaves.max(4);
+        cfg.base_frequency = resolved_config.nebula_base_frequency;
+        return cfg;
+    }
+
     NebulaCloudConfig {
         strength: resolved_config.nebula_strength,
         octaves: resolved_config.nebula_octaves,
@@ -681,6 +698,7 @@ pub fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
     output_mode: FinishOutputMode,
+    noise_seed: i32,
 ) -> EffectConfig {
     let width = resolved.width as usize;
     let height = resolved.height as usize;
@@ -742,6 +760,18 @@ pub fn build_effect_config_from_resolved(
         atmospheric_depth_config: build_atmospheric_depth_config(resolved),
         fine_texture_enabled,
         fine_texture_config,
+
+        bloom_pyramid_enabled: resolved.enable_bloom_pyramid,
+        anamorphic_flare_enabled: resolved.enable_anamorphic_flare,
+        god_rays_enabled: resolved.enable_god_rays,
+        star_field_enabled: resolved.enable_star_field,
+        star_field_seed: noise_seed,
+        diffraction_spikes_enabled: resolved.enable_diffraction_spikes,
+        palette_harmony_enabled: resolved.enable_palette_harmony,
+        palette_harmony_seed: noise_seed.rotate_left(7),
+        glaze_enabled: resolved.enable_glaze,
+        output_width: width,
+        output_height: height,
     }
 }
 
@@ -998,14 +1028,18 @@ fn pass_1_build_histogram_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> HistogramData {
-    let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
+    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
-    let effect_config =
-        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let effect_config = build_effect_config_from_resolved(
+        resolved_config,
+        render_config,
+        FinishOutputMode::Still,
+        noise_seed,
+    );
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
     let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
 
@@ -1151,8 +1185,12 @@ fn pass_2_write_frames_spectral_with_backend(
     }
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    let effect_config =
-        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
+    let effect_config = build_effect_config_from_resolved(
+        resolved_config,
+        render_config,
+        FinishOutputMode::Video,
+        noise_seed,
+    );
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     let nebula_config = build_nebula_config(resolved_config, noise_seed);
@@ -1328,8 +1366,12 @@ fn render_final_frame_spectral_with_backend(
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
-    let effect_config =
-        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let effect_config = build_effect_config_from_resolved(
+        resolved_config,
+        render_config,
+        FinishOutputMode::Still,
+        noise_seed,
+    );
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     let nebula_config = build_nebula_config(resolved_config, noise_seed);
@@ -1440,8 +1482,12 @@ fn render_single_frame_spectral_with_backend(
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     // Build effect configuration from resolved config
-    let effect_config =
-        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let effect_config = build_effect_config_from_resolved(
+        resolved_config,
+        render_config,
+        FinishOutputMode::Still,
+        noise_seed,
+    );
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
     let nebula_config = build_nebula_config(resolved_config, noise_seed);
@@ -1538,6 +1584,16 @@ mod tests {
             enable_edge_luminance: false,
             enable_atmospheric_depth: false,
             enable_fine_texture: false,
+            enable_bloom_pyramid: false,
+            enable_anamorphic_flare: false,
+            enable_god_rays: false,
+            enable_rim_light: false,
+            enable_star_field: false,
+            enable_diffraction_spikes: false,
+            enable_airy_disc: false,
+            enable_nebula_tint: false,
+            enable_palette_harmony: false,
+            enable_glaze: false,
             blur_strength: 4.0,
             blur_radius_scale: 0.006,
             blur_core_brightness: 10.0,
@@ -1912,7 +1968,7 @@ mod tests {
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
         let effect_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still, 0);
 
         assert_eq!(effect_config.bloom_mode, "dog");
         assert_eq!(effect_config.blur_radius_px, 0);
@@ -1927,7 +1983,7 @@ mod tests {
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Gaussian };
 
         let effect_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still, 0);
 
         assert_eq!(effect_config.bloom_mode, "gaussian");
         assert!(effect_config.blur_radius_px > 0);
@@ -1943,7 +1999,7 @@ mod tests {
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
         let effect_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still, 0);
 
         assert!(!effect_config.fine_texture_enabled, "proxy-sized renders should skip texture");
     }
@@ -1959,9 +2015,9 @@ mod tests {
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
         let still_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still, 0);
         let video_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video, 0);
 
         assert!(still_config.fine_texture_enabled);
         assert!(video_config.fine_texture_enabled);
@@ -1986,7 +2042,7 @@ mod tests {
             RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
 
         let effect_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still, 0);
         let perceptual =
             effect_config.perceptual_blur_config.expect("perceptual blur should remain configured");
 

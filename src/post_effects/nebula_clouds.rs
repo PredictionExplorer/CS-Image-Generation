@@ -77,6 +77,66 @@ impl NebulaCloudConfig {
             edge_fade: 0.0,
         }
     }
+
+    /// Build a cosmic-astrophoto nebula preset. Colors lean toward deep blue,
+    /// magenta, and warm orange (Hubble-palette-ish). Suitable when the
+    /// Cosmic mood has `enable_nebula_tint` active.
+    #[must_use]
+    pub fn cosmic_mode(width: usize, height: usize, seed: i32, strength: f64) -> Self {
+        let min_dim = width.min(height) as f64;
+        Self {
+            strength: strength.clamp(0.0, 0.6),
+            octaves: 5,
+            base_frequency: 0.0012 * (1080.0 / min_dim.max(1.0)),
+            persistence: 0.58,
+            lacunarity: 2.1,
+            colors: [
+                [0.02, 0.05, 0.18], // deep blue
+                [0.22, 0.04, 0.30], // magenta
+                [0.05, 0.25, 0.30], // teal
+                [0.38, 0.10, 0.06], // warm ember
+            ],
+            time_scale: 0.002,
+            noise_seed: i64::from(seed),
+            edge_fade: 0.20,
+        }
+    }
+
+    /// Rotate all palette colors in RGB space by shifting hue via a simple
+    /// primary-rotation trick: apply a 3x3 rotation matrix that cyclically
+    /// mixes (R, G, B) components to shift the apparent hue. `shift` is a
+    /// value in `[0, 1]` where 0 is no shift, 1 is a full 120° cycle.
+    ///
+    /// This is an approximation that works well for wash colors without
+    /// needing to round-trip through `OKLab`.
+    pub fn rotate_hue(&mut self, shift: f64) {
+        let t = shift.clamp(0.0, 1.0) * std::f64::consts::TAU / 3.0;
+        let (cs, sn) = (t.cos(), t.sin());
+        let k = 1.0 - cs;
+        // Axis (1,1,1) unit length is 1/sqrt(3); rotating RGB about it shifts hue
+        // while preserving luminance.
+        let axis = 1.0 / 3.0_f64.sqrt();
+        let ax = axis;
+        let ay = axis;
+        let az = axis;
+        let m00 = cs + ax * ax * k;
+        let m01 = ax * ay * k - az * sn;
+        let m02 = ax * az * k + ay * sn;
+        let m10 = ay * ax * k + az * sn;
+        let m11 = cs + ay * ay * k;
+        let m12 = ay * az * k - ax * sn;
+        let m20 = az * ax * k - ay * sn;
+        let m21 = az * ay * k + ax * sn;
+        let m22 = cs + az * az * k;
+        for c in &mut self.colors {
+            let r = c[0] * m00 + c[1] * m01 + c[2] * m02;
+            let g = c[0] * m10 + c[1] * m11 + c[2] * m12;
+            let b = c[0] * m20 + c[1] * m21 + c[2] * m22;
+            c[0] = r.clamp(0.0, 1.0);
+            c[1] = g.clamp(0.0, 1.0);
+            c[2] = b.clamp(0.0, 1.0);
+        }
+    }
 }
 
 /// Nebula clouds post-effect

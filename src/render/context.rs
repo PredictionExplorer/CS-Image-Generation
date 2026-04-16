@@ -13,6 +13,27 @@ use nalgebra::Vector3;
 /// Color channels may be linear or display-space depending on the render stage.
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
+/// How the camera frames the trajectory.
+#[derive(Clone, Copy, Debug)]
+pub enum FramingMode {
+    /// Tight fit: use percentile-trimmed bbox and `orbit_fit` so content fills
+    /// `fill` fraction of the frame (e.g. `fill = 0.90` targets 90% coverage).
+    AutoFill {
+        /// Fraction of the frame the bbox should occupy (0.5..=0.98).
+        fill: f64,
+        /// Fraction of points to keep when trimming outliers (e.g. 0.99).
+        pct: f64,
+    },
+    /// Legacy behaviour: raw min/max bbox + fixed 55 FOV `orbit_default`.
+    Classic,
+}
+
+impl Default for FramingMode {
+    fn default() -> Self {
+        Self::AutoFill { fill: 0.90, pct: 0.99 }
+    }
+}
+
 /// Encapsulates common rendering operations and coordinate transformations
 #[derive(Debug)]
 pub struct RenderContext {
@@ -30,7 +51,9 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    /// Creates a new render context from position data
+    /// Creates a new render context from position data using the globally-configured
+    /// framing mode (see [`pipeline_flags::current_framing_mode`]).
+    /// Prefer [`RenderContext::with_framing`] for explicit control.
     #[must_use]
     pub fn new(
         width: u32,
@@ -38,13 +61,40 @@ impl RenderContext {
         positions: &[Vec<Vector3<f64>>],
         aspect_correction: bool,
     ) -> Self {
-        let mut bounds = BoundingBox::from_positions(positions);
+        Self::with_framing(
+            width,
+            height,
+            positions,
+            aspect_correction,
+            pipeline_flags::current_framing_mode(),
+        )
+    }
+
+    /// Creates a new render context with an explicit framing mode.
+    #[must_use]
+    pub fn with_framing(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+        framing: FramingMode,
+    ) -> Self {
+        let mut bounds = match framing {
+            FramingMode::AutoFill { pct, .. } => BoundingBox::from_positions_percentile(positions, pct),
+            FramingMode::Classic => BoundingBox::from_positions(positions),
+        };
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
 
         let perspective = if pipeline_flags::perspective_camera_enabled() {
-            Some(PerspectiveCamera::orbit_default(&bounds, width, height))
+            let cam = match framing {
+                FramingMode::AutoFill { fill, .. } => {
+                    PerspectiveCamera::orbit_fit(&bounds, width, height, fill)
+                }
+                FramingMode::Classic => PerspectiveCamera::orbit_classic(&bounds, width, height),
+            };
+            Some(cam)
         } else {
             None
         };
@@ -94,7 +144,32 @@ impl RenderContext {
     }
 }
 
-/// Bounding box for coordinate transformations
+/// Compute min/max Z extent across all bodies and timesteps.
+#[inline]
+fn z_extent(positions: &[Vec<Vector3<f64>>]) -> (f64, f64) {
+    let mut min_z = f64::INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+    for body in positions {
+        for p in body {
+            if p[2] < min_z {
+                min_z = p[2];
+            }
+            if p[2] > max_z {
+                max_z = p[2];
+            }
+        }
+    }
+    if !min_z.is_finite() || !max_z.is_finite() {
+        return (-1.0, 1.0);
+    }
+    if (max_z - min_z).abs() < 1e-12 {
+        return (min_z - crate::render::constants::BOUNDING_BOX_PADDING, max_z + crate::render::constants::BOUNDING_BOX_PADDING);
+    }
+    (min_z, max_z)
+}
+
+/// Bounding box for coordinate transformations (now also carries Z extent for
+/// perspective-camera fitting).
 #[derive(Clone, Copy, Debug)]
 pub struct BoundingBox {
     /// Minimum x-coordinate of the bounding region.
@@ -105,25 +180,72 @@ pub struct BoundingBox {
     pub min_y: f64,
     /// Maximum y-coordinate of the bounding region.
     pub max_y: f64,
+    /// Minimum z-coordinate of the bounding region.
+    pub min_z: f64,
+    /// Maximum z-coordinate of the bounding region.
+    pub max_z: f64,
     /// Horizontal span (`max_x - min_x`), clamped to avoid division by zero.
     pub width: f64,
     /// Vertical span (`max_y - min_y`), clamped to avoid division by zero.
     pub height: f64,
+    /// Depth span (`max_z - min_z`), clamped to avoid division by zero.
+    pub depth: f64,
 }
 
 impl BoundingBox {
-    /// Create a new bounding box from position data
+    /// Create a new bounding box from position data (raw min/max, legacy).
     #[must_use]
     pub fn from_positions(positions: &[Vec<Vector3<f64>>]) -> Self {
         let (min_x, max_x, min_y, max_y) = crate::utils::bounding_box(positions);
+        let (min_z, max_z) = z_extent(positions);
         Self {
             min_x,
             max_x,
             min_y,
             max_y,
+            min_z,
+            max_z,
             width: (max_x - min_x).max(1e-12),
             height: (max_y - min_y).max(1e-12),
+            depth: (max_z - min_z).max(1e-12),
         }
+    }
+
+    /// Create a percentile-trimmed bounding box so drift-inflated outlier
+    /// timesteps do not back the camera off from the interesting action.
+    #[must_use]
+    pub fn from_positions_percentile(
+        positions: &[Vec<Vector3<f64>>],
+        pct: f64,
+    ) -> Self {
+        let (min_x, max_x, min_y, max_y, min_z, max_z) =
+            crate::utils::bounding_box_percentile(positions, pct);
+        Self {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            min_z,
+            max_z,
+            width: (max_x - min_x).max(1e-12),
+            height: (max_y - min_y).max(1e-12),
+            depth: (max_z - min_z).max(1e-12),
+        }
+    }
+
+    /// The eight axis-aligned corners of the box.
+    #[must_use]
+    pub fn corners(&self) -> [Vector3<f64>; 8] {
+        [
+            Vector3::new(self.min_x, self.min_y, self.min_z),
+            Vector3::new(self.max_x, self.min_y, self.min_z),
+            Vector3::new(self.min_x, self.max_y, self.min_z),
+            Vector3::new(self.max_x, self.max_y, self.min_z),
+            Vector3::new(self.min_x, self.min_y, self.max_z),
+            Vector3::new(self.max_x, self.min_y, self.max_z),
+            Vector3::new(self.min_x, self.max_y, self.max_z),
+            Vector3::new(self.max_x, self.max_y, self.max_z),
+        ]
     }
 
     /// Convert world coordinates to normalized coordinates (0..1)
@@ -209,16 +331,28 @@ mod tests {
         assert!((ny - 0.5).abs() < 0.01, "center should normalize to ~0.5");
     }
 
+    fn test_bbox(
+        min_x: f64,
+        max_x: f64,
+        min_y: f64,
+        max_y: f64,
+    ) -> BoundingBox {
+        BoundingBox {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            min_z: -1.0,
+            max_z: 1.0,
+            width: (max_x - min_x).max(1e-12),
+            height: (max_y - min_y).max(1e-12),
+            depth: 2.0,
+        }
+    }
+
     #[test]
     fn test_aspect_correction_wide_orbit() {
-        let mut bbox = BoundingBox {
-            min_x: 0.0,
-            max_x: 100.0,
-            min_y: 0.0,
-            max_y: 50.0,
-            width: 100.0,
-            height: 50.0,
-        };
+        let mut bbox = test_bbox(0.0, 100.0, 0.0, 50.0);
         bbox.apply_aspect_correction(1920, 1080);
         let ar = bbox.width / bbox.height;
         let target_ar = 1920.0 / 1080.0;
@@ -232,14 +366,7 @@ mod tests {
 
     #[test]
     fn test_aspect_correction_tall_orbit() {
-        let mut bbox = BoundingBox {
-            min_x: 0.0,
-            max_x: 50.0,
-            min_y: 0.0,
-            max_y: 100.0,
-            width: 50.0,
-            height: 100.0,
-        };
+        let mut bbox = test_bbox(0.0, 50.0, 0.0, 100.0);
         bbox.apply_aspect_correction(1920, 1080);
         let ar = bbox.width / bbox.height;
         let target_ar = 1920.0 / 1080.0;
@@ -253,14 +380,7 @@ mod tests {
 
     #[test]
     fn test_aspect_correction_already_matching() {
-        let mut bbox = BoundingBox {
-            min_x: 0.0,
-            max_x: 160.0,
-            min_y: 0.0,
-            max_y: 90.0,
-            width: 160.0,
-            height: 90.0,
-        };
+        let mut bbox = test_bbox(0.0, 160.0, 0.0, 90.0);
         let orig_width = bbox.width;
         let orig_height = bbox.height;
         bbox.apply_aspect_correction(1920, 1080);
@@ -270,14 +390,7 @@ mod tests {
 
     #[test]
     fn test_aspect_correction_centers_padding() {
-        let mut bbox = BoundingBox {
-            min_x: 10.0,
-            max_x: 110.0,
-            min_y: 20.0,
-            max_y: 70.0,
-            width: 100.0,
-            height: 50.0,
-        };
+        let mut bbox = test_bbox(10.0, 110.0, 20.0, 70.0);
         let cy_before = f64::midpoint(bbox.min_y, bbox.max_y);
         bbox.apply_aspect_correction(1920, 1080);
         let cy_after = f64::midpoint(bbox.min_y, bbox.max_y);
@@ -286,17 +399,23 @@ mod tests {
 
     #[test]
     fn test_aspect_correction_zero_height() {
-        let mut bbox = BoundingBox {
-            min_x: 0.0,
-            max_x: 100.0,
-            min_y: 50.0,
-            max_y: 50.0,
-            width: 100.0,
-            height: 0.0,
-        };
+        let mut bbox = test_bbox(0.0, 100.0, 50.0, 50.0);
+        bbox.height = 0.0;
         bbox.apply_aspect_correction(1920, 1080);
         assert!(bbox.width.is_finite());
         assert!(bbox.height.is_finite());
+    }
+
+    #[test]
+    fn test_bounding_box_carries_z_extent() {
+        let positions = vec![vec![
+            Vector3::new(0.0, 0.0, -3.0),
+            Vector3::new(0.0, 0.0, 4.0),
+        ]];
+        let bbox = BoundingBox::from_positions(&positions);
+        assert!(bbox.min_z <= -3.0, "min_z should include the negative extreme");
+        assert!(bbox.max_z >= 4.0, "max_z should include the positive extreme");
+        assert!(bbox.depth >= 7.0, "depth should span the z-extent");
     }
 
     #[test]

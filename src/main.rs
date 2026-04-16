@@ -73,6 +73,54 @@ impl DriftModeArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum FramingArg {
+    /// Tight fit: percentile-trimmed bbox + true fit-to-frame camera.
+    Auto,
+    /// Legacy: raw min/max bbox + fixed 55 FOV camera.
+    Classic,
+}
+
+impl FramingArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Classic => "classic",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum MoodArg {
+    /// Randomly pick one of the three moods per seed (default).
+    Auto,
+    /// Cinematic: multi-tier bloom, anamorphic flare, god rays, rim-lit bodies.
+    Cinematic,
+    /// Cosmic: procedural stars, diffraction spikes, airy-disc cores, rich nebula.
+    Cosmic,
+    /// Painterly: harmonized `OKLab` palette, opalescence, glaze, canvas texture.
+    Painterly,
+}
+
+impl MoodArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Cinematic => "cinematic",
+            Self::Cosmic => "cosmic",
+            Self::Painterly => "painterly",
+        }
+    }
+}
+
+fn parse_fill(s: &str) -> std::result::Result<f64, String> {
+    let v: f64 = s.parse().map_err(|_| "fill must be a number".to_string())?;
+    if !(0.50..=0.98).contains(&v) {
+        return Err(format!("fill must be between 0.50 and 0.98, got {v}"));
+    }
+    Ok(v)
+}
+
 /// Command-line arguments
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Generate a curated three-body image and video from a seed.")]
@@ -140,6 +188,22 @@ struct Args {
     /// Hero master: `off`, `4k`, or `8k` (extra still + EXR + crops after main run).
     #[arg(long, default_value = "off")]
     hero: String,
+
+    /// Framing mode. `auto` (default) tightly fits the orbit to the frame using
+    /// a percentile-trimmed bbox so camera drift does not push content off-screen.
+    /// `classic` restores the legacy fixed-FOV framing (tiny-blob-on-black look).
+    #[arg(long, value_enum, default_value_t = FramingArg::Auto)]
+    framing: FramingArg,
+
+    /// Target fraction of the frame the trajectory should occupy under `--framing auto`.
+    /// Range `0.50..=0.98`; default `0.90` gives a 5% breathing margin per edge.
+    #[arg(long, default_value_t = 0.90, value_parser = parse_fill)]
+    fill: f64,
+
+    /// Mood preset used to curate post-processing: one of `auto`, `cinematic`,
+    /// `cosmic`, `painterly`. `auto` samples a mood from the seed RNG.
+    #[arg(long, value_enum, default_value_t = MoodArg::Auto)]
+    mood: MoodArg,
 }
 
 /// Generate hero still / EXR / crops / contact sheet after the main pass.
@@ -274,6 +338,7 @@ fn build_generation_log_config(
     resolved: &render::randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
     borda_weights: &ResolvedBordaWeights,
+    mood: render::mood::Mood,
 ) -> app::GenerationLogConfig {
     let min_dim = resolved.width.min(resolved.height);
     let bloom_mode = if resolved.enable_bloom {
@@ -313,6 +378,8 @@ fn build_generation_log_config(
         chaos_weight: borda_weights.chaos_weight,
         equil_weight: borda_weights.equil_weight,
         weights_randomized: borda_weights.was_randomized,
+        mood: mood.as_str().to_string(),
+        framing: args.framing.as_str().to_string(),
     }
 }
 
@@ -338,6 +405,8 @@ fn main() -> Result<()> {
     render::pipeline_flags::set_shutter_samples(args.shutter_samples);
     render::pipeline_flags::set_perspective_camera(!args.no_perspective);
     render::pipeline_flags::set_multi_act_director(!args.no_director);
+    render::pipeline_flags::set_framing_mode(args.framing.as_str());
+    render::pipeline_flags::set_framing_fill(args.fill);
 
     error::validation::validate_dimensions(args.resolution.width, args.resolution.height)?;
 
@@ -355,10 +424,23 @@ fn main() -> Result<()> {
         DEFAULT_VELOCITY,
     );
 
+    let mood = match args.mood {
+        MoodArg::Auto => render::mood::Mood::sample(&mut rng),
+        MoodArg::Cinematic => render::mood::Mood::Cinematic,
+        MoodArg::Cosmic => render::mood::Mood::Cosmic,
+        MoodArg::Painterly => render::mood::Mood::Painterly,
+    };
+    render::pipeline_flags::set_mood(mood);
+    info!("Active mood: {} ({})", mood.as_str(), args.mood.as_str());
+
     info!("Resolving effect configuration...");
     let randomizable_config = render::randomizable_config::RandomizableEffectConfig::default();
     let (resolved_effect_config, randomization_log) =
         randomizable_config.resolve(&mut rng, args.resolution.width, args.resolution.height);
+
+    // Mood-driven hot-path toggles that are read directly inside the renderer.
+    render::pipeline_flags::set_rim_light(resolved_effect_config.enable_rim_light);
+    render::pipeline_flags::set_airy_disc(resolved_effect_config.enable_airy_disc);
 
     let num_randomized = randomization_log
         .effects
@@ -413,6 +495,12 @@ fn main() -> Result<()> {
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
+    info!(
+        "   => Framing: {} (fill={:.2}, aspect-correction={})",
+        args.framing.as_str(),
+        args.fill,
+        enhancements.aspect_correction
+    );
     let render_ctx = render::context::RenderContext::new(
         args.resolution.width,
         args.resolution.height,
@@ -421,8 +509,8 @@ fn main() -> Result<()> {
     );
     let bbox = render_ctx.bounds();
     info!(
-        "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",
-        bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y
+        "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}], Z: [{:.3}, {:.3}]",
+        bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y, bbox.min_z, bbox.max_z
     );
 
     let render_config = RenderConfig {
@@ -501,7 +589,7 @@ fn main() -> Result<()> {
     );
 
     let generation_log_config =
-        build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights);
+        build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights, mood);
     if let Err(e) = app::log_generation(
         &generation_log_config,
         &args.output,
@@ -534,6 +622,9 @@ mod tests {
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);
         assert!(args.chaos_weight.is_none());
         assert!(args.equil_weight.is_none());
+        assert_eq!(args.framing, FramingArg::Auto);
+        assert!((args.fill - 0.90).abs() < 1e-9);
+        assert_eq!(args.mood, MoodArg::Auto);
     }
 
     #[test]

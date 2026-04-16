@@ -8,12 +8,13 @@ use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use crate::post_effects::{
-    AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
-    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
-    EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
-    GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
-    Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    AtmosphericDepth, AtmosphericDepthConfig, BloomPyramid, ChampleveConfig, ChromaticBloom,
+    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DiffractionSpikes, DogBloom,
+    EdgeLuminance, EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, Glaze,
+    GlowEnhancement, GlowEnhancementConfig, GodRays, GradientMap, GradientMapConfig, MicroContrast,
+    MicroContrastConfig, Opalescence, OpalescenceConfig, PaletteHarmony, PaletteScheme,
+    PerceptualBlur, PerceptualBlurConfig, PostEffect, PostEffectChain, StarField,
+    aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
     lens_flare::LensFlareDiffractive,
 };
 use crate::render::pipeline_flags;
@@ -98,6 +99,46 @@ pub struct EffectConfig {
     pub fine_texture_enabled: bool,
     /// Fine texture configuration
     pub fine_texture_config: FineTextureConfig,
+
+    /// Whether the mood-driven multi-tier bloom pyramid is enabled.
+    pub bloom_pyramid_enabled: bool,
+    /// Whether the wide cyan anamorphic streak variant is enabled.
+    pub anamorphic_flare_enabled: bool,
+    /// Whether volumetric god rays are enabled.
+    pub god_rays_enabled: bool,
+    /// Whether the procedural star field is enabled.
+    pub star_field_enabled: bool,
+    /// Star field random seed (deterministic from simulation seed).
+    pub star_field_seed: i32,
+    /// Whether diffraction spikes are enabled.
+    pub diffraction_spikes_enabled: bool,
+    /// Whether the `OKLab` palette harmonizer is enabled.
+    pub palette_harmony_enabled: bool,
+    /// Palette harmonizer random seed.
+    pub palette_harmony_seed: i32,
+    /// Whether the warm highlight glaze is enabled.
+    pub glaze_enabled: bool,
+
+    /// Output width in pixels (used to size per-image effects at construction).
+    pub output_width: usize,
+    /// Output height in pixels (used to size per-image effects at construction).
+    pub output_height: usize,
+}
+
+impl EffectConfig {
+    /// Output width in pixels.
+    #[must_use]
+    #[inline]
+    pub fn width_px(&self) -> usize {
+        self.output_width
+    }
+
+    /// Output height in pixels.
+    #[must_use]
+    #[inline]
+    pub fn height_px(&self) -> usize {
+        self.output_height
+    }
 }
 
 /// Per-frame parameters that may vary
@@ -137,14 +178,37 @@ impl FinishEffectPipeline {
     fn build_trajectory_chain(config: &EffectConfig) -> PostEffectChain {
         let mut chain = PostEffectChain::new();
 
+        // ===== PHASE 0: COSMIC BACKGROUND =====
+        // Drop in a star field before bloom so the bright stars glow too.
+        if config.star_field_enabled {
+            chain.add(Box::new(StarField::new(
+                config.width_px(),
+                config.height_px(),
+                config.star_field_seed,
+                0.55,
+            )));
+        }
+
         // ===== PHASE 1: BLOOM & GLOW =====
         // Base lighting effects that work on bright areas
 
-        // 1a. Traditional bloom (large diffuse glow)
-        if config.blur_radius_px > 0 {
+        // 1a. Traditional bloom (large diffuse glow). When the multi-tier
+        // pyramid is active, it takes the role of the wide halation layer and
+        // the single-radius Gaussian is skipped to avoid double-blooming.
+        if config.blur_radius_px > 0 && !config.bloom_pyramid_enabled {
             chain.add(Box::new(GaussianBloom::new(
                 config.blur_radius_px,
                 config.blur_strength,
+                config.blur_core_brightness,
+            )));
+        }
+
+        // 1a'. Multi-tier bloom pyramid (cinematic mood).
+        if config.bloom_pyramid_enabled {
+            let base = config.blur_radius_px.max(4);
+            chain.add(Box::new(BloomPyramid::new(
+                base,
+                config.blur_strength.max(0.25),
                 config.blur_core_brightness,
             )));
         }
@@ -165,6 +229,11 @@ impl FinishEffectPipeline {
         // 1d. Chromatic bloom (prismatic color separation)
         if config.chromatic_bloom_enabled {
             chain.add(Box::new(ChromaticBloom::new(config.chromatic_bloom_config.clone())));
+        }
+
+        // 1e. Volumetric god rays from thresholded highlights (cinematic mood).
+        if config.god_rays_enabled {
+            chain.add(Box::new(GodRays::for_image(config.width_px(), config.height_px(), 0.45)));
         }
 
         // ===== PHASE 2: TONE MAPPING & BLUR =====
@@ -193,9 +262,25 @@ impl FinishEffectPipeline {
             chain.add(Box::new(GradientMap::new(config.gradient_map_config.clone())));
         }
 
+        // 4a'. OKLab palette harmonizer (painterly mood). Snaps pixel hues
+        // toward anchors drawn from a triadic palette for colour cohesion.
+        if config.palette_harmony_enabled {
+            chain.add(Box::new(PaletteHarmony::from_seed(
+                config.palette_harmony_seed,
+                0.45,
+                PaletteScheme::Triadic,
+            )));
+        }
+
         // 4b. Cinematic color grading (film-like look)
         if config.color_grade_enabled && config.color_grade_params.strength > 0.0 {
             chain.add(Box::new(CinematicColorGrade::new(config.color_grade_params.clone())));
+        }
+
+        // 4c. Warm highlight glaze (painterly mood, after color grade so it
+        // lifts the already-graded highlights rather than fighting the grade).
+        if config.glaze_enabled {
+            chain.add(Box::new(Glaze::default()));
         }
 
         // ===== PHASE 5: MATERIAL PROPERTIES =====
@@ -242,8 +327,25 @@ impl FinishEffectPipeline {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
         }
 
+        // Diffraction spikes on bright points (cosmic mood): after tonemap but
+        // before lens flare so the flare can also pick up the spikes.
+        if config.diffraction_spikes_enabled {
+            chain.add(Box::new(DiffractionSpikes::for_image(
+                config.width_px(),
+                config.height_px(),
+                0.30,
+            )));
+        }
+
+        // Classic star + horizontal streak flare (pipeline-flag opt-in).
         if pipeline_flags::lens_flare_enabled() {
             chain.add(Box::new(LensFlareDiffractive::pipeline_default()));
+        }
+
+        // Anamorphic wide blue streak (cinematic mood), independent of the
+        // legacy lens-flare flag.
+        if config.anamorphic_flare_enabled {
+            chain.add(Box::new(LensFlareDiffractive::anamorphic()));
         }
 
         chain
@@ -663,6 +765,17 @@ mod tests {
             atmospheric_depth_config: AtmosphericDepthConfig::default(),
             fine_texture_enabled: false,
             fine_texture_config: FineTextureConfig::default(),
+            bloom_pyramid_enabled: false,
+            anamorphic_flare_enabled: false,
+            god_rays_enabled: false,
+            star_field_enabled: false,
+            star_field_seed: 0,
+            diffraction_spikes_enabled: false,
+            palette_harmony_enabled: false,
+            palette_harmony_seed: 0,
+            glaze_enabled: false,
+            output_width: 320,
+            output_height: 180,
         }
     }
 

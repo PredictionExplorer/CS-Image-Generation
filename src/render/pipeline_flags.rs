@@ -38,6 +38,26 @@ static BODY_SPHERES: AtomicBool = AtomicBool::new(true);
 /// Use multi-act director for video checkpoint spacing.
 static MULTI_ACT_DIRECTOR: AtomicBool = AtomicBool::new(true);
 
+/// Framing mode: `0` = `AutoFill` (default), `1` = Classic (legacy 55 FOV).
+static FRAMING_MODE: AtomicU8 = AtomicU8::new(0);
+
+/// Active mood: `0` = Cinematic, `1` = Cosmic, `2` = Painterly, `3` = Neutral
+/// (no mood biases, matches legacy effect probabilities). Defaults to Neutral
+/// so library consumers / tests behave identically to pre-mood releases.
+static MOOD: AtomicU8 = AtomicU8::new(3);
+
+/// Whether rim-lit body spheres (Doppler-tinted outer ring) are drawn.
+static RIM_LIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Whether body cores use an airy-disc PSF instead of a plain Gaussian.
+static AIRY_DISC: AtomicBool = AtomicBool::new(false);
+
+/// Target fill fraction for `AutoFill` framing (bits as `f64`). Default `0.90`.
+static FRAMING_FILL: AtomicU64 = AtomicU64::new(0.90f64.to_bits());
+
+/// Percentile (fraction kept) for outlier-trimmed bbox. Default `0.99`.
+static FRAMING_PCT: AtomicU64 = AtomicU64::new(0.99f64.to_bits());
+
 /// Configure Plummer softening (`epsilon` in world units; 0 disables).
 pub fn set_sim_softening_epsilon(eps: f64) {
     let bits = if eps > 0.0 { (eps * eps).to_bits() } else { 0 };
@@ -159,6 +179,98 @@ pub fn set_multi_act_director(on: bool) {
 #[must_use]
 pub fn multi_act_director_enabled() -> bool {
     MULTI_ACT_DIRECTOR.load(Ordering::Relaxed)
+}
+
+/// Configure global framing mode (`"auto"` = `AutoFill`, `"classic"` = Classic).
+/// Unknown values fall back to `AutoFill`.
+pub fn set_framing_mode(mode: &str) {
+    let code: u8 = match mode.to_ascii_lowercase().as_str() {
+        "classic" | "legacy" => 1,
+        _ => 0,
+    };
+    FRAMING_MODE.store(code, Ordering::Relaxed);
+}
+
+/// Configure the `AutoFill` target fill fraction (clamped to `[0.5, 0.98]`).
+pub fn set_framing_fill(fill: f64) {
+    FRAMING_FILL.store(fill.clamp(0.5, 0.98).to_bits(), Ordering::Relaxed);
+}
+
+/// Configure the `AutoFill` bbox percentile (clamped to `[0.80, 1.0]`).
+pub fn set_framing_percentile(pct: f64) {
+    FRAMING_PCT.store(pct.clamp(0.80, 1.0).to_bits(), Ordering::Relaxed);
+}
+
+/// Resolve the currently-configured framing mode into a concrete
+/// [`crate::render::context::FramingMode`].
+#[must_use]
+pub fn current_framing_mode() -> crate::render::context::FramingMode {
+    let code = FRAMING_MODE.load(Ordering::Relaxed);
+    if code == 1 {
+        crate::render::context::FramingMode::Classic
+    } else {
+        let fill = f64::from_bits(FRAMING_FILL.load(Ordering::Relaxed));
+        let pct = f64::from_bits(FRAMING_PCT.load(Ordering::Relaxed));
+        crate::render::context::FramingMode::AutoFill { fill, pct }
+    }
+}
+
+/// Set the active [`crate::render::mood::Mood`].
+pub fn set_mood(mood: crate::render::mood::Mood) {
+    let code: u8 = match mood {
+        crate::render::mood::Mood::Cinematic => 0,
+        crate::render::mood::Mood::Cosmic => 1,
+        crate::render::mood::Mood::Painterly => 2,
+    };
+    MOOD.store(code, Ordering::Relaxed);
+}
+
+/// Reset to neutral (legacy, no mood biasing).
+pub fn clear_mood() {
+    MOOD.store(3, Ordering::Relaxed);
+}
+
+/// Get the active mood, or `None` when no mood has been set (neutral).
+#[must_use]
+pub fn current_mood() -> Option<crate::render::mood::Mood> {
+    match MOOD.load(Ordering::Relaxed) {
+        0 => Some(crate::render::mood::Mood::Cinematic),
+        1 => Some(crate::render::mood::Mood::Cosmic),
+        2 => Some(crate::render::mood::Mood::Painterly),
+        _ => None,
+    }
+}
+
+/// Get the biases for the currently-active mood, or the neutral (all-1.0)
+/// biases when no mood has been set.
+#[must_use]
+pub fn current_mood_biases() -> crate::render::mood::MoodBiases {
+    match current_mood() {
+        Some(m) => m.biases(),
+        None => crate::render::mood::MoodBiases::default(),
+    }
+}
+
+/// Enable or disable rim-lit body spheres.
+pub fn set_rim_light(on: bool) {
+    RIM_LIGHT.store(on, Ordering::Relaxed);
+}
+
+/// Whether rim-lit body spheres are drawn.
+#[must_use]
+pub fn rim_light_enabled() -> bool {
+    RIM_LIGHT.load(Ordering::Relaxed)
+}
+
+/// Enable or disable airy-disc PSF on body cores.
+pub fn set_airy_disc(on: bool) {
+    AIRY_DISC.store(on, Ordering::Relaxed);
+}
+
+/// Whether airy-disc PSF is used for body cores.
+#[must_use]
+pub fn airy_disc_enabled() -> bool {
+    AIRY_DISC.load(Ordering::Relaxed)
 }
 
 #[cfg(test)]

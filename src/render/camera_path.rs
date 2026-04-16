@@ -30,8 +30,12 @@ pub struct PerspectiveCamera {
 
 impl PerspectiveCamera {
     /// Build a camera that frames `bbox` from an elevated viewpoint.
+    ///
+    /// Legacy behaviour: fixed 55 FOV with a heuristic eye distance. Retained
+    /// under the `--framing classic` escape hatch; prefer [`orbit_fit`] for
+    /// content that actually fills the frame.
     #[must_use]
-    pub fn orbit_default(bbox: &BoundingBox, width: u32, height: u32) -> Self {
+    pub fn orbit_classic(bbox: &BoundingBox, width: u32, height: u32) -> Self {
         let cx = f64::midpoint(bbox.min_x, bbox.max_x);
         let cy = f64::midpoint(bbox.min_y, bbox.max_y);
         let cz = f64::midpoint(
@@ -50,6 +54,92 @@ impl PerspectiveCamera {
             target,
             up,
             fov_y: 55_f64.to_radians(),
+            aspect,
+            focus_distance: (eye - target).norm(),
+            coc_max_px: 6.0,
+            right: Vector3::zeros(),
+            cam_up: Vector3::zeros(),
+            forward: Vector3::zeros(),
+        };
+        cam.build_frame();
+        cam
+    }
+
+    /// Backwards-compatible alias for [`orbit_classic`].
+    #[must_use]
+    #[inline]
+    pub fn orbit_default(bbox: &BoundingBox, width: u32, height: u32) -> Self {
+        Self::orbit_classic(bbox, width, height)
+    }
+
+    /// Build a camera that **fits** the bbox to the frame.
+    ///
+    /// Uses a 45 FOV (less wide-angle distortion than 55) and walks the eye
+    /// along a slightly off-axis elevated viewing direction until the furthest
+    /// bbox corner projects within `fill` of the frame (e.g. `fill = 0.90`
+    /// gives 90% coverage with 5% safety margin per edge).
+    ///
+    /// Both horizontal and vertical screen-space extents are constrained and
+    /// the tighter distance is kept, so the orbit fills the output regardless
+    /// of aspect ratio.
+    #[must_use]
+    pub fn orbit_fit(bbox: &BoundingBox, width: u32, height: u32, fill: f64) -> Self {
+        let fill_clamped = fill.clamp(0.2, 0.98);
+        let aspect = f64::from(width) / f64::from(height).max(1.0);
+
+        let cx = f64::midpoint(bbox.min_x, bbox.max_x);
+        let cy = f64::midpoint(bbox.min_y, bbox.max_y);
+        let cz = f64::midpoint(bbox.min_z, bbox.max_z);
+        let target = Vector3::new(cx, cy, cz);
+        let up = Vector3::new(0.0, 0.0, 1.0);
+
+        let fov_y = 45_f64.to_radians();
+        let tan_half_y = (fov_y * 0.5).tan();
+
+        // Viewing direction: slightly off-axis to give 3D parallax without
+        // pushing bodies off-screen. Keep the same general direction as the
+        // legacy camera but shorter so we can back out along it.
+        let dir = Vector3::new(0.15, -1.8, 1.2).normalize();
+
+        // Seed distance from the span so corner projections are well-defined.
+        let span = bbox.width.max(bbox.height).max(bbox.depth).max(1e-6);
+        let mut dist = span * 1.5;
+
+        // Build a provisional camera to obtain right/cam_up; these do not
+        // depend on `eye`'s distance, only on the viewing direction.
+        let eye = target - dir * dist;
+        let forward = (target - eye).normalize();
+        let right = forward.cross(&up).normalize();
+        let cam_up = right.cross(&forward).normalize();
+
+        // For each bbox corner, compute the minimum eye distance along `-dir`
+        // that puts its projected NDC within +/- fill (horizontal and vertical
+        // separately). We solve: |x_c| <= fill * aspect * tan_half * z_c.
+        // With eye = target - dir * d, let o = corner - target. Then
+        //   x_c = o.right,  y_c = o.up,  z_c = o.forward + d
+        // so required d is (|x_c| / (fill*aspect*tan_half)) - o.forward for x,
+        // and (|y_c| / (fill*tan_half)) - o.forward for y. We take the max.
+        let mut needed_d: f64 = span * 0.25;
+        for corner in bbox.corners() {
+            let o = corner - target;
+            let ox = o.dot(&right);
+            let oy = o.dot(&cam_up);
+            let oz = o.dot(&forward);
+            let limit_x = fill_clamped * aspect * tan_half_y;
+            let limit_y = fill_clamped * tan_half_y;
+            let dx = ox.abs() / limit_x.max(1e-9) - oz;
+            let dy = oy.abs() / limit_y.max(1e-9) - oz;
+            needed_d = needed_d.max(dx).max(dy);
+        }
+        // Keep a small floor so we never end up with the eye inside the bbox.
+        dist = needed_d.max(span * 0.25);
+
+        let eye = target - dir * dist;
+        let mut cam = Self {
+            eye,
+            target,
+            up,
+            fov_y,
             aspect,
             focus_distance: (eye - target).norm(),
             coc_max_px: 6.0,
@@ -93,7 +183,17 @@ mod tests {
     use crate::render::context::BoundingBox;
 
     fn test_bbox() -> BoundingBox {
-        BoundingBox { min_x: -4.0, max_x: 4.0, min_y: -3.0, max_y: 3.0, width: 8.0, height: 6.0 }
+        BoundingBox {
+            min_x: -4.0,
+            max_x: 4.0,
+            min_y: -3.0,
+            max_y: 3.0,
+            min_z: -1.0,
+            max_z: 1.0,
+            width: 8.0,
+            height: 6.0,
+            depth: 2.0,
+        }
     }
 
     #[test]
@@ -132,5 +232,64 @@ mod tests {
         let (_, _, c_focus) = cam.project(1280, 720, focus);
         let (_, _, c_far) = cam.project(1280, 720, far);
         assert!(c_far >= c_focus);
+    }
+
+    #[test]
+    fn test_orbit_fit_all_corners_inside_frame() {
+        let bbox = test_bbox();
+        let (w, h) = (1920u32, 1080u32);
+        let cam = PerspectiveCamera::orbit_fit(&bbox, w, h, 0.90);
+        for corner in bbox.corners() {
+            let (px, py, _) = cam.project(w, h, corner);
+            assert!(
+                px >= 0.0 && px <= w as f32,
+                "corner {corner:?} projected x={px} outside [0,{w}]"
+            );
+            assert!(
+                py >= 0.0 && py <= h as f32,
+                "corner {corner:?} projected y={py} outside [0,{h}]"
+            );
+        }
+    }
+
+    #[test]
+    fn test_orbit_fit_covers_at_least_target_fraction() {
+        // The widest corner in either axis should project near (1 - fill)/2
+        // from the edge in the tighter dimension.
+        let bbox = test_bbox();
+        let (w, h) = (1920u32, 1080u32);
+        let fill = 0.90;
+        let cam = PerspectiveCamera::orbit_fit(&bbox, w, h, fill);
+        let mut max_ndc_x = 0.0f32;
+        let mut max_ndc_y = 0.0f32;
+        for corner in bbox.corners() {
+            let (px, py, _) = cam.project(w, h, corner);
+            let nx = (px / w as f32 - 0.5).abs() * 2.0;
+            let ny = (py / h as f32 - 0.5).abs() * 2.0;
+            max_ndc_x = max_ndc_x.max(nx);
+            max_ndc_y = max_ndc_y.max(ny);
+        }
+        // At least one axis should reach close to `fill` (the constraining axis).
+        let max_axis = max_ndc_x.max(max_ndc_y);
+        assert!(
+            max_axis >= fill as f32 - 0.02,
+            "orbit_fit underfills frame: max_ndc={max_axis}, expected >= {}",
+            fill - 0.02
+        );
+        // And no axis exceeds fill + small numeric slack.
+        assert!(
+            max_axis <= fill as f32 + 0.02,
+            "orbit_fit overfills frame: max_ndc={max_axis}, expected <= {}",
+            fill + 0.02
+        );
+    }
+
+    #[test]
+    fn test_orbit_fit_target_at_center() {
+        let bbox = test_bbox();
+        let cam = PerspectiveCamera::orbit_fit(&bbox, 1600, 900, 0.90);
+        let (px, py, _) = cam.project(1600, 900, cam.target);
+        assert!((px - 800.0).abs() < 1.0);
+        assert!((py - 450.0).abs() < 1.0);
     }
 }

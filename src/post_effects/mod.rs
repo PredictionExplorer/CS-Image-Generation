@@ -113,39 +113,51 @@ impl Default for PostEffectChain {
 
 pub mod aether;
 pub mod atmospheric_depth;
+pub mod bloom_pyramid;
 pub mod champleve;
 pub mod chromatic_bloom;
 pub mod color_grade;
+pub mod diffraction_spikes;
 pub mod dog_bloom;
 pub mod edge_luminance;
 pub mod fine_texture;
 pub mod gaussian_bloom;
+pub mod glaze;
 pub mod glow_enhancement;
+pub mod god_rays;
 pub mod gradient_map;
 pub mod lens_flare;
 pub mod micro_contrast;
 pub mod nebula_clouds;
 pub mod opalescence;
+pub mod palette_harmony;
 pub mod perceptual_blur;
+pub mod star_field;
 pub mod temporal_smoothing;
 pub(super) mod utils;
 
 pub use aether::{AetherConfig, apply_aether_weave};
 pub use atmospheric_depth::{AtmosphericDepth, AtmosphericDepthConfig};
+pub use bloom_pyramid::BloomPyramid;
 pub use champleve::{ChampleveConfig, apply_champleve_iridescence};
 pub use chromatic_bloom::{ChromaticBloom, ChromaticBloomConfig};
 pub use color_grade::{CinematicColorGrade, ColorGradeParams};
+pub use diffraction_spikes::DiffractionSpikes;
 pub use dog_bloom::DogBloom;
 pub use edge_luminance::{EdgeLuminance, EdgeLuminanceConfig};
 pub use fine_texture::{FineTexture, FineTextureConfig};
 pub use gaussian_bloom::GaussianBloom;
+pub use glaze::Glaze;
 pub use glow_enhancement::{GlowEnhancement, GlowEnhancementConfig};
+pub use god_rays::GodRays;
 pub use gradient_map::{GradientMap, GradientMapConfig, LuxuryPalette};
 pub use lens_flare::LensFlareDiffractive;
 pub use micro_contrast::{MicroContrast, MicroContrastConfig};
 pub use nebula_clouds::{NebulaCloudConfig, NebulaClouds};
 pub use opalescence::{Opalescence, OpalescenceConfig};
+pub use palette_harmony::{PaletteHarmony, PaletteScheme};
 pub use perceptual_blur::{PerceptualBlur, PerceptualBlurConfig};
+pub use star_field::StarField;
 pub use temporal_smoothing::{TemporalSmoothing, TemporalSmoothingConfig};
 
 #[cfg(test)]

@@ -327,6 +327,9 @@ pub(crate) fn draw_body_spheres_spectral_rows(
     }
     let width = ctx.width_usize;
 
+    let rim_light = super::pipeline_flags::rim_light_enabled();
+    let airy_disc = super::pipeline_flags::airy_disc_enabled();
+
     for body in 0..3 {
         let p = positions[body][step];
         let (cx, cy, _) = ctx.to_pixel_world(p);
@@ -340,6 +343,10 @@ pub(crate) fn draw_body_spheres_spectral_rows(
         let bin_f = spectral_constants::wavelength_to_bin(wavelength);
         let alpha = body_alphas[body] * hdr_scale;
 
+        // Rim-light bin: shift wavelength 15nm hotter for a cool rim highlight.
+        let rim_wavelength = (wavelength - 15.0).clamp(380.0, 700.0);
+        let rim_bin_f = spectral_constants::wavelength_to_bin(rim_wavelength);
+
         let min_x = (ix - pad).max(0);
         let max_x = (ix + pad).min(ctx.width as i32 - 1);
         let min_y = (iy - pad).max(row_start as i32);
@@ -350,7 +357,20 @@ pub(crate) fn draw_body_spheres_spectral_rows(
                 let dx = px as f32 - cx;
                 let dy = py as f32 - cy;
                 let dist_sq = dx * dx + dy * dy;
-                let energy = (-dist_sq / (radius * radius)).exp();
+                // Core energy profile: Gaussian by default, airy-disc-ish when
+                // the mood flag is set. The airy approximation is a central
+                // Gaussian lobe plus a first faint ring at ~1.22 radii.
+                let energy = if airy_disc {
+                    let r_norm = dist_sq.sqrt() / radius;
+                    let core = (-r_norm * r_norm * 1.2).exp();
+                    let ring_center = 1.22f32;
+                    let ring_width = 0.35f32;
+                    let ring_d = (r_norm - ring_center) / ring_width;
+                    let ring = (-ring_d * ring_d).exp() * 0.22;
+                    (core + ring).min(1.2)
+                } else {
+                    (-dist_sq / (radius * radius)).exp()
+                };
                 if energy < 0.02 {
                     continue;
                 }
@@ -364,6 +384,27 @@ pub(crate) fn draw_body_spheres_spectral_rows(
                 } else {
                     accum[idx][bin_left] += final_energy * (1.0 - w_right);
                     accum[idx][bin_right] += final_energy * w_right;
+                }
+
+                // Optional rim-light pass: deposit a thin hot-wavelength ring
+                // near the body's perimeter so it reads as a 3-D glassy sphere.
+                if rim_light {
+                    let r_norm = dist_sq.sqrt() / radius;
+                    // Smoothstep band centered at r=0.88 with width ~0.15.
+                    let band = ((r_norm - 0.75) / 0.25).clamp(0.0, 1.0);
+                    let rim_profile = band * (1.0 - band) * 4.0; // peaks at 1.0
+                    if rim_profile > 0.05 {
+                        let rim_energy = f64::from(rim_profile) * alpha * 0.45;
+                        let rbl = (rim_bin_f.floor() as usize).min(NUM_BINS - 1);
+                        let rbr = (rbl + 1).min(NUM_BINS - 1);
+                        let rw = rim_bin_f.fract();
+                        if rbr == rbl {
+                            accum[idx][rbl] += rim_energy;
+                        } else {
+                            accum[idx][rbl] += rim_energy * (1.0 - rw);
+                            accum[idx][rbr] += rim_energy * rw;
+                        }
+                    }
                 }
             }
         }

@@ -47,7 +47,7 @@ impl Default for Enhancements {
             sat_boost: true,
             aces_tweak: true,
             alpha_variation: true,
-            aspect_correction: false,
+            aspect_correction: true,
             dispersion_boost: true,
         }
     }
@@ -107,6 +107,10 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
     /// Whether Borda weights were randomized.
     pub weights_randomized: bool,
+    /// Mood preset label (cinematic, cosmic, painterly).
+    pub mood: String,
+    /// Framing mode label (auto, classic).
+    pub framing: String,
 }
 
 /// Initialize per-seed output directory structure:
@@ -459,6 +463,8 @@ pub fn log_generation(
 
     // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
+    record.mood.clone_from(&config.mood);
+    record.framing.clone_from(&config.framing);
 
     logger.log_generation(record)
 }
@@ -502,7 +508,7 @@ mod tests {
         assert!(e.sat_boost);
         assert!(e.aces_tweak);
         assert!(e.alpha_variation);
-        assert!(!e.aspect_correction);
+        assert!(e.aspect_correction, "aspect correction should now default ON for tight framing");
         assert!(e.dispersion_boost);
     }
 

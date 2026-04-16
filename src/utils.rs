@@ -111,6 +111,89 @@ pub fn bounding_box(positions: &[Vec<Vector3<f64>>]) -> (f64, f64, f64, f64) {
     (min_x, max_x, min_y, max_y)
 }
 
+/// Per-axis symmetric percentile for a sorted-in-place helper.
+///
+/// Returns `(lo, hi)` where `lo` is at the `pct_low` quantile and `hi` at the
+/// `1 - pct_low` quantile (so `pct_low = 0.005` trims 1% total).
+#[inline]
+fn axis_percentile(values: &mut [f64], pct_low: f64) -> (f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+    let n = values.len();
+    let lo_idx = ((pct_low * n as f64).floor() as usize).min(n - 1);
+    let hi_idx = (((1.0 - pct_low) * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
+    values.select_nth_unstable_by(lo_idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let lo = values[lo_idx];
+    values.select_nth_unstable_by(hi_idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let hi = values[hi_idx];
+    (lo, hi)
+}
+
+/// Percentile-trimmed 3D bounding box: `(min_x, max_x, min_y, max_y, min_z, max_z)`.
+///
+/// `pct` is the fraction of data to keep (e.g. `pct = 0.99` trims the outermost 1%,
+/// i.e. 0.5% from each tail). This makes framing robust against drift-inflated
+/// outlier timesteps that pull the raw min/max far from where the action is.
+///
+/// After percentile selection each axis receives the same 5%-per-side expansion
+/// as [`bounding_box`] for breathing room, and degenerate axes are padded.
+#[must_use]
+pub fn bounding_box_percentile(
+    positions: &[Vec<Vector3<f64>>],
+    pct: f64,
+) -> (f64, f64, f64, f64, f64, f64) {
+    let pct_clamped = pct.clamp(0.5, 1.0);
+    let pct_low = 0.5 * (1.0 - pct_clamped);
+
+    let mut xs: Vec<f64> = Vec::new();
+    let mut ys: Vec<f64> = Vec::new();
+    let mut zs: Vec<f64> = Vec::new();
+    for body in positions {
+        xs.reserve(body.len());
+        ys.reserve(body.len());
+        zs.reserve(body.len());
+        for p in body {
+            xs.push(p[0]);
+            ys.push(p[1]);
+            zs.push(p[2]);
+        }
+    }
+
+    if xs.is_empty() {
+        return (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+    }
+
+    let (mut min_x, mut max_x) = axis_percentile(&mut xs, pct_low);
+    let (mut min_y, mut max_y) = axis_percentile(&mut ys, pct_low);
+    let (mut min_z, mut max_z) = axis_percentile(&mut zs, pct_low);
+
+    if (max_x - min_x).abs() < 1e-12 {
+        min_x -= constants::BOUNDING_BOX_PADDING;
+        max_x += constants::BOUNDING_BOX_PADDING;
+    }
+    if (max_y - min_y).abs() < 1e-12 {
+        min_y -= constants::BOUNDING_BOX_PADDING;
+        max_y += constants::BOUNDING_BOX_PADDING;
+    }
+    if (max_z - min_z).abs() < 1e-12 {
+        min_z -= constants::BOUNDING_BOX_PADDING;
+        max_z += constants::BOUNDING_BOX_PADDING;
+    }
+
+    let wx = max_x - min_x;
+    let wy = max_y - min_y;
+    let wz = max_z - min_z;
+    min_x -= 0.05 * wx;
+    max_x += 0.05 * wx;
+    min_y -= 0.05 * wy;
+    max_y += 0.05 * wy;
+    min_z -= 0.05 * wz;
+    max_z += 0.05 * wz;
+
+    (min_x, max_x, min_y, max_y, min_z, max_z)
+}
+
 /// Build a simple 1D Gaussian kernel
 #[must_use]
 pub fn build_gaussian_kernel(radius: usize) -> SmallVec<[f64; 32]> {
@@ -334,5 +417,53 @@ mod tests {
         assert_eq!(max_x, 0.0);
         assert_eq!(min_y, 0.0);
         assert_eq!(max_y, 0.0);
+    }
+
+    #[test]
+    fn test_bounding_box_percentile_rejects_outliers() {
+        // 100 in-range points plus 2 far outliers per axis.
+        let mut pts = Vec::new();
+        for i in 0..100 {
+            let t = f64::from(i) / 100.0;
+            pts.push(Vector3::new(t * 10.0, t * 10.0, t * 10.0));
+        }
+        pts.push(Vector3::new(1_000_000.0, 1_000_000.0, 1_000_000.0));
+        pts.push(Vector3::new(-1_000_000.0, -1_000_000.0, -1_000_000.0));
+        let positions = vec![pts];
+
+        // Trim 2% (2/102 tails) so the big outliers are discarded.
+        let (min_x, max_x, _, _, _, _) = bounding_box_percentile(&positions, 0.97);
+        // After 5% per-side expansion of a ~10 span we should still be nowhere near 1e6.
+        assert!(max_x < 1000.0, "percentile max_x {max_x} must ignore 1e6 outlier");
+        assert!(min_x > -1000.0, "percentile min_x {min_x} must ignore -1e6 outlier");
+    }
+
+    #[test]
+    fn test_bounding_box_percentile_full_passthrough_when_pct_is_one() {
+        let positions = vec![vec![
+            Vector3::new(-5.0, 3.0, 1.0),
+            Vector3::new(10.0, -2.0, 4.0),
+            Vector3::new(0.0, 7.0, -1.0),
+        ]];
+        let (min_x, max_x, min_y, max_y, min_z, max_z) =
+            bounding_box_percentile(&positions, 1.0);
+        // All points should be inside the returned (padded) box.
+        for p in &positions[0] {
+            assert!(p.x >= min_x - 1e-9 && p.x <= max_x + 1e-9);
+            assert!(p.y >= min_y - 1e-9 && p.y <= max_y + 1e-9);
+            assert!(p.z >= min_z - 1e-9 && p.z <= max_z + 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_bounding_box_percentile_returns_z_extent() {
+        let positions = vec![vec![
+            Vector3::new(0.0, 0.0, -50.0),
+            Vector3::new(0.0, 0.0, 50.0),
+            Vector3::new(0.0, 0.0, 0.0),
+        ]];
+        let (_, _, _, _, min_z, max_z) = bounding_box_percentile(&positions, 1.0);
+        assert!(min_z < -40.0, "z extent should include negative extreme");
+        assert!(max_z > 40.0, "z extent should include positive extreme");
     }
 }
