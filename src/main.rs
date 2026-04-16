@@ -26,6 +26,7 @@ const DEFAULT_MAX_MASS: f64 = 300.0;
 const DEFAULT_ALPHA_DENOM: usize = 15_000_000;
 const DEFAULT_ALPHA_COMPRESS: f64 = 6.0;
 const DEFAULT_ESCAPE_THRESHOLD: f64 = -0.3;
+const DEFAULT_BEAUTY_WEIGHT: f64 = 0.45;
 const DEFAULT_HDR_MODE: &str = "auto";
 const DEFAULT_PERCEPTUAL_GAMUT_MODE: &str = "preserve-hue";
 
@@ -109,6 +110,79 @@ struct Args {
     /// Omit to randomize from a curated range.
     #[arg(long)]
     equil_weight: Option<f64>,
+
+    /// Borda weight for the auxiliary beauty ensemble (close approaches, motion entropy).
+    #[arg(long, default_value_t = DEFAULT_BEAUTY_WEIGHT)]
+    beauty_weight: f64,
+
+    /// Spectral bin LUT: `cie` (default) or `bruton` legacy RGB.
+    #[arg(long, default_value = "cie")]
+    color_science: String,
+
+    /// Plummer softening length in world units (0 disables).
+    #[arg(long, default_value_t = 0.0)]
+    softening: f64,
+
+    /// Shutter samples per simulation step for motion blur (1 disables).
+    ///
+    /// Defaults to 8 for cinema-grade smoothness; values up to 32 are accepted.
+    #[arg(long, default_value_t = 8_u8)]
+    shutter_samples: u8,
+
+    /// Disable perspective camera (orthographic bbox projection).
+    #[arg(long, default_value_t = false)]
+    no_perspective: bool,
+
+    /// Disable multi-act video pacing (uniform frame spacing).
+    #[arg(long, default_value_t = false)]
+    no_director: bool,
+
+    /// Hero master: `off`, `4k`, or `8k` (extra still + EXR + crops after main run).
+    #[arg(long, default_value = "off")]
+    hero: String,
+}
+
+/// Generate hero still / EXR / crops / contact sheet after the main pass.
+fn emit_hero_outputs(
+    master_png: &str,
+    accum_spd: &[[f64; three_body_problem::spectrum::NUM_BINS]],
+    width: u32,
+    height: u32,
+    hero_mode: &str,
+    seed_dir: &str,
+) -> Result<()> {
+    use image::DynamicImage;
+    let (target_w, target_h) = match hero_mode {
+        "4k" => (3840u32, 2160u32),
+        "8k" => (7680u32, 4320u32),
+        _ => (width, height),
+    };
+
+    info!("Generating hero outputs ({target_w}x{target_h}, mode={hero_mode})...");
+    let dyn_img = image::open(master_png).map_err(|e| {
+        error::AppError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+    })?;
+    let master: image::ImageBuffer<image::Rgb<u16>, Vec<u16>> = match dyn_img {
+        DynamicImage::ImageRgb16(b) => b,
+        other => other.to_rgb16(),
+    };
+
+    let hero_png = format!("{seed_dir}/hero.png");
+    render::hero_outputs::save_hero_upscale(&master, target_w, target_h, &hero_png)?;
+
+    let exr_path = format!("{seed_dir}/hero_linear.exr");
+    render::hero_outputs::save_exr_linear_rgb_from_u16(&master, &exr_path)?;
+
+    let vert_path = format!("{seed_dir}/crop_9x16.png");
+    render::hero_outputs::save_vertical_9_16_crop(&master, &vert_path)?;
+
+    let square_path = format!("{seed_dir}/crop_1x1.png");
+    render::hero_outputs::save_square_1_1_crop(&master, &square_path)?;
+
+    let contact_path = format!("{seed_dir}/spectral_contact_4x16.png");
+    render::hero_outputs::save_contact_sheet_4x16(accum_spd, width, height, &contact_path)?;
+
+    Ok(())
 }
 
 fn parse_bounded_sims(value: &str) -> std::result::Result<usize, String> {
@@ -259,6 +333,12 @@ fn main() -> Result<()> {
     render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
+    three_body_problem::spectrum::set_color_science_bruton(args.color_science.eq_ignore_ascii_case("bruton"));
+    render::pipeline_flags::set_sim_softening_epsilon(args.softening);
+    render::pipeline_flags::set_shutter_samples(args.shutter_samples);
+    render::pipeline_flags::set_perspective_camera(!args.no_perspective);
+    render::pipeline_flags::set_multi_act_director(!args.no_director);
+
     error::validation::validate_dimensions(args.resolution.width, args.resolution.height)?;
 
     let seed_bytes = app::parse_seed(&args.seed)?;
@@ -302,9 +382,11 @@ fn main() -> Result<()> {
         args.steps,
         borda_weights.chaos_weight,
         borda_weights.equil_weight,
+        args.beauty_weight,
         DEFAULT_ESCAPE_THRESHOLD,
     )?;
 
+    let masses = [best_bodies[0].mass, best_bodies[1].mass, best_bodies[2].mass];
     let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
 
     let drift_config = if args.drift == DriftModeArg::None {
@@ -323,6 +405,11 @@ fn main() -> Result<()> {
 
     let (colors, body_alphas) =
         app::generate_colors(&mut rng, args.steps, DEFAULT_ALPHA_DENOM, &enhancements);
+
+    let kinematics = three_body_problem::kinematics::compute_kinematics(
+        &positions,
+        three_body_problem::render::constants::DEFAULT_DT,
+    );
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
@@ -357,7 +444,13 @@ fn main() -> Result<()> {
     let output_vid = format!("{seed_dir}/video.mp4");
 
     let accum_spd = app::render_video(
-        render::SpectralScene::new(&positions, &colors, &body_alphas),
+        render::SpectralScene::with_kinematics_and_masses(
+            &positions,
+            &colors,
+            &body_alphas,
+            &masses,
+            &kinematics,
+        ),
         &levels,
         render::SpectralRenderSettings::new(
             &resolved_effect_config,
@@ -388,6 +481,19 @@ fn main() -> Result<()> {
         &spectral_sweep_path,
         args.fast_encode,
     )?;
+
+    if args.hero.as_str() != "off"
+        && let Err(e) = emit_hero_outputs(
+            &output_png,
+            &accum_spd,
+            args.resolution.width,
+            args.resolution.height,
+            &args.hero,
+            &seed_dir,
+        )
+    {
+        warn!("Hero outputs failed (non-fatal): {e}");
+    }
 
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",

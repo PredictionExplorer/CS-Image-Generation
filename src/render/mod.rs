@@ -20,29 +20,36 @@ pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
 pub mod batch_drawing;
+pub mod camera_path;
 pub mod color;
 pub mod constants;
 pub mod context;
+pub mod director;
 pub mod drawing;
 pub mod effect_randomizer;
 pub mod effects;
 pub mod error;
+pub mod hero_outputs;
 pub mod histogram;
 pub mod parameter_descriptors;
+pub mod pipeline_flags;
 pub mod randomizable_config;
 pub mod spectral_output;
+pub mod trajectory;
 pub mod types;
 pub mod velocity_hdr;
 pub mod video;
 
 // Import from our submodules
 use self::batch_drawing::{
-    BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices,
+    BatchDrawParams, draw_triangle_batch_spectral_rows, lerp_body_step, prepare_triangle_vertices,
+    prepare_triangle_vertices_at,
 };
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
 use self::error::{RenderError, Result};
 use self::histogram::HistogramData;
+use self::drawing::draw_body_spheres_spectral_rows;
 
 // Re-export core types and functions for public API compatibility
 pub use color::{OklabColor, generate_body_color_sequences};
@@ -124,6 +131,10 @@ pub struct SpectralScene<'a> {
     pub colors: &'a [Vec<OklabColor>],
     /// Overall opacity weight for each body's lines.
     pub body_alphas: &'a [f64],
+    /// Optional body masses for sphere sizing / physics-aware effects.
+    pub masses: Option<&'a [f64; 3]>,
+    /// Optional finite-difference kinematics (velocity, curvature, close approaches).
+    pub kinematics: Option<&'a crate::kinematics::KinematicTrajectories>,
 }
 
 impl std::fmt::Debug for SpectralScene<'_> {
@@ -132,6 +143,7 @@ impl std::fmt::Debug for SpectralScene<'_> {
             .field("num_bodies", &self.positions.len())
             .field("num_steps", &self.positions.first().map_or(0, std::vec::Vec::len))
             .field("num_body_alphas", &self.body_alphas.len())
+            .field("has_kinematics", &self.kinematics.is_some())
             .finish()
     }
 }
@@ -144,7 +156,19 @@ impl<'a> SpectralScene<'a> {
         colors: &'a [Vec<OklabColor>],
         body_alphas: &'a [f64],
     ) -> Self {
-        Self { positions, colors, body_alphas }
+        Self { positions, colors, body_alphas, masses: None, kinematics: None }
+    }
+
+    /// Same as [`Self::new`] but attaches masses and kinematics for Doppler, wakes, and spheres.
+    #[must_use]
+    pub fn with_kinematics_and_masses(
+        positions: &'a [Vec<Vector3<f64>>],
+        colors: &'a [Vec<OklabColor>],
+        body_alphas: &'a [f64],
+        masses: &'a [f64; 3],
+        kinematics: &'a crate::kinematics::KinematicTrajectories,
+    ) -> Self {
+        Self { positions, colors, body_alphas, masses: Some(masses), kinematics: Some(kinematics) }
     }
 
     /// Number of simulation timesteps recorded for each body.
@@ -314,18 +338,53 @@ fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) 
     ]
 }
 
-/// Save 16-bit image as PNG
+/// Save a 16-bit RGB image as a PNG with an explicit sRGB chunk so colour-managed
+/// viewers honour the colour space instead of assuming it.
 ///
-/// TODO: Add explicit sRGB ICC profile chunk via the `png` crate for strict
-/// color-managed viewers. The `image` crate's encoder omits the sRGB chunk,
-/// but most viewers assume sRGB for untagged PNGs, so this is cosmetic.
+/// The `image` crate encoder omits the `sRGB`/`gAMA`/`cHRM` chunks; we go through the
+/// `png` crate directly to emit a minimal set that all compliant PNG readers understand.
 pub fn save_image_as_png_16bit(
     rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
     path: &str,
 ) -> Result<()> {
-    let dyn_img = DynamicImage::ImageRgb16(rgb_img.clone());
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    info!("   Saved 16-bit PNG (sRGB assumed) => {path}");
+    use std::fs::File;
+    use std::io::BufWriter;
+
+    let width = rgb_img.width();
+    let height = rgb_img.height();
+    if width == 0 || height == 0 {
+        return Err(RenderError::ImageEncoding {
+            reason: format!("cannot encode zero-sized image {width}x{height}"),
+        });
+    }
+
+    let file = File::create(path).map_err(|e| RenderError::ImageEncoding {
+        reason: format!("creating {path}: {e}"),
+    })?;
+    let writer = BufWriter::new(file);
+
+    let mut encoder = png::Encoder::new(writer, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Sixteen);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+    let mut png_writer = encoder
+        .write_header()
+        .map_err(|e| RenderError::ImageEncoding { reason: format!("PNG header: {e}") })?;
+
+    // Convert native-endian u16 samples to big-endian as required by PNG.
+    let raw: &[u16] = rgb_img.as_raw();
+    let mut be_bytes = Vec::with_capacity(raw.len() * 2);
+    for sample in raw {
+        be_bytes.extend_from_slice(&sample.to_be_bytes());
+    }
+    png_writer
+        .write_image_data(&be_bytes)
+        .map_err(|e| RenderError::ImageEncoding { reason: format!("PNG data: {e}") })?;
+    png_writer
+        .finish()
+        .map_err(|e| RenderError::ImageEncoding { reason: format!("PNG finalize: {e}") })?;
+
+    info!("   Saved 16-bit PNG (sRGB-tagged) => {path}");
     Ok(())
 }
 
@@ -686,8 +745,32 @@ pub fn build_effect_config_from_resolved(
     }
 }
 
-/// Apply energy density wavelength shift to spectral buffer
-/// Hot regions (high energy) shift toward red, cool regions stay blue
+/// Gentle scene-linear exposure normalization before temporal blend / tonemap.
+fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
+    let mut sum = 0.0f64;
+    let mut w = 0.0f64;
+    for &(r, g, b, a) in buffer.iter() {
+        if a > 1e-9 {
+            let lr = r / a;
+            let lg = g / a;
+            let lb = b / a;
+            sum += constants::rec709_luminance(lr, lg, lb) * a;
+            w += a;
+        }
+    }
+    let mean = if w > 0.0 { sum / w } else { 0.14 };
+    let target = 0.14;
+    let auto = (target / mean.max(1e-6)).clamp(0.25, 6.0);
+    let g = auto * pipeline_flags::scene_exposure_scale();
+    for p in buffer.iter_mut() {
+        p.0 *= g;
+        p.1 *= g;
+        p.2 *= g;
+    }
+}
+
+/// Apply energy density wavelength shift to spectral buffer.
+/// Hot regions (high energy) shift toward red, cool regions stay blue.
 fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
     use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
 
@@ -772,29 +855,105 @@ fn accumulate_spectral_steps_into_rows(
     }
 
     let triangle_alphas = params.scene.triangle_alphas();
-    for step in params.step_start..params.step_end {
-        let vertices = prepare_triangle_vertices(
-            params.scene.positions,
-            params.scene.colors,
-            &triangle_alphas,
-            step,
-            params.ctx,
-        );
+    let shutter = usize::from(pipeline_flags::shutter_samples().max(1));
+    let n = params.scene.step_count();
+    let inv_shutter = 1.0 / shutter as f64;
 
+    for step in params.step_start..params.step_end {
         let hdr_mult_01 = params.velocity_calc.compute_segment_multiplier(step, 0, 1);
         let hdr_mult_12 = params.velocity_calc.compute_segment_multiplier(step, 1, 2);
         let hdr_mult_20 = params.velocity_calc.compute_segment_multiplier(step, 2, 0);
 
-        draw_triangle_batch_spectral_rows(
+        for sub in 0..shutter {
+            let frac = (sub as f64 + 0.5) * inv_shutter;
+            let corners = if shutter > 1 && step + 1 < n {
+                [
+                    lerp_body_step(&params.scene.positions[0], step, frac),
+                    lerp_body_step(&params.scene.positions[1], step, frac),
+                    lerp_body_step(&params.scene.positions[2], step, frac),
+                ]
+            } else {
+                [
+                    params.scene.positions[0][step],
+                    params.scene.positions[1][step],
+                    params.scene.positions[2][step],
+                ]
+            };
+
+            let vertices = prepare_triangle_vertices_at(
+                corners,
+                params.scene.colors,
+                &triangle_alphas,
+                step,
+                params.ctx,
+            );
+
+            draw_triangle_batch_spectral_rows(
+                accum_spd,
+                &BatchDrawParams {
+                    width: params.ctx.width,
+                    height: params.ctx.height,
+                    row_start,
+                    row_end,
+                    vertices,
+                    hdr_multipliers: [hdr_mult_01, hdr_mult_12, hdr_mult_20],
+                    hdr_scale: params.hdr_scale * inv_shutter,
+                    kinematics: params.scene.kinematics,
+                    step,
+                },
+            );
+        }
+    }
+
+    if pipeline_flags::comet_wake_enabled() {
+        const WAKE: usize = 64;
+        let wake_start = params.step_end.saturating_sub(WAKE).max(params.step_start);
+        for step in wake_start..params.step_end {
+            let fade = (step + 1 - wake_start) as f64 / WAKE as f64;
+            let wake_scale = params.hdr_scale * 0.12 * fade * fade;
+            let vertices = prepare_triangle_vertices(
+                params.scene.positions,
+                params.scene.colors,
+                &triangle_alphas,
+                step,
+                params.ctx,
+            );
+            let hdr_mult_01 = params.velocity_calc.compute_segment_multiplier(step, 0, 1);
+            let hdr_mult_12 = params.velocity_calc.compute_segment_multiplier(step, 1, 2);
+            let hdr_mult_20 = params.velocity_calc.compute_segment_multiplier(step, 2, 0);
+            draw_triangle_batch_spectral_rows(
+                accum_spd,
+                &BatchDrawParams {
+                    width: params.ctx.width,
+                    height: params.ctx.height,
+                    row_start,
+                    row_end,
+                    vertices,
+                    hdr_multipliers: [hdr_mult_01, hdr_mult_12, hdr_mult_20],
+                    hdr_scale: wake_scale,
+                    kinematics: params.scene.kinematics,
+                    step,
+                },
+            );
+        }
+    }
+
+    if pipeline_flags::body_spheres_enabled()
+        && let Some(masses) = params.scene.masses
+    {
+        let st = params.step_end.saturating_sub(1);
+        draw_body_spheres_spectral_rows(
             accum_spd,
-            &BatchDrawParams {
-                width: params.ctx.width,
-                height: params.ctx.height,
+            &self::drawing::BodySphereDrawArgs {
+                ctx: params.ctx,
                 row_start,
                 row_end,
-                vertices,
-                hdr_multipliers: [hdr_mult_01, hdr_mult_12, hdr_mult_20],
-                hdr_scale: params.hdr_scale,
+                positions: params.scene.positions,
+                colors: params.scene.colors,
+                masses,
+                body_alphas: &triangle_alphas,
+                step: st,
+                hdr_scale: params.hdr_scale * 0.35,
             },
         );
     }
@@ -999,7 +1158,11 @@ fn pass_2_write_frames_spectral_with_backend(
     let nebula_config = build_nebula_config(resolved_config, noise_seed);
 
     let total_steps = scene.step_count();
-    let checkpoints = checkpoint_steps(total_steps, frame_interval);
+    let checkpoints = if pipeline_flags::multi_act_director_enabled() {
+        director::resolve_video_checkpoints(total_steps, true)
+    } else {
+        checkpoint_steps(total_steps, frame_interval)
+    };
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
@@ -1016,7 +1179,7 @@ fn pass_2_write_frames_spectral_with_backend(
     };
     let mut step_start = 0;
 
-    for &checkpoint_step in &checkpoints {
+    for (frame_idx, &checkpoint_step) in checkpoints.iter().enumerate() {
         if step_start < total_steps && step_start % chunk_line == 0 {
             let pct = (step_start as f64 / total_steps as f64) * constants::PERCENT_FACTOR;
             debug!(progress = pct, pass = 2, mode = "spectral", "Render pass progress");
@@ -1038,8 +1201,7 @@ fn pass_2_write_frames_spectral_with_backend(
         apply_energy_density_shift(accum_spd);
         convert_spd_buffer_to_rgba(accum_spd, &mut accum_rgba, width as usize, height as usize);
 
-        let frame_params =
-            FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
+        let frame_params = FrameParams { frame_number: frame_idx, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
         let mut trajectory_pixels = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
@@ -1050,33 +1212,48 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let generated_nebula;
         let nebula_ref = if resolved_config.nebula_strength > 0.0 {
-            generated_nebula = generate_nebula_background(
-                width as usize,
-                height as usize,
-                checkpoint_step / frame_interval,
-                &nebula_config,
-            )?;
+            generated_nebula = if pipeline_flags::volumetric_nebula_enabled() {
+                crate::post_effects::nebula_clouds::render_volumetric_trajectory_nebula(
+                    width as usize,
+                    height as usize,
+                    frame_idx,
+                    checkpoint_step + 1,
+                    scene.positions,
+                    &nebula_config,
+                )
+            } else {
+                generate_nebula_background(
+                    width as usize,
+                    height as usize,
+                    frame_idx,
+                    &nebula_config,
+                )?
+            };
             &generated_nebula
         } else {
             &empty_background
         };
 
-        let composited = composite_buffers(nebula_ref, &trajectory_pixels);
+        let mut composited = composite_buffers(nebula_ref, &trajectory_pixels);
+
+        apply_auto_scene_metering(&mut composited);
+
+        let smoothed_linear = match &temporal_smoother {
+            Some(smoother) => smoother.process_frame(composited),
+            None => composited,
+        };
 
         // Reclaim the trajectory buffer's allocation back into accum_rgba.
         // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
         // so we just need the capacity -- no need to clear or resize.
+        trajectory_pixels = smoothed_linear;
         trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
         accum_rgba = trajectory_pixels;
 
-        let display_buffer = tonemap_to_display_buffer(&composited, levels);
-        let smoothed_display = match &temporal_smoother {
-            Some(smoother) => smoother.process_frame(display_buffer),
-            None => display_buffer,
-        };
+        let display_buffer = tonemap_to_display_buffer(&accum_rgba, levels);
 
         let final_display = finish_pipeline
-            .process_image(smoothed_display, width as usize, height as usize, &frame_params)
+            .process_image(display_buffer, width as usize, height as usize, &frame_params)
             .map_err(|e| RenderError::EffectChain {
                 effect_name: "image_chain".into(),
                 reason: e.to_string(),

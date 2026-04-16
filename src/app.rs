@@ -162,6 +162,7 @@ pub fn run_borda_selection(
     num_steps_sim: usize,
     chaos_weight: f64,
     equil_weight: f64,
+    beauty_weight: f64,
     escape_threshold: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
     info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
@@ -172,6 +173,7 @@ pub fn run_borda_selection(
         num_steps_sim,
         chaos_weight,
         equil_weight,
+        beauty_weight,
         escape_threshold,
     )
 }
@@ -610,9 +612,16 @@ mod tests {
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);
 
-        let (best_bodies, _) =
-            crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, 0.75, 11.0, -0.3)
-                .expect("Borda search should find at least one valid orbit");
+        let (best_bodies, _) = crate::sim::select_best_trajectory(
+            &mut rng,
+            num_sims,
+            num_steps,
+            0.75,
+            11.0,
+            0.45,
+            -0.3,
+        )
+        .expect("Borda search should find at least one valid orbit");
 
         let mut positions = simulate_best_orbit(best_bodies, num_steps);
 

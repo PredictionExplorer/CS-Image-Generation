@@ -6,6 +6,7 @@
 //! right before the normal tone-mapping / bloom pipeline.
 
 use crate::spectrum_simd;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Number of wavelength buckets in the SPD.
 pub const NUM_BINS: usize = 64;
@@ -82,6 +83,30 @@ pub static BIN_COMBINED_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS
         }
         arr
     });
+
+/// When true, [`BIN_COMBINED_LUT`] (Bruton-style) is used; when false, [`crate::spectrum_cie::BIN_CIE_COMBINED_LUT`].
+static USE_BRUTON_LUT: AtomicBool = AtomicBool::new(false);
+
+/// Select spectral bin reconstruction: `true` = legacy Bruton RGB, `false` = CIE 1931 CMF weights.
+pub fn set_color_science_bruton(use_bruton: bool) {
+    USE_BRUTON_LUT.store(use_bruton, Ordering::Relaxed);
+}
+
+/// Returns true when the legacy Bruton RGB LUT is selected.
+#[must_use]
+pub fn color_science_is_bruton() -> bool {
+    USE_BRUTON_LUT.load(Ordering::Relaxed)
+}
+
+/// Active `(R, G, B, k)` LUT for [`spd_to_rgba`] / SIMD paths.
+#[must_use]
+pub fn bin_combined_lut() -> &'static [(f64, f64, f64, f64); NUM_BINS] {
+    if color_science_is_bruton() {
+        &BIN_COMBINED_LUT
+    } else {
+        &crate::spectrum_cie::BIN_CIE_COMBINED_LUT
+    }
+}
 
 /// Convert an SPD sample (per-bin energy) to linear-sRGB premultiplied RGBA.
 /// Alpha equals total energy (capped at 1.0) so downstream blending treats it

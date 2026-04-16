@@ -118,10 +118,17 @@ impl Body {
     }
     fn update_acceleration(&mut self, om: f64, op: &Vector3<f64>) {
         let dir = self.position - *op;
-        let d = dir.norm();
-        if d > crate::utils::FLOAT_EPSILON {
-            self.acceleration += -G * om * dir / d.powi(3);
+        let d2 = dir.norm_squared();
+        if d2 <= crate::utils::FLOAT_EPSILON * crate::utils::FLOAT_EPSILON {
+            return;
         }
+        let eps2 = crate::render::pipeline_flags::sim_softening_eps2();
+        let inv = if eps2 > 0.0 {
+            1.0 / (d2 + eps2).powf(1.5)
+        } else {
+            1.0 / d2.powf(1.5)
+        };
+        self.acceleration += -G * om * dir * inv;
     }
 }
 
@@ -348,6 +355,10 @@ pub struct TrajectoryResult {
     pub total_score: usize,
     /// Weighted combination of Borda points used for final ranking.
     pub total_score_weighted: f64,
+    /// Auxiliary aesthetic ensemble score (close approaches, motion entropy, etc.).
+    pub beauty: f64,
+    /// Borda points from the beauty ensemble rank.
+    pub beauty_pts: usize,
     /// Original simulation index of the selected orbit.
     pub selected_index: usize,
     /// Number of orbits discarded by quality filters.
@@ -370,6 +381,7 @@ fn rank_trajectories(
     results: Vec<Option<(TrajectoryResult, usize)>>,
     cw: f64,
     ew: f64,
+    bw: f64,
 ) -> Vec<(TrajectoryResult, usize)> {
     fn assign(vals: &mut [(f64, usize)], hb: bool) -> Vec<usize> {
         if hb {
@@ -392,21 +404,68 @@ fn rank_trajectories(
 
     let mut cv = Vec::with_capacity(iv.len());
     let mut ev = Vec::with_capacity(iv.len());
+    let mut bv = Vec::with_capacity(iv.len());
     for (i, (t, _)) in iv.iter().enumerate() {
         cv.push((t.chaos, i));
         ev.push((t.equilateralness, i));
+        bv.push((t.beauty, i));
     }
     let cps = assign(&mut cv, false);
     let eps = assign(&mut ev, true);
+    let bps = assign(&mut bv, true);
     for (i, (t, _)) in iv.iter_mut().enumerate() {
         t.chaos_pts = cps[i];
         t.equil_pts = eps[i];
-        t.total_score = t.chaos_pts + t.equil_pts;
+        t.beauty_pts = bps[i];
+        t.total_score = t.chaos_pts + t.equil_pts + t.beauty_pts;
         // usize→f64: chaos_pts/equil_pts are bounded by the number of valid trajectories
-        t.total_score_weighted = cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64);
+        t.total_score_weighted =
+            cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64) + bw * (t.beauty_pts as f64);
     }
     iv.sort_by(|a, b| b.0.total_score_weighted.total_cmp(&a.0.total_score_weighted));
     iv
+}
+
+/// Re-rank the top-K Borda candidates using a higher-fidelity re-simulation and a richer
+/// aesthetic ensemble (close approaches + motion entropy + fractal dimension + symmetries).
+///
+/// Returns the re-ranked Borda winner with its updated `beauty` score.  The returned
+/// `selected_index` is the index into the *original* `candidates` slice, which callers use
+/// to look up the original initial conditions.
+fn thumbnail_rerank_top_k(
+    candidates: &[(Vec<Body>, TrajectoryResult)],
+    k: usize,
+    rerank_steps: usize,
+    escape_threshold: f64,
+) -> Option<(usize, TrajectoryResult)> {
+    if candidates.is_empty() || k == 0 {
+        return None;
+    }
+    let take = k.min(candidates.len()).max(1);
+    let scored: Vec<(usize, f64, TrajectoryResult)> = (0..take)
+        .into_par_iter()
+        .filter_map(|i| {
+            let (bodies, traj) = &candidates[i];
+            let simr = get_positions_with_early_exit(bodies.clone(), rerank_steps, escape_threshold)?;
+            let pos = simr.positions;
+            let m1 = bodies[0].mass;
+            let m2 = bodies[1].mass;
+            let m3 = bodies[2].mass;
+            let beauty = crate::analysis::beauty_ensemble_score(&pos, m1, m2, m3);
+            // Combine stage-1 weighted Borda score with the fresh beauty ensemble.
+            // 0.55 weight on the Borda stage keeps chaos/equil influence; 0.45 on beauty lets
+            // the richer re-rank differentiate near-ties.
+            let combined = 0.55 * traj.total_score_weighted + 0.45 * beauty * 100.0;
+            let mut updated = traj.clone();
+            updated.beauty = beauty;
+            Some((i, combined, updated))
+        })
+        .collect();
+
+    scored
+        .into_iter()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(idx, _, traj)| (idx, traj))
 }
 
 /// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
@@ -418,6 +477,7 @@ pub fn select_best_trajectory(
     steps: usize,
     cw: f64,
     ew: f64,
+    bw: f64,
     th: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
     // Generate random triples and immediately transform them to the COM frame so
@@ -466,6 +526,7 @@ pub fn select_best_trajectory(
             // Compute quality metrics
             let c = non_chaoticness(m1, m2, m3, &pos);
             let eq = equilateralness_score(&pos);
+            let beauty = crate::analysis::beauty_ensemble_score(&pos, m1, m2, m3);
 
             // Early rejection: if both metrics are terrible, skip
             // This saves time on Borda ranking for clearly unsuitable candidates
@@ -485,6 +546,8 @@ pub fn select_best_trajectory(
                     equil_pts: 0,
                     total_score: 0,
                     total_score_weighted: 0.0,
+                    beauty,
+                    beauty_pts: 0,
                     selected_index: 0,
                     discarded_count: 0,
                 },
@@ -498,7 +561,7 @@ pub fn select_best_trajectory(
         "   => Discarded {dtot}/{num_sims} ({:.1}%) orbits due to filters or escapes.",
         crate::render::constants::PERCENT_FACTOR * dtot as f64 / num_sims as f64
     );
-    let iv = rank_trajectories(results, cw, ew);
+    let iv = rank_trajectories(results, cw, ew, bw);
     if iv.is_empty() {
         return Err(SimulationError::NoValidOrbits {
             total_attempted: num_sims,
@@ -510,12 +573,30 @@ pub fn select_best_trajectory(
         }
         .into());
     }
-    let bi = iv[0].1;
-    let mut bt = iv[0].0.clone();
-    bt.selected_index = bi;
+    // Stage-1 winner indices and scores are in `iv`.  Build a top-K candidate list for stage-2
+    // re-rank, which re-simulates at `steps` and refreshes the beauty ensemble.  This amortises
+    // the full 100k stage-1 pool down to a few candidates for a high-fidelity comparison.
+    const TOP_K: usize = 8;
+    let top_k: Vec<(Vec<Body>, TrajectoryResult)> = iv
+        .iter()
+        .take(TOP_K)
+        .map(|(t, sim_idx)| (many[*sim_idx].clone(), t.clone()))
+        .collect();
+
+    let rerank_steps = steps.clamp(5_000, 200_000);
+    let (winner_in_top_k, bt_stage2) =
+        thumbnail_rerank_top_k(&top_k, TOP_K, rerank_steps, th)
+            .unwrap_or((0, iv[0].0.clone()));
+
+    let stage1_index = iv[winner_in_top_k].1;
+    let mut bt = bt_stage2;
+    bt.selected_index = stage1_index;
     bt.discarded_count = dtot;
-    info!("\n   => Chosen orbit idx {bi} with weighted score {:.3}", bt.total_score_weighted);
-    Ok((many[bi].clone(), bt))
+    info!(
+        "\n   => Stage-1 top-{TOP_K} -> rerank winner orbit idx {stage1_index} (top-K slot {winner_in_top_k}), weighted={:.3}, beauty={:.3}",
+        bt.total_score_weighted, bt.beauty
+    );
+    Ok((many[stage1_index].clone(), bt))
 }
 
 #[cfg(test)]
@@ -658,5 +739,78 @@ mod tests {
         let dbg = format!("{sim:?}");
         assert!(dbg.contains("num_bodies"));
         assert!(dbg.contains("num_steps"));
+    }
+
+    fn make_trajectory(
+        chaos: f64,
+        equil: f64,
+        beauty: f64,
+        idx: usize,
+    ) -> (TrajectoryResult, usize) {
+        (
+            TrajectoryResult {
+                chaos,
+                equilateralness: equil,
+                chaos_pts: 0,
+                equil_pts: 0,
+                total_score: 0,
+                total_score_weighted: 0.0,
+                beauty,
+                beauty_pts: 0,
+                selected_index: 0,
+                discarded_count: 0,
+            },
+            idx,
+        )
+    }
+
+    #[test]
+    fn test_rank_trajectories_weights_beauty_bins() {
+        let results = vec![
+            Some(make_trajectory(1.0, 0.5, 0.2, 0)), // high chaos, low equil, low beauty
+            Some(make_trajectory(0.1, 0.9, 0.95, 1)), // low chaos, high equil, high beauty
+            Some(make_trajectory(0.5, 0.5, 0.5, 2)),
+        ];
+        let ranked = rank_trajectories(results, 1.0, 1.0, 5.0);
+        assert_eq!(ranked.len(), 3);
+        // Index 1 has high beauty and high equil; with bw=5 it must win.
+        assert_eq!(ranked[0].1, 1, "beauty-weighted winner should be index 1");
+    }
+
+    #[test]
+    fn test_rank_trajectories_filters_none_entries() {
+        let results: Vec<Option<(TrajectoryResult, usize)>> = vec![
+            Some(make_trajectory(1.0, 1.0, 1.0, 0)),
+            None,
+            None,
+            Some(make_trajectory(0.5, 0.5, 0.5, 3)),
+        ];
+        let ranked = rank_trajectories(results, 1.0, 1.0, 1.0);
+        assert_eq!(ranked.len(), 2);
+    }
+
+    #[test]
+    fn test_rank_trajectories_total_score_equals_sum_of_pts() {
+        let results = vec![
+            Some(make_trajectory(0.3, 0.6, 0.1, 0)),
+            Some(make_trajectory(0.8, 0.2, 0.4, 1)),
+            Some(make_trajectory(0.1, 0.9, 0.9, 2)),
+        ];
+        let ranked = rank_trajectories(results, 1.0, 1.0, 1.0);
+        for (t, _) in &ranked {
+            assert_eq!(t.total_score, t.chaos_pts + t.equil_pts + t.beauty_pts);
+        }
+    }
+
+    #[test]
+    fn test_select_best_trajectory_returns_viable_orbit() {
+        let mut rng = Sha3RandomByteStream::new(&[0x01, 0x02, 0x03], 100.0, 300.0, 300.0, 1.0);
+        let (bodies, info) = select_best_trajectory(&mut rng, 64, 2_000, 1.0, 3.0, 0.5, -0.3)
+            .expect("selection should succeed on a populated seed");
+        assert_eq!(bodies.len(), 3);
+        assert!(info.chaos.is_finite());
+        assert!(info.equilateralness.is_finite());
+        assert!(info.beauty.is_finite());
+        assert!((0.0..=1.0).contains(&info.beauty));
     }
 }

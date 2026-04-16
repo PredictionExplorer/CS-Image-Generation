@@ -5,6 +5,7 @@
 //! atmospheric depth and cosmic beauty without overpowering the trajectories.
 
 use super::{PixelBuffer, PostEffect, PostEffectError};
+use nalgebra::Vector3;
 use opensimplex2::smooth;
 use rayon::prelude::*;
 
@@ -237,6 +238,174 @@ impl NebulaClouds {
     }
 }
 
+#[inline]
+fn lerp3(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
+fn volumetric_palette(config: &NebulaCloudConfig, t: f64) -> [f64; 3] {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.33 {
+        lerp3(config.colors[0], config.colors[1], t / 0.33)
+    } else if t < 0.66 {
+        lerp3(config.colors[1], config.colors[2], (t - 0.33) / 0.33)
+    } else {
+        lerp3(config.colors[2], config.colors[3], (t - 0.66) / 0.34)
+    }
+}
+
+fn trilinear_sample(grid: &[f64], g: usize, nx: f64, ny: f64, nz: f64) -> f64 {
+    let fx = nx * (g - 1) as f64;
+    let fy = ny * (g - 1) as f64;
+    let fz = nz * (g - 1) as f64;
+    let x0 = fx.floor() as usize;
+    let y0 = fy.floor() as usize;
+    let z0 = fz.floor() as usize;
+    let x1 = (x0 + 1).min(g - 1);
+    let y1 = (y0 + 1).min(g - 1);
+    let z1 = (z0 + 1).min(g - 1);
+    let tx = fx - x0 as f64;
+    let ty = fy - y0 as f64;
+    let tz = fz - z0 as f64;
+    let idx = |x: usize, y: usize, z: usize| grid[z * g * g + y * g + x];
+    let c000 = idx(x0, y0, z0);
+    let c100 = idx(x1, y0, z0);
+    let c010 = idx(x0, y1, z0);
+    let c110 = idx(x1, y1, z0);
+    let c001 = idx(x0, y0, z1);
+    let c101 = idx(x1, y0, z1);
+    let c011 = idx(x0, y1, z1);
+    let c111 = idx(x1, y1, z1);
+    let c00 = c000 * (1.0 - tx) + c100 * tx;
+    let c10 = c010 * (1.0 - tx) + c110 * tx;
+    let c01 = c001 * (1.0 - tx) + c101 * tx;
+    let c11 = c011 * (1.0 - tx) + c111 * tx;
+    let c0 = c00 * (1.0 - ty) + c10 * ty;
+    let c1 = c01 * (1.0 - ty) + c11 * ty;
+    c0 * (1.0 - tz) + c1 * tz
+}
+
+/// Volumetric nebula: sparse `G³` density from trajectory samples, trilinear-sampled along Z rays.
+///
+/// `step_end` limits how much of the timeline seeds the volume (grows over a video).
+#[must_use]
+pub fn render_volumetric_trajectory_nebula(
+    width: usize,
+    height: usize,
+    frame_number: usize,
+    step_end: usize,
+    positions: &[Vec<Vector3<f64>>],
+    config: &NebulaCloudConfig,
+) -> PixelBuffer {
+    const G: usize = 40;
+    let te = step_end.min(positions[0].len());
+    if te == 0 || width == 0 || height == 0 {
+        return vec![(0.0, 0.0, 0.0, 0.0); width * height];
+    }
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut min_z = f64::INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+    for body_positions in positions.iter().take(3) {
+        for p in body_positions.iter().take(te) {
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+            min_z = min_z.min(p.z);
+            max_z = max_z.max(p.z);
+        }
+    }
+    let bx = (max_x - min_x).max(1e-6);
+    let by = (max_y - min_y).max(1e-6);
+    let bz = (max_z - min_z).max(1e-6);
+    let pad = (bx + by + bz) / 3.0 * 0.1 + 1e-3;
+
+    let mut grid = vec![0.0f64; G * G * G];
+    let stride = (te / 5_000).max(1);
+    for (body, body_positions) in positions.iter().take(3).enumerate() {
+        let wbody = 1.0 + 0.15 * body as f64;
+        for t in (0..te).step_by(stride) {
+            let p = body_positions[t];
+            let nx = ((p.x - min_x + pad) / (bx + 2.0 * pad)).clamp(0.0, 1.0);
+            let ny = ((p.y - min_y + pad) / (by + 2.0 * pad)).clamp(0.0, 1.0);
+            let nz = ((p.z - min_z + pad) / (bz + 2.0 * pad)).clamp(0.0, 1.0);
+            let ix = (nx * (G - 1) as f64).round() as usize;
+            let iy = (ny * (G - 1) as f64).round() as usize;
+            let iz = (nz * (G - 1) as f64).round() as usize;
+            let ix = ix.min(G - 1);
+            let iy = iy.min(G - 1);
+            let iz = iz.min(G - 1);
+            grid[iz * G * G + iy * G + ix] += wbody;
+        }
+    }
+
+    let max_d = grid.iter().copied().fold(0.0_f64, f64::max).max(1e-9);
+    let time = frame_number as f64 * 0.02;
+
+    (0..height * width)
+        .into_par_iter()
+        .map(|idx| {
+            let px = idx % width;
+            let py = idx / width;
+            let u = (px as f64 + 0.5) / width as f64;
+            let v = (py as f64 + 0.5) / height as f64;
+            let wx = min_x - pad + u * (bx + 2.0 * pad);
+            let wy = min_y - pad + v * (by + 2.0 * pad);
+
+            let nv = f64::from(smooth::noise3_ImproveXY(
+                config.noise_seed,
+                u * 3.0,
+                v * 3.0,
+                time,
+            ));
+            let nv = (nv + 1.0) * 0.5;
+
+            const STEPS: usize = 12;
+            let mut acc = 0.0f64;
+            for s in 0..STEPS {
+                let tz = (s as f64 + 0.5) / STEPS as f64;
+                let wz = min_z - pad + tz * (bz + 2.0 * pad);
+                let nx = ((wx - min_x + pad) / (bx + 2.0 * pad)).clamp(0.0, 1.0);
+                let ny = ((wy - min_y + pad) / (by + 2.0 * pad)).clamp(0.0, 1.0);
+                let nz = ((wz - min_z + pad) / (bz + 2.0 * pad)).clamp(0.0, 1.0);
+                acc += trilinear_sample(&grid, G, nx, ny, nz);
+            }
+            acc /= STEPS as f64;
+            let dens = (acc / max_d).clamp(0.0, 1.0);
+            let mix = (0.55 * dens + 0.45 * nv).clamp(0.0, 1.0);
+            let rgb = volumetric_palette(config, mix);
+
+            let center_x = width as f64 * 0.5;
+            let center_y = height as f64 * 0.5;
+            let dx = (px as f64 - center_x) / width as f64;
+            let dy = (py as f64 - center_y) / height as f64;
+            let dist = (dx * dx + dy * dy).sqrt() / 0.707;
+            let edge = if config.edge_fade > 0.0 {
+                let fade_start = 1.0 - config.edge_fade;
+                if dist < fade_start {
+                    1.0
+                } else {
+                    (1.0 - (dist - fade_start) / config.edge_fade.max(1e-6)).clamp(0.0, 1.0)
+                }
+            } else {
+                1.0
+            };
+
+            let opacity = config.strength * edge * (0.25 + 0.75 * dens);
+            (rgb[0], rgb[1], rgb[2], opacity.clamp(0.0, 1.0))
+        })
+        .collect()
+}
+
 impl PostEffect for NebulaClouds {
     fn process(
         &self,
@@ -347,6 +516,39 @@ mod tests {
         // Small time step should produce small change (continuity)
         let small_diff = (noise_t1 - noise_t0).abs();
         assert!(small_diff < 0.5, "Noise changing too fast over small time: {small_diff}");
+    }
+
+    #[test]
+    fn test_volumetric_nebula_opacity_bounded() {
+        let n = 64;
+        let positions: Vec<Vec<Vector3<f64>>> = (0i32..3)
+            .map(|body| {
+                (0..n)
+                    .map(|t| {
+                        let ang = (t as f64) * std::f64::consts::TAU / n as f64
+                            + f64::from(body) * 0.3;
+                        Vector3::new(ang.cos(), ang.sin(), 0.1 * t as f64 / n as f64)
+                    })
+                    .collect()
+            })
+            .collect();
+        let cfg = NebulaCloudConfig::special_mode(64, 36, 7);
+        let buf = render_volumetric_trajectory_nebula(64, 36, 3, n, &positions, &cfg);
+        assert_eq!(buf.len(), 64 * 36);
+        for &(r, g, b, a) in &buf {
+            assert!((0.0..=1.0).contains(&a), "alpha out of range {a}");
+            assert!(r.is_finite() && g.is_finite() && b.is_finite());
+        }
+        let any_non_zero = buf.iter().any(|&(_, _, _, a)| a > 0.0);
+        assert!(any_non_zero, "volumetric nebula should produce density somewhere");
+    }
+
+    #[test]
+    fn test_volumetric_nebula_empty_timeline() {
+        let positions = vec![vec![Vector3::zeros(); 2]; 3];
+        let cfg = NebulaCloudConfig::special_mode(16, 16, 1);
+        let buf = render_volumetric_trajectory_nebula(16, 16, 0, 0, &positions, &cfg);
+        assert!(buf.iter().all(|&(r, g, b, a)| r == 0.0 && g == 0.0 && b == 0.0 && a == 0.0));
     }
 
     #[test]

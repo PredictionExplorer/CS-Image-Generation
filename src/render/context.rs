@@ -3,6 +3,8 @@
 //! This module provides the core rendering context that manages coordinate transformations
 //! and pixel operations, as well as utilities for iterating through animation frames.
 
+use super::camera_path::PerspectiveCamera;
+use super::pipeline_flags;
 use nalgebra::Vector3;
 
 /// Type alias for pixel buffers used throughout the pipeline.
@@ -23,6 +25,8 @@ pub struct RenderContext {
     /// Output image height as `usize` (avoids repeated casts).
     pub height_usize: usize,
     bounds: BoundingBox,
+    /// Optional perspective camera; when `None`, `to_pixel` uses the bounding-box orthographic map.
+    pub perspective: Option<PerspectiveCamera>,
 }
 
 impl RenderContext {
@@ -39,7 +43,20 @@ impl RenderContext {
             bounds.apply_aspect_correction(width, height);
         }
 
-        Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
+        let perspective = if pipeline_flags::perspective_camera_enabled() {
+            Some(PerspectiveCamera::orbit_default(&bounds, width, height))
+        } else {
+            None
+        };
+
+        Self {
+            width,
+            height,
+            width_usize: width as usize,
+            height_usize: height as usize,
+            bounds,
+            perspective,
+        }
     }
 
     /// Convert world coordinates to pixel coordinates
@@ -47,6 +64,19 @@ impl RenderContext {
     #[inline]
     pub fn to_pixel(&self, x: f64, y: f64) -> (f32, f32) {
         self.bounds.world_to_pixel(x, y, self.width, self.height)
+    }
+
+    /// Project a full 3D world point to pixels; third return is circle-of-confusion radius in pixels.
+    #[must_use]
+    #[inline]
+    pub fn to_pixel_world(&self, p: Vector3<f64>) -> (f32, f32, f32) {
+        if let Some(cam) = &self.perspective {
+            cam.project(self.width, self.height, p)
+        } else {
+            let (px, py) = self.bounds.world_to_pixel(p.x, p.y, self.width, self.height);
+            let coc = (p.z as f32 * 0.05).abs();
+            (px, py, coc)
+        }
     }
 
     /// Get total pixel count

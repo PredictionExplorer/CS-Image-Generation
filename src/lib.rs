@@ -24,7 +24,10 @@
 //! - [`AppRenderError`] wraps render-module errors at the app level.
 //! - [`render::error::RenderError`] is the render-module's internal error type.
 
-pub(crate) mod analysis;
+/// Orbit-quality metrics used by the Borda + beauty selection.
+pub mod analysis;
+/// Finite-difference kinematics from recorded trajectories.
+pub mod kinematics;
 /// High-level generation pipeline: seed parsing, simulation orchestration, and output.
 pub mod app;
 /// Body drift transforms applied between simulation frames.
@@ -44,6 +47,8 @@ pub mod render;
 pub mod sim;
 /// Wavelength-to-bin and bin-to-wavelength conversion constants.
 pub mod spectral_constants;
+/// CIE 1931 CMF-based spectral bin LUT (alternative to Bruton RGB in `spectrum`).
+pub mod spectrum_cie;
 /// Spectral power distribution (SPD) to RGB conversion via pre-computed LUTs.
 pub mod spectrum;
 /// SIMD-accelerated spectral conversion with AVX2, NEON, and scalar fallback.

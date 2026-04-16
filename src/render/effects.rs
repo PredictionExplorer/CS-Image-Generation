@@ -14,7 +14,9 @@ use crate::post_effects::{
     GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
     Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
     PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    lens_flare::LensFlareDiffractive,
 };
+use crate::render::pipeline_flags;
 use crate::spectrum::{NUM_BINS, spd_to_rgba};
 use rayon::prelude::*;
 
@@ -238,6 +240,10 @@ impl FinishEffectPipeline {
 
         if config.fine_texture_enabled {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
+        }
+
+        if pipeline_flags::lens_flare_enabled() {
+            chain.add(Box::new(LensFlareDiffractive::pipeline_default()));
         }
 
         chain
@@ -530,12 +536,30 @@ pub(crate) fn convert_spd_buffer_to_rgba(
         let r = (dx * dx + dy * dy).sqrt();
         let dir_x = if r > 0.0 { dx / r } else { 0.0 };
         let dir_y = if r > 0.0 { dy / r } else { 0.0 };
+        let ortho_x = -dir_y;
+        let ortho_y = dir_x;
 
-        let r_norm = r / max_r;
+        let r_norm = (r / max_r).clamp(0.0, 1.0);
+        let rf2 = r_norm * r_norm;
 
         let mut local_spd = [0.0f64; NUM_BINS];
 
-        if dispersion_strength > 0.0 {
+        if dispersion_strength > 0.0 && pipeline_flags::ca_model_physical() {
+            // Longitudinal + weak tangential dispersion ~ r² (achromat-style).
+            let ca = dispersion_strength * (1.0 + rf2 * 1.5);
+            for bin in 0..NUM_BINS {
+                let nu = bin as f64 / (NUM_BINS as f64 - 1.0).max(1.0);
+                let long = (nu - 0.5) * ca * 38.0 * rf2;
+                let tang = (nu - 0.5) * ca * 9.0 * r_norm.sqrt();
+                let sx = (x - dir_x * long + ortho_x * tang).round() as isize;
+                let sy = (y - dir_y * long + ortho_y * tang).round() as isize;
+
+                if sx >= 0 && sx < width as isize && sy >= 0 && sy < height as isize {
+                    let s_idx = sy as usize * width + sx as usize;
+                    local_spd[bin] = src[s_idx][bin];
+                }
+            }
+        } else if dispersion_strength > 0.0 {
             for bin in 0..NUM_BINS {
                 let bin_offset =
                     (bin as f64 - (NUM_BINS as f64 - 1.0) / 2.0) / ((NUM_BINS as f64 - 1.0) / 2.0);

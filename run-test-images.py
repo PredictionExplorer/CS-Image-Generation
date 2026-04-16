@@ -22,7 +22,7 @@ import time
 import typing
 from pathlib import Path
 
-from _utils import check_ffmpeg, fmt_duration, resolve_binary
+from _utils import check_ffmpeg, ensure_release_build, fmt_duration
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
@@ -70,9 +70,13 @@ class SimResult(typing.NamedTuple):
 
 
 def check_prerequisites() -> Path:
-    """Validate binary and ffmpeg, ensure output dir exists. Returns binary path."""
-    binary = resolve_binary(BINARY)
+    """Validate binary and ffmpeg, ensure output dir exists. Returns binary path.
+
+    Auto-runs ``cargo build --release`` when the binary is missing or older
+    than any Rust source file, so the runner always uses the latest build.
+    """
     check_ffmpeg()
+    binary = ensure_release_build(BINARY, repo_root=Path(__file__).resolve().parent)
     Path("output").mkdir(exist_ok=True)
     return binary
 

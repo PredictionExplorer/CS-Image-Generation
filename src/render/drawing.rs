@@ -1,7 +1,9 @@
 //! Line drawing, plot functions, and primitive rendering
 
 use super::color::OklabColor;
+use super::context::RenderContext;
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
+use nalgebra::Vector3;
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use spectral_constants::{LAMBDA_END, LAMBDA_START};
@@ -34,6 +36,8 @@ pub struct SpectralLineSegment {
     pub end: LineVertex,
     /// Multiplier for deposited spectral energy (HDR / velocity boost).
     pub hdr_scale: f64,
+    /// Wavelength multiplier from artistic Doppler (1.0 = off).
+    pub doppler_mul: f64,
 }
 
 /// Convert `OkLab` hue to wavelength with perceptually uniform distribution.
@@ -227,8 +231,9 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
 
     let (_l0, a0, b0) = col0;
     let (_l1, a1, b1) = col1;
-    let wavelength0 = oklab_hue_to_wavelength(a0, b0);
-    let wavelength1 = oklab_hue_to_wavelength(a1, b1);
+    let dm = segment.doppler_mul.clamp(0.2, 5.0);
+    let wavelength0 = (oklab_hue_to_wavelength(a0, b0) * dm).clamp(LAMBDA_START, LAMBDA_END);
+    let wavelength1 = (oklab_hue_to_wavelength(a1, b1) * dm).clamp(LAMBDA_START, LAMBDA_END);
 
     let bin0_f = spectral_constants::wavelength_to_bin(wavelength0);
     let bin1_f = spectral_constants::wavelength_to_bin(wavelength1);
@@ -278,6 +283,93 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     }
 }
 
+/// Bundled arguments for [`draw_body_spheres_spectral_rows`].
+pub(crate) struct BodySphereDrawArgs<'a> {
+    /// Render context (dimensions, bbox, projection helpers).
+    pub ctx: &'a RenderContext,
+    /// Inclusive-exclusive row band to write.
+    pub row_start: usize,
+    /// Exclusive row band end.
+    pub row_end: usize,
+    /// Per-body simulation trajectories (3 bodies × steps).
+    pub positions: &'a [Vec<Vector3<f64>>],
+    /// Per-body `OKLab` colour sequences (one colour per step per body).
+    pub colors: &'a [Vec<OklabColor>],
+    /// Per-body masses; used to scale splat radius.
+    pub masses: &'a [f64; 3],
+    /// Per-body base alpha multipliers.
+    pub body_alphas: &'a [f64; 3],
+    /// Simulation step index to draw (0..=n-1).
+    pub step: usize,
+    /// HDR scale factor applied to deposited energy.
+    pub hdr_scale: f64,
+}
+
+/// Draw small Gaussian splats for the three bodies at `step` (comet heads).
+pub(crate) fn draw_body_spheres_spectral_rows(
+    accum: &mut [[f64; NUM_BINS]],
+    args: &BodySphereDrawArgs<'_>,
+) {
+    let BodySphereDrawArgs {
+        ctx,
+        row_start,
+        row_end,
+        positions,
+        colors,
+        masses,
+        body_alphas,
+        step,
+        hdr_scale,
+    } = *args;
+    let row_end = row_end.min(ctx.height_usize);
+    if row_start >= row_end || ctx.width == 0 {
+        return;
+    }
+    let width = ctx.width_usize;
+
+    for body in 0..3 {
+        let p = positions[body][step];
+        let (cx, cy, _) = ctx.to_pixel_world(p);
+        let mass_scale = masses[body].powf(1.0 / 3.0);
+        let radius = (3.5 + mass_scale * 0.035).clamp(2.0, 18.0) as f32;
+        let pad = (radius * 2.5).ceil() as i32 + 2;
+        let ix = cx.round() as i32;
+        let iy = cy.round() as i32;
+        let (_l, a, b) = colors[body][step];
+        let wavelength = oklab_hue_to_wavelength(a, b);
+        let bin_f = spectral_constants::wavelength_to_bin(wavelength);
+        let alpha = body_alphas[body] * hdr_scale;
+
+        let min_x = (ix - pad).max(0);
+        let max_x = (ix + pad).min(ctx.width as i32 - 1);
+        let min_y = (iy - pad).max(row_start as i32);
+        let max_y = (iy + pad).min(row_end as i32 - 1);
+
+        for py in min_y..=max_y {
+            for px in min_x..=max_x {
+                let dx = px as f32 - cx;
+                let dy = py as f32 - cy;
+                let dist_sq = dx * dx + dy * dy;
+                let energy = (-dist_sq / (radius * radius)).exp();
+                if energy < 0.02 {
+                    continue;
+                }
+                let final_energy = f64::from(energy) * alpha;
+                let bin_left = (bin_f.floor() as usize).min(NUM_BINS - 1);
+                let bin_right = (bin_left + 1).min(NUM_BINS - 1);
+                let w_right = bin_f.fract();
+                let idx = (py as usize - row_start) * width + px as usize;
+                if bin_right == bin_left {
+                    accum[idx][bin_left] += final_energy;
+                } else {
+                    accum[idx][bin_left] += final_energy * (1.0 - w_right);
+                    accum[idx][bin_right] += final_energy * w_right;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +411,7 @@ mod tests {
                 alpha: 0.55,
             },
             hdr_scale,
+            doppler_mul: 1.0,
         }
     }
 
