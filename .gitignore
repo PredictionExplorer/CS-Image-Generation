@@ -20,6 +20,13 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+
+# Cursor IDE
+.cursor/
+
 # Rust build artifacts
 target/
 
