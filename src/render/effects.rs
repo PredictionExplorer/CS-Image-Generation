@@ -689,7 +689,13 @@ pub(crate) fn convert_spd_buffer_to_rgba(
             local_spd = src[idx];
         }
 
-        let rgba = spd_to_rgba(&local_spd);
+        // Apply the energy-density redshift as a pure per-pixel transform.
+        // Running this here (instead of as a `&mut accum_spd` pass in the
+        // frame loop) prevents the shift from being cumulatively re-applied
+        // to the persistent accumulator across all 1800 video frames, which
+        // used to migrate every hot pixel's spectral mass to the red end.
+        let shifted_spd = super::energy_density_shifted_spd(&local_spd);
+        let rgba = spd_to_rgba(&shifted_spd);
         *dest_pixel = rgba;
     });
 }
@@ -885,5 +891,36 @@ mod tests {
         for pixel in &result {
             assert!(pixel.0.abs() < 0.1, "Dark input should produce near-zero bloom");
         }
+    }
+
+    /// Regression: `convert_spd_buffer_to_rgba` must never mutate its source
+    /// accumulator. The earlier pipeline called a `&mut accum_spd` redshift
+    /// on every video frame, which turned the persistent accumulator into
+    /// a one-way conveyor belt toward bin `NUM_BINS-1` over 1800 frames
+    /// and produced red-saturated composite output. Running the conversion
+    /// twice on the same `src` must leave `src` bit-identical.
+    ///
+    /// Note: we intentionally do NOT toggle `DISPERSION_BOOST_ENABLED` in
+    /// this test — that global is read by `convert_spd_buffer_to_rgba`
+    /// under relaxed ordering, so flipping it from a unit test would
+    /// race with the parallel rendering regression tests in the same
+    /// test binary. Whatever the ambient value is at invocation time is
+    /// fine; we're only asserting the source isn't written back to.
+    #[test]
+    fn convert_spd_buffer_to_rgba_does_not_mutate_src() {
+        let (w, h) = (32usize, 32usize);
+        let mut src: Vec<[f64; NUM_BINS]> = vec![[0.0; NUM_BINS]; w * h];
+        // One "hot" pixel with total_energy well above the shift threshold,
+        // plus uniform dim background so the shift path is exercised.
+        for pixel in src.iter_mut() {
+            pixel[20] = 0.01;
+        }
+        src[(h / 2) * w + (w / 2)][32] = 2.0;
+        let src_before = src.clone();
+
+        let mut dest = vec![(0.0f64, 0.0, 0.0, 0.0); w * h];
+        convert_spd_buffer_to_rgba(&src, &mut dest, w, h);
+
+        assert_eq!(src, src_before, "convert_spd_buffer_to_rgba mutated its source");
     }
 }

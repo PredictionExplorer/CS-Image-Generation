@@ -853,36 +853,45 @@ fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
     }
 }
 
-/// Apply energy density wavelength shift to spectral buffer.
-/// Hot regions (high energy) shift toward red, cool regions stay blue.
-fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
+/// Energy-density wavelength shift for a single pixel's SPD.
+///
+/// Hot pixels (`total_energy > ENERGY_DENSITY_SHIFT_THRESHOLD`) have a
+/// fraction of their spectral energy moved one bin redward; cool pixels
+/// are returned unchanged. The transform is **pure** — the caller's SPD
+/// is never modified — and returns a stack-allocated `[f64; NUM_BINS]`
+/// (512 bytes), so it's safe to call per-pixel during conversion without
+/// allocating a heap-sized parallel buffer.
+///
+/// The older mutating `apply_energy_density_shift(&mut accum_spd)` was a
+/// bug magnet: because `accum_spd` is the persistent spectral accumulator
+/// that keeps accruing new energy each frame, calling the shift in-place
+/// inside the per-frame loop effectively applied the shift
+/// `DEFAULT_TARGET_FRAMES` times (i.e. 1800). The shift is a one-way
+/// conveyor belt (no bin ever loses to the left, bin `NUM_BINS-1` is a
+/// terminal accumulator), so hot pixels had all of their energy migrate
+/// to the red end, producing the red-dominance artefacts we saw in the
+/// composite even though the per-bin spectral gallery still carried the
+/// true hue. The fix is to never mutate the accumulator; the conversion
+/// from SPD to RGBA applies the shift on the fly.
+#[inline]
+#[must_use]
+pub(crate) fn energy_density_shifted_spd(spd: &[f64; NUM_BINS]) -> [f64; NUM_BINS] {
     use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
 
-    accum_spd.par_iter_mut().for_each(|spd| {
-        // Calculate total energy in this pixel
-        let total_energy: f64 = spd.iter().sum();
+    let total_energy: f64 = spd.iter().sum();
+    if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD {
+        return *spd;
+    }
 
-        // If energy is below threshold, no shift needed
-        if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD {
-            return;
-        }
+    let excess_energy = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD;
+    let shift_amount = (excess_energy * ENERGY_DENSITY_SHIFT_STRENGTH).min(1.0);
 
-        // Calculate shift amount (excess energy above threshold)
-        let excess_energy = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD;
-        let shift_amount = (excess_energy * ENERGY_DENSITY_SHIFT_STRENGTH).min(1.0);
-
-        // Apply redshift: move energy from lower bins (blue) to higher bins (red)
-        // We blur the spectrum toward the red end
-        let mut shifted_spd = *spd;
-        for i in (1..NUM_BINS).rev() {
-            // Each bin receives energy from the bin below it (blueshift → redshift)
-            shifted_spd[i] = spd[i] * (1.0 - shift_amount) + spd[i - 1] * shift_amount;
-        }
-        // First bin only loses energy
-        shifted_spd[0] = spd[0] * (1.0 - shift_amount);
-
-        *spd = shifted_spd;
-    });
+    let mut shifted = *spd;
+    for i in (1..NUM_BINS).rev() {
+        shifted[i] = spd[i] * (1.0 - shift_amount) + spd[i - 1] * shift_amount;
+    }
+    shifted[0] = spd[0] * (1.0 - shift_amount);
+    shifted
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1129,7 +1138,6 @@ fn pass_1_build_histogram_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(&mut accum_spd);
         convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
@@ -1293,7 +1301,6 @@ fn pass_2_write_frames_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(accum_spd);
         convert_spd_buffer_to_rgba(accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params = FrameParams { frame_number: frame_idx, density: None };
@@ -1429,7 +1436,6 @@ fn render_final_frame_spectral_with_backend(
         backend,
     );
 
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
@@ -1538,7 +1544,6 @@ fn render_single_frame_spectral_with_backend(
     );
 
     // Process the accumulated frame
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { frame_number: 0, density: None };
@@ -2568,6 +2573,69 @@ mod tests {
         assert!(
             (lum - 0.14).abs() < 0.02,
             "balanced scene unexpectedly shifted: post-gain lum={lum}"
+        );
+    }
+
+    /// Regression: `energy_density_shifted_spd` must be a pure function of
+    /// its input. The older mutating `apply_energy_density_shift(&mut ...)`
+    /// was called once per video frame on the persistent accumulator, so
+    /// repeated application compounded the shift and migrated all hot
+    /// spectral mass into `bin[NUM_BINS-1]`. The new helper must return
+    /// the same value no matter how many times it is called.
+    #[test]
+    fn energy_density_shift_is_idempotent_on_immutable_input() {
+        let mut spd = [0.0f64; NUM_BINS];
+        // Hot pixel: concentrate total_energy = 1.0 in a mid bin.
+        spd[32] = 1.0;
+        let first = energy_density_shifted_spd(&spd);
+        for _ in 0..5 {
+            let again = energy_density_shifted_spd(&spd);
+            assert_eq!(again, first, "repeated calls produced different output");
+        }
+        // And the source itself must never have been touched.
+        assert_eq!(spd[32], 1.0);
+    }
+
+    /// Regression: cool pixels (below the threshold) must pass through the
+    /// shift with bit-identical output, so the background isn't nudged.
+    #[test]
+    fn energy_density_shift_leaves_cold_pixels_untouched() {
+        let mut spd = [0.0f64; NUM_BINS];
+        // Total energy 0.2, well below `ENERGY_DENSITY_SHIFT_THRESHOLD`.
+        spd[10] = 0.1;
+        spd[20] = 0.1;
+        let shifted = energy_density_shifted_spd(&spd);
+        assert_eq!(shifted, spd, "cold pixel unexpectedly shifted");
+    }
+
+    /// Regression: for a hot pixel, the shift must actually move mass
+    /// toward the higher (red-end) bins. Checks the physical direction of
+    /// the artistic redshift.
+    #[test]
+    fn energy_density_shift_moves_energy_redward_for_hot_pixels() {
+        let mut spd = [0.0f64; NUM_BINS];
+        // Total energy 2.0 — far above the threshold, guarantees a shift.
+        let source_bin = 30;
+        spd[source_bin] = 2.0;
+        let shifted = energy_density_shifted_spd(&spd);
+        assert!(
+            shifted[source_bin] < spd[source_bin],
+            "source bin did not shed energy: before={}, after={}",
+            spd[source_bin],
+            shifted[source_bin]
+        );
+        assert!(
+            shifted[source_bin + 1] > spd[source_bin + 1],
+            "next redder bin did not receive energy: before={}, after={}",
+            spd[source_bin + 1],
+            shifted[source_bin + 1]
+        );
+        // Energy is approximately conserved (one-bin diffusion).
+        let before: f64 = spd.iter().sum();
+        let after: f64 = shifted.iter().sum();
+        assert!(
+            (before - after).abs() < 0.35,
+            "bulk energy drift too large: before={before}, after={after}"
         );
     }
 }
