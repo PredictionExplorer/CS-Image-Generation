@@ -242,6 +242,77 @@ fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) ->
     [rgb[0] * scale, rgb[1] * scale, rgb[2] * scale]
 }
 
+/// Final display-space safety shoulder applied after `process_image` and
+/// before the 16-bit quantize clamp.
+///
+/// `compress_display_highlights` asymptotes at 1.0 because its shoulder
+/// span is `1.0 - paper_white`; the image-stage effects (diffraction
+/// spikes, anamorphic lens flare, fine texture) then run **after** tonemap
+/// and add additively on top of a buffer that's already near 1.0, which
+/// [`quantize_display_buffer_to_16bit`] hard-clamps to 1.0 per channel.
+/// That per-channel clamp destroys hue (one channel saturates while the
+/// others lag) — it's the source of both the pure-white cores and the
+/// primary-colour splotches in the blown-out renders.
+///
+/// This helper rolls off any luminance above `knee` onto an exponential
+/// shoulder that asymptotes at a strict `ceiling < 1.0`, then soft-limits
+/// any residual per-channel overshoot. Pixels below the knee pass through
+/// untouched, so well-behaved seeds are unaffected.
+#[inline]
+fn compress_display_safety_shoulder(rgb: [f64; 3], knee: f64, ceiling: f64) -> [f64; 3] {
+    // Stage 1: luma-based shoulder. Any above-knee luminance is rolled off
+    // onto an exponential asymptote at `ceiling`, with every channel scaled
+    // by the same factor so hue is preserved exactly.
+    let mut out = rgb;
+    let luminance = constants::rec709_luminance(out[0], out[1], out[2]);
+    if luminance > knee && luminance > 1e-10 {
+        let span = (ceiling - knee).max(1e-6);
+        let excess = luminance - knee;
+        let compressed = knee + span * (1.0 - (-excess / span).exp());
+        let scale = compressed / luminance;
+        out = [out[0] * scale, out[1] * scale, out[2] * scale];
+    }
+
+    // Stage 2: per-channel gamut preservation. A pixel can have luminance
+    // below `knee` but still hold a single channel above `ceiling` — e.g. a
+    // nearly-pure-red highlight where R is hot but G and B are near zero,
+    // so rec709 luminance never clears the knee. Hard per-channel clamping
+    // would break hue (R gets crushed while G/B hold). Instead, find the
+    // max channel and scale *all* channels uniformly so the max lands on
+    // `ceiling`, preserving the R:G:B ratios exactly.
+    let max_ch = out[0].max(out[1]).max(out[2]);
+    if max_ch > ceiling {
+        let scale = ceiling / max_ch;
+        out[0] *= scale;
+        out[1] *= scale;
+        out[2] *= scale;
+    }
+    out
+}
+
+/// Luminance below `SAFETY_SHOULDER_KNEE` is a no-op on the luma axis, so
+/// well-behaved pixels pass through the safety shoulder unchanged.
+const SAFETY_SHOULDER_KNEE: f64 = 0.90;
+/// Strict upper bound on post-shoulder channel values. Leaves 1.5% headroom
+/// below the 16-bit quantize max, so the hard `.clamp(0.0, 1.0)` in
+/// [`quantize_display_buffer_to_16bit`] can never engage.
+const SAFETY_SHOULDER_CEILING: f64 = 0.985;
+
+/// Apply [`compress_display_safety_shoulder`] across the full display
+/// buffer. Operates in-place and preserves alpha.
+fn apply_display_safety_shoulder(buffer: &mut PixelBuffer) {
+    buffer.par_iter_mut().for_each(|pixel| {
+        let rolled = compress_display_safety_shoulder(
+            [pixel.0, pixel.1, pixel.2],
+            SAFETY_SHOULDER_KNEE,
+            SAFETY_SHOULDER_CEILING,
+        );
+        pixel.0 = rolled[0];
+        pixel.1 = rolled[1];
+        pixel.2 = rolled[2];
+    });
+}
+
 /// Core tonemapping function (shared logic for both 8-bit and 16-bit).
 ///
 /// Runs `AgX` per channel (same polynomial spline as before) but replaces
@@ -725,11 +796,13 @@ pub fn build_effect_config_from_resolved(
 fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
     /// Target alpha-weighted mean luminance (middle grey).
     const TARGET_MEAN: f64 = 0.14;
-    /// 99th-percentile luminance ceiling after auto gain. Chosen to sit
-    /// below `compress_display_highlights`'s `paper_white` (0.85) with
-    /// enough margin that the soft rolloff can handle the top 1% without
-    /// reaching `clip_white` in the post-tonemap buffer.
-    const HIGHLIGHT_HEADROOM: f64 = 0.92;
+    /// 99th-percentile luminance ceiling after auto gain. Matches the
+    /// tonemap's `paper_white` (0.85) so the top 1% of inked pixels sit at
+    /// or just below the shoulder — above it, `compress_display_highlights`
+    /// asymptotes at 1.0 and the stacked image-chain effects can then push
+    /// channels past the hard clamp. The final
+    /// [`apply_display_safety_shoulder`] catches any residual overshoot.
+    const HIGHLIGHT_HEADROOM: f64 = 0.85;
     /// Stride used for percentile sampling. Sampling every Nth inked
     /// pixel keeps this routine O(n/stride) while leaving enough data
     /// (~100k points on a 1920x1080 frame) for a stable p99 estimate.
@@ -1248,12 +1321,19 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let display_buffer = tonemap_to_display_buffer(&accum_rgba, levels);
 
-        let final_display = finish_pipeline
+        let mut final_display = finish_pipeline
             .process_image(display_buffer, width as usize, height as usize, &frame_params)
             .map_err(|e| RenderError::EffectChain {
                 effect_name: "image_chain".into(),
                 reason: e.to_string(),
             })?;
+        // Final hue-preserving safety shoulder: the image chain
+        // (diffraction_spikes, anamorphic_flare, fine_texture, ...) runs
+        // on the already-tonemapped display buffer and can push channels
+        // past 1.0. Without this roll-off, `quantize_display_buffer_to_16bit`
+        // hard-clamps per channel, destroying hue on hot pixels and
+        // producing the pure-white cores + primary-colour splotches.
+        apply_display_safety_shoulder(&mut final_display);
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
         let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
@@ -1363,12 +1443,13 @@ fn render_final_frame_spectral_with_backend(
         })?;
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
-    let final_display = finish_pipeline
+    let mut final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "image_chain".into(),
             reason: e.to_string(),
         })?;
+    apply_display_safety_shoulder(&mut final_display);
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
@@ -1469,12 +1550,13 @@ fn render_single_frame_spectral_with_backend(
         })?;
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
-    let final_display = finish_pipeline
+    let mut final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "image_chain".into(),
             reason: e.to_string(),
         })?;
+    apply_display_safety_shoulder(&mut final_display);
 
     // Quantize display buffer to 16-bit
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
@@ -2398,12 +2480,14 @@ mod tests {
         });
         let p99 = lums[p99_idx];
 
-        // Paper-white is 0.85 with a 2.25 highlight rolloff; keeping p99
-        // below 1.0 in the scene-linear buffer guarantees the shoulder can
-        // absorb the top 1% without reaching clip_white post-tonemap.
+        // Paper-white is 0.85; the tightened HIGHLIGHT_HEADROOM pins p99
+        // at (not past) the tonemap shoulder so `compress_display_highlights`
+        // never engages its asymptote-at-1.0 rolloff on the top 1%. A small
+        // floating-point slack (1e-6) absorbs the percentile sampling's
+        // strided quantisation.
         assert!(
-            p99 < 1.0,
-            "auto-metering failed to cap peak: p99={p99} (should be < 1.0)"
+            p99 <= 0.85 + 1e-6,
+            "auto-metering failed to cap peak: p99={p99} (should be <= 0.85)"
         );
         // The dim background shouldn't be completely crushed — it should
         // remain visible (non-zero) after the guard has pulled highlights
@@ -2411,6 +2495,60 @@ mod tests {
         let bg_lum =
             constants::rec709_luminance(buffer[total - 1].0, buffer[total - 1].1, buffer[total - 1].2);
         assert!(bg_lum > 0.0, "background crushed to zero: {bg_lum}");
+    }
+
+    /// Regression: the safety shoulder must cap every channel strictly
+    /// below the quantize clamp so the hard `.clamp(0.0, 1.0)` in
+    /// [`quantize_display_buffer_to_16bit`] never engages on any channel.
+    #[test]
+    fn safety_shoulder_caps_hot_channels_below_ceiling() {
+        let rolled =
+            compress_display_safety_shoulder([1.4, 1.2, 1.1], SAFETY_SHOULDER_KNEE, SAFETY_SHOULDER_CEILING);
+        for (i, &ch) in rolled.iter().enumerate() {
+            assert!(
+                ch <= SAFETY_SHOULDER_CEILING + 1e-9,
+                "channel {i} = {ch} exceeded ceiling {}",
+                SAFETY_SHOULDER_CEILING
+            );
+        }
+    }
+
+    /// Regression: the safety shoulder must preserve hue when scaling down
+    /// out-of-range pixels. Per-channel hard clamping (the bug) produces
+    /// pure primary-colour splotches; the fix must keep the R:G ratio
+    /// approximately stable on a saturated red pixel.
+    #[test]
+    fn safety_shoulder_preserves_hue_on_saturated_pixels() {
+        let input = [2.0, 0.5, 0.0];
+        let ratio_in = input[0] / input[1];
+        let rolled =
+            compress_display_safety_shoulder(input, SAFETY_SHOULDER_KNEE, SAFETY_SHOULDER_CEILING);
+        assert!(
+            rolled[1] > 1e-6,
+            "green channel crushed to zero, losing hue: {rolled:?}"
+        );
+        let ratio_out = rolled[0] / rolled[1];
+        // Uniform scaling by `ceiling / max_channel` preserves hue exactly;
+        // the only drift is floating-point rounding.
+        let drift = (ratio_out / ratio_in - 1.0).abs();
+        assert!(drift < 1e-6, "hue drift too large: in={ratio_in}, out={ratio_out}");
+    }
+
+    /// Regression: pixels below the knee must pass through the safety
+    /// shoulder untouched, so well-behaved seeds keep their exact look.
+    #[test]
+    fn safety_shoulder_passes_well_behaved_pixels_unchanged() {
+        let input = [0.4, 0.3, 0.2];
+        let rolled =
+            compress_display_safety_shoulder(input, SAFETY_SHOULDER_KNEE, SAFETY_SHOULDER_CEILING);
+        for i in 0..3 {
+            assert!(
+                (rolled[i] - input[i]).abs() < 1e-9,
+                "well-behaved pixel channel {i} shifted: {} -> {}",
+                input[i],
+                rolled[i]
+            );
+        }
     }
 
     /// Regression: on a well-behaved scene (no extreme highlights, modest
