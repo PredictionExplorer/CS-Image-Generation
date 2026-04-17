@@ -8,7 +8,15 @@
 //! This module projects every trajectory sample with a scratch camera, finds
 //! the percentile-trimmed **pixel** extent of the actual ink, then rebuilds
 //! the camera with a shifted target and tighter distance so the visible ink
-//! fills `fill` of the frame. The camera direction and FOV are preserved.
+//! fills `fill` of the frame.
+//!
+//! Before the two-pass zoom refit, the seed camera is **roll-aligned** about
+//! its forward axis so the principal axis of the projected ink matches the
+//! frame's long axis (horizontal for landscape, vertical for portrait). This
+//! converts diagonally elongated trajectories — which would otherwise waste
+//! most of the frame on empty corners — into compositions that actually fill
+//! the constraining axis. The roll is skipped for near-isotropic scenes to
+//! avoid introducing a spurious tilt on symmetric orbits.
 
 use super::camera_path::PerspectiveCamera;
 use super::context::BoundingBox;
@@ -42,12 +50,18 @@ pub fn fit_to_ink_camera(
 
     // Seed camera: fill=1.0 so corners just touch the frame; the projected
     // ink is guaranteed to lie inside the viewport (or close to it).
-    let seed = PerspectiveCamera::orbit_fit(bbox, width, height, 1.0);
+    let mut seed = PerspectiveCamera::orbit_fit(bbox, width, height, 1.0);
 
     let total: usize = positions.iter().map(std::vec::Vec::len).sum();
     if total == 0 {
         return offset_target(seed, focal_offset_world);
     }
+
+    // Roll-align the seed: rotate `up` about `forward` so the projected
+    // ink's principal axis matches the frame's long axis. This eliminates
+    // the diagonal-curve-in-landscape-frame failure mode where a huge chunk
+    // of the frame is wasted on empty corners.
+    apply_principal_axis_roll(&mut seed, positions, width, height);
 
     // Two-pass refinement: perspective is non-linear in `1/distance`, so
     // a single zoom either under-fills (zoom only up) or over-fills
@@ -70,7 +84,7 @@ pub fn fit_to_ink_camera(
         positions,
         width,
         height,
-        fill * 0.97,
+        fill * 0.99,
         ink_pct,
         Vector3::zeros(),
         /* allow_zoom_out = */ true,
@@ -169,6 +183,139 @@ fn offset_target(mut cam: PerspectiveCamera, offset: Vector3<f64>) -> Perspectiv
     cam
 }
 
+/// Project all ink through `cam` and, if the projected point cloud is
+/// meaningfully anisotropic, roll the camera about its forward axis so the
+/// principal axis of the projection aligns with the frame's long axis.
+///
+/// No-op when the ink is near-isotropic (major-variance fraction below
+/// `ANISOTROPY_THRESHOLD`); this avoids introducing a spurious tilt on
+/// symmetric orbits.
+fn apply_principal_axis_roll(
+    cam: &mut PerspectiveCamera,
+    positions: &[Vec<Vector3<f64>>],
+    width: u32,
+    height: u32,
+) {
+    let mut xs: Vec<f64> = Vec::new();
+    let mut ys: Vec<f64> = Vec::new();
+    for body in positions {
+        for &p in body {
+            let (px, py, _) = cam.project(width, height, p);
+            if px.is_finite() && py.is_finite() {
+                xs.push(f64::from(px));
+                ys.push(f64::from(py));
+            }
+        }
+    }
+    if xs.len() < 16 {
+        return;
+    }
+
+    let Some((theta, major_frac)) = principal_angle_rad(&xs, &ys) else {
+        return;
+    };
+
+    /// Minimum fraction of total projected variance captured by the major
+    /// axis to bother rolling. `0.55` means the major axis must hold at
+    /// least 55% of the variance (i.e. clearly elongated, not isotropic).
+    const ANISOTROPY_THRESHOLD: f64 = 0.55;
+    if major_frac < ANISOTROPY_THRESHOLD {
+        return;
+    }
+
+    let target_angle = if width >= height { 0.0 } else { std::f64::consts::FRAC_PI_2 };
+    // Normalize to the shortest equivalent rotation in [-PI/2, PI/2] since
+    // the principal axis is a line, not a direction.
+    let mut roll = target_angle - theta;
+    while roll > std::f64::consts::FRAC_PI_2 {
+        roll -= std::f64::consts::PI;
+    }
+    while roll < -std::f64::consts::FRAC_PI_2 {
+        roll += std::f64::consts::PI;
+    }
+    if roll.abs() < 1e-4 {
+        return;
+    }
+
+    roll_camera(cam, roll);
+}
+
+/// Closed-form 2x2-covariance PCA on centered (`xs`, `ys`).
+///
+/// Returns `Some((theta, major_frac))` where:
+/// * `theta` is the angle (in radians) of the major axis measured from the
+///   image-x axis. Image coordinates have y growing downward, but since we
+///   only use this to align a line — not a direction — the sign flip is
+///   irrelevant.
+/// * `major_frac` is `lambda_major / (lambda_major + lambda_minor)`,
+///   i.e. the fraction of total variance captured by the major eigenvalue
+///   (range `[0.5, 1.0]`; `0.5` = perfectly isotropic, `1.0` = degenerate
+///   line).
+///
+/// Returns `None` if the inputs degenerate (zero variance or NaN).
+fn principal_angle_rad(xs: &[f64], ys: &[f64]) -> Option<(f64, f64)> {
+    debug_assert_eq!(xs.len(), ys.len());
+    let n = xs.len();
+    if n < 2 {
+        return None;
+    }
+    let nf = n as f64;
+    let mean_x: f64 = xs.iter().sum::<f64>() / nf;
+    let mean_y: f64 = ys.iter().sum::<f64>() / nf;
+
+    let mut cxx = 0.0;
+    let mut cyy = 0.0;
+    let mut cxy = 0.0;
+    for i in 0..n {
+        let dx = xs[i] - mean_x;
+        let dy = ys[i] - mean_y;
+        cxx += dx * dx;
+        cyy += dy * dy;
+        cxy += dx * dy;
+    }
+    cxx /= nf;
+    cyy /= nf;
+    cxy /= nf;
+
+    let trace = cxx + cyy;
+    if trace <= 1e-12 || !trace.is_finite() {
+        return None;
+    }
+
+    // 2x2 symmetric eigenvalues:
+    //   lambda_{1,2} = (cxx+cyy)/2  +/-  sqrt(((cxx-cyy)/2)^2 + cxy^2)
+    let half_sum = 0.5 * trace;
+    let half_diff = 0.5 * (cxx - cyy);
+    let radius = (half_diff * half_diff + cxy * cxy).sqrt();
+    let lambda_major = half_sum + radius;
+    let lambda_minor = (half_sum - radius).max(0.0);
+    let denom = lambda_major + lambda_minor;
+    if denom <= 1e-12 {
+        return None;
+    }
+    let major_frac = lambda_major / denom;
+
+    // Principal-axis angle: major eigenvector direction.
+    // For a 2x2 symmetric covariance, the angle is 0.5 * atan2(2*cxy, cxx - cyy).
+    let theta = 0.5 * (2.0 * cxy).atan2(cxx - cyy);
+    Some((theta, major_frac))
+}
+
+/// Rotate the camera's `up` vector by `roll_rad` radians about its forward
+/// axis, then rebuild the cached orthonormal basis.
+///
+/// Positive `roll_rad` rotates the image such that the horizontal axis
+/// picks up content from the original `+roll_rad` direction in image space.
+fn roll_camera(cam: &mut PerspectiveCamera, roll_rad: f64) {
+    let (s, c) = roll_rad.sin_cos();
+    // Rotate about `forward`: new_up = cos * cam_up + sin * (forward x cam_up).
+    // With `right = forward x up` (same sign convention as `build_frame`),
+    // `forward x cam_up = -right`, so new_up = cos*cam_up - sin*right.
+    let new_up = cam.cam_up * c - cam.right * s;
+    cam.up = new_up;
+    cam.build_frame();
+}
+
 fn axis_percentile_f64(values: &mut [f64], pct_low: f64) -> (f64, f64) {
     if values.is_empty() {
         return (0.0, 0.0);
@@ -255,11 +402,13 @@ mod tests {
         // bound just checks the ink expands to a respectable fraction of
         // the frame (much better than `orbit_fit`'s bbox-corners
         // envelope) rather than matching `fill` exactly on every axis.
+        // The upper bound allows ~5% extra because refit targets the
+        // 98% envelope, so the remaining 1% tail can extend past `fill`.
         assert!(max_axis >= 0.65, "fit_to_ink underfills: max_ndc={max_axis}, expected >= 0.65");
         assert!(
-            max_axis <= fill as f32 + 0.08,
+            max_axis <= fill as f32 + 0.10,
             "fit_to_ink overfills: max_ndc={max_axis}, expected <= {}",
-            fill + 0.08
+            fill + 0.10
         );
     }
 
@@ -280,5 +429,114 @@ mod tests {
         let cam_no_off =
             fit_to_ink_camera(&positions, &bbox, 1920, 1080, 0.95, 0.98, Vector3::zeros());
         assert!((cam_off.target - cam_no_off.target).norm() > 1e-6);
+    }
+
+    #[test]
+    fn principal_angle_detects_45_deg_line() {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for i in 0..200 {
+            let t = (f64::from(i) - 100.0) / 100.0 * 5.0;
+            xs.push(t);
+            ys.push(t);
+        }
+        let (theta, frac) = super::principal_angle_rad(&xs, &ys).expect("nondegenerate");
+        assert!(
+            (theta - std::f64::consts::FRAC_PI_4).abs() < 1e-6,
+            "expected PI/4, got {theta}"
+        );
+        assert!(frac > 0.95, "expected near-degenerate major_frac, got {frac}");
+    }
+
+    #[test]
+    fn principal_angle_isotropic_returns_near_half() {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for i in 0..2000 {
+            let a = std::f64::consts::TAU * f64::from(i) / 2000.0;
+            xs.push(a.cos());
+            ys.push(a.sin());
+        }
+        let (_, frac) = super::principal_angle_rad(&xs, &ys).expect("nondegenerate");
+        assert!((frac - 0.5).abs() < 0.05, "expected near-isotropic major_frac, got {frac}");
+    }
+
+    #[test]
+    fn roll_camera_rotates_basis_by_90_degrees() {
+        let bbox = test_bbox();
+        let mut cam = PerspectiveCamera::orbit_fit(&bbox, 1920, 1080, 0.95);
+        let orig_right = cam.right;
+        let orig_cam_up = cam.cam_up;
+        super::roll_camera(&mut cam, std::f64::consts::FRAC_PI_2);
+        // After +PI/2 roll about forward: new right = orig cam_up,
+        //                                 new cam_up = -orig right.
+        assert!(
+            (cam.right - orig_cam_up).norm() < 1e-9,
+            "right mismatch: {:?} vs {:?}",
+            cam.right,
+            orig_cam_up
+        );
+        assert!(
+            (cam.cam_up - (-orig_right)).norm() < 1e-9,
+            "cam_up mismatch: {:?} vs {:?}",
+            cam.cam_up,
+            -orig_right
+        );
+    }
+
+    #[test]
+    fn fit_to_ink_rolls_elongated_ink_to_horizontal() {
+        // A thin line in world space aligned with world-Z. The seed camera's
+        // `up` is world-Z, so the seed projection is a near-vertical line.
+        // After fit-to-ink (which includes roll-align), the projected line
+        // must land along the horizontal axis for a 16:9 frame.
+        let bbox = BoundingBox {
+            min_x: -0.1,
+            max_x: 0.1,
+            min_y: -0.1,
+            max_y: 0.1,
+            min_z: -3.0,
+            max_z: 3.0,
+            width: 0.2,
+            height: 0.2,
+            depth: 6.0,
+        };
+        let mut body = Vec::new();
+        for i in 0..500 {
+            let t = (f64::from(i) / 499.0 - 0.5) * 6.0;
+            // Tiny jitter so the minor variance is nonzero (avoids degenerate
+            // edge cases in the projection).
+            let e = 0.01 * f64::from(i).sin();
+            body.push(Vector3::new(e, e, t));
+        }
+        let positions = vec![body];
+        let (w, h) = (1920u32, 1080u32);
+
+        let cam = fit_to_ink_camera(&positions, &bbox, w, h, 0.95, 0.98, Vector3::zeros());
+
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for b in &positions {
+            for &p in b {
+                let (px, py, _) = cam.project(w, h, p);
+                xs.push(f64::from(px));
+                ys.push(f64::from(py));
+            }
+        }
+        let nf = xs.len() as f64;
+        let mx: f64 = xs.iter().sum::<f64>() / nf;
+        let my: f64 = ys.iter().sum::<f64>() / nf;
+        let mut cxx = 0.0;
+        let mut cyy = 0.0;
+        for i in 0..xs.len() {
+            let dx = xs[i] - mx;
+            let dy = ys[i] - my;
+            cxx += dx * dx;
+            cyy += dy * dy;
+        }
+        cxx /= nf;
+        cyy /= nf;
+
+        assert!(cxx > 3.0 * cyy, "ink not rolled to horizontal: cxx={cxx}, cyy={cyy}");
     }
 }

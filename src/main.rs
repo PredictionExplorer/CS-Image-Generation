@@ -113,6 +113,23 @@ impl MoodArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum ComposeArg {
+    /// Subject is framed dead-center. Maximizes fill on the constraining axis.
+    Center,
+    /// Subject is shifted to a rule-of-thirds intersection (legacy behaviour).
+    Thirds,
+}
+
+impl ComposeArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Center => "center",
+            Self::Thirds => "thirds",
+        }
+    }
+}
+
 fn parse_fill(s: &str) -> std::result::Result<f64, String> {
     let v: f64 = s.parse().map_err(|_| "fill must be a number".to_string())?;
     if !(0.50..=0.98).contains(&v) {
@@ -196,14 +213,19 @@ struct Args {
     framing: FramingArg,
 
     /// Target fraction of the frame the trajectory should occupy under `--framing auto`.
-    /// Range `0.50..=0.98`; default `0.90` gives a 5% breathing margin per edge.
-    #[arg(long, default_value_t = 0.90, value_parser = parse_fill)]
+    /// Range `0.50..=0.98`; default `0.95` gives a 2.5% breathing margin per edge.
+    #[arg(long, default_value_t = 0.95, value_parser = parse_fill)]
     fill: f64,
 
     /// Mood preset used to curate post-processing: one of `auto`, `cinematic`,
     /// `cosmic`, `painterly`. `auto` samples a mood from the seed RNG.
     #[arg(long, value_enum, default_value_t = MoodArg::Auto)]
     mood: MoodArg,
+
+    /// Composition: `center` (default, maximizes fill) or `thirds`
+    /// (rule-of-thirds offset — subject deliberately off-center).
+    #[arg(long, value_enum, default_value_t = ComposeArg::Center)]
+    compose: ComposeArg,
 }
 
 /// Generate hero still / EXR / crops / contact sheet after the main pass.
@@ -497,7 +519,8 @@ fn main() -> Result<()> {
 
     // Compute a rule-of-thirds focal offset before building the render
     // context so the perspective camera is built with the offset in place.
-    {
+    // Opt-in via `--compose thirds`; the default is `center` for tighter fill.
+    if matches!(args.compose, ComposeArg::Thirds) {
         let probe_bbox = render::context::BoundingBox::from_positions_percentile(&positions, 0.98);
         let offset = render::composition::rule_of_thirds_offset(&probe_bbox, &mut rng);
         render::context::set_focal_offset(offset);
@@ -506,9 +529,10 @@ fn main() -> Result<()> {
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
     info!(
-        "   => Framing: {} (fill={:.2}, aspect-correction={})",
+        "   => Framing: {} (fill={:.2}, compose={}, aspect-correction={})",
         args.framing.as_str(),
         args.fill,
+        args.compose.as_str(),
         enhancements.aspect_correction
     );
     let render_ctx = render::context::RenderContext::new(
