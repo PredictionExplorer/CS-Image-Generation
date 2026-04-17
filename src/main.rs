@@ -662,7 +662,7 @@ mod tests {
         assert!(args.chaos_weight.is_none());
         assert!(args.equil_weight.is_none());
         assert_eq!(args.framing, FramingArg::Auto);
-        assert!((args.fill - 0.90).abs() < 1e-9);
+        assert!((args.fill - 0.95).abs() < 1e-9);
         assert_eq!(args.mood, MoodArg::Auto);
     }
 

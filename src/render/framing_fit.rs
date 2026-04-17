@@ -10,13 +10,21 @@
 //! the camera with a shifted target and tighter distance so the visible ink
 //! fills `fill` of the frame.
 //!
-//! Before the two-pass zoom refit, the seed camera is **roll-aligned** about
+//! Before the iterated zoom refit, the seed camera is **roll-aligned** about
 //! its forward axis so the principal axis of the projected ink matches the
 //! frame's long axis (horizontal for landscape, vertical for portrait). This
 //! converts diagonally elongated trajectories — which would otherwise waste
 //! most of the frame on empty corners — into compositions that actually fill
 //! the constraining axis. The roll is skipped for near-isotropic scenes to
 //! avoid introducing a spurious tilt on symmetric orbits.
+//!
+//! The refit itself is **iterated to convergence** (up to five passes) rather
+//! than a fixed two-pass overshoot correction, because perspective is
+//! non-linear in `1/distance` and high-drift orbits embedded in an inflated
+//! bounding box can require several corrective passes before the projected
+//! ink fills the configured fraction. A final recentre-only pass locks the
+//! subject to dead-centre regardless of any parallax introduced by the last
+//! zoom step.
 
 use super::camera_path::PerspectiveCamera;
 use super::context::BoundingBox;
@@ -63,13 +71,9 @@ pub fn fit_to_ink_camera(
     // of the frame is wasted on empty corners.
     apply_principal_axis_roll(&mut seed, positions, width, height);
 
-    // Two-pass refinement: perspective is non-linear in `1/distance`, so
-    // a single zoom either under-fills (zoom only up) or over-fills
-    // (zoom amplified by the non-linearity). The first pass gets us
-    // close; the second pass is allowed to **zoom out** as well as in
-    // to correct the overshoot, and uses a small headroom factor so the
-    // ink never clips the frame edge.
-    let pass1 = refit_once(
+    // Pass 1 is zoom-in-only to protect already-tight seeds from regressing,
+    // and it carries the rule-of-thirds focal offset into the target.
+    let mut cam = refit_once(
         &seed,
         positions,
         width,
@@ -79,31 +83,95 @@ pub fn fit_to_ink_camera(
         focal_offset_world,
         /* allow_zoom_out = */ false,
     );
-    refit_once(
-        &pass1,
-        positions,
-        width,
-        height,
-        fill * 0.99,
-        ink_pct,
-        Vector3::zeros(),
-        /* allow_zoom_out = */ true,
-    )
+
+    // Iterate to convergence. Perspective is non-linear in `1/distance`, so
+    // a single overshoot correction isn't always enough — a drift-inflated
+    // bbox can leave the projected ink a small fraction of the seed viewport
+    // after pass 1, and the subsequent passes need to be allowed to zoom
+    // out (via `fill * 0.99` headroom) to settle without clipping the frame
+    // edge. Five total passes converge reliably on the seeds we've seen.
+    let w = f64::from(width);
+    let h = f64::from(height);
+    for _ in 0..MAX_REFIT_ITERS {
+        let Some(extent) = measure_ink_pixel_extent(&cam, positions, width, height, ink_pct)
+        else {
+            break;
+        };
+        let fill_actual = (extent.width() / w).max(extent.height() / h);
+        if (fill_actual - fill).abs() <= FILL_CONVERGENCE_TOL {
+            break;
+        }
+        cam = refit_once(
+            &cam,
+            positions,
+            width,
+            height,
+            fill * 0.99,
+            ink_pct,
+            Vector3::zeros(),
+            /* allow_zoom_out = */ true,
+        );
+    }
+
+    // Final recentre-only pass: lock the subject to dead-centre without
+    // touching zoom. Perspective parallax from the last zoom step can leave
+    // the projected centre a few pixels off-axis; this pass absorbs that
+    // residual without destabilising the just-converged fill.
+    if let Some(extent) = measure_ink_pixel_extent(&cam, positions, width, height, ink_pct) {
+        cam = recenter_only(&cam, &extent, width, height);
+    }
+
+    cam
 }
 
-fn refit_once(
+/// Maximum additional refit passes after the zoom-in-only first pass.
+/// Empirically, three or four are enough; five is a safety margin.
+const MAX_REFIT_ITERS: usize = 4;
+
+/// Stop iterating once the constraining-axis fill is within this tolerance
+/// of the target. 1.5% = a ~15-pixel envelope on a 1080-pixel axis, which is
+/// below visual perception for composition and well under the motion-blur
+/// footprint.
+const FILL_CONVERGENCE_TOL: f64 = 0.015;
+
+/// Percentile-trimmed pixel-space extent of the projected ink.
+#[derive(Clone, Copy, Debug)]
+struct InkExtent {
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+}
+
+impl InkExtent {
+    #[inline]
+    fn width(&self) -> f64 {
+        (self.max_x - self.min_x).max(1.0)
+    }
+    #[inline]
+    fn height(&self) -> f64 {
+        (self.max_y - self.min_y).max(1.0)
+    }
+    #[inline]
+    fn center_x(&self) -> f64 {
+        0.5 * (self.min_x + self.max_x)
+    }
+    #[inline]
+    fn center_y(&self) -> f64 {
+        0.5 * (self.min_y + self.max_y)
+    }
+}
+
+/// Project every trajectory sample through `camera` and return the
+/// percentile-trimmed pixel bounding box of the result. Returns `None` when
+/// no finite projections exist (empty positions or degenerate camera).
+fn measure_ink_pixel_extent(
     camera: &PerspectiveCamera,
     positions: &[Vec<Vector3<f64>>],
     width: u32,
     height: u32,
-    fill: f64,
     ink_pct: f64,
-    focal_offset_world: Vector3<f64>,
-    allow_zoom_out: bool,
-) -> PerspectiveCamera {
-    let w = f64::from(width);
-    let h = f64::from(height);
-
+) -> Option<InkExtent> {
     let total: usize = positions.iter().map(std::vec::Vec::len).sum();
     let mut xs: Vec<f64> = Vec::with_capacity(total);
     let mut ys: Vec<f64> = Vec::with_capacity(total);
@@ -117,17 +185,36 @@ fn refit_once(
         }
     }
     if xs.is_empty() {
-        return offset_target(camera.clone(), focal_offset_world);
+        return None;
     }
 
     let pct_low = 0.5 * (1.0 - ink_pct);
-    let (min_px, max_px) = axis_percentile_f64(&mut xs, pct_low);
-    let (min_py, max_py) = axis_percentile_f64(&mut ys, pct_low);
+    let (min_x, max_x) = axis_percentile_f64(&mut xs, pct_low);
+    let (min_y, max_y) = axis_percentile_f64(&mut ys, pct_low);
+    Some(InkExtent { min_x, max_x, min_y, max_y })
+}
 
-    let ink_w_px = (max_px - min_px).max(1.0);
-    let ink_h_px = (max_py - min_py).max(1.0);
-    let ink_cx = 0.5 * (min_px + max_px);
-    let ink_cy = 0.5 * (min_py + max_py);
+fn refit_once(
+    camera: &PerspectiveCamera,
+    positions: &[Vec<Vector3<f64>>],
+    width: u32,
+    height: u32,
+    fill: f64,
+    ink_pct: f64,
+    focal_offset_world: Vector3<f64>,
+    allow_zoom_out: bool,
+) -> PerspectiveCamera {
+    let Some(extent) = measure_ink_pixel_extent(camera, positions, width, height, ink_pct) else {
+        return offset_target(camera.clone(), focal_offset_world);
+    };
+
+    let w = f64::from(width);
+    let h = f64::from(height);
+
+    let ink_w_px = extent.width();
+    let ink_h_px = extent.height();
+    let ink_cx = extent.center_x();
+    let ink_cy = extent.center_y();
 
     let zoom_x = (fill * w) / ink_w_px;
     let zoom_y = (fill * h) / ink_h_px;
@@ -138,9 +225,11 @@ fn refit_once(
     if !allow_zoom_out && zoom < 1.0 {
         zoom = 1.0;
     }
-    // Soft clamps to avoid pathological behaviour on degenerate
-    // trajectories (single-point orbits, NaNs, etc.).
-    zoom = zoom.clamp(0.2, 12.0);
+    // Upper bound of 64x lets the iteration close the gap when the seed
+    // viewport is drift-inflated and the projected ink is a small fraction
+    // of it. The lower bound stays at 0.2 for stability on degenerate inputs
+    // (single-point orbits, NaNs, etc.).
+    zoom = zoom.clamp(0.2, 64.0);
 
     let world_per_pixel_y = camera.focus_distance * (camera.fov_y * 0.5).tan() * 2.0 / h.max(1.0);
     let world_per_pixel_x = world_per_pixel_y;
@@ -163,6 +252,53 @@ fn refit_once(
         fov_y: camera.fov_y,
         aspect: camera.aspect,
         focus_distance: new_distance,
+        coc_max_px: camera.coc_max_px,
+        right: Vector3::zeros(),
+        cam_up: Vector3::zeros(),
+        forward: Vector3::zeros(),
+    };
+    cam.build_frame();
+    cam
+}
+
+/// Translate the camera target so the projected ink lands dead-centre,
+/// preserving the current zoom / focus distance. Used as a final pass after
+/// the iterated refit so any perspective-parallax drift introduced by the
+/// last zoom step doesn't leave the subject visibly off-axis.
+fn recenter_only(
+    camera: &PerspectiveCamera,
+    extent: &InkExtent,
+    width: u32,
+    height: u32,
+) -> PerspectiveCamera {
+    let w = f64::from(width);
+    let h = f64::from(height);
+
+    let dx_px = extent.center_x() - 0.5 * w;
+    let dy_px = extent.center_y() - 0.5 * h;
+
+    // Already centred within sub-pixel tolerance — skip the rebuild.
+    if dx_px.abs() < 0.5 && dy_px.abs() < 0.5 {
+        return camera.clone();
+    }
+
+    let world_per_pixel_y = camera.focus_distance * (camera.fov_y * 0.5).tan() * 2.0 / h.max(1.0);
+    let world_per_pixel_x = world_per_pixel_y;
+
+    let target_offset =
+        camera.right * (dx_px * world_per_pixel_x) + camera.cam_up * (-dy_px * world_per_pixel_y);
+
+    let new_target = camera.target + target_offset;
+    let dir = (camera.target - camera.eye).normalize();
+    let new_eye = new_target - dir * camera.focus_distance;
+
+    let mut cam = PerspectiveCamera {
+        eye: new_eye,
+        target: new_target,
+        up: camera.up,
+        fov_y: camera.fov_y,
+        aspect: camera.aspect,
+        focus_distance: camera.focus_distance,
         coc_max_px: camera.coc_max_px,
         right: Vector3::zeros(),
         cam_up: Vector3::zeros(),
@@ -538,5 +674,131 @@ mod tests {
         cyy /= nf;
 
         assert!(cxx > 3.0 * cyy, "ink not rolled to horizontal: cxx={cxx}, cyy={cyy}");
+    }
+
+    /// Project all positions through `cam` and return the maximum absolute
+    /// NDC value on each axis (`|2*px/w - 1|` and `|2*py/h - 1|`).
+    fn max_ndc(
+        cam: &PerspectiveCamera,
+        positions: &[Vec<Vector3<f64>>],
+        w: u32,
+        h: u32,
+    ) -> (f32, f32) {
+        let mut max_ndc_x = 0.0f32;
+        let mut max_ndc_y = 0.0f32;
+        for body in positions {
+            for &p in body {
+                let (px, py, _) = cam.project(w, h, p);
+                let nx = (px / w as f32 - 0.5).abs() * 2.0;
+                let ny = (py / h as f32 - 0.5).abs() * 2.0;
+                max_ndc_x = max_ndc_x.max(nx);
+                max_ndc_y = max_ndc_y.max(ny);
+            }
+        }
+        (max_ndc_x, max_ndc_y)
+    }
+
+    /// Regression: when drift inflates the seeding bbox so the actual ink
+    /// occupies only ~1/6th of the seed viewport, the iterated refit must
+    /// still fill the constraining axis to within a small tolerance of the
+    /// configured `fill`. The legacy two-pass implementation left ~35% fill
+    /// for seeds like `0xb6dbcf780360` (drift.scale = 1.87).
+    #[test]
+    fn fit_to_ink_fills_when_drift_inflates_bbox() {
+        // Thin orbit of radius 1.5 (diameter 3) embedded in a bbox 3x larger
+        // per axis, simulating a drift-inflated percentile bbox.
+        let bbox = BoundingBox {
+            min_x: -9.0,
+            max_x: 9.0,
+            min_y: -9.0,
+            max_y: 9.0,
+            min_z: -9.0,
+            max_z: 9.0,
+            width: 18.0,
+            height: 18.0,
+            depth: 18.0,
+        };
+        let positions = thin_orbit();
+        let (w, h) = (1920u32, 1080u32);
+        let fill = 0.95;
+
+        let cam = fit_to_ink_camera(&positions, &bbox, w, h, fill, 0.98, Vector3::zeros());
+        let (mx, my) = max_ndc(&cam, &positions, w, h);
+        let constraining = mx.max(my);
+
+        assert!(
+            constraining >= 0.90,
+            "drift-inflated bbox underfilled: max_ndc=({mx},{my}), expected constraining >= 0.90"
+        );
+        assert!(
+            constraining <= fill as f32 + 0.06,
+            "drift-inflated bbox overshot: max_ndc=({mx},{my}), expected <= {}",
+            fill + 0.06
+        );
+    }
+
+    /// Regression: the legacy `zoom.clamp(0.2, 12.0)` upper bound could bind
+    /// when the seeding bbox was an extreme multiple of the projected ink,
+    /// leaving a single pass far short of the target fill. The new 64x clamp
+    /// combined with convergence iteration must close this gap even at a
+    /// 30x ratio.
+    #[test]
+    fn fit_to_ink_iterates_past_zoom_clamp_regression() {
+        let bbox = BoundingBox {
+            min_x: -45.0,
+            max_x: 45.0,
+            min_y: -45.0,
+            max_y: 45.0,
+            min_z: -45.0,
+            max_z: 45.0,
+            width: 90.0,
+            height: 90.0,
+            depth: 90.0,
+        };
+        let positions = thin_orbit();
+        let (w, h) = (1920u32, 1080u32);
+        let fill = 0.95;
+
+        let cam = fit_to_ink_camera(&positions, &bbox, w, h, fill, 0.98, Vector3::zeros());
+        let (mx, my) = max_ndc(&cam, &positions, w, h);
+        let constraining = mx.max(my);
+
+        assert!(
+            constraining >= 0.85,
+            "30x bbox underfilled: max_ndc=({mx},{my}), expected constraining >= 0.85"
+        );
+    }
+
+    /// Regression: after the iterated refit + final recenter, the projected
+    /// ink centroid must land within a small fraction of the frame centre,
+    /// even when the seeding bbox is drift-inflated.
+    #[test]
+    fn fit_to_ink_centers_subject_after_refit() {
+        let bbox = BoundingBox {
+            min_x: -9.0,
+            max_x: 9.0,
+            min_y: -9.0,
+            max_y: 9.0,
+            min_z: -9.0,
+            max_z: 9.0,
+            width: 18.0,
+            height: 18.0,
+            depth: 18.0,
+        };
+        let positions = thin_orbit();
+        let (w, h) = (1920u32, 1080u32);
+
+        let cam = fit_to_ink_camera(&positions, &bbox, w, h, 0.95, 0.98, Vector3::zeros());
+        let extent =
+            measure_ink_pixel_extent(&cam, &positions, w, h, 0.98).expect("positions non-empty");
+        let cx_err = (extent.center_x() / f64::from(w) - 0.5).abs();
+        let cy_err = (extent.center_y() / f64::from(h) - 0.5).abs();
+
+        // Within 2% of frame centre on both axes after the final recentre
+        // pass. 2% is below visual perception (~20 px on a 1080 axis) and
+        // accounts for the linear-approximation error in the single-pass
+        // recentre on perspective-projected ink.
+        assert!(cx_err < 0.02, "x centring error too large: {cx_err}");
+        assert!(cy_err < 0.02, "y centring error too large: {cy_err}");
     }
 }

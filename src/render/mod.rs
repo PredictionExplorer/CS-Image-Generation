@@ -710,21 +710,68 @@ pub fn build_effect_config_from_resolved(
 }
 
 /// Gentle scene-linear exposure normalization before temporal blend / tonemap.
+///
+/// Two guards stack to shape the exposure:
+/// 1. A **mean-luminance** normalization pushes the alpha-weighted average
+///    toward `target = 0.14`, clamped to `[0.25, 6.0]` so single-frame
+///    exposure swings stay bounded.
+/// 2. A **99th-percentile highlight headroom** cap ensures the auto gain
+///    never scales the bright tail past `HIGHLIGHT_HEADROOM` — this matters
+///    when many additive effects stack (bloom pyramid, anamorphic flare,
+///    god rays, rim light, diffraction spikes, chromatic bloom), because
+///    mean-normalisation alone can still leave peaks deep in the
+///    `clip_white` saturation zone, turning a compact bright subject into
+///    a pure-white blob.
 fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
+    /// Target alpha-weighted mean luminance (middle grey).
+    const TARGET_MEAN: f64 = 0.14;
+    /// 99th-percentile luminance ceiling after auto gain. Chosen to sit
+    /// below `compress_display_highlights`'s `paper_white` (0.85) with
+    /// enough margin that the soft rolloff can handle the top 1% without
+    /// reaching `clip_white` in the post-tonemap buffer.
+    const HIGHLIGHT_HEADROOM: f64 = 0.92;
+    /// Stride used for percentile sampling. Sampling every Nth inked
+    /// pixel keeps this routine O(n/stride) while leaving enough data
+    /// (~100k points on a 1920x1080 frame) for a stable p99 estimate.
+    const PERCENTILE_STRIDE: usize = 20;
+
     let mut sum = 0.0f64;
     let mut w = 0.0f64;
-    for &(r, g, b, a) in buffer.iter() {
+    // Alpha-normalised luminance samples used for the highlight percentile.
+    let mut samples: Vec<f64> = Vec::with_capacity(buffer.len() / PERCENTILE_STRIDE + 1);
+    for (i, &(r, g, b, a)) in buffer.iter().enumerate() {
         if a > 1e-9 {
             let lr = r / a;
             let lg = g / a;
             let lb = b / a;
-            sum += constants::rec709_luminance(lr, lg, lb) * a;
+            let lum = constants::rec709_luminance(lr, lg, lb);
+            sum += lum * a;
             w += a;
+            if i % PERCENTILE_STRIDE == 0 && lum.is_finite() {
+                samples.push(lum);
+            }
         }
     }
-    let mean = if w > 0.0 { sum / w } else { 0.14 };
-    let target = 0.14;
-    let auto = (target / mean.max(1e-6)).clamp(0.25, 6.0);
+    let mean = if w > 0.0 { sum / w } else { TARGET_MEAN };
+    let mut auto = (TARGET_MEAN / mean.max(1e-6)).clamp(0.25, 6.0);
+
+    // Highlight headroom: cap `auto` so the post-gain 99th-percentile
+    // luminance does not exceed `HIGHLIGHT_HEADROOM`. The cap is only
+    // applied when the percentile is well-defined and the resulting gain
+    // would actually tighten (not loosen) the auto term.
+    if !samples.is_empty() {
+        let p99_idx = ((samples.len() as f64) * 0.99).floor() as usize;
+        let p99_idx = p99_idx.min(samples.len() - 1);
+        samples.select_nth_unstable_by(p99_idx, |a, b| {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let p99 = samples[p99_idx].max(1e-6);
+        let highlight_cap = HIGHLIGHT_HEADROOM / p99;
+        if highlight_cap < auto {
+            auto = highlight_cap;
+        }
+    }
+
     let g = auto * pipeline_flags::scene_exposure_scale();
     for p in buffer.iter_mut() {
         p.0 *= g;
@@ -2312,6 +2359,77 @@ mod tests {
         assert!(
             r_high <= r_low,
             "higher softness stack should produce equal or smaller radius: {r_high} vs {r_low}",
+        );
+    }
+
+    /// Regression: when a compact, very bright subject is embedded in a
+    /// mostly-dark frame (the stacked-Cinematic-bloom failure mode that
+    /// produced the pure-white blob on seed `0xb6dbcf780360`), the mean
+    /// luminance alone is not enough to defend the highlights. The 99th
+    /// percentile headroom cap in `apply_auto_scene_metering` must pull
+    /// the bright tail back below the tonemap's paper-white ceiling.
+    #[test]
+    fn auto_metering_caps_peak_below_clip() {
+        // 1920x1080 buffer: 99.5% dim background + 0.5% ultra-bright cluster.
+        // All pixels carry alpha=1 so both tiers contribute to the mean and
+        // to the percentile sampling.
+        let w = 1920usize;
+        let h = 1080usize;
+        let total = w * h;
+        let mut buffer: PixelBuffer = vec![(0.05, 0.05, 0.05, 1.0); total];
+        let hot_count = total / 200; // 0.5%
+        let hot = (12.0, 12.0, 12.0, 1.0); // scene-linear 12x display-white
+        for pixel in buffer.iter_mut().take(hot_count) {
+            *pixel = hot;
+        }
+
+        apply_auto_scene_metering(&mut buffer);
+
+        // Find the post-metering 99th-percentile luminance.
+        let mut lums: Vec<f64> = buffer
+            .iter()
+            .filter(|(_, _, _, a)| *a > 1e-9)
+            .map(|&(r, g, b, a)| constants::rec709_luminance(r / a, g / a, b / a))
+            .collect();
+        let p99_idx = ((lums.len() as f64) * 0.99).floor() as usize;
+        let p99_idx = p99_idx.min(lums.len() - 1);
+        lums.select_nth_unstable_by(p99_idx, |a, b| {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let p99 = lums[p99_idx];
+
+        // Paper-white is 0.85 with a 2.25 highlight rolloff; keeping p99
+        // below 1.0 in the scene-linear buffer guarantees the shoulder can
+        // absorb the top 1% without reaching clip_white post-tonemap.
+        assert!(
+            p99 < 1.0,
+            "auto-metering failed to cap peak: p99={p99} (should be < 1.0)"
+        );
+        // The dim background shouldn't be completely crushed — it should
+        // remain visible (non-zero) after the guard has pulled highlights
+        // down.
+        let bg_lum =
+            constants::rec709_luminance(buffer[total - 1].0, buffer[total - 1].1, buffer[total - 1].2);
+        assert!(bg_lum > 0.0, "background crushed to zero: {bg_lum}");
+    }
+
+    /// Regression: on a well-behaved scene (no extreme highlights, modest
+    /// mean), the headroom guard must NOT tighten `auto` — otherwise we'd
+    /// darken already-good seeds. Verify that a flat, middle-grey-ish
+    /// buffer comes back approximately unchanged.
+    #[test]
+    fn auto_metering_leaves_balanced_scene_alone() {
+        let total = 1920 * 1080;
+        // Flat alpha-weighted luminance around the target of 0.14.
+        let mut buffer: PixelBuffer = vec![(0.14, 0.14, 0.14, 1.0); total];
+        apply_auto_scene_metering(&mut buffer);
+
+        // Mean was already at target, and p99 equals the mean, so neither
+        // guard should move pixels measurably.
+        let lum = constants::rec709_luminance(buffer[0].0, buffer[0].1, buffer[0].2);
+        assert!(
+            (lum - 0.14).abs() < 0.02,
+            "balanced scene unexpectedly shifted: post-gain lum={lum}"
         );
     }
 }
