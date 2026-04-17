@@ -4,11 +4,19 @@ use nalgebra::Vector3;
 
 /// Catmull–Rom sample on uniform knots `p0,p1,p2,p3` at `t ∈ [0,1]` between `p1` and `p2`.
 #[must_use]
-pub fn catmull_rom(p0: Vector3<f64>, p1: Vector3<f64>, p2: Vector3<f64>, p3: Vector3<f64>, t: f64) -> Vector3<f64> {
+pub fn catmull_rom(
+    p0: Vector3<f64>,
+    p1: Vector3<f64>,
+    p2: Vector3<f64>,
+    p3: Vector3<f64>,
+    t: f64,
+) -> Vector3<f64> {
     let t = t.clamp(0.0, 1.0);
     let t2 = t * t;
     let t3 = t2 * t;
-    0.5 * (2.0 * p1 + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+    0.5 * (2.0 * p1
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
         + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
 }
 
@@ -91,4 +99,3 @@ mod tests {
         assert!((mid - v(0.5, 0.0, 0.0)).norm() < 1e-6);
     }
 }
-

@@ -84,22 +84,37 @@ impl PerspectiveCamera {
     /// of aspect ratio.
     #[must_use]
     pub fn orbit_fit(bbox: &BoundingBox, width: u32, height: u32, fill: f64) -> Self {
+        Self::orbit_fit_with_offset(bbox, width, height, fill, Vector3::zeros())
+    }
+
+    /// Same as [`orbit_fit`] but applies a world-space shift to the camera
+    /// target before solving for the distance. The shift is used to place
+    /// the subject on a rule-of-thirds intersection instead of dead center.
+    #[must_use]
+    pub fn orbit_fit_with_offset(
+        bbox: &BoundingBox,
+        width: u32,
+        height: u32,
+        fill: f64,
+        focal_offset: Vector3<f64>,
+    ) -> Self {
         let fill_clamped = fill.clamp(0.2, 0.98);
         let aspect = f64::from(width) / f64::from(height).max(1.0);
 
         let cx = f64::midpoint(bbox.min_x, bbox.max_x);
         let cy = f64::midpoint(bbox.min_y, bbox.max_y);
         let cz = f64::midpoint(bbox.min_z, bbox.max_z);
-        let target = Vector3::new(cx, cy, cz);
+        let target = Vector3::new(cx, cy, cz) + focal_offset;
         let up = Vector3::new(0.0, 0.0, 1.0);
 
         let fov_y = 45_f64.to_radians();
         let tan_half_y = (fov_y * 0.5).tan();
 
-        // Viewing direction: slightly off-axis to give 3D parallax without
-        // pushing bodies off-screen. Keep the same general direction as the
-        // legacy camera but shorter so we can back out along it.
-        let dir = Vector3::new(0.15, -1.8, 1.2).normalize();
+        // Viewing direction: mildly off-axis for subtle 3D parallax without
+        // wasting slivers of screen space on a highly oblique composition.
+        // The earlier direction `(0.15, -1.8, 1.2)` left large empty corners
+        // because the apparent bbox was stretched diagonally on screen.
+        let dir = Vector3::new(0.08, -1.6, 0.55).normalize();
 
         // Seed distance from the span so corner projections are well-defined.
         let span = bbox.width.max(bbox.height).max(bbox.depth).max(1e-6);
@@ -151,7 +166,13 @@ impl PerspectiveCamera {
         cam
     }
 
-    fn build_frame(&mut self) {
+    /// Recompute the cached orthonormal camera basis (`forward`, `right`,
+    /// `cam_up`) from the current `eye`, `target`, and `up`.
+    ///
+    /// Called automatically by the `orbit_*` constructors; only callers
+    /// who mutate `eye`/`target`/`up` directly (fit-to-ink framing)
+    /// need to invoke it manually.
+    pub fn build_frame(&mut self) {
         self.forward = (self.target - self.eye).normalize();
         self.right = self.forward.cross(&self.up).normalize();
         self.cam_up = self.right.cross(&self.forward).normalize();

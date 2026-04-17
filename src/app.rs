@@ -152,7 +152,8 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
 }
 
-/// Derive noise seed from simulation seed for nebula generation
+/// Derive a per-seed noise seed (used by the procedural star field,
+/// palette harmony, and texture passes).
 #[must_use]
 pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
     let get_or_zero = |idx| seed_bytes.get(idx).copied().unwrap_or(0);
@@ -613,19 +614,12 @@ mod tests {
             enable_edge_luminance: Some(false),
             enable_atmospheric_depth: Some(false),
             enable_fine_texture: Some(false),
-            nebula_strength: Some(0.0),
             ..Default::default()
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);
 
         let (best_bodies, _) = crate::sim::select_best_trajectory(
-            &mut rng,
-            num_sims,
-            num_steps,
-            0.75,
-            11.0,
-            0.45,
-            -0.3,
+            &mut rng, num_sims, num_steps, 0.75, 11.0, 0.45, -0.3,
         )
         .expect("Borda search should find at least one valid orbit");
 

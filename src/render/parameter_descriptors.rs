@@ -521,10 +521,15 @@ pub const FINE_TEXTURE_CONTRAST: FloatParamDescriptor = FloatParamDescriptor {
 // ---------------------------------------------------------------------------
 
 /// HDR line-alpha scale multiplier.
+///
+/// Lowered relative to the legacy `[0.08, 0.18]` band because the new
+/// `OKLab` tonemap recovers perceived brightness from a slightly darker
+/// scene-linear input without clipping, giving the pipeline more highlight
+/// headroom and richer chroma in dense regions.
 pub const HDR_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "hdr_scale",
-    min: 0.08,
-    max: 0.18,
+    min: 0.06,
+    max: 0.14,
     description: "HDR line alpha scale multiplier",
 };
 
@@ -541,39 +546,16 @@ pub const CLIP_BLACK: FloatParamDescriptor = FloatParamDescriptor {
 };
 
 /// White-point percentile clipping threshold.
+///
+/// Nudged higher (`[0.990, 0.998]`) because the `OKLab` tonemap asymptotes
+/// to `paper_white` instead of hard-clamping, so we can afford to treat
+/// a larger slice of the brightest pixels as in-range highlights rather
+/// than flagging them for compression.
 pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
     name: "clip_white",
-    min: 0.985,
-    max: 0.995,
+    min: 0.990,
+    max: 0.998,
     description: "White point percentile clipping",
-};
-
-// ---------------------------------------------------------------------------
-// Nebula
-// ---------------------------------------------------------------------------
-
-/// Nebula cloud background opacity (currently disabled: range is `[0, 0]`).
-pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_strength",
-    min: 0.0,
-    max: 0.0,
-    description: "Nebula cloud background opacity (currently disabled)",
-};
-
-/// Nebula noise detail octaves.
-pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
-    name: "nebula_octaves",
-    min: 3,
-    max: 4,
-    description: "Nebula noise detail octaves",
-};
-
-/// Nebula noise base frequency.
-pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_base_frequency",
-    min: 0.0010,
-    max: 0.0020,
-    description: "Nebula noise base frequency",
 };
 
 #[cfg(test)]
@@ -634,12 +616,10 @@ mod tests {
         &HDR_SCALE,
         &CLIP_BLACK,
         &CLIP_WHITE,
-        &NEBULA_STRENGTH,
-        &NEBULA_BASE_FREQUENCY,
     ];
 
     const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] =
-        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS, &NEBULA_OCTAVES];
+        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS];
 
     const ALL_ENABLE_PROBS: &[(&str, f64)] = &[
         ("bloom", ENABLE_PROB_BLOOM),

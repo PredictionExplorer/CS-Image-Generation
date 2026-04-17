@@ -41,16 +41,10 @@ pub fn compute_kinematics(positions: &[Vec<Vector3<f64>>], dt: f64) -> Kinematic
             }
         }
         for t in 1..n.saturating_sub(1) {
-            let v0 = Vector3::new(
-                p[t][0] - p[t - 1][0],
-                p[t][1] - p[t - 1][1],
-                p[t][2] - p[t - 1][2],
-            );
-            let v1 = Vector3::new(
-                p[t + 1][0] - p[t][0],
-                p[t + 1][1] - p[t][1],
-                p[t + 1][2] - p[t][2],
-            );
+            let v0 =
+                Vector3::new(p[t][0] - p[t - 1][0], p[t][1] - p[t - 1][1], p[t][2] - p[t - 1][2]);
+            let v1 =
+                Vector3::new(p[t + 1][0] - p[t][0], p[t + 1][1] - p[t][1], p[t + 1][2] - p[t][2]);
             let l0 = (v0.x * v0.x + v0.y * v0.y).sqrt().max(1e-18);
             let l1 = (v1.x * v1.x + v1.y * v1.y).sqrt().max(1e-18);
             let u0x = v0.x / l0;
@@ -85,9 +79,7 @@ mod tests {
     fn straight_line(n: usize, v: f64) -> Vec<Vec<Vector3<f64>>> {
         (0..3i32)
             .map(|body| {
-                (0..n)
-                    .map(|t| Vector3::new(v * t as f64 + f64::from(body), 0.0, 0.0))
-                    .collect()
+                (0..n).map(|t| Vector3::new(v * t as f64 + f64::from(body), 0.0, 0.0)).collect()
             })
             .collect()
     }
@@ -137,16 +129,15 @@ mod tests {
             .map(|body| {
                 (0..n)
                     .map(|t| {
-                        let ang = (t as f64) * std::f64::consts::TAU / n as f64
-                            + f64::from(body) * 0.1;
+                        let ang =
+                            (t as f64) * std::f64::consts::TAU / n as f64 + f64::from(body) * 0.1;
                         Vector3::new(ang.cos(), ang.sin(), 0.0)
                     })
                     .collect()
             })
             .collect();
         let k = compute_kinematics(&positions, 1.0);
-        let mean: f64 =
-            k.curvature_xy[0].iter().skip(10).take(400).copied().sum::<f64>() / 400.0;
+        let mean: f64 = k.curvature_xy[0].iter().skip(10).take(400).copied().sum::<f64>() / 400.0;
         assert!(mean > 0.0, "circle should have positive curvature, got {mean}");
     }
 
@@ -166,4 +157,3 @@ mod tests {
         }
     }
 }
-

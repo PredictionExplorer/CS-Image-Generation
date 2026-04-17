@@ -96,7 +96,7 @@ enum MoodArg {
     Auto,
     /// Cinematic: multi-tier bloom, anamorphic flare, god rays, rim-lit bodies.
     Cinematic,
-    /// Cosmic: procedural stars, diffraction spikes, airy-disc cores, rich nebula.
+    /// Cosmic: procedural stars, diffraction spikes, airy-disc cores.
     Cosmic,
     /// Painterly: harmonized `OKLab` palette, opalescence, glaze, canvas texture.
     Painterly,
@@ -400,7 +400,9 @@ fn main() -> Result<()> {
     render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
 
-    three_body_problem::spectrum::set_color_science_bruton(args.color_science.eq_ignore_ascii_case("bruton"));
+    three_body_problem::spectrum::set_color_science_bruton(
+        args.color_science.eq_ignore_ascii_case("bruton"),
+    );
     render::pipeline_flags::set_sim_softening_epsilon(args.softening);
     render::pipeline_flags::set_shutter_samples(args.shutter_samples);
     render::pipeline_flags::set_perspective_camera(!args.no_perspective);
@@ -492,6 +494,14 @@ fn main() -> Result<()> {
         &positions,
         three_body_problem::render::constants::DEFAULT_DT,
     );
+
+    // Compute a rule-of-thirds focal offset before building the render
+    // context so the perspective camera is built with the offset in place.
+    {
+        let probe_bbox = render::context::BoundingBox::from_positions_percentile(&positions, 0.98);
+        let offset = render::composition::rule_of_thirds_offset(&probe_bbox, &mut rng);
+        render::context::set_focal_offset(offset);
+    }
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
@@ -588,8 +598,13 @@ fn main() -> Result<()> {
         best_info.total_score_weighted
     );
 
-    let generation_log_config =
-        build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights, mood);
+    let generation_log_config = build_generation_log_config(
+        &args,
+        &resolved_effect_config,
+        &render_config,
+        &borda_weights,
+        mood,
+    );
     if let Err(e) = app::log_generation(
         &generation_log_config,
         &args.output,

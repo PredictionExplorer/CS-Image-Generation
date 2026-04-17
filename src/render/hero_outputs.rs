@@ -61,9 +61,7 @@ pub fn save_exr_linear_rgb_from_u16(
         let p = linear[y * width + x];
         (p[0], p[1], p[2])
     })
-    .map_err(|e| RenderError::ImageEncoding {
-        reason: format!("EXR encode '{path}': {e}"),
-    })?;
+    .map_err(|e| RenderError::ImageEncoding { reason: format!("EXR encode '{path}': {e}") })?;
     info!("   Saved scene-linear EXR master => {path}");
     Ok(())
 }
@@ -77,7 +75,8 @@ fn brightest_column(img: &ImageBuffer<Rgb<u16>, Vec<u16>>) -> u32 {
         let row = y as usize * w as usize * 3;
         for x in 0..w {
             let i = row + x as usize * 3;
-            col_sum[x as usize] += u64::from(raw[i]) + u64::from(raw[i + 1]) + u64::from(raw[i + 2]);
+            col_sum[x as usize] +=
+                u64::from(raw[i]) + u64::from(raw[i + 1]) + u64::from(raw[i + 2]);
         }
     }
     col_sum.iter().enumerate().max_by_key(|&(_, v)| *v).map_or(w / 2, |(i, _)| i as u32)
@@ -121,8 +120,7 @@ pub fn crop_rect(
     for row in 0..h {
         let ss = ((y + row) as usize * sw as usize + x as usize) * 3;
         let dd = row as usize * w as usize * 3;
-        out_vec[dd..dd + w as usize * 3]
-            .copy_from_slice(&raw_src[ss..ss + w as usize * 3]);
+        out_vec[dd..dd + w as usize * 3].copy_from_slice(&raw_src[ss..ss + w as usize * 3]);
     }
     out
 }
@@ -185,14 +183,13 @@ pub fn save_hero_upscale(
             let p10 = f64::from(raw_src[(y0 * sw + x1) * 3 + c]);
             let p01 = f64::from(raw_src[(y1 * sw + x0) * 3 + c]);
             let p11 = f64::from(raw_src[(y1 * sw + x1) * 3 + c]);
-            let v = (1.0 - ty) * ((1.0 - tx) * p00 + tx * p10)
-                + ty * ((1.0 - tx) * p01 + tx * p11);
+            let v = (1.0 - ty) * ((1.0 - tx) * p00 + tx * p10) + ty * ((1.0 - tx) * p01 + tx * p11);
             chunk[c] = v.round().clamp(0.0, 65_535.0) as u16;
         }
     });
-    let out: ImageBuffer<Rgb<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(out_w, out_h, out_raw).ok_or_else(|| {
-            RenderError::ImageEncoding { reason: "hero upscale buffer invalid".into() }
+    let out: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(out_w, out_h, out_raw)
+        .ok_or_else(|| RenderError::ImageEncoding {
+            reason: "hero upscale buffer invalid".into(),
         })?;
     super::save_image_as_png_16bit(&out, path)
 }
@@ -242,9 +239,9 @@ pub fn save_contact_sheet_4x16(
         }
     }
 
-    let out: ImageBuffer<Rgb<u16>, Vec<u16>> =
-        ImageBuffer::from_raw(sheet_w, sheet_h, sheet).ok_or_else(|| {
-            RenderError::ImageEncoding { reason: "contact sheet buffer invalid".into() }
+    let out: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(sheet_w, sheet_h, sheet)
+        .ok_or_else(|| RenderError::ImageEncoding {
+            reason: "contact sheet buffer invalid".into(),
         })?;
     super::save_image_as_png_16bit(&out, path)
 }
@@ -367,8 +364,7 @@ mod tests {
         let img = checker(32, 16);
         let tmpdir = tempfile::tempdir().expect("tmpdir");
         let path = tmpdir.path().join("master.exr");
-        save_exr_linear_rgb_from_u16(&img, path.to_str().expect("path"))
-            .expect("EXR writes");
+        save_exr_linear_rgb_from_u16(&img, path.to_str().expect("path")).expect("EXR writes");
         let size = std::fs::metadata(&path).expect("exr metadata").len();
         assert!(size > 64, "EXR too small: {size}");
     }

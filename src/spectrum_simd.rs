@@ -124,6 +124,13 @@ fn finalize_rgba(
         return (0.0, 0.0, 0.0, 0.0);
     }
 
+    // Normalize to chromaticity so the saturation boost and downstream
+    // bright-area effects have a predictable dynamic range. The chief
+    // hue-preservation improvements happen **outside** this function:
+    // accumulation-time lateral dispersion (`drawing.rs`) keeps the
+    // per-pixel SPD asymmetric enough that the chromaticity carries
+    // hue even in hot cores, and the OKLab tonemap (`mod.rs`) maps the
+    // brightness curve without per-channel clamping.
     r /= total;
     g /= total;
     b /= total;

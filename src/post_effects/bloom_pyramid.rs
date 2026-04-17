@@ -104,7 +104,10 @@ impl PostEffect for BloomPyramid {
             .zip(medium.par_iter())
             .zip(wide.par_iter())
             .map(
-                |((((&(br, bg, bb, ba), &(hr, hg, hb, _)), &(tr, tg, tb, _)), &(mr, mg, mb, _)), &(wr, wg, wb, _))| {
+                |(
+                    (((&(br, bg, bb, ba), &(hr, hg, hb, _)), &(tr, tg, tb, _)), &(mr, mg, mb, _)),
+                    &(wr, wg, wb, _),
+                )| {
                     (
                         br + hr * core_gain + tr * w_tight + mr * w_med + wr * w_wide,
                         bg + hg * core_gain + tg * w_tight + mg * w_med + wg * w_wide,

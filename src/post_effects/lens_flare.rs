@@ -135,13 +135,8 @@ impl PostEffect for LensFlareDiffractive {
 
         let thr = self.threshold;
         let str = self.strength;
-        let streak: &[(isize, f64)] =
-            if self.anamorphic { H_STREAK_WIDE } else { H_STREAK };
-        let tint = if self.anamorphic {
-            self.anamorphic_tint
-        } else {
-            (1.0, 1.0, 1.0)
-        };
+        let streak: &[(isize, f64)] = if self.anamorphic { H_STREAK_WIDE } else { H_STREAK };
+        let tint = if self.anamorphic { self.anamorphic_tint } else { (1.0, 1.0, 1.0) };
 
         acc.par_iter_mut().enumerate().for_each(|(idx, out)| {
             let x0 = (idx % width) as isize;
@@ -211,8 +206,7 @@ mod tests {
     #[test]
     fn test_zero_strength_is_passthrough() {
         let input = center_hotspot(48, 32);
-        let flare =
-            LensFlareDiffractive { strength: 0.0, threshold: 0.5, ..Default::default() };
+        let flare = LensFlareDiffractive { strength: 0.0, threshold: 0.5, ..Default::default() };
         let out = flare.process(&input, 48, 32).expect("process");
         assert_eq!(out, input);
     }
@@ -228,8 +222,7 @@ mod tests {
             p.3 = 1.0;
         }
         // Per-pixel un-premultiplied luma is 0.1, below threshold = 0.9 → gate never opens.
-        let flare =
-            LensFlareDiffractive { strength: 0.5, threshold: 0.9, ..Default::default() };
+        let flare = LensFlareDiffractive { strength: 0.5, threshold: 0.9, ..Default::default() };
         let out = flare.process(&input, 16, 16).expect("process");
         assert_eq!(out, input);
     }

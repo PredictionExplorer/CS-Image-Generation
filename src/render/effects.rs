@@ -8,12 +8,12 @@ use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use crate::post_effects::{
-    AtmosphericDepth, AtmosphericDepthConfig, BloomPyramid, ChampleveConfig, ChromaticBloom,
-    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DiffractionSpikes, DogBloom,
-    EdgeLuminance, EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, Glaze,
-    GlowEnhancement, GlowEnhancementConfig, GodRays, GradientMap, GradientMapConfig, MicroContrast,
-    MicroContrastConfig, Opalescence, OpalescenceConfig, PaletteHarmony, PaletteScheme,
-    PerceptualBlur, PerceptualBlurConfig, PostEffect, PostEffectChain, StarField,
+    AtmosphericDepth, AtmosphericDepthConfig, BaselineVignette, BloomPyramid, ChampleveConfig,
+    ChromaticBloom, ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DiffractionSpikes,
+    DogBloom, EdgeLuminance, EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom,
+    Glaze, GlowEnhancement, GlowEnhancementConfig, GodRays, GradientMap, GradientMapConfig,
+    MicroContrast, MicroContrastConfig, Opalescence, OpalescenceConfig, PaletteHarmony,
+    PaletteScheme, PerceptualBlur, PerceptualBlurConfig, PostEffect, PostEffectChain, StarField,
     aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
     lens_flare::LensFlareDiffractive,
 };
@@ -348,6 +348,12 @@ impl FinishEffectPipeline {
             chain.add(Box::new(LensFlareDiffractive::anamorphic()));
         }
 
+        // Final pass: subtle always-on vignette that centers the subject
+        // regardless of mood or whether the cinematic color grade rolled.
+        // The strength is intentionally gentle (~22%) so it reads as
+        // natural light falloff rather than a heavy frame.
+        chain.add(Box::new(BaselineVignette::default()));
+
         chain
     }
 
@@ -619,10 +625,14 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     use crate::render::drawing::DISPERSION_BOOST_ENABLED;
     use std::sync::atomic::Ordering;
 
+    // Accumulation-time lateral dispersion already paints wavelength
+    // separation across the whole trail, so the image-stage radial CA is
+    // dialed back to a secondary rim-only enhancement rather than the
+    // dominant chromatic cue.
     let dispersion_strength = if DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed) {
-        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 0.8
     } else {
-        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH * 3.0
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH * 0.5
     };
 
     let cx = width as f64 / 2.0;
@@ -786,8 +796,9 @@ mod tests {
 
         let pipeline = FinishEffectPipeline::new(config);
 
+        // Image chain contains: fine_texture + always-on baseline vignette.
         assert_eq!(pipeline.trajectory_len(), 0);
-        assert_eq!(pipeline.image_len(), 1);
+        assert_eq!(pipeline.image_len(), 2);
     }
 
     #[test]
@@ -798,8 +809,10 @@ mod tests {
 
         let pipeline = FinishEffectPipeline::new(config);
 
+        // Trajectory chain has the cinematic grade; image chain holds the
+        // texture + always-on baseline vignette (now 2 effects).
         assert!(pipeline.trajectory_len() >= 1);
-        assert_eq!(pipeline.image_len(), 1);
+        assert_eq!(pipeline.image_len(), 2);
     }
 
     #[test]

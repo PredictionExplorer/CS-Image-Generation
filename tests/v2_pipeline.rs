@@ -58,10 +58,10 @@ fn borda_selection_is_deterministic_under_beauty_weight_bw() {
     let seed = app::parse_seed(SEED).expect("seed");
     let mut rng1 = rng(&seed);
     let mut rng2 = rng(&seed);
-    let (b1, t1) = app::run_borda_selection(&mut rng1, 256, 4_000, 1.0, 5.0, 0.45, -0.3)
-        .expect("borda run 1");
-    let (b2, t2) = app::run_borda_selection(&mut rng2, 256, 4_000, 1.0, 5.0, 0.45, -0.3)
-        .expect("borda run 2");
+    let (b1, t1) =
+        app::run_borda_selection(&mut rng1, 256, 4_000, 1.0, 5.0, 0.45, -0.3).expect("borda run 1");
+    let (b2, t2) =
+        app::run_borda_selection(&mut rng2, 256, 4_000, 1.0, 5.0, 0.45, -0.3).expect("borda run 2");
     for (a, b) in b1.iter().zip(&b2) {
         assert_eq!(a.mass.to_bits(), b.mass.to_bits());
         assert_eq!(a.position, b.position);
@@ -86,10 +86,7 @@ fn changing_beauty_weight_can_change_selection() {
     // We don't assert inequality hard (the two might still agree for some seeds); just that
     // the API accepts both weightings and produces a valid orbit.
     let _ = same;
-    assert!(
-        bodies_a.iter().all(|b| b.position.iter().all(|v| v.is_finite())),
-        "positions finite"
-    );
+    assert!(bodies_a.iter().all(|b| b.position.iter().all(|v| v.is_finite())), "positions finite");
 }
 
 #[test]

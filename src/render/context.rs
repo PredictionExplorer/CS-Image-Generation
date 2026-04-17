@@ -4,8 +4,48 @@
 //! and pixel operations, as well as utilities for iterating through animation frames.
 
 use super::camera_path::PerspectiveCamera;
+use super::framing_fit::fit_to_ink_camera;
 use super::pipeline_flags;
 use nalgebra::Vector3;
+
+/// Shared thread-local store used to pass a pre-computed camera focal offset
+/// to `RenderContext::new` without threading it through every call site.
+///
+/// Set by the CLI (or a test harness) before constructing a render context;
+/// consumed once and cleared on read. A `None` offset means "no rule-of-thirds
+/// shift".
+static FOCAL_OFFSET_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOCAL_OFFSET_X: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FOCAL_OFFSET_Y: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Install a rule-of-thirds focal offset for the next
+/// [`RenderContext`] constructed with `with_framing`.
+pub fn set_focal_offset(offset: Vector3<f64>) {
+    FOCAL_OFFSET_X.store(offset.x.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    FOCAL_OFFSET_Y.store(offset.y.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    FOCAL_OFFSET_BITS.store(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Read the currently-installed rule-of-thirds focal offset, or zero if
+/// none has been set. Does **not** clear the value — multiple render
+/// contexts in a single run share the same composition offset.
+#[must_use]
+pub fn current_focal_offset() -> Vector3<f64> {
+    if FOCAL_OFFSET_BITS.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        return Vector3::zeros();
+    }
+    let x = f64::from_bits(FOCAL_OFFSET_X.load(std::sync::atomic::Ordering::Relaxed));
+    let y = f64::from_bits(FOCAL_OFFSET_Y.load(std::sync::atomic::Ordering::Relaxed));
+    Vector3::new(x, y, 0.0)
+}
+
+/// Clear the installed focal offset (test-only helper).
+#[cfg(test)]
+pub fn clear_focal_offset() {
+    FOCAL_OFFSET_BITS.store(0, std::sync::atomic::Ordering::Relaxed);
+    FOCAL_OFFSET_X.store(0, std::sync::atomic::Ordering::Relaxed);
+    FOCAL_OFFSET_Y.store(0, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Type alias for pixel buffers used throughout the pipeline.
 ///
@@ -16,13 +56,25 @@ pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 /// How the camera frames the trajectory.
 #[derive(Clone, Copy, Debug)]
 pub enum FramingMode {
-    /// Tight fit: use percentile-trimmed bbox and `orbit_fit` so content fills
-    /// `fill` fraction of the frame (e.g. `fill = 0.90` targets 90% coverage).
+    /// Tight fit to the bbox corners: percentile-trimmed axis-aligned bbox
+    /// projected with `orbit_fit` so the bbox (not the actual ink) covers
+    /// `fill` of the frame.
     AutoFill {
         /// Fraction of the frame the bbox should occupy (0.5..=0.98).
         fill: f64,
         /// Fraction of points to keep when trimming outliers (e.g. 0.99).
         pct: f64,
+    },
+    /// Tight fit to the projected ink: build a proxy projection, find the
+    /// percentile-trimmed pixel rectangle containing the visible trail, and
+    /// re-zoom/re-center the camera so **that** rectangle covers `fill` of
+    /// the frame. This is the default — the axis-aligned bbox typically
+    /// wastes most of the frame on empty corners for a thin 3-body curve.
+    FitToInk {
+        /// Fraction of the frame the ink envelope should occupy (0.5..=0.98).
+        fill: f64,
+        /// Fraction of projected ink samples kept when trimming outliers.
+        ink_pct: f64,
     },
     /// Legacy behaviour: raw min/max bbox + fixed 55 FOV `orbit_default`.
     Classic,
@@ -30,7 +82,7 @@ pub enum FramingMode {
 
 impl Default for FramingMode {
     fn default() -> Self {
-        Self::AutoFill { fill: 0.90, pct: 0.99 }
+        Self::FitToInk { fill: 0.95, ink_pct: 0.98 }
     }
 }
 
@@ -80,18 +132,38 @@ impl RenderContext {
         framing: FramingMode,
     ) -> Self {
         let mut bounds = match framing {
-            FramingMode::AutoFill { pct, .. } => BoundingBox::from_positions_percentile(positions, pct),
+            FramingMode::AutoFill { pct, .. } => {
+                BoundingBox::from_positions_percentile(positions, pct)
+            }
+            FramingMode::FitToInk { ink_pct, .. } => {
+                BoundingBox::from_positions_percentile(positions, ink_pct)
+            }
             FramingMode::Classic => BoundingBox::from_positions(positions),
         };
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
 
+        let focal_offset = current_focal_offset();
+
         let perspective = if pipeline_flags::perspective_camera_enabled() {
             let cam = match framing {
-                FramingMode::AutoFill { fill, .. } => {
-                    PerspectiveCamera::orbit_fit(&bounds, width, height, fill)
-                }
+                FramingMode::AutoFill { fill, .. } => PerspectiveCamera::orbit_fit_with_offset(
+                    &bounds,
+                    width,
+                    height,
+                    fill,
+                    focal_offset,
+                ),
+                FramingMode::FitToInk { fill, ink_pct } => fit_to_ink_camera(
+                    positions,
+                    &bounds,
+                    width,
+                    height,
+                    fill,
+                    ink_pct,
+                    focal_offset,
+                ),
                 FramingMode::Classic => PerspectiveCamera::orbit_classic(&bounds, width, height),
             };
             Some(cam)
@@ -163,7 +235,10 @@ fn z_extent(positions: &[Vec<Vector3<f64>>]) -> (f64, f64) {
         return (-1.0, 1.0);
     }
     if (max_z - min_z).abs() < 1e-12 {
-        return (min_z - crate::render::constants::BOUNDING_BOX_PADDING, max_z + crate::render::constants::BOUNDING_BOX_PADDING);
+        return (
+            min_z - crate::render::constants::BOUNDING_BOX_PADDING,
+            max_z + crate::render::constants::BOUNDING_BOX_PADDING,
+        );
     }
     (min_z, max_z)
 }
@@ -214,10 +289,7 @@ impl BoundingBox {
     /// Create a percentile-trimmed bounding box so drift-inflated outlier
     /// timesteps do not back the camera off from the interesting action.
     #[must_use]
-    pub fn from_positions_percentile(
-        positions: &[Vec<Vector3<f64>>],
-        pct: f64,
-    ) -> Self {
+    pub fn from_positions_percentile(positions: &[Vec<Vector3<f64>>], pct: f64) -> Self {
         let (min_x, max_x, min_y, max_y, min_z, max_z) =
             crate::utils::bounding_box_percentile(positions, pct);
         Self {
@@ -331,12 +403,7 @@ mod tests {
         assert!((ny - 0.5).abs() < 0.01, "center should normalize to ~0.5");
     }
 
-    fn test_bbox(
-        min_x: f64,
-        max_x: f64,
-        min_y: f64,
-        max_y: f64,
-    ) -> BoundingBox {
+    fn test_bbox(min_x: f64, max_x: f64, min_y: f64, max_y: f64) -> BoundingBox {
         BoundingBox {
             min_x,
             max_x,
@@ -408,10 +475,7 @@ mod tests {
 
     #[test]
     fn test_bounding_box_carries_z_extent() {
-        let positions = vec![vec![
-            Vector3::new(0.0, 0.0, -3.0),
-            Vector3::new(0.0, 0.0, 4.0),
-        ]];
+        let positions = vec![vec![Vector3::new(0.0, 0.0, -3.0), Vector3::new(0.0, 0.0, 4.0)]];
         let bbox = BoundingBox::from_positions(&positions);
         assert!(bbox.min_z <= -3.0, "min_z should include the negative extreme");
         assert!(bbox.max_z >= 4.0, "max_z should include the positive extreme");

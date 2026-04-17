@@ -23,12 +23,7 @@ pub struct Glaze {
 
 impl Default for Glaze {
     fn default() -> Self {
-        Self {
-            strength: 0.35,
-            threshold: 0.55,
-            tint: (1.15, 1.02, 0.82),
-            enabled: true,
-        }
+        Self { strength: 0.35, threshold: 0.55, tint: (1.15, 1.02, 0.82), enabled: true }
     }
 }
 

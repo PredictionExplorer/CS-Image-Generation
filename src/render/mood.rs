@@ -17,7 +17,7 @@ pub enum Mood {
     /// rim-lit bodies, moody color grade.
     Cinematic,
     /// Astrophotography: procedural star field, diffraction spikes on bright
-    /// points, airy-disc body cores, richly-coloured nebula background.
+    /// points, airy-disc body cores.
     Cosmic,
     /// Ethereal / illuminated-manuscript: harmonized `OKLab` palette, boosted
     /// opalescence + aether, glazed highlights, canvas texture.
@@ -84,10 +84,9 @@ impl Mood {
                 anamorphic_flare: 1.0,
                 god_rays: 0.7,
                 rim_light: 1.0,
-                star_field: 0.2,
+                star_field: 0.45,
                 diffraction_spikes: 0.8,
                 airy_disc: 0.2,
-                nebula_tint: 0.4,
                 palette_harmony: 0.4,
                 glaze: 0.4,
                 bloom_strength_scale: 1.35,
@@ -116,7 +115,6 @@ impl Mood {
                 star_field: 1.0,
                 diffraction_spikes: 1.0,
                 airy_disc: 1.0,
-                nebula_tint: 1.0,
                 palette_harmony: 0.5,
                 glaze: 0.3,
                 bloom_strength_scale: 1.1,
@@ -142,10 +140,9 @@ impl Mood {
                 anamorphic_flare: 0.2,
                 god_rays: 0.2,
                 rim_light: 0.4,
-                star_field: 0.1,
+                star_field: 0.3,
                 diffraction_spikes: 0.2,
                 airy_disc: 0.2,
-                nebula_tint: 0.5,
                 palette_harmony: 1.0,
                 glaze: 1.0,
                 bloom_strength_scale: 0.95,
@@ -202,8 +199,6 @@ pub struct MoodBiases {
     pub diffraction_spikes: f64,
     /// Probability (0..1) that the airy-disc PSF replaces Gaussian body cores.
     pub airy_disc: f64,
-    /// Probability (0..1) that the nebula background is tinted by the scene SPD.
-    pub nebula_tint: f64,
     /// Probability (0..1) that the `OKLab` palette harmonizer is applied.
     pub palette_harmony: f64,
     /// Probability (0..1) that the warm-tinted glaze highlight pass runs.
@@ -239,7 +234,6 @@ impl Default for MoodBiases {
             star_field: 0.0,
             diffraction_spikes: 0.0,
             airy_disc: 0.0,
-            nebula_tint: 0.0,
             palette_harmony: 0.0,
             glaze: 0.0,
             bloom_strength_scale: 1.0,

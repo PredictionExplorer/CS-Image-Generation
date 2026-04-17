@@ -123,9 +123,13 @@ fn axis_percentile(values: &mut [f64], pct_low: f64) -> (f64, f64) {
     let n = values.len();
     let lo_idx = ((pct_low * n as f64).floor() as usize).min(n - 1);
     let hi_idx = (((1.0 - pct_low) * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
-    values.select_nth_unstable_by(lo_idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    values.select_nth_unstable_by(lo_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
     let lo = values[lo_idx];
-    values.select_nth_unstable_by(hi_idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    values.select_nth_unstable_by(hi_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
     let hi = values[hi_idx];
     (lo, hi)
 }
@@ -445,8 +449,7 @@ mod tests {
             Vector3::new(10.0, -2.0, 4.0),
             Vector3::new(0.0, 7.0, -1.0),
         ]];
-        let (min_x, max_x, min_y, max_y, min_z, max_z) =
-            bounding_box_percentile(&positions, 1.0);
+        let (min_x, max_x, min_y, max_y, min_z, max_z) = bounding_box_percentile(&positions, 1.0);
         // All points should be inside the returned (padded) box.
         for p in &positions[0] {
             assert!(p.x >= min_x - 1e-9 && p.x <= max_x + 1e-9);

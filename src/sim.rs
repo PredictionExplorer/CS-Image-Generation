@@ -123,11 +123,7 @@ impl Body {
             return;
         }
         let eps2 = crate::render::pipeline_flags::sim_softening_eps2();
-        let inv = if eps2 > 0.0 {
-            1.0 / (d2 + eps2).powf(1.5)
-        } else {
-            1.0 / d2.powf(1.5)
-        };
+        let inv = if eps2 > 0.0 { 1.0 / (d2 + eps2).powf(1.5) } else { 1.0 / d2.powf(1.5) };
         self.acceleration += -G * om * dir * inv;
     }
 }
@@ -446,7 +442,8 @@ fn thumbnail_rerank_top_k(
         .into_par_iter()
         .filter_map(|i| {
             let (bodies, traj) = &candidates[i];
-            let simr = get_positions_with_early_exit(bodies.clone(), rerank_steps, escape_threshold)?;
+            let simr =
+                get_positions_with_early_exit(bodies.clone(), rerank_steps, escape_threshold)?;
             let pos = simr.positions;
             let m1 = bodies[0].mass;
             let m2 = bodies[1].mass;
@@ -462,10 +459,7 @@ fn thumbnail_rerank_top_k(
         })
         .collect();
 
-    scored
-        .into_iter()
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(idx, _, traj)| (idx, traj))
+    scored.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(idx, _, traj)| (idx, traj))
 }
 
 /// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
@@ -577,16 +571,12 @@ pub fn select_best_trajectory(
     // re-rank, which re-simulates at `steps` and refreshes the beauty ensemble.  This amortises
     // the full 100k stage-1 pool down to a few candidates for a high-fidelity comparison.
     const TOP_K: usize = 8;
-    let top_k: Vec<(Vec<Body>, TrajectoryResult)> = iv
-        .iter()
-        .take(TOP_K)
-        .map(|(t, sim_idx)| (many[*sim_idx].clone(), t.clone()))
-        .collect();
+    let top_k: Vec<(Vec<Body>, TrajectoryResult)> =
+        iv.iter().take(TOP_K).map(|(t, sim_idx)| (many[*sim_idx].clone(), t.clone())).collect();
 
     let rerank_steps = steps.clamp(5_000, 200_000);
     let (winner_in_top_k, bt_stage2) =
-        thumbnail_rerank_top_k(&top_k, TOP_K, rerank_steps, th)
-            .unwrap_or((0, iv[0].0.clone()));
+        thumbnail_rerank_top_k(&top_k, TOP_K, rerank_steps, th).unwrap_or((0, iv[0].0.clone()));
 
     let stage1_index = iv[winner_in_top_k].1;
     let mut bt = bt_stage2;

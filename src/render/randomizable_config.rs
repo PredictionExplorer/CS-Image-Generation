@@ -160,13 +160,6 @@ pub struct RandomizableEffectConfig {
     pub clip_black: Option<f64>,
     /// White point clipping threshold.
     pub clip_white: Option<f64>,
-
-    /// Nebula overlay strength.
-    pub nebula_strength: Option<f64>,
-    /// Number of noise octaves for nebula generation.
-    pub nebula_octaves: Option<usize>,
-    /// Base frequency for nebula noise.
-    pub nebula_base_frequency: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -191,7 +184,7 @@ impl RandomizableEffectConfig {
         self.resolve_material_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_detail_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_hdr_param(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
 
         apply_mood_strength_scales(&mut resolved, &biases);
@@ -207,8 +200,7 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        let bias_prob =
-            |base: f64, bias: f64| (base * bias).clamp(0.0, 1.0);
+        let bias_prob = |base: f64, bias: f64| (base * bias).clamp(0.0, 1.0);
         resolved.enable_bloom = self.resolve_enable(
             "bloom",
             self.enable_bloom,
@@ -303,8 +295,13 @@ impl RandomizableEffectConfig {
         // Mood-driven new effects. These are not exposed in the CLI config
         // structure (yet); the probability is the mood bias itself, which for
         // classic behaviour is `0.0`.
-        resolved.enable_bloom_pyramid =
-            self.resolve_enable("bloom_pyramid", None, biases.bloom_pyramid.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_bloom_pyramid = self.resolve_enable(
+            "bloom_pyramid",
+            None,
+            biases.bloom_pyramid.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
         resolved.enable_anamorphic_flare = self.resolve_enable(
             "anamorphic_flare",
             None,
@@ -314,10 +311,20 @@ impl RandomizableEffectConfig {
         );
         resolved.enable_god_rays =
             self.resolve_enable("god_rays", None, biases.god_rays.clamp(0.0, 1.0), randomizer, log);
-        resolved.enable_rim_light =
-            self.resolve_enable("rim_light", None, biases.rim_light.clamp(0.0, 1.0), randomizer, log);
-        resolved.enable_star_field =
-            self.resolve_enable("star_field", None, biases.star_field.clamp(0.0, 1.0), randomizer, log);
+        resolved.enable_rim_light = self.resolve_enable(
+            "rim_light",
+            None,
+            biases.rim_light.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
+        resolved.enable_star_field = self.resolve_enable(
+            "star_field",
+            None,
+            biases.star_field.clamp(0.0, 1.0),
+            randomizer,
+            log,
+        );
         resolved.enable_diffraction_spikes = self.resolve_enable(
             "diffraction_spikes",
             None,
@@ -325,12 +332,10 @@ impl RandomizableEffectConfig {
             randomizer,
             log,
         );
-        resolved.enable_airy_disc =
-            self.resolve_enable("airy_disc", None, biases.airy_disc.clamp(0.0, 1.0), randomizer, log);
-        resolved.enable_nebula_tint = self.resolve_enable(
-            "nebula_tint",
+        resolved.enable_airy_disc = self.resolve_enable(
+            "airy_disc",
             None,
-            biases.nebula_tint.clamp(0.0, 1.0),
+            biases.airy_disc.clamp(0.0, 1.0),
             randomizer,
             log,
         );
@@ -740,7 +745,7 @@ impl RandomizableEffectConfig {
         );
     }
 
-    fn resolve_hdr_nebula_params(
+    fn resolve_hdr_param(
         &self,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
@@ -748,27 +753,6 @@ impl RandomizableEffectConfig {
     ) {
         resolved.hdr_scale =
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
-        resolved.nebula_strength = self.resolve_float(
-            "nebula_strength",
-            self.nebula_strength,
-            &pd::NEBULA_STRENGTH,
-            randomizer,
-            log,
-        );
-        resolved.nebula_octaves = self.resolve_int(
-            "nebula_octaves",
-            self.nebula_octaves,
-            &pd::NEBULA_OCTAVES,
-            randomizer,
-            log,
-        );
-        resolved.nebula_base_frequency = self.resolve_float(
-            "nebula_base_frequency",
-            self.nebula_base_frequency,
-            &pd::NEBULA_BASE_FREQUENCY,
-            randomizer,
-            log,
-        );
     }
 
     fn resolve_clip_params(
@@ -898,7 +882,6 @@ impl RandomizableEffectConfig {
             "edge_luminance",
             "color_grade",
             "tone_curve",
-            "nebula_base",
         ];
         for prefix in MULTI_WORD_PREFIXES {
             if param_name.starts_with(prefix) {
@@ -958,8 +941,6 @@ pub struct ResolvedEffectConfig {
     pub enable_diffraction_spikes: bool,
     /// Whether body cores use an airy-disc PSF (mood-driven).
     pub enable_airy_disc: bool,
-    /// Whether the nebula background is tinted by the scene SPD (mood-driven).
-    pub enable_nebula_tint: bool,
     /// Whether the `OKLab` palette harmonizer is applied (mood-driven).
     pub enable_palette_harmony: bool,
     /// Whether the warm-tinted glaze highlight pass runs (mood-driven).
@@ -1073,24 +1054,15 @@ pub struct ResolvedEffectConfig {
     pub clip_black: f64,
     /// Resolved white point clipping threshold.
     pub clip_white: f64,
-    /// Resolved nebula overlay strength.
-    pub nebula_strength: f64,
-    /// Resolved number of nebula noise octaves.
-    pub nebula_octaves: usize,
-    /// Resolved nebula base frequency.
-    pub nebula_base_frequency: f64,
 }
 
 /// Apply per-mood strength scales to resolved parameters.
 ///
 /// The enable flags already picked which effects run; this tweaks intensity
 /// so each mood has the right *feel*: cinematic boosts bloom and vignette,
-/// cosmic slightly lifts saturation for colourful star/nebula fields, and
+/// cosmic slightly lifts saturation for colourful star fields, and
 /// painterly keeps bloom modest so opalescence/aether can breathe.
-fn apply_mood_strength_scales(
-    config: &mut ResolvedEffectConfig,
-    biases: &MoodBiases,
-) {
+fn apply_mood_strength_scales(config: &mut ResolvedEffectConfig, biases: &MoodBiases) {
     // Bloom family
     config.blur_strength *= biases.bloom_strength_scale;
     config.dog_strength *= biases.bloom_strength_scale;
@@ -1188,17 +1160,14 @@ fn apply_conflict_detection(
         ));
     }
 
-    // ============================================================================
-    // QUALITY GUARD 1: Prevent isolated chromatic haze
-    // ============================================================================
-    // Chromatic bloom without a base bloom pass often reads as soft, smeared RGB fringing.
-    if config.enable_chromatic_bloom && !config.enable_bloom {
-        config.enable_chromatic_bloom = false;
-        adjustments.push(
-            "Quality guard: Disabled chromatic_bloom because base bloom was off, avoiding isolated prismatic haze"
-                .to_string(),
-        );
-    }
+    // QUALITY GUARD 1 (retired): the legacy guard disabled chromatic bloom
+    // when base bloom was off because it looked like smeared RGB haze. With
+    // the new accumulation-time lateral dispersion in `drawing.rs` the
+    // underlying image already carries wavelength separation throughout
+    // the trail, so chromatic bloom **reinforces** hue instead of creating
+    // isolated prismatic haze. The guard is intentionally removed so that
+    // painterly and cinematic renders without heavy base bloom can still
+    // benefit from a touch of prismatic halo.
 
     // ============================================================================
     // QUALITY GUARD 2: Preserve color when atmospheric depth has no counterbalance
@@ -1375,7 +1344,6 @@ mod tests {
             enable_star_field: false,
             enable_diffraction_spikes: false,
             enable_airy_disc: false,
-            enable_nebula_tint: false,
             enable_palette_harmony: false,
             enable_glaze: false,
             blur_radius_scale: 0.02,
@@ -1432,9 +1400,6 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
         }
     }
 
@@ -1540,18 +1505,20 @@ mod tests {
     }
 
     #[test]
-    fn test_chromatic_bloom_is_disabled_without_base_bloom() {
+    fn test_chromatic_bloom_survives_without_base_bloom() {
+        // The legacy guard that auto-disabled chromatic bloom when base
+        // bloom was off has been retired: accumulation-time lateral
+        // dispersion now paints wavelength separation throughout the
+        // trail, so chromatic bloom reinforces hue instead of creating
+        // isolated haze. Verify the guard no longer fires.
         let config =
             ResolvedEffectConfig { enable_chromatic_bloom: true, ..baseline_resolved_config() };
 
         let mut log = RandomizationLog::new();
         let result = apply_conflict_detection(config, &mut log);
 
-        assert!(
-            !result.enable_chromatic_bloom,
-            "chromatic bloom should be disabled when base bloom is off"
-        );
-        assert!(log.effects.iter().any(|record| {
+        assert!(result.enable_chromatic_bloom);
+        assert!(!log.effects.iter().any(|record| {
             record.effect_name == "render_constraints"
                 && record
                     .parameters
@@ -1779,7 +1746,10 @@ mod tests {
         let default_tolerance = 0.12; // generous tolerance for 500 samples
         check("bloom", pd::ENABLE_PROB_BLOOM, default_tolerance);
         check("glow", pd::ENABLE_PROB_GLOW, default_tolerance);
-        check("chromatic_bloom", pd::ENABLE_PROB_CHROMATIC_BLOOM * pd::ENABLE_PROB_BLOOM, 0.06);
+        // The base-bloom guard was retired with the accumulation-time
+        // dispersion rewrite; chromatic bloom now fires at its own base
+        // probability unconditionally.
+        check("chromatic_bloom", pd::ENABLE_PROB_CHROMATIC_BLOOM, default_tolerance);
         check("perceptual_blur", pd::ENABLE_PROB_PERCEPTUAL_BLUR, default_tolerance);
         check("micro_contrast", pd::ENABLE_PROB_MICRO_CONTRAST, default_tolerance);
         check("gradient_map", pd::ENABLE_PROB_GRADIENT_MAP, default_tolerance);

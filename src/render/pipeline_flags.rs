@@ -17,9 +17,6 @@ static PERSPECTIVE_CAMERA: AtomicBool = AtomicBool::new(true);
 /// Enable comet wake overlay in spectral accumulation.
 static COMET_WAKE: AtomicBool = AtomicBool::new(true);
 
-/// Enable volumetric-style nebula seeded by trajectory (replaces pure 2-D noise when true).
-static VOLUMETRIC_NEBULA: AtomicBool = AtomicBool::new(true);
-
 /// `0` = legacy radial dispersion, `1` = achromatic polynomial CA in `convert_spd_buffer_to_rgba`.
 static CA_MODEL: AtomicU8 = AtomicU8::new(1);
 
@@ -38,8 +35,9 @@ static BODY_SPHERES: AtomicBool = AtomicBool::new(true);
 /// Use multi-act director for video checkpoint spacing.
 static MULTI_ACT_DIRECTOR: AtomicBool = AtomicBool::new(true);
 
-/// Framing mode: `0` = `AutoFill` (default), `1` = Classic (legacy 55 FOV).
-static FRAMING_MODE: AtomicU8 = AtomicU8::new(0);
+/// Framing mode: `0` = `AutoFill`, `1` = Classic (legacy 55 FOV),
+/// `2` = `FitToInk` (default; fits the visible ink envelope, not the bbox).
+static FRAMING_MODE: AtomicU8 = AtomicU8::new(2);
 
 /// Active mood: `0` = Cinematic, `1` = Cosmic, `2` = Painterly, `3` = Neutral
 /// (no mood biases, matches legacy effect probabilities). Defaults to Neutral
@@ -52,8 +50,10 @@ static RIM_LIGHT: AtomicBool = AtomicBool::new(false);
 /// Whether body cores use an airy-disc PSF instead of a plain Gaussian.
 static AIRY_DISC: AtomicBool = AtomicBool::new(false);
 
-/// Target fill fraction for `AutoFill` framing (bits as `f64`). Default `0.90`.
-static FRAMING_FILL: AtomicU64 = AtomicU64::new(0.90f64.to_bits());
+/// Target fill fraction for `AutoFill`/`FitToInk` framing (bits as `f64`).
+/// Default `0.95` since fit-to-ink measures the actual curve, not the
+/// axis-aligned bbox around it, so a higher fill still leaves breathing room.
+static FRAMING_FILL: AtomicU64 = AtomicU64::new(0.95f64.to_bits());
 
 /// Percentile (fraction kept) for outlier-trimmed bbox. Default `0.99`.
 static FRAMING_PCT: AtomicU64 = AtomicU64::new(0.99f64.to_bits());
@@ -102,17 +102,6 @@ pub fn set_comet_wake(on: bool) {
 #[must_use]
 pub fn comet_wake_enabled() -> bool {
     COMET_WAKE.load(Ordering::Relaxed)
-}
-
-/// Enable trajectory-seeded volumetric nebula instead of pure 2D noise.
-pub fn set_volumetric_nebula(on: bool) {
-    VOLUMETRIC_NEBULA.store(on, Ordering::Relaxed);
-}
-
-/// Whether volumetric nebula generation is enabled.
-#[must_use]
-pub fn volumetric_nebula_enabled() -> bool {
-    VOLUMETRIC_NEBULA.load(Ordering::Relaxed)
 }
 
 /// `0` legacy CA sampling, `1` physical-style CA.
@@ -181,12 +170,16 @@ pub fn multi_act_director_enabled() -> bool {
     MULTI_ACT_DIRECTOR.load(Ordering::Relaxed)
 }
 
-/// Configure global framing mode (`"auto"` = `AutoFill`, `"classic"` = Classic).
-/// Unknown values fall back to `AutoFill`.
+/// Configure global framing mode.
+///
+/// * `"classic"` / `"legacy"` -> Classic (legacy 55 FOV).
+/// * `"bbox"` / `"autofill"`  -> `AutoFill` (percentile bbox + `orbit_fit`).
+/// * anything else (including `"auto"`) -> `FitToInk` (new default).
 pub fn set_framing_mode(mode: &str) {
     let code: u8 = match mode.to_ascii_lowercase().as_str() {
         "classic" | "legacy" => 1,
-        _ => 0,
+        "bbox" | "autofill" => 0,
+        _ => 2,
     };
     FRAMING_MODE.store(code, Ordering::Relaxed);
 }
@@ -206,12 +199,12 @@ pub fn set_framing_percentile(pct: f64) {
 #[must_use]
 pub fn current_framing_mode() -> crate::render::context::FramingMode {
     let code = FRAMING_MODE.load(Ordering::Relaxed);
-    if code == 1 {
-        crate::render::context::FramingMode::Classic
-    } else {
-        let fill = f64::from_bits(FRAMING_FILL.load(Ordering::Relaxed));
-        let pct = f64::from_bits(FRAMING_PCT.load(Ordering::Relaxed));
-        crate::render::context::FramingMode::AutoFill { fill, pct }
+    let fill = f64::from_bits(FRAMING_FILL.load(Ordering::Relaxed));
+    let pct = f64::from_bits(FRAMING_PCT.load(Ordering::Relaxed));
+    match code {
+        1 => crate::render::context::FramingMode::Classic,
+        0 => crate::render::context::FramingMode::AutoFill { fill, pct },
+        _ => crate::render::context::FramingMode::FitToInk { fill, ink_pct: pct },
     }
 }
 
@@ -314,11 +307,6 @@ mod tests {
         assert!(!comet_wake_enabled());
         set_comet_wake(true);
         assert!(comet_wake_enabled());
-
-        set_volumetric_nebula(false);
-        assert!(!volumetric_nebula_enabled());
-        set_volumetric_nebula(true);
-        assert!(volumetric_nebula_enabled());
 
         set_body_spheres(false);
         assert!(!body_spheres_enabled());

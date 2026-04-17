@@ -83,7 +83,11 @@ pub const DEFAULT_PRETONEMAP_BUDGET_RESPONSE: f64 = 1.5;
 pub const DEFAULT_MIN_EXPOSURE_SCALE: f64 = 0.35;
 
 /// Display-space luminance reserved for "paper white".
-pub const DEFAULT_TONEMAP_PAPER_WHITE: f64 = 0.92;
+///
+/// Lowered from `0.92` to `0.85` in the gallery-grade pipeline so the
+/// OKLab-space tonemap leaves more headroom for specular accents to read
+/// as bright-but-not-blown rather than saturating at display white.
+pub const DEFAULT_TONEMAP_PAPER_WHITE: f64 = 0.85;
 
 /// Strength of the luminance-preserving shoulder above paper white.
 pub const DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF: f64 = 2.25;
@@ -196,21 +200,50 @@ pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.8;
 /// Boosted dispersion for wider rainbow trails
 pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 1.1;
 
-/// Velocity-based HDR boost factor - multiplies HDR scale at high velocities
-/// 1.0 = no boost, 2.0 = double brightness at max velocity
-pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 8.0; // Increased from 2.5 for dramatic flares
+/// Velocity-based HDR boost factor - multiplies HDR scale at high velocities.
+/// `1.0` = no boost, `2.0` = double brightness at max velocity.
+///
+/// Tuned back to `2.5` from the "dramatic flares" value of `8.0` because
+/// the 8× boost pushed the line-splat accumulation so far above the SPD
+/// saturation point that hot cores collapsed to pure white through the
+/// `OKLab` tonemap. A 2.5× boost still emphasizes fast segments without
+/// clipping.
+pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 2.5;
 
 /// Velocity threshold for HDR boost (normalized units per timestep)
 /// Velocities above this get maximum boost
-pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15; // Lowered from 0.3 to activate earlier
+pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15;
 
-/// Energy density threshold for wavelength shift (normalized energy)
-/// Pixels above this threshold shift toward red (heat)
-pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.08; // Lowered from 0.25 to affect more pixels
+/// Energy density threshold for wavelength shift (normalized energy).
+///
+/// Pixels above this threshold shift toward red (heat). Raised from `0.08`
+/// to `0.35` so only genuinely dense regions pick up a redshift tint,
+/// instead of mildly bright mid-trail pixels collapsing toward red or white.
+pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.35;
 
-/// Wavelength shift strength (fraction of bin to shift per density unit)
-/// Higher values create stronger red-shift in high-energy regions
-pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.75; // Increased from 0.35 for stronger heat effect
+/// Wavelength shift strength (fraction of bin to shift per density unit).
+///
+/// Reduced from `0.75` to `0.25` to preserve hue in hot cores. The `OKLab`
+/// tonemap protects chroma through compression, so the aggressive redshift
+/// is no longer needed to convey "heat" and was flattening the palette.
+pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.25;
+
+/// Maximum per-pixel energy a single line splat may deposit in one bin.
+///
+/// Prevents a single coincidence of thin segment + high velocity boost +
+/// grazing-distance Gaussian splat from dumping an order of magnitude
+/// more energy than neighbouring pixels, which would force the tonemap to
+/// collapse the rest of the trail into a black backdrop.
+pub const LINE_SPLAT_ENERGY_CAP: f64 = 0.02;
+
+/// Lateral chromatic dispersion, in pixels, applied per bin during line
+/// accumulation. Gives the full trail a gentle wavelength-dependent
+/// spread so the core shows hue separation (instead of saturating to
+/// white), not only the rim where image-center `CA` becomes visible.
+///
+/// Kept deliberately small (sub-pixel) so it reads as smooth prismatic
+/// shimmer rather than smeared colour blobs.
+pub const ACCUMULATION_DISPERSION_PX: f64 = 0.35;
 
 // ========== Video Encoding Constants ==========
 

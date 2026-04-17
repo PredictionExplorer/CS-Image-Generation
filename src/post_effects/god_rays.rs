@@ -28,13 +28,7 @@ pub struct GodRays {
 
 impl Default for GodRays {
     fn default() -> Self {
-        Self {
-            strength: 0.35,
-            samples: 24,
-            decay: 0.94,
-            step_px: 2.0,
-            enabled: true,
-        }
+        Self { strength: 0.35, samples: 24, decay: 0.94, step_px: 2.0, enabled: true }
     }
 }
 
@@ -77,11 +71,7 @@ impl GodRays {
                 }
             }
         }
-        if sw <= 0.0 {
-            None
-        } else {
-            Some((sx / sw, sy / sw))
-        }
+        if sw <= 0.0 { None } else { Some((sx / sw, sy / sw)) }
     }
 
     /// Sample pixel at (px, py) with bilinear interpolation; returns black for

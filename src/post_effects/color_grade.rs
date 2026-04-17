@@ -200,6 +200,66 @@ impl Default for CinematicColorGrade {
     }
 }
 
+/// Baseline always-on vignette that runs regardless of the cinematic color
+/// grade. Gives every mood a gentle subject-centering falloff without
+/// flattening the palette or applying a film grade.
+pub struct BaselineVignette {
+    /// Strength of the darkening at the frame edge (0.0 = off).
+    pub strength: f64,
+    /// Falloff softness exponent; higher = later onset near the edges.
+    pub softness: f64,
+}
+
+impl BaselineVignette {
+    /// Create a baseline vignette with fixed strength and softness.
+    #[must_use]
+    pub fn new(strength: f64, softness: f64) -> Self {
+        Self { strength, softness: softness.max(1.0) }
+    }
+}
+
+impl Default for BaselineVignette {
+    fn default() -> Self {
+        Self::new(0.22, constants::DEFAULT_COLOR_GRADE_VIGNETTE_SOFTNESS)
+    }
+}
+
+impl PostEffect for BaselineVignette {
+    fn is_enabled(&self) -> bool {
+        self.strength > 0.0
+    }
+
+    fn process(
+        &self,
+        input: &PixelBuffer,
+        width: usize,
+        height: usize,
+    ) -> Result<PixelBuffer, PostEffectError> {
+        if !self.is_enabled() {
+            return Ok(input.clone());
+        }
+        let center_x = (width as f64 - 1.0) * 0.5;
+        let center_y = (height as f64 - 1.0) * 0.5;
+        let inv_radius = 1.0 / center_x.max(center_y).max(1.0);
+        let softness = self.softness;
+        let strength = self.strength;
+
+        let mut output = input.clone();
+        output.par_iter_mut().enumerate().for_each(|(idx, px)| {
+            let x = idx % width;
+            let y = idx / width;
+            let dx = (x as f64 - center_x) * inv_radius;
+            let dy = (y as f64 - center_y) * inv_radius;
+            let r2 = (dx * dx + dy * dy).powf(softness).min(1.0);
+            let factor = (1.0 - strength * r2).max(0.0);
+            px.0 *= factor;
+            px.1 *= factor;
+            px.2 *= factor;
+        });
+        Ok(output)
+    }
+}
+
 impl PostEffect for CinematicColorGrade {
     fn is_enabled(&self) -> bool {
         self.enabled && self.params.strength > 0.0

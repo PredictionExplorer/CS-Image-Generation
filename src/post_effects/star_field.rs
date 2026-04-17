@@ -3,8 +3,7 @@
 //! Generates a deterministic star layout seeded from the simulation noise seed
 //! using a simple rejection-sampled pseudo-poisson distribution, then paints
 //! each star as a tiny Gaussian splat (airy-disc-ish) directly into the
-//! trajectory/nebula-composited buffer (before bloom so the bloom lights up
-//! the brighter stars).
+//! trajectory buffer (before bloom so the bloom lights up the brighter stars).
 //!
 //! Used primarily by the Cosmic mood.
 
@@ -180,8 +179,7 @@ mod tests {
         let b = StarField::new(320, 180, 2, 0.5);
         // With at least ~36 stars, positions should differ somewhere.
         let any_diff = (0..a.star_count().min(b.star_count())).any(|i| {
-            (a.stars[i].x - b.stars[i].x).abs() > 0.5
-                || (a.stars[i].y - b.stars[i].y).abs() > 0.5
+            (a.stars[i].x - b.stars[i].x).abs() > 0.5 || (a.stars[i].y - b.stars[i].y).abs() > 0.5
         });
         assert!(any_diff, "different seeds should produce different star positions");
     }

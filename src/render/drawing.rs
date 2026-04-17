@@ -203,7 +203,15 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let dz = z1 - z0;
 
     let len_sq = dx * dx + dy * dy;
+    let len_2d = len_sq.sqrt();
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
+
+    // X-component of the perpendicular unit vector in screen space; used
+    // for **horizontal-only** bin-dependent dispersion. Staying in a single
+    // scan row keeps the splat writes confined to the caller's row band,
+    // so the parallel (row-banded) and serial (full-frame) paths deposit
+    // bitwise-identical energy.
+    let perp_x_horiz = if len_2d > 1e-6 { -dy / len_2d } else { 0.0f32 };
 
     // Dynamic line width: faster -> thinner, slower -> thicker
     let base_thickness = 1.2;
@@ -245,6 +253,18 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let depth_fade = (-avg_z.abs() * 0.002).exp().clamp(0.05, 1.0);
     let base_energy_mult = hdr_scale * f64::from(depth_fade) * f64::from(energy_conservation);
 
+    // Accumulation-time wavelength dispersion: shift each bin's deposit
+    // laterally along the segment's perpendicular by a small pixel amount
+    // proportional to (bin - center). This paints a rainbow perpendicular
+    // to motion across the entire trail, not just at the image rim.
+    let dispersion_px = if DISPERSION_BOOST_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::render::constants::ACCUMULATION_DISPERSION_PX
+    } else {
+        0.0
+    };
+    let bin_center = (NUM_BINS as f64 - 1.0) * 0.5;
+    let bin_norm_denom = ((NUM_BINS as f64 - 1.0) * 0.5).max(1.0);
+
     for py in min_y..=max_y {
         for px in min_x..=max_x {
             let pax = px as f32 - x0;
@@ -264,22 +284,96 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             }
 
             let alpha = alpha0 * (1.0 - f64::from(h)) + alpha1 * f64::from(h);
-            let final_energy = f64::from(energy) * alpha * base_energy_mult;
+            let mut final_energy = f64::from(energy) * alpha * base_energy_mult;
+            // Cap per-sample energy so one pathological splat cannot soak
+            // the SPD bins and force the tonemap to crush everything else.
+            if final_energy > crate::render::constants::LINE_SPLAT_ENERGY_CAP {
+                final_energy = crate::render::constants::LINE_SPLAT_ENERGY_CAP;
+            }
 
             let bin_f = bin0_f * (1.0 - f64::from(h)) + bin1_f * f64::from(h);
             let bin_left = (bin_f.floor() as usize).min(NUM_BINS - 1);
             let bin_right = (bin_left + 1).min(NUM_BINS - 1);
             let w_right = bin_f.fract();
 
-            let idx = (py as usize - row_start) * width as usize + px as usize;
+            if dispersion_px > 0.0 {
+                // Deposit left and right bins with independent **horizontal**
+                // lateral shifts proportional to how far each bin sits from
+                // the central wavelength. Staying on the same row keeps
+                // all writes inside the caller's row band so the banded
+                // accumulator is bitwise identical to the full-frame one.
+                let bl_offset = (bin_left as f64 - bin_center) / bin_norm_denom;
+                let br_offset = (bin_right as f64 - bin_center) / bin_norm_denom;
+                let ex_l = f64::from(px as f32 + perp_x_horiz * (bl_offset * dispersion_px) as f32);
+                let ex_r = f64::from(px as f32 + perp_x_horiz * (br_offset * dispersion_px) as f32);
 
-            if bin_right == bin_left {
-                accum[idx][bin_left] += final_energy;
+                let e_left = final_energy * (1.0 - w_right);
+                let e_right = final_energy * w_right;
+                deposit_bilinear_row(
+                    accum,
+                    width as usize,
+                    row_start,
+                    py as usize,
+                    ex_l,
+                    bin_left,
+                    e_left,
+                );
+                if bin_right != bin_left {
+                    deposit_bilinear_row(
+                        accum,
+                        width as usize,
+                        row_start,
+                        py as usize,
+                        ex_r,
+                        bin_right,
+                        e_right,
+                    );
+                }
             } else {
-                accum[idx][bin_left] += final_energy * (1.0 - w_right);
-                accum[idx][bin_right] += final_energy * w_right;
+                let idx = (py as usize - row_start) * width as usize + px as usize;
+                if bin_right == bin_left {
+                    accum[idx][bin_left] += final_energy;
+                } else {
+                    accum[idx][bin_left] += final_energy * (1.0 - w_right);
+                    accum[idx][bin_right] += final_energy * w_right;
+                }
             }
         }
+    }
+}
+
+/// Deposit `energy` bilinearly across two adjacent columns on a single row.
+/// Used by accumulation-time dispersion where each bin's deposit lands at
+/// a sub-pixel laterally offset position **within the same row** (so it
+/// stays inside the caller's row band regardless of the segment's
+/// orientation).
+#[inline]
+fn deposit_bilinear_row(
+    accum: &mut [[f64; NUM_BINS]],
+    width: usize,
+    row_start: usize,
+    py: usize,
+    x: f64,
+    bin: usize,
+    energy: f64,
+) {
+    if energy <= 0.0 {
+        return;
+    }
+    let x0 = x.floor();
+    let fx = (x - x0).clamp(0.0, 1.0);
+    let ix0 = x0 as isize;
+    let row = py - row_start;
+    // Left column.
+    if ix0 >= 0 && (ix0 as usize) < width {
+        let idx = row * width + ix0 as usize;
+        accum[idx][bin] += energy * (1.0 - fx);
+    }
+    // Right column.
+    let ix1 = ix0 + 1;
+    if ix1 >= 0 && (ix1 as usize) < width {
+        let idx = row * width + ix1 as usize;
+        accum[idx][bin] += energy * fx;
     }
 }
 

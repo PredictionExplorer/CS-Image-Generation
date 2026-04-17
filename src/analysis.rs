@@ -114,10 +114,7 @@ pub fn close_approach_density(positions: &[Vec<Vector3<f64>>], threshold: f64) -
         return 0.0;
     }
     let mut hits = 0usize;
-    for (p0, (p1, p2)) in positions[0]
-        .iter()
-        .zip(positions[1].iter().zip(positions[2].iter()))
-    {
+    for (p0, (p1, p2)) in positions[0].iter().zip(positions[1].iter().zip(positions[2].iter())) {
         let d01 = (p0 - p1).norm();
         let d12 = (p1 - p2).norm();
         let d20 = (p2 - p0).norm();
@@ -502,9 +499,8 @@ mod tests {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             (rng >> 33) as f64 / f64::from(u32::MAX) - 0.5
         };
-        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
-            .map(|_| (0..256).map(|_| Vector3::new(next(), next(), 0.0)).collect())
-            .collect();
+        let positions: Vec<Vec<Vector3<f64>>> =
+            (0..3).map(|_| (0..256).map(|_| Vector3::new(next(), next(), 0.0)).collect()).collect();
         let s = time_reversal_symmetry_xy(&positions);
         assert!((0.0..=1.0).contains(&s));
     }

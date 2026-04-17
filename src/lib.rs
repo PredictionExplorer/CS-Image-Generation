@@ -26,8 +26,6 @@
 
 /// Orbit-quality metrics used by the Borda + beauty selection.
 pub mod analysis;
-/// Finite-difference kinematics from recorded trajectories.
-pub mod kinematics;
 /// High-level generation pipeline: seed parsing, simulation orchestration, and output.
 pub mod app;
 /// Body drift transforms applied between simulation frames.
@@ -38,6 +36,8 @@ pub mod drift_config;
 pub mod error;
 /// Persistent JSON generation log for tracking produced seeds.
 pub mod generation_log;
+/// Finite-difference kinematics from recorded trajectories.
+pub mod kinematics;
 pub(crate) mod oklab;
 /// Composable image post-processing effect pipeline.
 pub mod post_effects;
@@ -47,10 +47,10 @@ pub mod render;
 pub mod sim;
 /// Wavelength-to-bin and bin-to-wavelength conversion constants.
 pub mod spectral_constants;
-/// CIE 1931 CMF-based spectral bin LUT (alternative to Bruton RGB in `spectrum`).
-pub mod spectrum_cie;
 /// Spectral power distribution (SPD) to RGB conversion via pre-computed LUTs.
 pub mod spectrum;
+/// CIE 1931 CMF-based spectral bin LUT (alternative to Bruton RGB in `spectrum`).
+pub mod spectrum_cie;
 /// SIMD-accelerated spectral conversion with AVX2, NEON, and scalar fallback.
 pub mod spectrum_simd;
 pub(crate) mod utils;

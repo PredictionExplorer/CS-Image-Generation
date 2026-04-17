@@ -85,10 +85,22 @@ impl PostEffect for DiffractionSpikes {
                 (-c, -s),
                 (-s, c),
                 (s, -c),
-                ((c - s) * std::f64::consts::FRAC_1_SQRT_2, (s + c) * std::f64::consts::FRAC_1_SQRT_2),
-                (-(c - s) * std::f64::consts::FRAC_1_SQRT_2, -(s + c) * std::f64::consts::FRAC_1_SQRT_2),
-                ((c + s) * std::f64::consts::FRAC_1_SQRT_2, (s - c) * std::f64::consts::FRAC_1_SQRT_2),
-                (-(c + s) * std::f64::consts::FRAC_1_SQRT_2, -(s - c) * std::f64::consts::FRAC_1_SQRT_2),
+                (
+                    (c - s) * std::f64::consts::FRAC_1_SQRT_2,
+                    (s + c) * std::f64::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    -(c - s) * std::f64::consts::FRAC_1_SQRT_2,
+                    -(s + c) * std::f64::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    (c + s) * std::f64::consts::FRAC_1_SQRT_2,
+                    (s - c) * std::f64::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    -(c + s) * std::f64::consts::FRAC_1_SQRT_2,
+                    -(s - c) * std::f64::consts::FRAC_1_SQRT_2,
+                ),
             ]
         } else {
             vec![(c, s), (-c, -s), (-s, c), (s, -c)]
@@ -101,11 +113,7 @@ impl PostEffect for DiffractionSpikes {
                 (0..width).filter_map(move |x| {
                     let p = input[y * width + x];
                     let lum = Self::premul_luma(p);
-                    if lum >= thr {
-                        Some((x, y, p))
-                    } else {
-                        None
-                    }
+                    if lum >= thr { Some((x, y, p)) } else { None }
                 })
             })
             .collect();

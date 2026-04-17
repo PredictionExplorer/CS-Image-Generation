@@ -184,11 +184,7 @@ pub fn prepare_triangle_vertices_at(
 /// Linearly interpolate `pos[step]` toward `pos[step+1]` by `frac ∈ [0,1]`.
 #[inline]
 pub(crate) fn lerp_body_step(pos: &[Vector3<f64>], step: usize, frac: f64) -> Vector3<f64> {
-    if step + 1 < pos.len() {
-        pos[step] * (1.0 - frac) + pos[step + 1] * frac
-    } else {
-        pos[step]
-    }
+    if step + 1 < pos.len() { pos[step] * (1.0 - frac) + pos[step + 1] * frac } else { pos[step] }
 }
 
 #[cfg(test)]
