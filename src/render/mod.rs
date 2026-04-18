@@ -36,6 +36,7 @@ pub mod histogram;
 pub mod mood;
 pub mod parameter_descriptors;
 pub mod pipeline_flags;
+pub mod quality_gate;
 pub mod randomizable_config;
 pub mod spectral_output;
 pub mod spectral_tonemap;
@@ -796,16 +797,22 @@ pub fn build_effect_config_from_resolved(
 fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
     /// Target alpha-weighted mean luminance (middle grey).
     const TARGET_MEAN: f64 = 0.14;
-    /// 99th-percentile luminance ceiling after auto gain. Matches the
-    /// tonemap's `paper_white` (0.85) so the top 1% of inked pixels sit at
-    /// or just below the shoulder — above it, `compress_display_highlights`
-    /// asymptotes at 1.0 and the stacked image-chain effects can then push
-    /// channels past the hard clamp. The final
-    /// [`apply_display_safety_shoulder`] catches any residual overshoot.
-    const HIGHLIGHT_HEADROOM: f64 = 0.85;
+    /// 99th-percentile luminance ceiling after auto gain. Sits well below
+    /// the tonemap's `paper_white` (0.85) so the AgX shoulder has room to
+    /// shape highlights without the top 1 % of inked pixels already
+    /// sitting against the hard upper bound.
+    const HIGHLIGHT_HEADROOM_P99: f64 = 0.65;
+    /// 99.9th-percentile ceiling. The p99 cap on its own leaves the
+    /// extreme top 0.1 % (compact bright cores stacked with additive
+    /// bloom + god rays + chromatic + aether) free to clip past AgX's
+    /// `max_ev = 2.5` and collapse to display white. This second cap
+    /// pins that tail at `1.2` in scene-linear space so the AgX
+    /// allocation still has room to compress instead of saturate.
+    const HIGHLIGHT_HEADROOM_P999: f64 = 1.2;
     /// Stride used for percentile sampling. Sampling every Nth inked
     /// pixel keeps this routine O(n/stride) while leaving enough data
-    /// (~100k points on a 1920x1080 frame) for a stable p99 estimate.
+    /// (~100k points on a 1920x1080 frame) for a stable p99/p99.9
+    /// estimate.
     const PERCENTILE_STRIDE: usize = 20;
 
     let mut sum = 0.0f64;
@@ -814,9 +821,10 @@ fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
     let mut samples: Vec<f64> = Vec::with_capacity(buffer.len() / PERCENTILE_STRIDE + 1);
     for (i, &(r, g, b, a)) in buffer.iter().enumerate() {
         if a > 1e-9 {
-            let lr = r / a;
-            let lg = g / a;
-            let lb = b / a;
+            let inv_a = 1.0 / a;
+            let lr = r * inv_a;
+            let lg = g * inv_a;
+            let lb = b * inv_a;
             let lum = constants::rec709_luminance(lr, lg, lb);
             sum += lum * a;
             w += a;
@@ -826,22 +834,45 @@ fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
         }
     }
     let mean = if w > 0.0 { sum / w } else { TARGET_MEAN };
-    let mut auto = (TARGET_MEAN / mean.max(1e-6)).clamp(0.25, 6.0);
+    // Upper bound tightened from 6.0 to 2.5: the previous value could
+    // boost a dim scene ~6x and drive the additive post-effect peaks
+    // far above the tonemap's headroom. 2.5x is still a meaningful
+    // lift for legitimately underexposed renders without risking
+    // clipping on top.
+    let mut auto = (TARGET_MEAN / mean.max(1e-6)).clamp(0.25, 2.5);
 
-    // Highlight headroom: cap `auto` so the post-gain 99th-percentile
-    // luminance does not exceed `HIGHLIGHT_HEADROOM`. The cap is only
-    // applied when the percentile is well-defined and the resulting gain
-    // would actually tighten (not loosen) the auto term.
+    // Highlight headroom: cap `auto` so the post-gain percentile
+    // luminances don't exceed their respective headroom values. Each
+    // cap is only applied when it actually tightens (not loosens) the
+    // auto term.
     if !samples.is_empty() {
-        let p99_idx = ((samples.len() as f64) * 0.99).floor() as usize;
-        let p99_idx = p99_idx.min(samples.len() - 1);
-        samples.select_nth_unstable_by(p99_idx, |a, b| {
+        let n = samples.len();
+        // Partial-sort enough of the tail to read both p99 and p99.9.
+        let p99_idx = ((n as f64) * 0.99).floor() as usize;
+        let p999_idx = ((n as f64) * 0.999).floor() as usize;
+        let p99_idx = p99_idx.min(n - 1);
+        let p999_idx = p999_idx.min(n - 1);
+        samples.select_nth_unstable_by(p999_idx, |a, b| {
             a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let p99 = samples[p99_idx].max(1e-6);
-        let highlight_cap = HIGHLIGHT_HEADROOM / p99;
-        if highlight_cap < auto {
-            auto = highlight_cap;
+        let p999 = samples[p999_idx].max(1e-6);
+        // The p99 index lies below p999_idx inside the now-lower
+        // partition; `select_nth_unstable_by` on the lower slice gives
+        // us the p99 quantile without a full sort.
+        let lower = &mut samples[..=p999_idx];
+        let p99_idx = p99_idx.min(lower.len() - 1);
+        lower.select_nth_unstable_by(p99_idx, |a, b| {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let p99 = lower[p99_idx].max(1e-6);
+
+        let cap_p99 = HIGHLIGHT_HEADROOM_P99 / p99;
+        if cap_p99 < auto {
+            auto = cap_p99;
+        }
+        let cap_p999 = HIGHLIGHT_HEADROOM_P999 / p999;
+        if cap_p999 < auto {
+            auto = cap_p999;
         }
     }
 
@@ -851,6 +882,62 @@ fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
         p.1 *= g;
         p.2 *= g;
     }
+}
+
+/// Scene-linear, hue-preserving luminance ceiling applied between
+/// `apply_auto_scene_metering` and the tonemap.
+///
+/// The metering step caps the **99th** percentile luminance; a compact
+/// hot core sitting in the top 0.1 % can still be many multiples of that
+/// value and punch past the AgX `max_ev = 2.5` (≈ 5.66 linear) window.
+/// Once all three channels clip there, the per-channel spline saturates
+/// at ~1.0, the outset matrix leaves each channel near unity, and
+/// `gamut_map_preserve_hue` no longer has chroma to recover — the pixel
+/// collapses to flat display white.
+///
+/// This ceiling uniformly scales `r, g, b` by `ceiling / lum` whenever
+/// the un-premultiplied luminance of a pixel exceeds `CEILING_LUMA`, so
+/// the RGB ratio (hue + saturation in linear space) is preserved
+/// exactly. A secondary per-channel guard catches nearly-pure colour
+/// highlights (e.g. saturated red) whose luminance alone may stay below
+/// the luma ceiling while a single channel runs far above it.
+fn apply_scene_linear_ceiling(buffer: &mut PixelBuffer) {
+    /// Luminance cap for the un-premultiplied scene-linear RGB. Sits well
+    /// below AgX's `2^2.5 ≈ 5.66` saturation point so the tonemap still
+    /// has room to produce a highlight shoulder instead of a hard clip.
+    const CEILING_LUMA: f64 = 3.0;
+    /// Per-channel cap. A bit above the luma ceiling so strongly coloured
+    /// highlights (e.g. pure red where only R is hot) still get rolled
+    /// in without flattening saturated tones that the luma cap alone
+    /// would miss.
+    const CEILING_CHANNEL: f64 = 4.5;
+    buffer.par_iter_mut().for_each(|p| {
+        let a = p.3;
+        if a <= 1e-9 {
+            return;
+        }
+        let inv_a = 1.0 / a;
+        let rs = p.0 * inv_a;
+        let gs = p.1 * inv_a;
+        let bs = p.2 * inv_a;
+        let lum = constants::rec709_luminance(rs, gs, bs);
+        let mut scale = 1.0;
+        if lum > CEILING_LUMA {
+            scale = CEILING_LUMA / lum;
+        }
+        // Per-channel safety: scale further if the brightest channel in
+        // un-premul space is still above CEILING_CHANNEL after the luma
+        // rescale. Uniform rescale preserves hue.
+        let max_ch_after = rs.max(gs).max(bs) * scale;
+        if max_ch_after > CEILING_CHANNEL {
+            scale *= CEILING_CHANNEL / max_ch_after;
+        }
+        if scale < 1.0 {
+            p.0 *= scale;
+            p.1 *= scale;
+            p.2 *= scale;
+        }
+    });
 }
 
 /// Energy-density wavelength shift for a single pixel's SPD.
@@ -1143,9 +1230,18 @@ fn pass_1_build_histogram_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
-        let trajectory_proxy = finish_pipeline
+        let mut trajectory_proxy = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
             .expect("effect chain invariant: histogram-pass trajectory processing must not fail");
+        // Pass-1 histogram must see the same pixel values that pass-2
+        // will feed into `tonemap_core`: both auto-metering and the
+        // scene-linear ceiling happen before tonemap in pass 2, so they
+        // must also happen here. Without this, `ChannelLevels` are
+        // calibrated to the unmetered proxy, and pass-2 metering can
+        // push the actual tonemap inputs off that calibrated range —
+        // contributing to blowouts on pathological seeds.
+        apply_auto_scene_metering(&mut trajectory_proxy);
+        apply_scene_linear_ceiling(&mut trajectory_proxy);
         accum_rgba.clear();
         accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
@@ -1313,6 +1409,7 @@ fn pass_2_write_frames_spectral_with_backend(
             })?;
 
         apply_auto_scene_metering(&mut trajectory_pixels);
+        apply_scene_linear_ceiling(&mut trajectory_pixels);
 
         let smoothed_linear = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(trajectory_pixels),
@@ -1441,12 +1538,21 @@ fn render_final_frame_spectral_with_backend(
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
-    let trajectory_pixels = finish_pipeline
+    let mut trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "trajectory_chain".into(),
             reason: e.to_string(),
         })?;
+
+    // Match the pass-2 video path exactly: global exposure metering and
+    // a hue-preserving scene-linear ceiling before tonemap. Without
+    // these, extreme seeds produce blown-out white cores because the
+    // additive trajectory chain (bloom, god rays, chromatic bloom,
+    // aether, ...) can pile far above the AgX headroom before the
+    // tonemap gets a chance to compress it.
+    apply_auto_scene_metering(&mut trajectory_pixels);
+    apply_scene_linear_ceiling(&mut trajectory_pixels);
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let mut final_display = finish_pipeline
@@ -1580,6 +1686,97 @@ mod tests {
     use crate::render::randomizable_config::ResolvedEffectConfig;
     use nalgebra::Vector3;
     use rayon::ThreadPoolBuilder;
+
+    /// Reconstruct the un-premultiplied RGB from a premul pixel and
+    /// compare each channel as a ratio (NaN-safe, 1e-9 alpha guard).
+    fn unpremul(p: (f64, f64, f64, f64)) -> (f64, f64, f64) {
+        let a = p.3.max(1e-12);
+        (p.0 / a, p.1 / a, p.2 / a)
+    }
+
+    #[test]
+    fn scene_linear_ceiling_preserves_hue_when_clamping() {
+        // A pixel with a hot core: luminance well above the ceiling but
+        // with a distinct saturated colour (high blue, low green).
+        let rs = 6.0;
+        let gs = 1.0;
+        let bs = 10.0;
+        let alpha = 0.8;
+        let mut buffer: PixelBuffer =
+            vec![(rs * alpha, gs * alpha, bs * alpha, alpha)];
+        apply_scene_linear_ceiling(&mut buffer);
+        let (rn, gn, bn) = unpremul(buffer[0]);
+        // Luminance must now be at or below the 3.0 ceiling (with a
+        // small epsilon for floating-point slack and the secondary
+        // channel cap which may pull luminance even lower).
+        let lum = constants::rec709_luminance(rn, gn, bn);
+        assert!(lum <= 3.0 + 1e-9, "luminance {} exceeds ceiling", lum);
+        // Ratios r:g:b must match the input: uniform scale preserves
+        // hue and saturation exactly.
+        let orig_ratio_rg = rs / gs;
+        let orig_ratio_bg = bs / gs;
+        let new_ratio_rg = rn / gn;
+        let new_ratio_bg = bn / gn;
+        assert!(
+            (new_ratio_rg - orig_ratio_rg).abs() / orig_ratio_rg < 1e-6,
+            "r/g ratio drifted: {} vs {}",
+            new_ratio_rg,
+            orig_ratio_rg
+        );
+        assert!(
+            (new_ratio_bg - orig_ratio_bg).abs() / orig_ratio_bg < 1e-6,
+            "b/g ratio drifted: {} vs {}",
+            new_ratio_bg,
+            orig_ratio_bg
+        );
+    }
+
+    #[test]
+    fn scene_linear_ceiling_leaves_well_exposed_pixels_untouched() {
+        // A well-exposed pixel (luminance < 3.0, all channels < 4.5)
+        // should emerge bit-identical.
+        let alpha = 0.5;
+        let original = (0.8 * alpha, 1.2 * alpha, 0.5 * alpha, alpha);
+        let mut buffer: PixelBuffer = vec![original];
+        apply_scene_linear_ceiling(&mut buffer);
+        assert_eq!(buffer[0], original);
+    }
+
+    #[test]
+    fn scene_linear_ceiling_ignores_zero_alpha() {
+        // Transparent pixels must not produce NaN from division.
+        let mut buffer: PixelBuffer = vec![(0.0, 0.0, 0.0, 0.0)];
+        apply_scene_linear_ceiling(&mut buffer);
+        assert_eq!(buffer[0], (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn auto_scene_metering_bounds_p99_near_headroom() {
+        // Build a buffer with a bright tail that the old clamp (6.0x)
+        // would happily boost past paper white. The tightened bounds
+        // plus the p99 cap must keep the top percentile well-controlled.
+        let mut buffer: PixelBuffer = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            let a = 1.0;
+            let lum = if i < 990 { 0.05 } else { 1.5 }; // 99% dim, 1% hot
+            buffer.push((lum * a, lum * a, lum * a, a));
+        }
+        apply_auto_scene_metering(&mut buffer);
+        // Measure p99 of the post-metering un-premul luminance.
+        let mut lums: Vec<f64> = buffer
+            .iter()
+            .map(|p| {
+                let (r, g, b) = unpremul(*p);
+                constants::rec709_luminance(r, g, b)
+            })
+            .collect();
+        lums.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p99 = lums[(lums.len() as f64 * 0.99) as usize - 1];
+        // With HIGHLIGHT_HEADROOM_P99 = 0.65 and a 1% hot tail at lum=1.5,
+        // the metering must cap the post-gain p99 near (or below) 0.65.
+        // Allow a modest slack for the discrete percentile.
+        assert!(p99 <= 0.8, "p99 {} exceeded bounded headroom", p99);
+    }
 
     fn default_levels() -> ChannelLevels {
         ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)

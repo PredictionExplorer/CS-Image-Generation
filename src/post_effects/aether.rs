@@ -140,7 +140,26 @@ pub fn apply_aether_weave(
             final_b += (hue_shift + 4.18879).cos() * spectral; // +240°
         }
 
-        *pixel = (final_r.max(0.0) * a, final_g.max(0.0) * a, final_b.max(0.0) * a, a);
+        // Hue-preserving cap on the **un-premultiplied** composite
+        // before we re-premul. The scatter/caustic/iridescence adds
+        // are unbounded and, without this, a bright subject (high
+        // `sr/sg/sb`) stacked with an aggressive scattering strength
+        // can deposit multiple units of extra linear energy per
+        // channel — enough to push a premul pixel far past the
+        // scene-linear ceiling even before other additive effects
+        // chime in.
+        const UNPREMUL_CEILING: f64 = 3.0;
+        let r_nn = final_r.max(0.0);
+        let g_nn = final_g.max(0.0);
+        let b_nn = final_b.max(0.0);
+        let max_ch = r_nn.max(g_nn).max(b_nn);
+        let (cr, cg, cb) = if max_ch > UNPREMUL_CEILING {
+            let scale = UNPREMUL_CEILING / max_ch;
+            (r_nn * scale, g_nn * scale, b_nn * scale)
+        } else {
+            (r_nn, g_nn, b_nn)
+        };
+        *pixel = (cr * a, cg * a, cb * a, a);
     });
 }
 

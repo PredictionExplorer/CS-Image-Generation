@@ -349,10 +349,25 @@ pub fn render_video(
         &video_options,
     )?;
 
-    // Save final frame
+    // Save final frame, after a last-mile quality gate. The pipeline
+    // fixes upstream (scene-linear ceiling, tight metering, per-effect
+    // caps, additive-stack guard) make blowouts very unlikely, but we
+    // still verify before shipping: if the gate rejects, surface a
+    // specific error so the orchestrator (run.py) can retry with a
+    // rescue-salted seed instead of silently writing a broken PNG.
     if let Some(last_frame) = last_frame_png {
-        info!("Attempting to save 16-bit PNG to: {}", output_png);
-        save_image_as_png_16bit(&last_frame, output_png)?;
+        match render::quality_gate::analyze_white_blob(&last_frame) {
+            render::quality_gate::QaVerdict::Pass => {
+                info!("Attempting to save 16-bit PNG to: {}", output_png);
+                save_image_as_png_16bit(&last_frame, output_png)?;
+            }
+            render::quality_gate::QaVerdict::Reject { reason } => {
+                warn!("Quality gate rejected final frame: {reason}");
+                let _ = fs::remove_file(output_png);
+                let _ = fs::remove_file(output_vid);
+                return Err(render::error::RenderError::QualityGateRejected { reason }.into());
+            }
+        }
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }

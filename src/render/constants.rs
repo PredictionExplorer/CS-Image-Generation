@@ -68,7 +68,12 @@ pub const DEFAULT_HDR_SCALE: f64 = 1.0;
 
 /// Pre-tonemap luminance target for the solved white percentile.
 /// Values above this still retain headroom for specular accents.
-pub const DEFAULT_PRETONEMAP_LUMA_TARGET: f64 = 0.88;
+///
+/// Lowered from `0.88` → `0.78` so the high-percentile target sits
+/// well below the AgX saturation point, giving the tonemap a real
+/// shoulder to shape instead of having highlights slam into the hard
+/// upper bound of AgX's allocation window.
+pub const DEFAULT_PRETONEMAP_LUMA_TARGET: f64 = 0.78;
 
 /// Samples above this normalized luminance are considered near-clipped during proxy analysis.
 pub const DEFAULT_PRETONEMAP_NEAR_CLIP_THRESHOLD: f64 = 1.10;
@@ -80,7 +85,13 @@ pub const DEFAULT_PRETONEMAP_NEAR_CLIP_BUDGET: f64 = 0.0025;
 pub const DEFAULT_PRETONEMAP_BUDGET_RESPONSE: f64 = 1.5;
 
 /// Lower clamp for the global exposure scale derived from proxy analysis.
-pub const DEFAULT_MIN_EXPOSURE_SCALE: f64 = 0.35;
+///
+/// Lowered from `0.35` → `0.20` so the governor has more room to darken
+/// truly extreme scenes (many additive bloom-family effects stacked at
+/// top-of-range strengths). Without this, the governor bottoms out at
+/// `0.35` for pathological seeds and the tonemap still gets inputs
+/// that collapse to flat display white.
+pub const DEFAULT_MIN_EXPOSURE_SCALE: f64 = 0.20;
 
 /// Display-space luminance reserved for "paper white".
 ///

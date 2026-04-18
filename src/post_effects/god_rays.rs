@@ -181,9 +181,20 @@ impl PostEffect for GodRays {
                 // doesn't get double-bright.
                 let falloff = (dist / 80.0).min(1.0);
                 let gain = inv * falloff;
-                out.0 += acc_r * gain;
-                out.1 += acc_g * gain;
-                out.2 += acc_b * gain;
+                // Alpha-proportional cap on the additive ray energy. The
+                // trajectory buffer is premultiplied, so a single pixel
+                // whose `out.3 = a` naturally tops out near `a`; a 2x
+                // over-alpha add lets a rim-lit subject still read as
+                // rays without dumping 10-20x the local brightness into
+                // the core when multiple additive effects stack with
+                // god rays.
+                let cap = (out.3 * 2.0).max(1e-6);
+                let add_r = (acc_r * gain).min(cap);
+                let add_g = (acc_g * gain).min(cap);
+                let add_b = (acc_b * gain).min(cap);
+                out.0 += add_r;
+                out.1 += add_g;
+                out.2 += add_b;
             }
         });
 

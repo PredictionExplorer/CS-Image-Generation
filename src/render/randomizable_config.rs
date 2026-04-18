@@ -1074,10 +1074,15 @@ fn apply_mood_strength_scales(config: &mut ResolvedEffectConfig, biases: &MoodBi
     config.vignette_strength *= biases.vignette_scale;
 
     // Keep everything in sensible bounds after the scale.
+    // Chromatic and glow upper bounds tightened (3.0 -> 1.5, 5.0 -> 2.5)
+    // because the previous maxima, combined with mood scales, could
+    // push enough energy into an already-hot scene to overwhelm the
+    // tonemap shoulder. These lower ceilings still leave room for a
+    // confidently bold halo or glow without blowout.
     config.blur_strength = config.blur_strength.clamp(0.0, 64.0);
     config.dog_strength = config.dog_strength.clamp(0.0, 6.0);
-    config.chromatic_bloom_strength = config.chromatic_bloom_strength.clamp(0.0, 3.0);
-    config.glow_strength = config.glow_strength.clamp(0.0, 5.0);
+    config.chromatic_bloom_strength = config.chromatic_bloom_strength.clamp(0.0, 1.5);
+    config.glow_strength = config.glow_strength.clamp(0.0, 2.5);
     config.vibrance = config.vibrance.clamp(0.0, 3.0);
     config.vignette_strength = config.vignette_strength.clamp(0.0, 1.5);
 }
@@ -1290,6 +1295,104 @@ fn apply_conflict_detection(
         config.enable_perceptual_blur = false;
         adjustments.push(format!(
             "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {softness_score:.2})"
+        ));
+    }
+
+    // ============================================================================
+    // QUALITY GUARD 6: Bound additive brightening stacks
+    // ============================================================================
+    // Every bloom-family / glow / chromatic / god-rays / aether / opalescence /
+    // edge-luminance / micro-contrast effect deposits additional linear
+    // energy into the premultiplied HDR buffer. Each one individually is
+    // tastefully bounded, but when ≥ 5 run together the additive pile
+    // drives compact highlights past the tonemap shoulder and collapses
+    // to flat display white. We deterministically attenuate all enabled
+    // additive strengths by `1 / sqrt(count / 4)` so the combined
+    // contribution grows sub-linearly with the number of effects in the
+    // stack, preserving look diversity without blowing out.
+    let additive_count = {
+        let mut n = 0u32;
+        if config.enable_bloom {
+            n += 1;
+        }
+        if config.enable_bloom_pyramid {
+            n += 1;
+        }
+        if config.enable_glow {
+            n += 1;
+        }
+        if config.enable_chromatic_bloom {
+            n += 1;
+        }
+        if config.enable_god_rays {
+            n += 1;
+        }
+        if config.enable_aether {
+            n += 1;
+        }
+        if config.enable_opalescence {
+            n += 1;
+        }
+        if config.enable_edge_luminance {
+            n += 1;
+        }
+        if config.enable_micro_contrast {
+            n += 1;
+        }
+        n
+    };
+    if additive_count >= 5 {
+        // Count-driven attenuation: the signal "how many additive
+        // brightening effects are stacked" includes every enabled
+        // effect from the list above, but the **attenuation** itself
+        // only hits the true HDR-brightening effects (bloom,
+        // bloom_pyramid, glow, chromatic_bloom, god_rays, opalescence,
+        // aether). Micro-contrast and edge-luminance deposit far less
+        // energy and primarily serve as *detail rescue* for soft
+        // stacks — scaling them down would undo Guard 4's rescue work
+        // for softness stacks without materially reducing blowout
+        // risk.
+        let scale = 1.0 / ((additive_count as f64) / 4.0).sqrt();
+        let original_blur = config.blur_strength;
+        let original_dog = config.dog_strength;
+        let original_glow = config.glow_strength;
+        let original_chromatic = config.chromatic_bloom_strength;
+        let original_opal = config.opalescence_strength;
+        let original_aether = config.aether_scattering_strength;
+
+        if config.enable_bloom {
+            config.blur_strength *= scale;
+            config.dog_strength *= scale;
+        }
+        if config.enable_glow {
+            config.glow_strength *= scale;
+        }
+        if config.enable_chromatic_bloom {
+            config.chromatic_bloom_strength *= scale;
+        }
+        if config.enable_opalescence {
+            config.opalescence_strength *= scale;
+        }
+        if config.enable_aether {
+            config.aether_scattering_strength *= scale;
+        }
+
+        adjustments.push(format!(
+            "Quality guard: Attenuated bloom-family strengths by {:.3}x to prevent cumulative blowout (stack count: {}, blur: {:.3} -> {:.3}, dog: {:.3} -> {:.3}, glow: {:.3} -> {:.3}, chromatic: {:.3} -> {:.3}, opal: {:.3} -> {:.3}, aether: {:.3} -> {:.3})",
+            scale,
+            additive_count,
+            original_blur,
+            config.blur_strength,
+            original_dog,
+            config.dog_strength,
+            original_glow,
+            config.glow_strength,
+            original_chromatic,
+            config.chromatic_bloom_strength,
+            original_opal,
+            config.opalescence_strength,
+            original_aether,
+            config.aether_scattering_strength,
         ));
     }
 

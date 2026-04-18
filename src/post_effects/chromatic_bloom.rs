@@ -66,8 +66,17 @@ impl ChromaticBloom {
                     return (0.0, 0.0, 0.0, 0.0);
                 }
 
-                // Calculate luminance (Rec. 709)
-                let lum = crate::render::constants::rec709_luminance(r, g, b);
+                // Luminance of the **un-premultiplied** colour; without
+                // the 1/a division this misidentifies dim-but-thick
+                // trails (high a, low r,g,b) as bright and underweights
+                // actual specular highlights, skewing where chromatic
+                // bloom lands.
+                let inv_a = 1.0 / a;
+                let lum = crate::render::constants::rec709_luminance(
+                    r * inv_a,
+                    g * inv_a,
+                    b * inv_a,
+                );
 
                 // Threshold-based extraction with smooth falloff
                 let brightness =
@@ -274,10 +283,18 @@ impl PostEffect for ChromaticBloom {
                 let bloom_g = g.1;
                 let bloom_b = b.2;
 
+                // Alpha-proportional cap instead of the legacy absolute
+                // `.min(10.0)`. The trajectory buffer is premultiplied,
+                // so the natural upper bound for a pixel is `~alpha`;
+                // allowing a 3x-over-alpha add preserves the prismatic
+                // halo intent while preventing pathological stacking
+                // from piling an order of magnitude of energy into a
+                // single channel.
+                let cap = (orig.3 * 3.0).max(1e-6);
                 (
-                    (orig.0 + bloom_r * self.config.strength).min(10.0), // Clamp to reasonable HDR range
-                    (orig.1 + bloom_g * self.config.strength).min(10.0),
-                    (orig.2 + bloom_b * self.config.strength).min(10.0),
+                    (orig.0 + bloom_r * self.config.strength).min(cap),
+                    (orig.1 + bloom_g * self.config.strength).min(cap),
+                    (orig.2 + bloom_b * self.config.strength).min(cap),
                     orig.3,
                 )
             })

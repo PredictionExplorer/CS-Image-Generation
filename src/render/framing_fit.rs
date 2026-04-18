@@ -121,7 +121,68 @@ pub fn fit_to_ink_camera(
         cam = recenter_only(&cam, &extent, width, height);
     }
 
+    // Viewport-occupancy sanity check: the iterated refit can converge on
+    // a camera where the percentile-trimmed ink extent *looks* right in
+    // absolute pixel units but the majority of samples actually lie
+    // outside the framebuffer (a known failure mode for high-drift
+    // orbits embedded in an inflated bounding box — produces a
+    // mostly-black frame with a tiny splat in one corner, like seed
+    // 0x8f1d87d78ba2). If fewer than `MIN_VIEWPORT_OCCUPANCY` of
+    // trajectory samples project inside the viewport we fall back to a
+    // corner-safe `orbit_fit`, which is the ground-truth framing that
+    // guarantees the full 3D bounding box is inside the frame.
+    const MIN_VIEWPORT_OCCUPANCY: f64 = 0.85;
+    let occupancy = measure_viewport_occupancy(&cam, positions, width, height);
+    if occupancy < MIN_VIEWPORT_OCCUPANCY {
+        let fallback_fill = fill.min(0.85);
+        let mut fallback = PerspectiveCamera::orbit_fit(bbox, width, height, fallback_fill);
+        // Recentre fallback on the ink as well so the subject sits
+        // centred rather than in a bbox corner.
+        if let Some(extent) =
+            measure_ink_pixel_extent(&fallback, positions, width, height, ink_pct)
+        {
+            fallback = recenter_only(&fallback, &extent, width, height);
+        }
+        cam = fallback;
+    }
+
     cam
+}
+
+/// Fraction of projected trajectory samples that land inside the
+/// framebuffer `[0, width] x [0, height]`.
+///
+/// Returns `1.0` for empty input so that trivial scenes don't trigger
+/// the fallback. Infinite or NaN projections count as "outside".
+fn measure_viewport_occupancy(
+    camera: &PerspectiveCamera,
+    positions: &[Vec<Vector3<f64>>],
+    width: u32,
+    height: u32,
+) -> f64 {
+    let mut total = 0usize;
+    let mut inside = 0usize;
+    let wf = f64::from(width);
+    let hf = f64::from(height);
+    for body in positions {
+        for &p in body {
+            let (px, py, _) = camera.project(width, height, p);
+            let pxf = f64::from(px);
+            let pyf = f64::from(py);
+            total += 1;
+            if pxf.is_finite()
+                && pyf.is_finite()
+                && (0.0..=wf).contains(&pxf)
+                && (0.0..=hf).contains(&pyf)
+            {
+                inside += 1;
+            }
+        }
+    }
+    if total == 0 {
+        return 1.0;
+    }
+    inside as f64 / total as f64
 }
 
 /// Maximum additional refit passes after the zoom-in-only first pass.
