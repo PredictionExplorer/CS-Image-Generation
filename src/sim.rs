@@ -462,6 +462,123 @@ fn thumbnail_rerank_top_k(
     scored.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(idx, _, traj)| (idx, traj))
 }
 
+/// Outlier dominance threshold (p98 / p50 trimmed axial extent). Above
+/// this ratio a single excursion of one or two bodies dwarfs the main
+/// cluster, producing the "tiny cluster plus a long tail into empty
+/// space" failure mode that the framing pipeline can only partially
+/// compensate for. Empirically, well-composed three-body orbits sit at
+/// 3–8; anything above 20 is pathological.
+pub const MAX_OUTLIER_EXTENT_RATIO: f64 = 20.0;
+
+/// Absolute floor on the dominant axial extent of any body. Below this,
+/// every body is collapsing to a near-point and the resulting image
+/// carries no meaningful trajectory to light up pixels. Measured in the
+/// same world units as the initial-condition location scale.
+pub const MIN_DOMINANT_BODY_EXTENT: f64 = 1.0;
+
+/// Percentile-trimmed axial extent of `positions` along axis
+/// `axis` (0 = x, 1 = y, 2 = z).
+///
+/// Returns the span between the `low`-th and `(1 - low)`-th
+/// percentiles of the coordinates sampled over all bodies and
+/// time-steps. `low` is expected to be small (e.g. 0.02 → 2 %–98 %
+/// trim). A zero-length input returns `0.0`.
+fn trimmed_axial_extent(positions: &[Vec<Vector3<f64>>], axis: usize, low: f64) -> f64 {
+    let total: usize = positions.iter().map(std::vec::Vec::len).sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let mut values: Vec<f64> = Vec::with_capacity(total);
+    for body in positions {
+        for p in body {
+            values.push(match axis {
+                0 => p.x,
+                1 => p.y,
+                _ => p.z,
+            });
+        }
+    }
+    let n = values.len();
+    let lo_idx = ((low * n as f64).floor() as usize).min(n - 1);
+    let hi_idx = (((1.0 - low) * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
+    values.select_nth_unstable_by(lo_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let lo = values[lo_idx];
+    values.select_nth_unstable_by(hi_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let hi = values[hi_idx];
+    (hi - lo).max(0.0)
+}
+
+/// Maximum, across `(body, axis)` pairs, of the 98th–2nd percentile
+/// trimmed axial extent. Used as the "dominant body extent" signal:
+/// as long as at least one body has a non-trivial range of motion on
+/// at least one axis, the orbit can produce meaningful image content.
+fn dominant_body_extent(positions: &[Vec<Vector3<f64>>]) -> f64 {
+    let mut best = 0.0f64;
+    for body in positions {
+        if body.is_empty() {
+            continue;
+        }
+        for axis in 0..3 {
+            let single = [body.clone()];
+            let ext = trimmed_axial_extent(&single, axis, 0.02);
+            if ext > best {
+                best = ext;
+            }
+        }
+    }
+    best
+}
+
+/// Ratio between the untrimmed and 2 %-trimmed axial extents, maxed
+/// over axes. Large values indicate outliers: a small, tight main
+/// cluster plus one or more rare excursions that blow up the raw
+/// bounding box. When the ratio exceeds
+/// [`MAX_OUTLIER_EXTENT_RATIO`] the framing camera is forced to
+/// choose between keeping the outlier visible (leaving the main
+/// subject tiny) and zooming past it (leaving a hot splat near the
+/// frame edge).
+fn outlier_extent_ratio(positions: &[Vec<Vector3<f64>>]) -> f64 {
+    let mut worst = 0.0f64;
+    for axis in 0..3 {
+        let trimmed = trimmed_axial_extent(positions, axis, 0.02);
+        let raw = trimmed_axial_extent(positions, axis, 0.0);
+        if trimmed <= 1e-9 {
+            continue;
+        }
+        let ratio = raw / trimmed;
+        if ratio > worst {
+            worst = ratio;
+        }
+    }
+    worst
+}
+
+/// Reject `positions` if the orbit's projected spatial extent is
+/// degenerate or outlier-dominated.
+///
+/// Returns `true` when the trajectory is acceptable for rendering, and
+/// `false` when Borda selection should discard it. Conservative by
+/// design: only catches clearly-broken orbits (every body collapsed to
+/// a point, or a single body's far excursion dwarfing the rest).
+/// Preserves variety — "boring but bounded" orbits are not filtered;
+/// the framing / tone-mapping pipeline already handles them.
+pub fn passes_spatial_extent_filter(positions: &[Vec<Vector3<f64>>]) -> bool {
+    if positions.is_empty() {
+        return false;
+    }
+    if dominant_body_extent(positions) < MIN_DOMINANT_BODY_EXTENT {
+        return false;
+    }
+    if outlier_extent_ratio(positions) > MAX_OUTLIER_EXTENT_RATIO {
+        return false;
+    }
+    true
+}
+
 /// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
 ///
 /// Returns the winning initial conditions together with their [`TrajectoryResult`] scores.
@@ -513,6 +630,26 @@ pub fn select_best_trajectory(
             };
 
             let pos = simr.positions;
+
+            // Spatial-extent degeneracy filter. Catches the two
+            // failure modes that routinely slip past chaos/equil/energy
+            // gates into final renders:
+            //   1. All three bodies collapse to a near-point (dominant
+            //      extent < `MIN_DOMINANT_BODY_EXTENT`). The resulting
+            //      image is a single bright dot with no structure.
+            //   2. One body's rare long excursion dominates the
+            //      bounding box (outlier ratio >
+            //      `MAX_OUTLIER_EXTENT_RATIO`). The framing camera is
+            //      then forced to either zoom onto a tiny cluster with
+            //      a bright splat far off-centre, or frame the whole
+            //      extent and leave the real subject as a few pixels.
+            // The filter is conservative: empirically-observed
+            // museum-quality orbits sit well inside both bounds.
+            if !passes_spatial_extent_filter(&pos) {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+
             let m1 = b[0].mass;
             let m2 = b[1].mass;
             let m3 = b[2].mass;
@@ -586,6 +723,23 @@ pub fn select_best_trajectory(
         "\n   => Stage-1 top-{TOP_K} -> rerank winner orbit idx {stage1_index} (top-K slot {winner_in_top_k}), weighted={:.3}, beauty={:.3}",
         bt.total_score_weighted, bt.beauty
     );
+
+    // Emit spatial-extent telemetry for the winner. We re-simulate at
+    // `rerank_steps` (the same horizon used for beauty scoring) so the
+    // telemetry reflects what the downstream render will see, not the
+    // coarser `steps` footprint from stage-1.
+    if let Some(simr) =
+        get_positions_with_early_exit(many[stage1_index].clone(), rerank_steps, th)
+    {
+        let pos = &simr.positions;
+        let dbe = dominant_body_extent(pos);
+        let oer = outlier_extent_ratio(pos);
+        crate::generation_log::record_telemetry(|t| {
+            t.dominant_body_extent = Some(dbe);
+            t.outlier_extent_ratio = Some(oer);
+        });
+    }
+
     Ok((many[stage1_index].clone(), bt))
 }
 
@@ -802,5 +956,117 @@ mod tests {
         assert!(info.equilateralness.is_finite());
         assert!(info.beauty.is_finite());
         assert!((0.0..=1.0).contains(&info.beauty));
+    }
+
+    // ------------------------------------------------------------------
+    // Spatial-extent filter (Phase 4) unit + property tests
+    // ------------------------------------------------------------------
+
+    /// Build a three-body circular motion on the XY plane with the
+    /// given radius. Used as a "well-composed" reference trajectory
+    /// that must always pass the spatial-extent filter.
+    fn circular_trajectory(radius: f64, steps: usize) -> Vec<Vec<Vector3<f64>>> {
+        use std::f64::consts::TAU;
+        (0..3i32)
+            .map(|body_idx| {
+                let phase = TAU * f64::from(body_idx) / 3.0;
+                (0..steps)
+                    .map(|i| {
+                        let t = TAU * (i as f64) / (steps as f64);
+                        Vector3::new(
+                            radius * (t + phase).cos(),
+                            radius * (t + phase).sin(),
+                            0.0,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn spatial_extent_filter_accepts_healthy_orbit() {
+        let pos = circular_trajectory(5.0, 500);
+        assert!(passes_spatial_extent_filter(&pos), "healthy circular orbit must pass");
+    }
+
+    #[test]
+    fn spatial_extent_filter_rejects_collapsed_orbit() {
+        // All bodies glued to origin: dominant extent = 0, below floor.
+        let pos: Vec<Vec<Vector3<f64>>> =
+            (0..3).map(|_| (0..500).map(|_| Vector3::zeros()).collect()).collect();
+        assert!(!passes_spatial_extent_filter(&pos), "collapsed orbit must be rejected");
+    }
+
+    #[test]
+    fn spatial_extent_filter_rejects_outlier_dominated_orbit() {
+        // Baseline tight cluster + one extreme excursion of body 0 far
+        // from the origin. Raw extent is driven by the outlier; trimmed
+        // extent stays inside the cluster. Ratio should blow past the
+        // 20x threshold.
+        let steps = 500;
+        let mut pos = circular_trajectory(1.0, steps);
+        pos[0][steps - 1] = Vector3::new(5000.0, 0.0, 0.0);
+        pos[0][steps - 2] = Vector3::new(5000.0, 0.0, 0.0);
+        assert!(
+            !passes_spatial_extent_filter(&pos),
+            "outlier-dominated orbit must be rejected"
+        );
+    }
+
+    #[test]
+    fn spatial_extent_filter_preserves_modest_asymmetry() {
+        // 5x asymmetry between bodies — well within the 20x threshold.
+        // This guards the conservative-by-design promise: the filter
+        // must not prune legitimately-varied orbits from the pool.
+        let mut pos = circular_trajectory(2.0, 500);
+        for p in &mut pos[0] {
+            p.x *= 4.0;
+        }
+        assert!(
+            passes_spatial_extent_filter(&pos),
+            "moderately-asymmetric orbit must pass (filter is conservative)"
+        );
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            cases: 128,
+            .. proptest::prelude::ProptestConfig::default()
+        })]
+
+        // Any non-degenerate, bounded circular orbit at moderate radius
+        // with moderate anisotropy must pass the spatial-extent filter.
+        // This encodes the "conservative" invariant: the filter may
+        // only reject clearly broken orbits, never reasonable ones.
+        #[test]
+        fn proptest_conservative_filter_never_rejects_reasonable_orbits(
+            radius in 1.5f64..50.0,
+            anisotropy in 0.3f64..3.0,
+            z_amp in 0.0f64..5.0,
+            steps in 200usize..1000,
+        ) {
+            use std::f64::consts::TAU;
+            let pos: Vec<Vec<Vector3<f64>>> = (0..3i32)
+                .map(|body_idx| {
+                    let phase = TAU * f64::from(body_idx) / 3.0;
+                    (0..steps)
+                        .map(|i| {
+                            let t = TAU * (i as f64) / (steps as f64);
+                            Vector3::new(
+                                radius * (t + phase).cos(),
+                                radius * anisotropy * (t + phase).sin(),
+                                z_amp * (t * 2.0 + phase).sin(),
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+            proptest::prop_assert!(
+                passes_spatial_extent_filter(&pos),
+                "rejected reasonable orbit (radius={}, anisotropy={}, z_amp={}, steps={})",
+                radius, anisotropy, z_amp, steps,
+            );
+        }
     }
 }

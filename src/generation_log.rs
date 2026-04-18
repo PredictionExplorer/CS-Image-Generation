@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read as _, Write as _};
 use std::path::Path;
+use std::sync::RwLock;
 use tracing::{error, info, warn};
 
 const LOG_FILE_PATH: &str = "generation_log.json";
@@ -48,6 +49,124 @@ pub struct GenerationRecord {
     /// Framing mode used for the camera (auto, classic).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub framing: String,
+
+    /// Runtime telemetry captured from the render pipeline. Logged
+    /// alongside the reproducible parameters so post-hoc analysis can
+    /// correlate blowouts / framing regressions with the *actual*
+    /// pipeline state instead of guessing from parameters alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<Telemetry>,
+}
+
+/// Per-render telemetry captured from the pipeline's quality guards.
+///
+/// All fields are optional because earlier log entries predate
+/// telemetry and because some values (e.g. centroid offset) may be
+/// unavailable if the framing pass early-exits on empty positions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Telemetry {
+    // --- Framing ---
+    /// Viewport occupancy (fraction of frame occupied by inked
+    /// pixels) measured after `fit_to_ink_camera` converges. Target
+    /// >= 0.95 per `MIN_VIEWPORT_OCCUPANCY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport_occupancy: Option<f64>,
+    /// `|centroid_x - 0.5 * width|` as a fraction of frame width.
+    /// Target < 0.02 per `MAX_CENTROID_OFFSET_FRAC`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centroid_offset_x_frac: Option<f64>,
+    /// `|centroid_y - 0.5 * height|` as a fraction of frame height.
+    /// Target < 0.02 per `MAX_CENTROID_OFFSET_FRAC`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centroid_offset_y_frac: Option<f64>,
+
+    // --- Additive stack ---
+    /// Count of enabled additive HDR-brightening effects used by
+    /// Guard 6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additive_effect_count: Option<u32>,
+    /// Weighted additive energy as computed by
+    /// `additive_weighted_energy` after Guard 7 has (possibly)
+    /// rescaled the stack. Should always be <= `ADDITIVE_ENERGY_BUDGET`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additive_weighted_energy: Option<f64>,
+
+    // --- Spatial extent (sim) ---
+    /// Dominant axial extent of the selected trajectory (max across
+    /// bodies and axes of the 2%–98% trimmed range). Target >=
+    /// `MIN_DOMINANT_BODY_EXTENT`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dominant_body_extent: Option<f64>,
+    /// Ratio of raw to trimmed axial extent (outlier dominance
+    /// signal). Target <= `MAX_OUTLIER_EXTENT_RATIO`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outlier_extent_ratio: Option<f64>,
+}
+
+/// Process-global telemetry accumulator. Pipeline stages (framing,
+/// conflict detection, sim selection) stream their metrics into this
+/// slot via [`record_telemetry`] during a single render; the CLI reads
+/// the accumulated value via [`take_telemetry`] when building the
+/// `GenerationRecord`.
+///
+/// The choice of a global mutex (vs threading a telemetry handle
+/// through the entire pipeline) mirrors the existing `focal_offset`
+/// store in `render::context`: both carry render-wide state that spans
+/// many functions without belonging to any single pipeline struct.
+static TELEMETRY: RwLock<Telemetry> = RwLock::new(Telemetry {
+    viewport_occupancy: None,
+    centroid_offset_x_frac: None,
+    centroid_offset_y_frac: None,
+    additive_effect_count: None,
+    additive_weighted_energy: None,
+    dominant_body_extent: None,
+    outlier_extent_ratio: None,
+});
+
+/// Update the global telemetry slot via the closure `mutator`.
+/// Silently no-ops if the lock is poisoned — telemetry must never
+/// crash the render pipeline. Poisoning can occur if a panic happens
+/// while another thread holds the lock, in which case we've already
+/// lost the render.
+pub fn record_telemetry<F>(mutator: F)
+where
+    F: FnOnce(&mut Telemetry),
+{
+    if let Ok(mut guard) = TELEMETRY.write() {
+        mutator(&mut guard);
+    }
+}
+
+/// Atomically read and reset the global telemetry slot. Returns a
+/// snapshot of whatever metrics the pipeline recorded during the most
+/// recent render. The returned [`Telemetry`] is `Some(...)` only when
+/// at least one field has been populated.
+#[must_use]
+pub fn take_telemetry() -> Option<Telemetry> {
+    let mut guard = TELEMETRY.write().ok()?;
+    let out = guard.clone();
+    *guard = Telemetry::default();
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+impl Telemetry {
+    /// True if no metric has been recorded yet. Used by
+    /// [`take_telemetry`] to decide whether the snapshot is worth
+    /// persisting to the generation log.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.viewport_occupancy.is_none()
+            && self.centroid_offset_x_frac.is_none()
+            && self.centroid_offset_y_frac.is_none()
+            && self.additive_effect_count.is_none()
+            && self.additive_weighted_energy.is_none()
+            && self.dominant_body_extent.is_none()
+            && self.outlier_extent_ratio.is_none()
+    }
 }
 
 /// Snapshot of render pipeline settings written to the generation log.
@@ -158,6 +277,7 @@ impl GenerationRecord {
             randomization_log: None,
             mood: String::new(),
             framing: String::new(),
+            telemetry: None,
         }
     }
 }

@@ -1087,6 +1087,130 @@ fn apply_mood_strength_scales(config: &mut ResolvedEffectConfig, biases: &MoodBi
     config.vignette_strength = config.vignette_strength.clamp(0.0, 1.5);
 }
 
+/// Maximum allowed weighted additive energy across all enabled
+/// HDR-brightening post-effects. Above this, Guard 7 rescales every
+/// additive strength proportionally so the sum lands exactly at the
+/// budget. Calibrated against the historical blow-out seed cluster
+/// (`0x8f1d87d78ba2`, `0x3cbc65976065`) where the weighted sum sat at
+/// ~3.5–4.5 before the rescale.
+pub const ADDITIVE_ENERGY_BUDGET: f64 = 3.0;
+
+// Per-effect weights used by [`additive_weighted_energy`] and Guard 7.
+// Each value represents the **additive energy deposited per unit of
+// normalized strength** (strength projected into its descriptor's
+// `[0, 1]` range). Weights are calibrated so a stack of three fully
+// maxed "average" effects (weight ≈ 1.0 each) just touches
+// [`ADDITIVE_ENERGY_BUDGET`].
+
+/// Guard 7 weight for the classic `bloom` additive path (baseline).
+pub const W_BLOOM: f64 = 1.0;
+/// Guard 7 weight for the multi-scale `bloom_pyramid` stack. Higher
+/// than `W_BLOOM` because pyramid samples hit every scale.
+pub const W_BLOOM_PYRAMID: f64 = 1.2;
+/// Guard 7 weight for the tight `glow` pass (smaller footprint).
+pub const W_GLOW: f64 = 0.8;
+/// Guard 7 weight for prismatic `chromatic_bloom`. Slightly below
+/// bloom because its channel-offset structure disperses energy.
+pub const W_CHROMATIC: f64 = 0.9;
+/// Guard 7 weight for volumetric `god_rays`. Highest of the family
+/// since its radial scatter deposits bright energy across the widest
+/// footprint.
+pub const W_GOD_RAYS: f64 = 1.5;
+/// Guard 7 weight for `aether` volumetric filaments (spread out, less
+/// concentrated than bloom).
+pub const W_AETHER: f64 = 0.6;
+/// Guard 7 weight for `opalescence` iridescence (subtle, low energy).
+pub const W_OPALESCENCE: f64 = 0.4;
+/// Guard 7 weight for `micro_contrast` local sharpening. Low since
+/// the effect is detail-rescue, not additive brightening.
+pub const W_MICRO_CONTRAST: f64 = 0.3;
+/// Guard 7 weight for `edge_luminance` rim brightening. Concentrated
+/// along edges, so per-effect energy is modest.
+pub const W_EDGE_LUMINANCE: f64 = 0.4;
+
+/// Project an absolute strength into `[0, 1]` against its descriptor
+/// range. Values outside the curated range clamp to the nearest end.
+fn normalize_strength(value: f64, desc: &pd::FloatParamDescriptor) -> f64 {
+    let span = (desc.max - desc.min).max(1e-9);
+    ((value - desc.min) / span).clamp(0.0, 1.0)
+}
+
+/// Compute the weighted additive energy of every enabled
+/// HDR-brightening effect in `config`. Returns a scalar that can be
+/// compared directly to [`ADDITIVE_ENERGY_BUDGET`]. Used both by
+/// Guard 7 and by property tests asserting the post-conflict-detection
+/// config never exceeds the budget.
+#[must_use]
+pub fn additive_weighted_energy(config: &ResolvedEffectConfig) -> f64 {
+    let n_blur = if config.enable_bloom || config.enable_bloom_pyramid {
+        normalize_strength(config.blur_strength, &pd::BLUR_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_dog = if config.enable_bloom || config.enable_bloom_pyramid {
+        normalize_strength(config.dog_strength, &pd::DOG_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_glow = if config.enable_glow {
+        normalize_strength(config.glow_strength, &pd::GLOW_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_chromatic = if config.enable_chromatic_bloom {
+        normalize_strength(config.chromatic_bloom_strength, &pd::CHROMATIC_BLOOM_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_aether = if config.enable_aether {
+        normalize_strength(config.aether_scattering_strength, &pd::AETHER_SCATTERING_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_opal = if config.enable_opalescence {
+        normalize_strength(config.opalescence_strength, &pd::OPALESCENCE_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_micro = if config.enable_micro_contrast {
+        normalize_strength(config.micro_contrast_strength, &pd::MICRO_CONTRAST_STRENGTH)
+    } else {
+        0.0
+    };
+    let n_edge = if config.enable_edge_luminance {
+        normalize_strength(config.edge_luminance_strength, &pd::EDGE_LUMINANCE_STRENGTH)
+    } else {
+        0.0
+    };
+
+    // `bloom` and `bloom_pyramid` share `blur_strength` and `dog_strength`
+    // but have distinct per-effect weights, so each contributes when
+    // enabled. Average blur and DoG to avoid double-counting the two
+    // strengths that always move together.
+    let n_bloom_pair = 0.5 * (n_blur + n_dog);
+    let mut total = 0.0;
+    if config.enable_bloom {
+        total += n_bloom_pair * W_BLOOM;
+    }
+    if config.enable_bloom_pyramid {
+        total += n_bloom_pair * W_BLOOM_PYRAMID;
+    }
+    total += n_glow * W_GLOW
+        + n_chromatic * W_CHROMATIC
+        + n_aether * W_AETHER
+        + n_opal * W_OPALESCENCE
+        + n_micro * W_MICRO_CONTRAST
+        + n_edge * W_EDGE_LUMINANCE;
+    // god_rays has no resolved strength knob: its contribution is a
+    // fixed weight whenever it's enabled. (Guard 6 hard-disables it in
+    // extreme stacks; this energy contribution reflects its cost when
+    // it is left on.)
+    if config.enable_god_rays {
+        total += W_GOD_RAYS;
+    }
+    total
+}
+
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
 ///
 /// Philosophy: Maximum exploration with minimum intervention.
@@ -1299,17 +1423,33 @@ fn apply_conflict_detection(
     }
 
     // ============================================================================
-    // QUALITY GUARD 6: Bound additive brightening stacks
+    // QUALITY GUARD 6: Bound additive brightening stacks (count-driven)
     // ============================================================================
     // Every bloom-family / glow / chromatic / god-rays / aether / opalescence /
     // edge-luminance / micro-contrast effect deposits additional linear
     // energy into the premultiplied HDR buffer. Each one individually is
-    // tastefully bounded, but when ≥ 5 run together the additive pile
+    // tastefully bounded, but when ≥ 4 run together the additive pile
     // drives compact highlights past the tonemap shoulder and collapses
     // to flat display white. We deterministically attenuate all enabled
-    // additive strengths by `1 / sqrt(count / 4)` so the combined
+    // additive strengths by `1 / (count / 3)` so the combined
     // contribution grows sub-linearly with the number of effects in the
     // stack, preserving look diversity without blowing out.
+    //
+    // History:
+    // * The legacy activation threshold was 5 with `1 / sqrt(count / 4)`
+    //   scaling, which at count = 5 only tightened strengths to 89 %. On
+    //   the remote 50-seed sweep more than half of outputs were still
+    //   blowing out (the `0x8f1d87d78ba2` / `0x3cbc65976065` cluster),
+    //   so we drop activation to 4 and use the sharper `count/3` rate.
+    // * `bloom_pyramid` shares `blur_strength` with `bloom`, so the
+    //   existing attenuation of `blur_strength` naturally tames the
+    //   pyramid without a dedicated knob.
+    // * `god_rays` has no resolved strength field — it's a pure enable
+    //   flag — so extremely dense stacks (count ≥ 7) hard-disable it as
+    //   the final safety valve. Keeping it enabled alongside the
+    //   attenuated bloom family would leave a single un-tamed additive
+    //   contributor, which is exactly the failure mode this guard is
+    //   trying to eliminate.
     let additive_count = {
         let mut n = 0u32;
         if config.enable_bloom {
@@ -1341,18 +1481,20 @@ fn apply_conflict_detection(
         }
         n
     };
-    if additive_count >= 5 {
+    if additive_count >= 4 {
         // Count-driven attenuation: the signal "how many additive
         // brightening effects are stacked" includes every enabled
         // effect from the list above, but the **attenuation** itself
         // only hits the true HDR-brightening effects (bloom,
-        // bloom_pyramid, glow, chromatic_bloom, god_rays, opalescence,
-        // aether). Micro-contrast and edge-luminance deposit far less
-        // energy and primarily serve as *detail rescue* for soft
-        // stacks — scaling them down would undo Guard 4's rescue work
-        // for softness stacks without materially reducing blowout
-        // risk.
-        let scale = 1.0 / ((additive_count as f64) / 4.0).sqrt();
+        // bloom_pyramid, glow, chromatic_bloom, opalescence, aether).
+        // Micro-contrast and edge-luminance deposit far less energy
+        // and primarily serve as *detail rescue* for soft stacks —
+        // scaling them down would undo Guard 4's rescue work without
+        // materially reducing blowout risk.
+        //
+        // Scale at count 4 = 0.75, at 5 = 0.60, at 6 = 0.50,
+        //         at 7 = 0.43, at 8 = 0.38, at 9 = 0.33.
+        let scale = 1.0 / (f64::from(additive_count) / 3.0);
         let original_blur = config.blur_strength;
         let original_dog = config.dog_strength;
         let original_glow = config.glow_strength;
@@ -1360,7 +1502,7 @@ fn apply_conflict_detection(
         let original_opal = config.opalescence_strength;
         let original_aether = config.aether_scattering_strength;
 
-        if config.enable_bloom {
+        if config.enable_bloom || config.enable_bloom_pyramid {
             config.blur_strength *= scale;
             config.dog_strength *= scale;
         }
@@ -1377,8 +1519,18 @@ fn apply_conflict_detection(
             config.aether_scattering_strength *= scale;
         }
 
+        // Final safety valve: with no strength knob, god_rays can
+        // only be bounded by the enable flag. At stack ≥ 7 the
+        // remaining additive budget is so thin that leaving god_rays
+        // on would re-introduce the blowout we just attenuated away.
+        let original_god_rays = config.enable_god_rays;
+        let god_rays_disabled = additive_count >= 7 && config.enable_god_rays;
+        if god_rays_disabled {
+            config.enable_god_rays = false;
+        }
+
         adjustments.push(format!(
-            "Quality guard: Attenuated bloom-family strengths by {:.3}x to prevent cumulative blowout (stack count: {}, blur: {:.3} -> {:.3}, dog: {:.3} -> {:.3}, glow: {:.3} -> {:.3}, chromatic: {:.3} -> {:.3}, opal: {:.3} -> {:.3}, aether: {:.3} -> {:.3})",
+            "Quality guard 6: Attenuated additive strengths by {:.3}x to prevent cumulative blowout (stack count: {}, blur: {:.3} -> {:.3}, dog: {:.3} -> {:.3}, glow: {:.3} -> {:.3}, chromatic: {:.3} -> {:.3}, opal: {:.3} -> {:.3}, aether: {:.3} -> {:.3}, god_rays: {} -> {})",
             scale,
             additive_count,
             original_blur,
@@ -1393,6 +1545,107 @@ fn apply_conflict_detection(
             config.opalescence_strength,
             original_aether,
             config.aether_scattering_strength,
+            original_god_rays,
+            config.enable_god_rays,
+        ));
+    }
+
+    // ============================================================================
+    // QUALITY GUARD 7: Weighted-energy additive budget (post-Guard-6 backstop)
+    // ============================================================================
+    // Guard 6 is count-based: a stack of two effects, each cranked near
+    // their respective max strengths, never triggers it even though the
+    // combined output can still dominate the tonemap shoulder. Guard 7
+    // closes that gap by measuring a **normalized, weighted energy**
+    // across every additive effect (see [`additive_weighted_energy`])
+    // and scaling them down if the total exceeds
+    // [`ADDITIVE_ENERGY_BUDGET`].
+    //
+    // This is a **backstop**: it only fires when Guard 6 + the
+    // scene-linear ceiling haven't already tamed the stack. Under the
+    // mood-driven randomizer the typical energy is ~1.5–2.0 and no
+    // scaling is applied; seeds near the failure boundary land at
+    // ~3.0+ and are pulled back to exactly BUDGET.
+    let total_energy = additive_weighted_energy(&config);
+
+    if total_energy > ADDITIVE_ENERGY_BUDGET {
+        let scale = ADDITIVE_ENERGY_BUDGET / total_energy;
+
+        /// Rescale a strength by scaling its *normalized* position
+        /// inside the descriptor range, then projecting back to
+        /// absolute. Equivalent to `min + (normalized * scale) *
+        /// span`, so the post-scale strength is always inside
+        /// `[min, max]` regardless of `scale`.
+        fn rescale(current: f64, scale: f64, desc: &pd::FloatParamDescriptor) -> f64 {
+            let norm = normalize_strength(current, desc);
+            let new_norm = (norm * scale).clamp(0.0, 1.0);
+            desc.min + new_norm * (desc.max - desc.min)
+        }
+
+        let original_blur = config.blur_strength;
+        let original_dog = config.dog_strength;
+        let original_glow = config.glow_strength;
+        let original_chromatic = config.chromatic_bloom_strength;
+        let original_aether = config.aether_scattering_strength;
+        let original_opal = config.opalescence_strength;
+        let original_micro = config.micro_contrast_strength;
+        let original_edge = config.edge_luminance_strength;
+
+        if config.enable_bloom || config.enable_bloom_pyramid {
+            config.blur_strength = rescale(config.blur_strength, scale, &pd::BLUR_STRENGTH);
+            config.dog_strength = rescale(config.dog_strength, scale, &pd::DOG_STRENGTH);
+        }
+        if config.enable_glow {
+            config.glow_strength = rescale(config.glow_strength, scale, &pd::GLOW_STRENGTH);
+        }
+        if config.enable_chromatic_bloom {
+            config.chromatic_bloom_strength = rescale(
+                config.chromatic_bloom_strength,
+                scale,
+                &pd::CHROMATIC_BLOOM_STRENGTH,
+            );
+        }
+        if config.enable_aether {
+            config.aether_scattering_strength = rescale(
+                config.aether_scattering_strength,
+                scale,
+                &pd::AETHER_SCATTERING_STRENGTH,
+            );
+        }
+        if config.enable_opalescence {
+            config.opalescence_strength =
+                rescale(config.opalescence_strength, scale, &pd::OPALESCENCE_STRENGTH);
+        }
+        if config.enable_micro_contrast {
+            config.micro_contrast_strength =
+                rescale(config.micro_contrast_strength, scale, &pd::MICRO_CONTRAST_STRENGTH);
+        }
+        if config.enable_edge_luminance {
+            config.edge_luminance_strength =
+                rescale(config.edge_luminance_strength, scale, &pd::EDGE_LUMINANCE_STRENGTH);
+        }
+
+        adjustments.push(format!(
+            "Quality guard 7: Weighted additive energy {:.3} exceeds budget {:.3}; rescaled by {:.3}x (blur: {:.3} -> {:.3}, dog: {:.3} -> {:.3}, glow: {:.3} -> {:.3}, chromatic: {:.3} -> {:.3}, aether: {:.3} -> {:.3}, opal: {:.3} -> {:.3}, micro: {:.3} -> {:.3}, edge: {:.3} -> {:.3})",
+            total_energy,
+            ADDITIVE_ENERGY_BUDGET,
+            scale,
+            original_blur,
+            config.blur_strength,
+            original_dog,
+            config.dog_strength,
+            original_glow,
+            config.glow_strength,
+            original_chromatic,
+            config.chromatic_bloom_strength,
+            original_aether,
+            config.aether_scattering_strength,
+            original_opal,
+            config.opalescence_strength,
+            original_micro,
+            config.micro_contrast_strength,
+            original_edge,
+            config.edge_luminance_strength,
         ));
     }
 
@@ -1414,6 +1667,16 @@ fn apply_conflict_detection(
 
         log.add_record(adjustment_record);
     }
+
+    // Record the final additive-stack signal post-Guard-6/7. This is
+    // the value that actually drives the render — not the pre-guard
+    // state — so downstream analysis can correlate runtime telemetry
+    // with the configuration that produced each frame.
+    let final_energy = additive_weighted_energy(&config);
+    crate::generation_log::record_telemetry(|t| {
+        t.additive_effect_count = Some(additive_count);
+        t.additive_weighted_energy = Some(final_energy);
+    });
 
     config
 }
@@ -2000,5 +2263,156 @@ mod tests {
         // Test that modulo wrapping works (indices > 14)
         let _palette_15 = LuxuryPalette::from_index(15);
         let _palette_0 = LuxuryPalette::from_index(0);
+    }
+
+    /// Build a config with every additive effect enabled and every
+    /// strength pinned to its descriptor maximum — the worst case
+    /// Guard 6 + Guard 7 have to handle.
+    fn worst_case_additive_stack() -> ResolvedEffectConfig {
+        ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_bloom_pyramid: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_god_rays: true,
+            enable_aether: true,
+            enable_opalescence: true,
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            blur_strength: pd::BLUR_STRENGTH.max,
+            dog_strength: pd::DOG_STRENGTH.max,
+            glow_strength: pd::GLOW_STRENGTH.max,
+            chromatic_bloom_strength: pd::CHROMATIC_BLOOM_STRENGTH.max,
+            aether_scattering_strength: pd::AETHER_SCATTERING_STRENGTH.max,
+            opalescence_strength: pd::OPALESCENCE_STRENGTH.max,
+            micro_contrast_strength: pd::MICRO_CONTRAST_STRENGTH.max,
+            edge_luminance_strength: pd::EDGE_LUMINANCE_STRENGTH.max,
+            ..baseline_resolved_config()
+        }
+    }
+
+    #[test]
+    fn guard6_attenuates_shared_strengths_when_stack_has_at_least_four_effects() {
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_aether: true,
+            blur_strength: 4.0,
+            glow_strength: 0.30,
+            chromatic_bloom_strength: 0.45,
+            aether_scattering_strength: 1.0,
+            ..baseline_resolved_config()
+        };
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config.clone(), &mut log);
+
+        // Four effects → scale = 0.75 applied to each enabled strength.
+        assert!(result.blur_strength < config.blur_strength, "blur must attenuate");
+        assert!(result.glow_strength < config.glow_strength, "glow must attenuate");
+        assert!(
+            result.chromatic_bloom_strength < config.chromatic_bloom_strength,
+            "chromatic must attenuate"
+        );
+        assert!(
+            result.aether_scattering_strength < config.aether_scattering_strength,
+            "aether must attenuate"
+        );
+    }
+
+    #[test]
+    fn guard6_disables_god_rays_in_dense_stacks() {
+        // 9 effects: bloom, pyramid, glow, chromatic, god_rays,
+        // aether, opal, micro, edge. Count ≥ 7 triggers the kill.
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_bloom_pyramid: true,
+            enable_glow: true,
+            enable_chromatic_bloom: true,
+            enable_god_rays: true,
+            enable_aether: true,
+            enable_opalescence: true,
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            ..baseline_resolved_config()
+        };
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        assert!(!result.enable_god_rays, "god_rays must be disabled at count >= 7");
+    }
+
+    #[test]
+    fn guard7_pulls_worst_case_stack_to_budget() {
+        let config = worst_case_additive_stack();
+        let pre_energy = additive_weighted_energy(&config);
+        assert!(
+            pre_energy > ADDITIVE_ENERGY_BUDGET,
+            "baseline stack must exceed the budget ({pre_energy} <= {ADDITIVE_ENERGY_BUDGET})"
+        );
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        let post_energy = additive_weighted_energy(&result);
+
+        // Floating-point tolerance: rescaling is exact up to the
+        // clamp on god_rays (which has no strength knob), so the
+        // post-energy lands within a hair of the budget even in the
+        // worst case.
+        assert!(
+            post_energy <= ADDITIVE_ENERGY_BUDGET + 1e-6,
+            "Guard 7 must clamp weighted energy to budget: {post_energy} > {ADDITIVE_ENERGY_BUDGET}"
+        );
+    }
+
+    #[test]
+    fn guard7_leaves_small_stacks_untouched() {
+        // Two effects at mid-range strengths → energy well under budget.
+        let config = ResolvedEffectConfig {
+            enable_glow: true,
+            enable_opalescence: true,
+            glow_strength: 0.25,
+            opalescence_strength: 0.08,
+            ..baseline_resolved_config()
+        };
+        let pre_energy = additive_weighted_energy(&config);
+        assert!(
+            pre_energy < ADDITIVE_ENERGY_BUDGET,
+            "precondition: energy must start under budget (got {pre_energy})"
+        );
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config.clone(), &mut log);
+        assert_eq!(result.glow_strength, config.glow_strength);
+        assert_eq!(result.opalescence_strength, config.opalescence_strength);
+    }
+
+    // Property test: for any random seed, the resolved+attenuated
+    // config's weighted additive energy never exceeds the budget.
+    // Covers the full mood-driven randomization surface that the
+    // remote 50-seed sweep is sampling from.
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            cases: 256,
+            .. proptest::prelude::ProptestConfig::default()
+        })]
+
+        #[test]
+        fn proptest_random_seed_never_exceeds_energy_budget(
+            seed_val in 0u64..1_000_000,
+        ) {
+            let seed_bytes = seed_val.to_le_bytes();
+            let mut rng = Sha3RandomByteStream::new(&seed_bytes, 100.0, 300.0, 300.0, 1.0);
+            let config = RandomizableEffectConfig::default();
+            let (resolved, _log) = config.resolve(&mut rng, 1920, 1080);
+
+            let energy = additive_weighted_energy(&resolved);
+            proptest::prop_assert!(
+                energy <= ADDITIVE_ENERGY_BUDGET + 1e-6,
+                "seed {} produced post-guard energy {} > budget {}",
+                seed_val,
+                energy,
+                ADDITIVE_ENERGY_BUDGET,
+            );
+        }
     }
 }

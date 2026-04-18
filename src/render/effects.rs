@@ -912,7 +912,7 @@ mod tests {
         let mut src: Vec<[f64; NUM_BINS]> = vec![[0.0; NUM_BINS]; w * h];
         // One "hot" pixel with total_energy well above the shift threshold,
         // plus uniform dim background so the shift path is exercised.
-        for pixel in src.iter_mut() {
+        for pixel in &mut src {
             pixel[20] = 0.01;
         }
         src[(h / 2) * w + (w / 2)][32] = 2.0;

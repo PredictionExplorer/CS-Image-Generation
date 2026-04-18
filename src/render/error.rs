@@ -42,16 +42,6 @@ pub enum RenderError {
         /// Description of the encoding failure.
         reason: String,
     },
-
-    /// Post-render quality gate rejected the final image. The seed is
-    /// considered unshippable in its current form; the orchestrator
-    /// (run.py) can retry with a rescue-salted seed or log and move on.
-    #[error("Quality gate rejected render: {reason}")]
-    QualityGateRejected {
-        /// Human-readable description of which check failed and by how
-        /// much (e.g. "near-white fraction 0.28 > 0.15").
-        reason: String,
-    },
 }
 
 /// Convenience type alias

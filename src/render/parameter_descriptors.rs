@@ -98,11 +98,11 @@ pub const BLUR_RADIUS_SCALE: FloatParamDescriptor = FloatParamDescriptor {
 
 /// Brightness preservation factor in the blur core.
 ///
-/// Range narrowed from `9.0..14.0` → `4.0..7.0`. The original values
-/// applied an 9x–14x gain to the extracted highlight residual before
+/// Range narrowed from `9.0..14.0` -> `4.0..7.0`. The original values
+/// applied an 9x-14x gain to the extracted highlight residual before
 /// it was added back on top of the base image, which on top-of-range
 /// seeds with multiple bloom-family effects enabled drove the core
-/// pixels well past AgX saturation. `4..7` still gives bloom that
+/// pixels well past `AgX` saturation. `4..7` still gives bloom that
 /// reads as "bright specular" without blowing the highlight off the
 /// shoulder.
 pub const BLUR_CORE_BRIGHTNESS: FloatParamDescriptor = FloatParamDescriptor {

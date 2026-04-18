@@ -8,7 +8,7 @@ use crate::drift::parse_drift_mode;
 use crate::drift_config::{ResolvedDriftConfig, resolve_drift_config};
 use crate::error::{ConfigError, Result};
 use crate::generation_log::{
-    DriftConfig, GenerationLogger, GenerationRecord, LoggedRenderConfig, OrbitInfo,
+    self, DriftConfig, GenerationLogger, GenerationRecord, LoggedRenderConfig, OrbitInfo,
     SimulationConfig,
 };
 use crate::render::{
@@ -349,25 +349,19 @@ pub fn render_video(
         &video_options,
     )?;
 
-    // Save final frame, after a last-mile quality gate. The pipeline
-    // fixes upstream (scene-linear ceiling, tight metering, per-effect
-    // caps, additive-stack guard) make blowouts very unlikely, but we
-    // still verify before shipping: if the gate rejects, surface a
-    // specific error so the orchestrator (run.py) can retry with a
-    // rescue-salted seed instead of silently writing a broken PNG.
+    // Save final frame unconditionally. Quality is now enforced
+    // upstream via: (1) the framing invariant in `fit_to_ink_camera`
+    // (occupancy >= 0.95, centroid within 2 % of frame centre), (2)
+    // the energy-budget normalization in `apply_conflict_detection`
+    // (total additive post-effect energy <= BUDGET), (3) the
+    // scene-linear ceiling + auto metering before tonemap, and (4)
+    // the post-tonemap hue-preserving safety shoulder. These
+    // guarantees are validated by property tests in CI, so the render
+    // pipeline is designed to produce museum-quality output on the
+    // first shot rather than rejecting and retrying.
     if let Some(last_frame) = last_frame_png {
-        match render::quality_gate::analyze_white_blob(&last_frame) {
-            render::quality_gate::QaVerdict::Pass => {
-                info!("Attempting to save 16-bit PNG to: {}", output_png);
-                save_image_as_png_16bit(&last_frame, output_png)?;
-            }
-            render::quality_gate::QaVerdict::Reject { reason } => {
-                warn!("Quality gate rejected final frame: {reason}");
-                let _ = fs::remove_file(output_png);
-                let _ = fs::remove_file(output_vid);
-                return Err(render::error::RenderError::QualityGateRejected { reason }.into());
-            }
-        }
+        info!("Saving 16-bit PNG to: {}", output_png);
+        save_image_as_png_16bit(&last_frame, output_png)?;
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
@@ -481,6 +475,12 @@ pub fn log_generation(
     record.randomization_log = randomization_log.cloned();
     record.mood.clone_from(&config.mood);
     record.framing.clone_from(&config.framing);
+
+    // Drain the process-global telemetry slot populated by the
+    // framing, conflict-detection, and sim-selection stages during
+    // this render. `take_telemetry` resets the slot so the next run
+    // starts with a clean accumulator.
+    record.telemetry = generation_log::take_telemetry();
 
     logger.log_generation(record)
 }

@@ -25,13 +25,68 @@
 //! ink fills the configured fraction. A final recentre-only pass locks the
 //! subject to dead-centre regardless of any parallax introduced by the last
 //! zoom step.
+//!
+//! Museum-quality framing invariants (enforced by `fit_to_ink_camera`):
+//! * **Viewport occupancy** — at least [`MIN_VIEWPORT_OCCUPANCY`] (95%) of
+//!   trajectory samples project inside the framebuffer. Catches the
+//!   "tiny splat in one corner" failure mode where a drift-inflated
+//!   orbit would otherwise leave most of the ink off-screen.
+//! * **Centroid centring** — the percentile-trimmed ink centroid sits
+//!   within [`MAX_CENTROID_OFFSET_FRAC`] (2%) of frame centre on both
+//!   axes.
+//!
+//! If the primary `fit_to_ink` attempt misses either invariant, the
+//! target `fill` is progressively shrunk (×[`SHRINK_FACTOR`] per attempt,
+//! up to [`MAX_SHRINK_ATTEMPTS`] times) and the fit is retried. Each
+//! shrink step uniformly zooms the camera **out**, so more of the ink
+//! falls inside the viewport and any off-axis parallax residual also
+//! shrinks proportionally. As a terminal safety net, after the
+//! retries are exhausted the camera falls back to a corner-safe
+//! `orbit_fit` at a conservative fill — because `orbit_fit` puts the
+//! entire 3D bbox corners inside the viewport, occupancy is
+//! guaranteed by construction.
 
 use super::camera_path::PerspectiveCamera;
 use super::context::BoundingBox;
 use nalgebra::Vector3;
 
+/// Minimum fraction of trajectory samples that must land inside the
+/// framebuffer for a camera to be accepted. Tighter than the legacy 85%
+/// so the "tiny splat in one corner" failure mode (seed
+/// `0x8f1d87d78ba2`) is rejected before the PNG is ever written.
+pub const MIN_VIEWPORT_OCCUPANCY: f64 = 0.95;
+
+/// Maximum offset of the percentile-trimmed ink centroid from the frame
+/// centre, measured as a fraction of each axis's length. 2% is ~20 px on
+/// a 1080 axis — below visual perception for composition.
+pub const MAX_CENTROID_OFFSET_FRAC: f64 = 0.02;
+
+/// Number of progressively-shrinking refit attempts before the corner-safe
+/// fallback. At [`SHRINK_FACTOR`] = 0.92, the last attempt sits at ~0.51
+/// of the original fill — comfortably loose enough for any non-degenerate
+/// orbit.
+const MAX_SHRINK_ATTEMPTS: usize = 8;
+
+/// Multiplicative shrink applied to the target fill between retry
+/// attempts when an invariant is violated. 0.92 is gentle enough that
+/// most seeds pass on the first or second try while still guaranteeing
+/// convergence within [`MAX_SHRINK_ATTEMPTS`] attempts.
+const SHRINK_FACTOR: f64 = 0.92;
+
+/// Minimum allowed fill during retries. Below this, we stop retrying and
+/// fall through to the terminal corner-safe `orbit_fit` fallback.
+const MIN_RETRY_FILL: f64 = 0.30;
+
+/// Corner-safe fill used by the terminal `orbit_fit` fallback. Since
+/// `orbit_fit` at fill ≤ 1.0 places the 3D bbox corners inside the
+/// viewport, every trajectory sample (which by definition lies inside
+/// that bbox) is also inside the viewport — occupancy is 1.0 by
+/// construction.
+const TERMINAL_FALLBACK_FILL: f64 = 0.75;
+
 /// Build a perspective camera that fits the **projected ink** of `positions`
-/// into `fill` of the frame.
+/// into `fill` of the frame, subject to the museum-quality framing
+/// invariants ([`MIN_VIEWPORT_OCCUPANCY`] and [`MAX_CENTROID_OFFSET_FRAC`]).
 ///
 /// `bbox` seeds the initial camera (target, direction, distance) and should
 /// be the percentile-trimmed 3D bounding box of the same trajectories.
@@ -56,6 +111,101 @@ pub fn fit_to_ink_camera(
     let fill = fill.clamp(0.2, 0.98);
     let ink_pct = ink_pct.clamp(0.5, 1.0);
 
+    // Try the primary fit with the requested fill. If either invariant
+    // fails, progressively shrink `fill` and retry the whole refit —
+    // every shrink step pulls the camera farther back and so strictly
+    // increases both occupancy and centring headroom. This replaces
+    // the legacy one-shot `orbit_fit` fallback with a monotonic
+    // convergence loop.
+    let mut attempt_fill = fill;
+    for _ in 0..MAX_SHRINK_ATTEMPTS {
+        let cam = fit_to_ink_primary_attempt(
+            positions,
+            bbox,
+            width,
+            height,
+            attempt_fill,
+            ink_pct,
+            focal_offset_world,
+        );
+        if invariants_met(&cam, positions, width, height, ink_pct) {
+            record_framing_telemetry(&cam, positions, width, height, ink_pct);
+            return cam;
+        }
+        attempt_fill *= SHRINK_FACTOR;
+        if attempt_fill < MIN_RETRY_FILL {
+            break;
+        }
+    }
+
+    // Terminal safety net: `orbit_fit` at [`TERMINAL_FALLBACK_FILL`] is
+    // guaranteed by construction to keep all trajectory samples inside
+    // the viewport (bbox corners sit at 75% of the frame; samples are
+    // strictly inside the bbox). Iteratively recentre on the ink so the
+    // subject lands dead-centre even for off-centre orbits.
+    let mut cam = PerspectiveCamera::orbit_fit(bbox, width, height, TERMINAL_FALLBACK_FILL);
+    for _ in 0..MAX_RECENTER_ITERS {
+        let Some(extent) = measure_ink_pixel_extent(&cam, positions, width, height, ink_pct) else {
+            break;
+        };
+        let dx = extent.center_x() - 0.5 * f64::from(width);
+        let dy = extent.center_y() - 0.5 * f64::from(height);
+        if dx.abs() < RECENTER_TOL_PX && dy.abs() < RECENTER_TOL_PX {
+            break;
+        }
+        cam = recenter_only(&cam, &extent, width, height);
+    }
+    record_framing_telemetry(&cam, positions, width, height, ink_pct);
+    cam
+}
+
+/// Push the converged camera's framing metrics into the
+/// process-global [`generation_log::record_telemetry`] slot so the
+/// final `GenerationRecord` can include them.
+///
+/// Skips recording if the trajectory is empty (no meaningful metrics
+/// to emit). Silently no-ops when called from test harnesses that
+/// don't initialise the telemetry store — the lock is always
+/// available, so this is really just a guard against degenerate
+/// inputs.
+fn record_framing_telemetry(
+    camera: &PerspectiveCamera,
+    positions: &[Vec<Vector3<f64>>],
+    width: u32,
+    height: u32,
+    ink_pct: f64,
+) {
+    let total: usize = positions.iter().map(std::vec::Vec::len).sum();
+    if total == 0 {
+        return;
+    }
+    let occupancy = measure_viewport_occupancy(camera, positions, width, height);
+    let (cx_frac, cy_frac) = measure_ink_pixel_extent(camera, positions, width, height, ink_pct)
+        .map_or((0.0, 0.0), |e| {
+            (
+                (e.center_x() / f64::from(width) - 0.5).abs(),
+                (e.center_y() / f64::from(height) - 0.5).abs(),
+            )
+        });
+    crate::generation_log::record_telemetry(|t| {
+        t.viewport_occupancy = Some(occupancy);
+        t.centroid_offset_x_frac = Some(cx_frac);
+        t.centroid_offset_y_frac = Some(cy_frac);
+    });
+}
+
+/// Run the full roll-align + iterated-refit + recentre pipeline without
+/// any fallback. Factored out of [`fit_to_ink_camera`] so the outer
+/// loop can retry with a shrunk fill target when an invariant fails.
+fn fit_to_ink_primary_attempt(
+    positions: &[Vec<Vector3<f64>>],
+    bbox: &BoundingBox,
+    width: u32,
+    height: u32,
+    fill: f64,
+    ink_pct: f64,
+    focal_offset_world: Vector3<f64>,
+) -> PerspectiveCamera {
     // Seed camera: fill=1.0 so corners just touch the frame; the projected
     // ink is guaranteed to lie inside the viewport (or close to it).
     let mut seed = PerspectiveCamera::orbit_fit(bbox, width, height, 1.0);
@@ -113,40 +263,64 @@ pub fn fit_to_ink_camera(
         );
     }
 
-    // Final recentre-only pass: lock the subject to dead-centre without
+    // Final recentre-only phase: lock the subject to dead-centre without
     // touching zoom. Perspective parallax from the last zoom step can leave
-    // the projected centre a few pixels off-axis; this pass absorbs that
-    // residual without destabilising the just-converged fill.
-    if let Some(extent) = measure_ink_pixel_extent(&cam, positions, width, height, ink_pct) {
+    // the projected centre a few pixels off-axis; a single pass is only a
+    // *linear* correction (world-per-pixel is exact on the focus plane, but
+    // biased when the ink sits off-target by a non-trivial fraction of the
+    // focus distance), so we iterate. Each pass is a geometric contraction
+    // in the centroid error, so convergence is reached within a handful of
+    // iterations even on drift-inflated bboxes.
+    for _ in 0..MAX_RECENTER_ITERS {
+        let Some(extent) = measure_ink_pixel_extent(&cam, positions, width, height, ink_pct) else {
+            break;
+        };
+        let dx = extent.center_x() - 0.5 * f64::from(width);
+        let dy = extent.center_y() - 0.5 * f64::from(height);
+        if dx.abs() < RECENTER_TOL_PX && dy.abs() < RECENTER_TOL_PX {
+            break;
+        }
         cam = recenter_only(&cam, &extent, width, height);
     }
 
-    // Viewport-occupancy sanity check: the iterated refit can converge on
-    // a camera where the percentile-trimmed ink extent *looks* right in
-    // absolute pixel units but the majority of samples actually lie
-    // outside the framebuffer (a known failure mode for high-drift
-    // orbits embedded in an inflated bounding box — produces a
-    // mostly-black frame with a tiny splat in one corner, like seed
-    // 0x8f1d87d78ba2). If fewer than `MIN_VIEWPORT_OCCUPANCY` of
-    // trajectory samples project inside the viewport we fall back to a
-    // corner-safe `orbit_fit`, which is the ground-truth framing that
-    // guarantees the full 3D bounding box is inside the frame.
-    const MIN_VIEWPORT_OCCUPANCY: f64 = 0.85;
-    let occupancy = measure_viewport_occupancy(&cam, positions, width, height);
-    if occupancy < MIN_VIEWPORT_OCCUPANCY {
-        let fallback_fill = fill.min(0.85);
-        let mut fallback = PerspectiveCamera::orbit_fit(bbox, width, height, fallback_fill);
-        // Recentre fallback on the ink as well so the subject sits
-        // centred rather than in a bbox corner.
-        if let Some(extent) =
-            measure_ink_pixel_extent(&fallback, positions, width, height, ink_pct)
-        {
-            fallback = recenter_only(&fallback, &extent, width, height);
-        }
-        cam = fallback;
-    }
-
     cam
+}
+
+/// Maximum recentre passes after the zoom-convergence loop. Five passes
+/// is comfortably above the empirical worst case (3 on a 30x-drift bbox)
+/// while keeping the tail bounded on pathological inputs.
+const MAX_RECENTER_ITERS: usize = 5;
+
+/// Sub-pixel centroid tolerance: stop iterating `recenter_only` once the
+/// projected ink centroid is within half a pixel of the frame centre on
+/// both axes. A tighter tolerance would mostly chase float noise in the
+/// projection routine.
+const RECENTER_TOL_PX: f64 = 0.5;
+
+/// Check both framing invariants: viewport occupancy and centroid centring.
+fn invariants_met(
+    camera: &PerspectiveCamera,
+    positions: &[Vec<Vector3<f64>>],
+    width: u32,
+    height: u32,
+    ink_pct: f64,
+) -> bool {
+    let occupancy = measure_viewport_occupancy(camera, positions, width, height);
+    if occupancy < MIN_VIEWPORT_OCCUPANCY {
+        return false;
+    }
+    // Centroid check: the percentile-trimmed ink centre must sit within
+    // `MAX_CENTROID_OFFSET_FRAC` of the frame centre. `None` (empty or
+    // degenerate) is treated as passing — occupancy already caught the
+    // degeneracy above.
+    let Some(extent) = measure_ink_pixel_extent(camera, positions, width, height, ink_pct) else {
+        return true;
+    };
+    let w = f64::from(width);
+    let h = f64::from(height);
+    let cx_off = (extent.center_x() / w - 0.5).abs();
+    let cy_off = (extent.center_y() / h - 0.5).abs();
+    cx_off < MAX_CENTROID_OFFSET_FRAC && cy_off < MAX_CENTROID_OFFSET_FRAC
 }
 
 /// Fraction of projected trajectory samples that land inside the
@@ -154,7 +328,7 @@ pub fn fit_to_ink_camera(
 ///
 /// Returns `1.0` for empty input so that trivial scenes don't trigger
 /// the fallback. Infinite or NaN projections count as "outside".
-fn measure_viewport_occupancy(
+pub fn measure_viewport_occupancy(
     camera: &PerspectiveCamera,
     positions: &[Vec<Vector3<f64>>],
     width: u32,
@@ -861,5 +1035,224 @@ mod tests {
         // recentre on perspective-projected ink.
         assert!(cx_err < 0.02, "x centring error too large: {cx_err}");
         assert!(cy_err < 0.02, "y centring error too large: {cy_err}");
+    }
+
+    /// The core invariant `fit_to_ink_camera` must uphold: for any
+    /// non-empty trajectory and any reasonable target fill, the returned
+    /// camera has viewport occupancy >= `MIN_VIEWPORT_OCCUPANCY` and the
+    /// percentile-trimmed ink centroid is within `MAX_CENTROID_OFFSET_FRAC`
+    /// of the frame centre.
+    ///
+    /// We exercise a mix of shapes (tight orbit, drift-inflated bbox,
+    /// elongated line, off-centre cluster) at multiple fill targets to
+    /// guarantee the retry + fallback path covers every realistic seed.
+    #[test]
+    fn fit_to_ink_enforces_framing_invariants() {
+        let shapes: Vec<(BoundingBox, Vec<Vec<Vector3<f64>>>)> = vec![
+            (test_bbox(), thin_orbit()),
+            (
+                BoundingBox {
+                    min_x: -9.0,
+                    max_x: 9.0,
+                    min_y: -9.0,
+                    max_y: 9.0,
+                    min_z: -9.0,
+                    max_z: 9.0,
+                    width: 18.0,
+                    height: 18.0,
+                    depth: 18.0,
+                },
+                thin_orbit(),
+            ),
+            (
+                BoundingBox {
+                    min_x: -45.0,
+                    max_x: 45.0,
+                    min_y: -45.0,
+                    max_y: 45.0,
+                    min_z: -45.0,
+                    max_z: 45.0,
+                    width: 90.0,
+                    height: 90.0,
+                    depth: 90.0,
+                },
+                thin_orbit(),
+            ),
+        ];
+
+        let frames: &[(u32, u32)] = &[(1920, 1080), (1080, 1920), (2048, 2048), (800, 600)];
+        let fills = [0.80, 0.90, 0.95];
+
+        for (bbox, positions) in &shapes {
+            for &(w, h) in frames {
+                for &fill in &fills {
+                    let cam = fit_to_ink_camera(positions, bbox, w, h, fill, 0.98, Vector3::zeros());
+                    let occupancy = measure_viewport_occupancy(&cam, positions, w, h);
+                    assert!(
+                        occupancy >= MIN_VIEWPORT_OCCUPANCY,
+                        "occupancy invariant: {occupancy} < {MIN_VIEWPORT_OCCUPANCY} \
+                         (frame={w}x{h}, fill={fill}, bbox_w={:.1})",
+                        bbox.width,
+                    );
+                    let extent = measure_ink_pixel_extent(&cam, positions, w, h, 0.98)
+                        .expect("non-empty ink");
+                    let cx = (extent.center_x() / f64::from(w) - 0.5).abs();
+                    let cy = (extent.center_y() / f64::from(h) - 0.5).abs();
+                    assert!(
+                        cx < MAX_CENTROID_OFFSET_FRAC && cy < MAX_CENTROID_OFFSET_FRAC,
+                        "centroid invariant: ({cx:.4}, {cy:.4}) > {MAX_CENTROID_OFFSET_FRAC} \
+                         (frame={w}x{h}, fill={fill})",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Regression fixture for the `0x8f1d87d78ba2` geometry: a tight main
+    /// orbit accompanied by a small outlier splat in a distant corner of
+    /// the bbox. The legacy pipeline would zoom aggressively onto the main
+    /// orbit and leave the splat as a bright pixel near the frame edge
+    /// (the "tiny white blob in the corner" failure the user reported).
+    /// The new invariant-driven pipeline must either fit the whole thing
+    /// inside the viewport with >= 95% occupancy or zoom out enough to
+    /// absorb the outlier.
+    #[test]
+    fn fit_to_ink_handles_outlier_splat_regression() {
+        // Main orbit: small circle centred near the origin.
+        let mut body_a = Vec::new();
+        for i in 0..2000 {
+            let t = std::f64::consts::TAU * f64::from(i) / 2000.0;
+            body_a.push(Vector3::new(t.cos() * 1.5, t.sin() * 1.5, 0.0));
+        }
+        // Outlier body: small cluster 8 units away, in one 3D bbox corner.
+        let mut body_b = Vec::new();
+        for i in 0..50 {
+            let t = std::f64::consts::TAU * f64::from(i) / 50.0;
+            body_b.push(Vector3::new(8.0 + 0.2 * t.cos(), 7.5 + 0.2 * t.sin(), 4.0));
+        }
+
+        let positions = vec![body_a, body_b];
+        let bbox = BoundingBox {
+            min_x: -1.6,
+            max_x: 8.4,
+            min_y: -1.6,
+            max_y: 7.9,
+            min_z: 0.0,
+            max_z: 4.0,
+            width: 10.0,
+            height: 9.5,
+            depth: 4.0,
+        };
+        let (w, h) = (1920u32, 1080u32);
+        let cam = fit_to_ink_camera(&positions, &bbox, w, h, 0.95, 0.98, Vector3::zeros());
+
+        // Invariant: at least 95% of trajectory samples are inside the
+        // viewport. The legacy pipeline failed this test by aggressively
+        // zooming onto the main orbit and leaving the outlier splat at
+        // ~1.0 NDC.
+        let occupancy = measure_viewport_occupancy(&cam, &positions, w, h);
+        assert!(
+            occupancy >= MIN_VIEWPORT_OCCUPANCY,
+            "outlier-splat regression: occupancy {occupancy:.3} < {MIN_VIEWPORT_OCCUPANCY}",
+        );
+
+        // Centroid of the percentile-trimmed ink (which excludes the 2%
+        // tail — the outlier lies in that tail) must still land near the
+        // frame centre.
+        let extent =
+            measure_ink_pixel_extent(&cam, &positions, w, h, 0.98).expect("non-empty ink");
+        let cx = (extent.center_x() / f64::from(w) - 0.5).abs();
+        let cy = (extent.center_y() / f64::from(h) - 0.5).abs();
+        assert!(
+            cx < MAX_CENTROID_OFFSET_FRAC && cy < MAX_CENTROID_OFFSET_FRAC,
+            "outlier-splat regression: centroid ({cx:.4}, {cy:.4}) \
+             > {MAX_CENTROID_OFFSET_FRAC}",
+        );
+    }
+
+    // Property test: on random combinations of orbit radii, bbox padding
+    // factors (drift inflation), fill targets, and frame sizes, the
+    // framing invariants must hold for every output camera.
+    //
+    // The `bbox` is **derived from the positions** (with a random
+    // padding factor) rather than sampled independently, so every input
+    // faithfully mirrors how the real pipeline constructs its bbox:
+    // always a superset of the trajectory, possibly loose (drift) but
+    // never tighter than the ink.
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            cases: 256,
+            .. proptest::prelude::ProptestConfig::default()
+        })]
+
+        #[test]
+        fn proptest_framing_invariants_always_hold(
+            orbit_radius in 0.2f64..8.0,
+            bbox_padding in 1.1f64..4.0,
+            offset_frac_x in -0.4f64..0.4,
+            offset_frac_y in -0.4f64..0.4,
+            fill in 0.70f64..0.95,
+            aspect_is_landscape in proptest::prelude::any::<bool>(),
+            frame_size in 600u32..=2048,
+        ) {
+            let short_side = (f64::from(frame_size) * 0.5625).round() as u32;
+            let (w, h) = if aspect_is_landscape {
+                (frame_size, short_side)
+            } else {
+                (short_side, frame_size)
+            };
+            // Ensure non-degenerate frame.
+            let (w, h) = (w.max(256), h.max(256));
+
+            // Place the orbit at a world offset that's a fraction of its
+            // own radius — the full [min, max] then feeds the bbox so
+            // the bbox always contains the orbit.
+            let cx = offset_frac_x * orbit_radius;
+            let cy = offset_frac_y * orbit_radius;
+
+            let mut body = Vec::new();
+            for i in 0..500 {
+                let t = std::f64::consts::TAU * f64::from(i) / 500.0;
+                body.push(Vector3::new(
+                    cx + t.cos() * orbit_radius,
+                    cy + t.sin() * orbit_radius,
+                    0.0,
+                ));
+            }
+            let positions = vec![body];
+
+            // Derive the bbox from the positions, then pad by
+            // `bbox_padding` to simulate drift-inflated bounding boxes
+            // produced by the real pipeline.
+            let half = orbit_radius * bbox_padding;
+            let bbox = BoundingBox {
+                min_x: cx - half,
+                max_x: cx + half,
+                min_y: cy - half,
+                max_y: cy + half,
+                min_z: -half,
+                max_z: half,
+                width: 2.0 * half,
+                height: 2.0 * half,
+                depth: 2.0 * half,
+            };
+
+            let cam = fit_to_ink_camera(&positions, &bbox, w, h, fill, 0.98, Vector3::zeros());
+            let occupancy = measure_viewport_occupancy(&cam, &positions, w, h);
+            proptest::prop_assert!(
+                occupancy >= MIN_VIEWPORT_OCCUPANCY,
+                "occupancy invariant: {} < {} (frame={}x{}, fill={}, orbit_r={}, bbox_pad={})",
+                occupancy, MIN_VIEWPORT_OCCUPANCY, w, h, fill, orbit_radius, bbox_padding,
+            );
+            let extent = measure_ink_pixel_extent(&cam, &positions, w, h, 0.98)
+                .expect("non-empty ink");
+            let cx_off = (extent.center_x() / f64::from(w) - 0.5).abs();
+            let cy_off = (extent.center_y() / f64::from(h) - 0.5).abs();
+            proptest::prop_assert!(
+                cx_off < MAX_CENTROID_OFFSET_FRAC && cy_off < MAX_CENTROID_OFFSET_FRAC,
+                "centroid invariant: ({}, {}) > {} (frame={}x{}, fill={})",
+                cx_off, cy_off, MAX_CENTROID_OFFSET_FRAC, w, h, fill,
+            );
+        }
     }
 }

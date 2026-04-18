@@ -69,10 +69,10 @@ pub const DEFAULT_HDR_SCALE: f64 = 1.0;
 /// Pre-tonemap luminance target for the solved white percentile.
 /// Values above this still retain headroom for specular accents.
 ///
-/// Lowered from `0.88` → `0.78` so the high-percentile target sits
-/// well below the AgX saturation point, giving the tonemap a real
+/// Lowered from `0.88` -> `0.78` so the high-percentile target sits
+/// well below the `AgX` saturation point, giving the tonemap a real
 /// shoulder to shape instead of having highlights slam into the hard
-/// upper bound of AgX's allocation window.
+/// upper bound of `AgX`'s allocation window.
 pub const DEFAULT_PRETONEMAP_LUMA_TARGET: f64 = 0.78;
 
 /// Samples above this normalized luminance are considered near-clipped during proxy analysis.
