@@ -101,6 +101,59 @@ pub struct Telemetry {
     /// signal). Target <= `MAX_OUTLIER_EXTENT_RATIO`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outlier_extent_ratio: Option<f64>,
+
+    // --- Per-stage luminance (post-mortem diagnostics) ---
+    /// Luminance stats after the trajectory post-effect chain runs on
+    /// the scene-linear buffer but **before** auto metering. Shows
+    /// how hot the raw additive stack was — a p99 above ~3 here is
+    /// the "smoking gun" for a blown-out stack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_trajectory: Option<StageLuminance>,
+    /// After `apply_auto_scene_metering`. Should sit near
+    /// `HIGHLIGHT_HEADROOM_P99 .. HIGHLIGHT_HEADROOM_P999` in
+    /// scene-linear space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_metering: Option<StageLuminance>,
+    /// After `apply_scene_linear_ceiling`. Per-pixel luma capped at
+    /// `CEILING_LUMA = 3.0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_ceiling: Option<StageLuminance>,
+    /// After the `AgX` tonemap. Display-referred values in `[0, 1+]`
+    /// (image chain can still push past 1.0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_tonemap: Option<StageLuminance>,
+    /// After the image chain (diffraction spikes, anamorphic flare,
+    /// fine texture, vignette). This is the stage where un-guarded
+    /// additives were historically producing white blobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_image_chain: Option<StageLuminance>,
+    /// After `apply_display_headroom` (distribution-aware uniform
+    /// dim). Gates `bright_fraction` below the configured cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_display_headroom: Option<StageLuminance>,
+    /// After the final hue-preserving `apply_display_safety_shoulder`.
+    /// This is what gets quantized to the 16-bit PNG — the canonical
+    /// "final image" luminance distribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_post_shoulder: Option<StageLuminance>,
+}
+
+/// Per-stage luminance snapshot used to diagnose where in the render
+/// pipeline a white-blob blowout originates. All values are in the
+/// buffer's native luminance space (scene-linear Rec.709 for pre-tonemap
+/// stages, display-referred Rec.709 for post-tonemap stages).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StageLuminance {
+    /// 99th-percentile luminance across alpha-positive pixels.
+    pub p99: f64,
+    /// 99.9th-percentile luminance.
+    pub p99_9: f64,
+    /// Maximum luminance over the whole buffer.
+    pub max: f64,
+    /// Fraction of alpha-positive pixels whose luminance exceeds
+    /// `0.85`. The `bright_fraction` cap (`0.05`) in
+    /// `apply_display_headroom` targets this metric directly.
+    pub bright_fraction: f64,
 }
 
 /// Process-global telemetry accumulator. Pipeline stages (framing,
@@ -121,6 +174,13 @@ static TELEMETRY: RwLock<Telemetry> = RwLock::new(Telemetry {
     additive_weighted_energy: None,
     dominant_body_extent: None,
     outlier_extent_ratio: None,
+    stage_post_trajectory: None,
+    stage_post_metering: None,
+    stage_post_ceiling: None,
+    stage_post_tonemap: None,
+    stage_post_image_chain: None,
+    stage_post_display_headroom: None,
+    stage_post_shoulder: None,
 });
 
 /// Update the global telemetry slot via the closure `mutator`.
@@ -135,6 +195,45 @@ where
     if let Ok(mut guard) = TELEMETRY.write() {
         mutator(&mut guard);
     }
+}
+
+/// Read the current value of a telemetry field without consuming or
+/// clearing the slot. Used by downstream pipeline stages (e.g. the
+/// auto-metering highlight cap) that need to adapt to earlier
+/// measurements (e.g. the Guard 6 / 7 additive-effect count).
+///
+/// Returns `None` if the lock is poisoned, to keep this utility
+/// panic-safe on the hot render path.
+pub fn peek_telemetry<T, F>(reader: F) -> Option<T>
+where
+    F: FnOnce(&Telemetry) -> Option<T>,
+{
+    let guard = TELEMETRY.read().ok()?;
+    reader(&guard)
+}
+
+/// Record per-stage luminance under one of the fixed named slots.
+/// Unknown labels are silently ignored — callers are expected to pass
+/// one of the canonical stage names:
+/// `"post_trajectory"`, `"post_metering"`, `"post_ceiling"`,
+/// `"post_tonemap"`, `"post_image_chain"`,
+/// `"post_display_headroom"`, `"post_shoulder"`.
+///
+/// The dedicated named fields (rather than a `HashMap`) are
+/// intentional: the JSON log is hand-read during post-mortems and
+/// ordered fields keep the `Telemetry` stanza compact and
+/// diff-friendly.
+pub fn record_stage_luminance(label: &str, stats: StageLuminance) {
+    record_telemetry(|t| match label {
+        "post_trajectory" => t.stage_post_trajectory = Some(stats),
+        "post_metering" => t.stage_post_metering = Some(stats),
+        "post_ceiling" => t.stage_post_ceiling = Some(stats),
+        "post_tonemap" => t.stage_post_tonemap = Some(stats),
+        "post_image_chain" => t.stage_post_image_chain = Some(stats),
+        "post_display_headroom" => t.stage_post_display_headroom = Some(stats),
+        "post_shoulder" => t.stage_post_shoulder = Some(stats),
+        _ => {}
+    });
 }
 
 /// Atomically read and reset the global telemetry slot. Returns a
@@ -166,6 +265,13 @@ impl Telemetry {
             && self.additive_weighted_energy.is_none()
             && self.dominant_body_extent.is_none()
             && self.outlier_extent_ratio.is_none()
+            && self.stage_post_trajectory.is_none()
+            && self.stage_post_metering.is_none()
+            && self.stage_post_ceiling.is_none()
+            && self.stage_post_tonemap.is_none()
+            && self.stage_post_image_chain.is_none()
+            && self.stage_post_display_headroom.is_none()
+            && self.stage_post_shoulder.is_none()
     }
 }
 

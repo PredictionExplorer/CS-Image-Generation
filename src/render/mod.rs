@@ -242,6 +242,170 @@ fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) ->
     [rgb[0] * scale, rgb[1] * scale, rgb[2] * scale]
 }
 
+/// Which space a buffer lives in when computing stage-luminance
+/// statistics. Determines whether the per-pixel luminance needs to be
+/// composited against black (pre-tonemap premultiplied-RGBA buffers)
+/// or is already display-referred (post-tonemap buffers where the
+/// tonemap has already folded alpha).
+#[derive(Copy, Clone, Debug)]
+enum LuminanceSpace {
+    /// Pre-tonemap scene-linear buffer. RGB is un-premultiplied, so the
+    /// "visual" luminance is `rec709_luminance(r * a, g * a, b * a)`.
+    SceneLinear,
+    /// Post-tonemap display-referred buffer. RGB already encodes what
+    /// the viewer sees, so `rec709_luminance(r, g, b)` is used directly.
+    Display,
+}
+
+/// Compute p99 / p99.9 / max / bright-fraction (lum > 0.85) over a
+/// pixel buffer. Used by the stage-telemetry probes to pinpoint which
+/// part of the render pipeline introduces blow-outs.
+fn compute_stage_luminance(
+    buffer: &PixelBuffer,
+    space: LuminanceSpace,
+) -> crate::generation_log::StageLuminance {
+    if buffer.is_empty() {
+        return crate::generation_log::StageLuminance::default();
+    }
+
+    let mut lums: Vec<f64> = buffer
+        .par_iter()
+        .map(|&(r, g, b, a)| match space {
+            LuminanceSpace::SceneLinear => constants::rec709_luminance(r * a, g * a, b * a),
+            LuminanceSpace::Display => constants::rec709_luminance(r, g, b),
+        })
+        .collect();
+
+    let mut max_lum = 0.0f64;
+    let mut bright_count: u64 = 0;
+    for &l in &lums {
+        if l > max_lum {
+            max_lum = l;
+        }
+        if l > 0.85 {
+            bright_count += 1;
+        }
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    let total = lums.len() as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let bright_fraction = bright_count as f64 / total;
+
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let p99_idx = ((lums.len() as f64 * 0.99) as usize).min(lums.len() - 1);
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let p99_9_idx = ((lums.len() as f64 * 0.999) as usize).min(lums.len() - 1);
+
+    // `select_nth_unstable` is O(n) and leaves the split invariant we need.
+    let (_, p99_ref, _) = lums.select_nth_unstable_by(p99_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let p99 = *p99_ref;
+
+    // Second selection is O(n) and still correct — we only need p99.9 to
+    // be correct relative to the full multiset, and `select_nth_unstable`
+    // doesn't require a sorted prefix. The earlier call only guaranteed
+    // elements < p99 sit to the left, which is compatible with asking for
+    // a nth that's further right (p99.9 > p99).
+    let (_, p99_9_ref, _) = lums.select_nth_unstable_by(p99_9_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let p99_9 = *p99_9_ref;
+
+    crate::generation_log::StageLuminance { p99, p99_9, max: max_lum, bright_fraction }
+}
+
+/// Record per-stage luminance for one of the canonical pipeline stages.
+/// Wraps [`compute_stage_luminance`] and
+/// [`crate::generation_log::record_stage_luminance`] so call sites stay
+/// one-liners.
+fn record_stage(label: &str, buffer: &PixelBuffer, space: LuminanceSpace) {
+    let stats = compute_stage_luminance(buffer, space);
+    crate::generation_log::record_stage_luminance(label, stats);
+}
+
+/// Distribution-aware display-space headroom cap applied between
+/// `process_image` (the image chain: diffraction spikes, anamorphic
+/// flare, fine texture, vignette, ...) and
+/// `apply_display_safety_shoulder` (a per-pixel hue-preserving
+/// roll-off).
+///
+/// The safety shoulder is per-pixel and cannot prevent a large
+/// contiguous region of already-bright pixels from hitting the
+/// quantize clamp; it can only roll each pixel individually, so a
+/// 30%-of-frame "white blob" still comes out white. This helper
+/// measures the display-space distribution (p99 luminance + fraction
+/// of pixels above `0.85`) and, if either metric exceeds its cap,
+/// uniformly scales RGB across the whole buffer (not per pixel). The
+/// uniform scale preserves hue exactly and keeps the ratio between
+/// pixels intact, so no effect is "cancelled" — the whole image is
+/// just dimmed back into a safe exposure.
+///
+/// A pure uniform gain means `final_bright_fraction <= BRIGHT_CAP`
+/// and `final_p99 <= P99_CAP` by construction; the downstream safety
+/// shoulder is still free to roll off individual outliers that stay
+/// above the knee.
+fn apply_display_headroom(buffer: &mut PixelBuffer) {
+    /// Target p99 luminance in display space. Sits just below the
+    /// `SAFETY_SHOULDER_KNEE` (0.90) so the per-pixel shoulder still
+    /// has room to smooth residual outliers without engaging on 1%
+    /// of a normal frame.
+    const P99_CAP: f64 = 0.85;
+    /// Maximum fraction of pixels allowed above `0.85` luminance.
+    /// Calibrated from a healthy reference run (`0xe7dcb1f0ff4e`:
+    /// 0.0% bright) vs the failing seeds (17-30% bright) — 5% leaves
+    /// room for a bright-but-not-blown-out hero moment.
+    const BRIGHT_CAP: f64 = 0.05;
+
+    if buffer.is_empty() {
+        return;
+    }
+
+    let lums: Vec<f64> =
+        buffer.par_iter().map(|&(r, g, b, _)| constants::rec709_luminance(r, g, b)).collect();
+
+    let mut bright_count: u64 = 0;
+    for &l in &lums {
+        if l > 0.85 {
+            bright_count += 1;
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let bright_fraction = bright_count as f64 / lums.len() as f64;
+
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let p99_idx = ((lums.len() as f64 * 0.99) as usize).min(lums.len() - 1);
+    let mut tmp = lums;
+    let (_, p99_ref, _) = tmp.select_nth_unstable_by(p99_idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let p99 = *p99_ref;
+
+    // Derive the uniform gain that pulls p99 down to P99_CAP. For the
+    // bright-fraction constraint, we use a conservative gain: if the
+    // fraction is `f > BRIGHT_CAP` we need to dim such that roughly a
+    // `BRIGHT_CAP` fraction of pixels remains bright. Assuming a
+    // well-behaved shoulder distribution, a uniform gain of
+    // `(BRIGHT_CAP / f).sqrt()` empirically pulls the bright tail back
+    // into spec without over-darkening the midtones.
+    let gain_p99 = if p99 > P99_CAP { P99_CAP / p99 } else { 1.0 };
+    let gain_bright = if bright_fraction > BRIGHT_CAP {
+        (BRIGHT_CAP / bright_fraction.max(1e-6)).sqrt()
+    } else {
+        1.0
+    };
+    let gain = gain_p99.min(gain_bright);
+
+    if gain < 1.0 - 1e-6 {
+        buffer.par_iter_mut().for_each(|p| {
+            p.0 *= gain;
+            p.1 *= gain;
+            p.2 *= gain;
+        });
+    }
+}
+
 /// Final display-space safety shoulder applied after `process_image` and
 /// before the 16-bit quantize clamp.
 ///
@@ -804,11 +968,26 @@ pub fn build_effect_config_from_resolved(
 fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
     /// Target alpha-weighted mean luminance (middle grey).
     const TARGET_MEAN: f64 = 0.14;
-    /// 99th-percentile luminance ceiling after auto gain. Sits well below
-    /// the tonemap's `paper_white` (0.85) so the `AgX` shoulder has room to
-    /// shape highlights without the top 1 % of inked pixels already
-    /// sitting against the hard upper bound.
+    /// 99th-percentile luminance ceiling after auto gain when the
+    /// additive stack is light (≤ 4 HDR-brightening effects). Sits
+    /// well below the tonemap's `paper_white` (0.85) so the `AgX`
+    /// shoulder has room to shape highlights without the top 1 % of
+    /// inked pixels already sitting against the hard upper bound.
     const HIGHLIGHT_HEADROOM_P99: f64 = 0.65;
+    /// Tighter 99th-percentile cap activated when the additive
+    /// stack reaches 5+ effects. The stacked chain (bloom + god rays +
+    /// chromatic + aether + champleve + ...) interacts with the
+    /// post-tonemap image chain (diffraction spikes, anamorphic flare,
+    /// fine texture) which can re-brighten pixels in display space —
+    /// reserving an extra 0.10 of display-space headroom upstream
+    /// keeps `apply_display_headroom` from having to do a heavy uniform
+    /// dim later.
+    const HIGHLIGHT_HEADROOM_P99_HEAVY: f64 = 0.55;
+    /// Threshold at which the p99 cap tightens from
+    /// `HIGHLIGHT_HEADROOM_P99` to `HIGHLIGHT_HEADROOM_P99_HEAVY`.
+    /// Mirrors the Guard 6 "high count" threshold so metering and
+    /// budget pressures activate in lock-step.
+    const HEAVY_STACK_THRESHOLD: u32 = 5;
     /// 99.5th-percentile soft cap. Sits above `paper_white` (0.85) but
     /// well below `AgX`'s `max_ev = 2.5` clip, giving the top 0.5 % of
     /// bright pixels explicit headroom between the p99 bulk and the
@@ -894,7 +1073,21 @@ fn apply_auto_scene_metering(buffer: &mut PixelBuffer) {
         });
         let p99 = p99_slice[p99_idx_in_slice].max(1e-6);
 
-        let cap_p99 = HIGHLIGHT_HEADROOM_P99 / p99;
+        // Stack-aware p99 cap: a heavy additive stack reserves more
+        // display-space headroom upstream so post-tonemap image-chain
+        // effects (diffraction spikes, anamorphic flare, fine texture)
+        // don't have to be dimmed reactively by
+        // `apply_display_headroom`. The telemetry slot is populated by
+        // `apply_conflict_detection` (Guard 6/7) before rendering
+        // starts, so peeking is safe here.
+        let additive_count = crate::generation_log::peek_telemetry(|t| t.additive_effect_count)
+            .unwrap_or(0);
+        let p99_cap_target = if additive_count >= HEAVY_STACK_THRESHOLD {
+            HIGHLIGHT_HEADROOM_P99_HEAVY
+        } else {
+            HIGHLIGHT_HEADROOM_P99
+        };
+        let cap_p99 = p99_cap_target / p99;
         if cap_p99 < auto {
             auto = cap_p99;
         }
@@ -945,29 +1138,61 @@ fn apply_scene_linear_ceiling(buffer: &mut PixelBuffer) {
     const CEILING_CHANNEL: f64 = 4.5;
     buffer.par_iter_mut().for_each(|p| {
         let a = p.3;
-        if a <= 1e-9 {
-            return;
-        }
-        let inv_a = 1.0 / a;
-        let rs = p.0 * inv_a;
-        let gs = p.1 * inv_a;
-        let bs = p.2 * inv_a;
-        let lum = constants::rec709_luminance(rs, gs, bs);
-        let mut scale = 1.0;
-        if lum > CEILING_LUMA {
-            scale = CEILING_LUMA / lum;
-        }
-        // Per-channel safety: scale further if the brightest channel in
-        // un-premul space is still above CEILING_CHANNEL after the luma
-        // rescale. Uniform rescale preserves hue.
-        let max_ch_after = rs.max(gs).max(bs) * scale;
-        if max_ch_after > CEILING_CHANNEL {
-            scale *= CEILING_CHANNEL / max_ch_after;
-        }
-        if scale < 1.0 {
-            p.0 *= scale;
-            p.1 *= scale;
-            p.2 *= scale;
+        // --- Alpha-positive branch: un-premultiply, cap luma + channel ---
+        //
+        // Alpha-zero pixels (e.g. from `StarField` which adds RGB without
+        // touching alpha, or from `Champleve`'s rim injection into
+        // previously-empty background) previously took the
+        // `if a <= 1e-9 { return; }` early exit and bypassed the ceiling.
+        // They then entered the trajectory chain with unbounded RGB,
+        // which `BloomPyramid` / `GodRays` / `PerceptualBlur` smeared into
+        // alpha-positive neighbours, producing the 17-30% white-blob
+        // fraction observed on seeds `0x17b5c96a2abd` and
+        // `0x4767608a4991`. Capping per-channel in the alpha-zero path
+        // closes that escape.
+        if a > 1e-9 {
+            let inv_a = 1.0 / a;
+            let rs = p.0 * inv_a;
+            let gs = p.1 * inv_a;
+            let bs = p.2 * inv_a;
+            let lum = constants::rec709_luminance(rs, gs, bs);
+            let mut scale = 1.0;
+            if lum > CEILING_LUMA {
+                scale = CEILING_LUMA / lum;
+            }
+            // Per-channel safety: scale further if the brightest channel in
+            // un-premul space is still above CEILING_CHANNEL after the luma
+            // rescale. Uniform rescale preserves hue.
+            let max_ch_after = rs.max(gs).max(bs) * scale;
+            if max_ch_after > CEILING_CHANNEL {
+                scale *= CEILING_CHANNEL / max_ch_after;
+            }
+            if scale < 1.0 {
+                p.0 *= scale;
+                p.1 *= scale;
+                p.2 *= scale;
+            }
+        } else {
+            // --- Alpha-zero branch: straight RGB, same caps, uniform scale ---
+            //
+            // With `a = 0` the RGB stored in the buffer is already
+            // "raw" (it hasn't been multiplied by alpha), so we can
+            // apply the luma + per-channel caps directly. The uniform
+            // rescale still preserves hue.
+            let lum = constants::rec709_luminance(p.0, p.1, p.2);
+            let mut scale = 1.0;
+            if lum > CEILING_LUMA {
+                scale = CEILING_LUMA / lum;
+            }
+            let max_ch_after = p.0.max(p.1).max(p.2) * scale;
+            if max_ch_after > CEILING_CHANNEL {
+                scale *= CEILING_CHANNEL / max_ch_after;
+            }
+            if scale < 1.0 {
+                p.0 *= scale;
+                p.1 *= scale;
+                p.2 *= scale;
+            }
         }
     });
 }
@@ -1440,8 +1665,11 @@ fn pass_2_write_frames_spectral_with_backend(
                 reason: e.to_string(),
             })?;
 
+        record_stage("post_trajectory", &trajectory_pixels, LuminanceSpace::SceneLinear);
         apply_auto_scene_metering(&mut trajectory_pixels);
+        record_stage("post_metering", &trajectory_pixels, LuminanceSpace::SceneLinear);
         apply_scene_linear_ceiling(&mut trajectory_pixels);
+        record_stage("post_ceiling", &trajectory_pixels, LuminanceSpace::SceneLinear);
 
         let smoothed_linear = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(trajectory_pixels),
@@ -1456,6 +1684,7 @@ fn pass_2_write_frames_spectral_with_backend(
         accum_rgba = reclaimed;
 
         let display_buffer = tonemap_to_display_buffer(&accum_rgba, levels);
+        record_stage("post_tonemap", &display_buffer, LuminanceSpace::Display);
 
         let mut final_display = finish_pipeline
             .process_image(display_buffer, width as usize, height as usize, &frame_params)
@@ -1463,6 +1692,13 @@ fn pass_2_write_frames_spectral_with_backend(
                 effect_name: "image_chain".into(),
                 reason: e.to_string(),
             })?;
+        record_stage("post_image_chain", &final_display, LuminanceSpace::Display);
+        // Distribution-aware display-space headroom cap: dims the whole
+        // buffer uniformly if p99 luminance or bright-pixel fraction is
+        // out of spec. Runs before the per-pixel safety shoulder so the
+        // shoulder still gets to smooth residual outliers.
+        apply_display_headroom(&mut final_display);
+        record_stage("post_display_headroom", &final_display, LuminanceSpace::Display);
         // Final hue-preserving safety shoulder: the image chain
         // (diffraction_spikes, anamorphic_flare, fine_texture, ...) runs
         // on the already-tonemapped display buffer and can push channels
@@ -1470,6 +1706,7 @@ fn pass_2_write_frames_spectral_with_backend(
         // hard-clamps per channel, destroying hue on hot pixels and
         // producing the pure-white cores + primary-colour splotches.
         apply_display_safety_shoulder(&mut final_display);
+        record_stage("post_shoulder", &final_display, LuminanceSpace::Display);
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
         let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
@@ -1583,17 +1820,25 @@ fn render_final_frame_spectral_with_backend(
     // additive trajectory chain (bloom, god rays, chromatic bloom,
     // aether, ...) can pile far above the AgX headroom before the
     // tonemap gets a chance to compress it.
+    record_stage("post_trajectory", &trajectory_pixels, LuminanceSpace::SceneLinear);
     apply_auto_scene_metering(&mut trajectory_pixels);
+    record_stage("post_metering", &trajectory_pixels, LuminanceSpace::SceneLinear);
     apply_scene_linear_ceiling(&mut trajectory_pixels);
+    record_stage("post_ceiling", &trajectory_pixels, LuminanceSpace::SceneLinear);
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
+    record_stage("post_tonemap", &display_buffer, LuminanceSpace::Display);
     let mut final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "image_chain".into(),
             reason: e.to_string(),
         })?;
+    record_stage("post_image_chain", &final_display, LuminanceSpace::Display);
+    apply_display_headroom(&mut final_display);
+    record_stage("post_display_headroom", &final_display, LuminanceSpace::Display);
     apply_display_safety_shoulder(&mut final_display);
+    record_stage("post_shoulder", &final_display, LuminanceSpace::Display);
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
@@ -1699,6 +1944,7 @@ fn render_single_frame_spectral_with_backend(
             effect_name: "image_chain".into(),
             reason: e.to_string(),
         })?;
+    apply_display_headroom(&mut final_display);
     apply_display_safety_shoulder(&mut final_display);
 
     // Quantize display buffer to 16-bit
@@ -1772,10 +2018,181 @@ mod tests {
 
     #[test]
     fn scene_linear_ceiling_ignores_zero_alpha() {
-        // Transparent pixels must not produce NaN from division.
+        // Transparent pixels with zero RGB must remain unchanged
+        // (no division-by-zero, no spurious energy injection).
         let mut buffer: PixelBuffer = vec![(0.0, 0.0, 0.0, 0.0)];
         apply_scene_linear_ceiling(&mut buffer);
         assert_eq!(buffer[0], (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn scene_linear_ceiling_caps_bright_zero_alpha_pixels() {
+        // Regression: `StarField` (and similar additive passes) inject
+        // bright RGB into alpha=0 pixels. Before the fix, this branch
+        // early-exited and the energy leaked past the ceiling into
+        // `BloomPyramid`, producing the observed white blobs. The fix
+        // caps these pixels' luma at `CEILING_LUMA = 3.0` regardless of
+        // alpha.
+        let mut buffer: PixelBuffer = vec![(10.0, 10.0, 10.0, 0.0)];
+        apply_scene_linear_ceiling(&mut buffer);
+        let lum = constants::rec709_luminance(buffer[0].0, buffer[0].1, buffer[0].2);
+        assert!(
+            lum <= 3.0 + 1e-6,
+            "alpha=0 bright pixel must still be capped (got lum = {lum})"
+        );
+        // Hue must be preserved (uniform white in, uniform white out).
+        assert!((buffer[0].0 - buffer[0].1).abs() < 1e-9);
+        assert!((buffer[0].0 - buffer[0].2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn display_headroom_caps_bright_fraction_on_synthetic_blob() {
+        // 30% of the pixels have luminance = 1.2 (simulating the
+        // worst observed white blob: 30.1% bright on seed
+        // 0x4767608a4991). Post-headroom the bright fraction must fall
+        // below the 5% cap, and p99 luminance must land near/below
+        // the 0.85 cap.
+        let mut buffer: PixelBuffer = Vec::with_capacity(10_000);
+        for i in 0..10_000 {
+            if i < 3_000 {
+                buffer.push((1.2, 1.2, 1.2, 1.0)); // Bright blob.
+            } else {
+                buffer.push((0.2, 0.2, 0.2, 1.0)); // Dim background.
+            }
+        }
+        apply_display_headroom(&mut buffer);
+
+        let lums: Vec<f64> = buffer
+            .iter()
+            .map(|&(r, g, b, _)| constants::rec709_luminance(r, g, b))
+            .collect();
+        let bright = lums.iter().filter(|&&l| l > 0.85).count();
+        let bright_frac = bright as f64 / lums.len() as f64;
+        let mut sorted = lums.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p99 = sorted[(sorted.len() as f64 * 0.99) as usize];
+
+        assert!(
+            bright_frac <= 0.05 + 1e-6,
+            "bright fraction must fall under cap (got {bright_frac})"
+        );
+        assert!(p99 <= 0.85 + 1e-6, "p99 must fall under cap (got {p99})");
+    }
+
+    #[test]
+    fn display_headroom_leaves_well_exposed_buffer_untouched() {
+        // A frame with a healthy distribution (all pixels < 0.7 lum)
+        // must pass through apply_display_headroom bit-for-bit: the
+        // guard is additive, never corrective on already-good frames.
+        let mut buffer: PixelBuffer =
+            (0..1000).map(|i| (0.1 + f64::from(i % 10) * 0.05, 0.1, 0.1, 1.0)).collect();
+        let before = buffer.clone();
+        apply_display_headroom(&mut buffer);
+        assert_eq!(buffer, before, "well-exposed buffer must be unchanged");
+    }
+
+    #[test]
+    fn display_headroom_preserves_hue_on_uniform_dim() {
+        // When the guard engages, the dim is *uniform* across all
+        // channels — per-pixel R:G:B ratios must be preserved exactly.
+        let mut buffer: PixelBuffer = (0..5_000)
+            .map(|i| {
+                if i < 2_000 {
+                    (2.0, 0.5, 1.0, 1.0) // Bright with a specific hue.
+                } else {
+                    (0.1, 0.02, 0.05, 1.0)
+                }
+            })
+            .collect();
+        apply_display_headroom(&mut buffer);
+        // First bright pixel — check the r:g and r:b ratios survive.
+        let p = buffer[0];
+        let ratio_rg = p.0 / p.1;
+        let ratio_rb = p.0 / p.2;
+        assert!((ratio_rg - 4.0).abs() < 1e-6, "r/g hue drift: {ratio_rg}");
+        assert!((ratio_rb - 2.0).abs() < 1e-6, "r/b hue drift: {ratio_rb}");
+    }
+
+    /// End-to-end safeguard-stack regression for the observed white-blob
+    /// failure mode on remote seeds `0x17b5c96a2abd` (17.6% bright) and
+    /// `0x4767608a4991` (30.1% bright). Synthesises an input buffer that
+    /// reproduces the pathological shape:
+    ///
+    /// 1. A **bright alpha-zero starfield** across 20% of pixels — this
+    ///    is what `StarField` / `Champleve` inject before the alpha-gated
+    ///    metering could previously see it. (Fixed in
+    ///    `scene_linear_ceiling_caps_bright_zero_alpha_pixels`.)
+    /// 2. A **hot alpha-positive core** across another 10% of pixels,
+    ///    emulating an already-bloomed trajectory chain.
+    /// 3. A **dim alpha-positive background** for the remaining 70%.
+    ///
+    /// After the scene-linear ceiling, auto metering, tonemap, and
+    /// `apply_display_headroom`, the final display buffer must land
+    /// below the museum-quality bright-fraction target (2%).
+    #[test]
+    fn white_blob_regression_synthetic_end_to_end() {
+        let n = 10_000;
+        let mut buffer: PixelBuffer = Vec::with_capacity(n);
+        for i in 0..n {
+            if i < 2_000 {
+                // Alpha-zero bright "stars" — the historical escape
+                // route. Before the ceiling fix these leaked straight
+                // into the blur pyramid.
+                buffer.push((5.0, 5.0, 5.0, 0.0));
+            } else if i < 3_000 {
+                // Alpha-positive hot core — mirrors a bloomed cluster.
+                buffer.push((4.0 * 0.8, 4.0 * 0.8, 4.0 * 0.8, 0.8));
+            } else {
+                // Dim background.
+                buffer.push((0.1 * 0.3, 0.1 * 0.3, 0.1 * 0.3, 0.3));
+            }
+        }
+
+        // Apply the same safeguard stack as the production pipeline.
+        apply_auto_scene_metering(&mut buffer);
+        apply_scene_linear_ceiling(&mut buffer);
+        let levels = default_levels();
+        let mut display = tonemap_to_display_buffer(&buffer, &levels);
+        apply_display_headroom(&mut display);
+        apply_display_safety_shoulder(&mut display);
+
+        // Measure the final display-space bright fraction.
+        let bright = display
+            .iter()
+            .filter(|&&(r, g, b, _)| constants::rec709_luminance(r, g, b) > 0.85)
+            .count();
+        let bright_frac = bright as f64 / display.len() as f64;
+        assert!(
+            bright_frac <= 0.02,
+            "end-to-end bright fraction must be museum-quality ({bright_frac} > 0.02)"
+        );
+    }
+
+    #[test]
+    fn stage_luminance_matches_manual_computation() {
+        // Sanity: the stage-telemetry helper reports p99, p99.9, max,
+        // and bright_fraction consistent with a manual reference.
+        let mut buffer: PixelBuffer = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            // 0.0 for first 990, 0.95 for next 9, 1.2 for last one.
+            let lum = if i < 990 {
+                0.0
+            } else if i < 999 {
+                0.95
+            } else {
+                1.2
+            };
+            buffer.push((lum, lum, lum, 1.0));
+        }
+        let stats = compute_stage_luminance(&buffer, LuminanceSpace::Display);
+        // bright_fraction: 10/1000 = 0.01.
+        assert!((stats.bright_fraction - 0.01).abs() < 1e-9);
+        // max = 1.2.
+        assert!((stats.max - 1.2).abs() < 1e-9);
+        // p99 sits at the boundary between 0.0 and 0.95, so near 0.95.
+        assert!(stats.p99 >= 0.94 && stats.p99 <= 0.96, "p99 = {}", stats.p99);
+        // p99.9 lands in the tail — should be either 0.95 or 1.2.
+        assert!(stats.p99_9 >= 0.94, "p99.9 = {}", stats.p99_9);
     }
 
     #[test]

@@ -1128,6 +1128,51 @@ pub const W_MICRO_CONTRAST: f64 = 0.3;
 /// along edges, so per-effect energy is modest.
 pub const W_EDGE_LUMINANCE: f64 = 0.4;
 
+// --- Binary / on-off additive weights ----------------------------------
+//
+// The effects below are "flat" — they don't expose a strength knob that
+// Guard 7 can normalize and rescale, so without explicit weights they
+// contribute zero to [`additive_weighted_energy`] and can stack freely
+// past [`ADDITIVE_ENERGY_BUDGET`]. Seeds `0x17b5c96a2abd` (17.6% bright
+// pixels) and `0x4767608a4991` (30.1% bright) both reported very low
+// measured energy (~0.06) *despite* an `additive_effect_count` of 7 —
+// that gap between "count" and "measured energy" is what these flat
+// costs close. Weights are calibrated so that any stack that stays
+// under `ADDITIVE_ENERGY_BUDGET` after strength rescale *plus* flat
+// costs has a real chance of producing museum-quality output.
+
+/// Flat energy cost of enabling the multi-scale `bloom_pyramid` at all,
+/// independent of its (shared) `blur_strength` / `dog_strength`. The
+/// pyramid's multi-scale upsample injects a non-trivial baseline
+/// contribution even at minimal strength.
+pub const W_BLOOM_PYRAMID_FLAT: f64 = 0.6;
+/// Flat energy cost of the anamorphic lens flare (post-tonemap). The
+/// horizontal streak covers a wide footprint even at subtle settings,
+/// and it runs in display space where there's no scene-linear ceiling
+/// to tame it.
+pub const W_ANAMORPHIC_FLARE: f64 = 0.6;
+/// Flat energy cost of diffraction spikes. The radial cross pattern
+/// deposits bright pixels across the full frame diagonal.
+pub const W_DIFFRACTION_SPIKES: f64 = 0.8;
+/// Flat energy cost of the star field. Stars are additive point
+/// injections into the pre-tonemap buffer on pixels whose alpha was
+/// previously zero — they slip past the alpha-gated metering and
+/// ceiling unless accounted for here.
+pub const W_STAR_FIELD: f64 = 0.4;
+/// Flat energy cost of the Airy disc at body cores. Concentrated hot
+/// pixel with diffraction rings, easy to compound with bloom.
+pub const W_AIRY_DISC: f64 = 0.5;
+/// Flat energy cost of rim lighting. Modifies drawing-stage density,
+/// so its effect compounds with every downstream additive pass.
+pub const W_RIM_LIGHT: f64 = 0.3;
+/// Flat energy cost of the fine grain texture. Small per-pixel but
+/// covers the whole frame.
+pub const W_FINE_TEXTURE: f64 = 0.2;
+/// Flat energy cost of the champlevé enamel pass. Has its own
+/// `interior_lift` / `rim_intensity` knobs that can brighten the whole
+/// trajectory body.
+pub const W_CHAMPLEVE: f64 = 0.5;
+
 /// Project an absolute strength into `[0, 1]` against its descriptor
 /// range. Values outside the curated range clamp to the nearest end.
 fn normalize_strength(value: f64, desc: &pd::FloatParamDescriptor) -> f64 {
@@ -1207,6 +1252,35 @@ pub fn additive_weighted_energy(config: &ResolvedEffectConfig) -> f64 {
     // it is left on.)
     if config.enable_god_rays {
         total += W_GOD_RAYS;
+    }
+
+    // Binary / on-off additives. These have no strength knob that
+    // Guard 7 can rescale, so they contribute a fixed flat cost
+    // whenever enabled. See the per-weight doc comments for
+    // calibration rationale.
+    if config.enable_bloom_pyramid {
+        total += W_BLOOM_PYRAMID_FLAT;
+    }
+    if config.enable_anamorphic_flare {
+        total += W_ANAMORPHIC_FLARE;
+    }
+    if config.enable_diffraction_spikes {
+        total += W_DIFFRACTION_SPIKES;
+    }
+    if config.enable_star_field {
+        total += W_STAR_FIELD;
+    }
+    if config.enable_airy_disc {
+        total += W_AIRY_DISC;
+    }
+    if config.enable_rim_light {
+        total += W_RIM_LIGHT;
+    }
+    if config.enable_fine_texture {
+        total += W_FINE_TEXTURE;
+    }
+    if config.enable_champleve {
+        total += W_CHAMPLEVE;
     }
     total
 }
@@ -1479,6 +1553,37 @@ fn apply_conflict_detection(
         if config.enable_micro_contrast {
             n += 1;
         }
+        // Binary / on-off additives. Previously excluded from the count
+        // because they have no strength knob for Guard 6 to attenuate,
+        // which meant a stack of 7 cosmetics only registered as
+        // `additive_count = 3` (bloom + bloom_pyramid + god_rays). That
+        // was the root cause of the `0x17b5c96a2abd` / `0x4767608a4991`
+        // blowouts: Guard 6 didn't fire, Guard 7 saw ~7.6 energy, and
+        // even after rescale + cascade enough flat cost remained to
+        // produce 17-30% white pixels. Counting them here means Guard 6
+        // scales down bloom / DoG strengths *and* disables god_rays at
+        // count ≥ 7, leaving Guard 7 only the binary cascade to do.
+        if config.enable_anamorphic_flare {
+            n += 1;
+        }
+        if config.enable_diffraction_spikes {
+            n += 1;
+        }
+        if config.enable_star_field {
+            n += 1;
+        }
+        if config.enable_airy_disc {
+            n += 1;
+        }
+        if config.enable_rim_light {
+            n += 1;
+        }
+        if config.enable_fine_texture {
+            n += 1;
+        }
+        if config.enable_champleve {
+            n += 1;
+        }
         n
     };
     if additive_count >= 4 {
@@ -1647,6 +1752,40 @@ fn apply_conflict_detection(
             original_edge,
             config.edge_luminance_strength,
         ));
+
+        // --- Binary-additive disable cascade ----------------------------
+        //
+        // Strength rescale only shrinks knobbed effects. If the budget is
+        // *still* exceeded after rescale, the overshoot is coming from
+        // the flat costs contributed by binary additives. Disable them
+        // one at a time (from least-structural to most-structural) until
+        // energy drops back under budget or the list is exhausted.
+        //
+        // Priority order is chosen to preserve **variety** and
+        // **structure**: small decorative effects go first, structural
+        // volumetrics (god_rays, rim_light, champleve, bloom_pyramid)
+        // stay on the longest because disabling them meaningfully
+        // changes the aesthetic.
+        let mut disabled: Vec<&'static str> = Vec::new();
+        macro_rules! cascade_step {
+            ($field:ident, $label:expr) => {
+                if additive_weighted_energy(&config) > ADDITIVE_ENERGY_BUDGET && config.$field {
+                    config.$field = false;
+                    disabled.push($label);
+                }
+            };
+        }
+        cascade_step!(enable_star_field, "star_field");
+        cascade_step!(enable_fine_texture, "fine_texture");
+        cascade_step!(enable_airy_disc, "airy_disc");
+        cascade_step!(enable_diffraction_spikes, "diffraction_spikes");
+        cascade_step!(enable_anamorphic_flare, "anamorphic_flare");
+        if !disabled.is_empty() {
+            let residual_energy = additive_weighted_energy(&config);
+            adjustments.push(format!(
+                "Quality guard 7b: Disabled binary additives {disabled:?} after strength rescale; residual energy {residual_energy:.3} vs budget {ADDITIVE_ENERGY_BUDGET:.3}"
+            ));
+        }
     }
 
     // Log adjustments if any were made
@@ -2386,6 +2525,97 @@ mod tests {
         assert_eq!(result.opalescence_strength, config.opalescence_strength);
     }
 
+    #[test]
+    fn guard7_counts_binary_additive_flat_costs() {
+        // A stack of only binary/on-off effects (no strength knobs)
+        // previously reported near-zero weighted energy. The
+        // extension must now account for them.
+        let config = ResolvedEffectConfig {
+            enable_bloom_pyramid: true,
+            enable_anamorphic_flare: true,
+            enable_diffraction_spikes: true,
+            enable_star_field: true,
+            enable_airy_disc: true,
+            enable_rim_light: true,
+            enable_fine_texture: true,
+            enable_champleve: true,
+            ..baseline_resolved_config()
+        };
+        let energy = additive_weighted_energy(&config);
+        // Sum of the flat weights = 0.6 + 0.6 + 0.8 + 0.4 + 0.5 + 0.3 + 0.2 + 0.5 = 3.9.
+        assert!(
+            energy >= 3.8 - 1e-6,
+            "binary-only stack must report its flat energy (got {energy})"
+        );
+    }
+
+    #[test]
+    fn guard7_cascade_disables_binary_additives_when_over_budget() {
+        // The remote blow-out seeds matched this shape: a huge binary
+        // stack plus a modest bloom contribution. Guard 7 must rescale
+        // the bloom *and* disable enough binaries to land under budget.
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_bloom_pyramid: true,
+            enable_god_rays: true,
+            enable_anamorphic_flare: true,
+            enable_diffraction_spikes: true,
+            enable_star_field: true,
+            enable_airy_disc: true,
+            enable_rim_light: true,
+            enable_fine_texture: true,
+            enable_champleve: true,
+            blur_strength: pd::BLUR_STRENGTH.max,
+            dog_strength: pd::DOG_STRENGTH.max,
+            ..baseline_resolved_config()
+        };
+        let pre_energy = additive_weighted_energy(&config);
+        assert!(
+            pre_energy > ADDITIVE_ENERGY_BUDGET,
+            "precondition: stacked binaries must blow the budget ({pre_energy} <= {ADDITIVE_ENERGY_BUDGET})"
+        );
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        let post_energy = additive_weighted_energy(&result);
+
+        assert!(
+            post_energy <= ADDITIVE_ENERGY_BUDGET + 1e-6,
+            "Guard 7 must bring binary-heavy stacks within budget: {post_energy} > {ADDITIVE_ENERGY_BUDGET}"
+        );
+        // Cascade priority order must be respected: star_field goes
+        // before airy_disc which goes before diffraction_spikes. If the
+        // cascade fired at all, at least star_field should be disabled.
+        assert!(
+            !result.enable_star_field,
+            "star_field is the first cascade victim and must be disabled on this heavy stack"
+        );
+    }
+
+    #[test]
+    fn guard7_cascade_preserves_structural_binaries() {
+        // A modest stack that exceeds budget by only a hair should
+        // only disable the least-structural effects, never god_rays /
+        // rim_light / champleve (structural volumetrics).
+        let config = ResolvedEffectConfig {
+            enable_bloom_pyramid: true,
+            enable_god_rays: true,
+            enable_rim_light: true,
+            enable_champleve: true,
+            enable_star_field: true,
+            enable_fine_texture: true,
+            ..baseline_resolved_config()
+        };
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        // Guard 7's cascade priority explicitly keeps god_rays,
+        // rim_light, and champleve even if budget pressure remains
+        // after Guard 6 / 7a.
+        assert!(result.enable_god_rays, "god_rays must survive the binary cascade");
+        assert!(result.enable_rim_light, "rim_light must survive the binary cascade");
+        assert!(result.enable_champleve, "champleve must survive the binary cascade");
+    }
+
     // Property test: for any random seed, the resolved+attenuated
     // config's weighted additive energy never exceeds the budget.
     // Covers the full mood-driven randomization surface that the
@@ -2411,6 +2641,67 @@ mod tests {
                 "seed {} produced post-guard energy {} > budget {}",
                 seed_val,
                 energy,
+                ADDITIVE_ENERGY_BUDGET,
+            );
+        }
+
+        /// Directly stress-tests Guard 7 on arbitrary binary enable masks.
+        ///
+        /// The default randomizer is already tested by
+        /// `proptest_random_seed_never_exceeds_energy_budget`, but it
+        /// only samples the mood-driven enable distribution. This test
+        /// flips every binary additive independently with 50 % probability
+        /// **and** pins strength knobs at their max, so it explores the
+        /// failure region (binary-heavy + strength-max) that the mood
+        /// prior would normally avoid. After `apply_conflict_detection`
+        /// the resolved config must still respect the budget.
+        #[test]
+        fn proptest_binary_enable_masks_respect_budget(
+            bloom in proptest::prelude::any::<bool>(),
+            bloom_pyramid in proptest::prelude::any::<bool>(),
+            glow in proptest::prelude::any::<bool>(),
+            chromatic in proptest::prelude::any::<bool>(),
+            god_rays in proptest::prelude::any::<bool>(),
+            aether in proptest::prelude::any::<bool>(),
+            opalescence in proptest::prelude::any::<bool>(),
+            anamorphic_flare in proptest::prelude::any::<bool>(),
+            diffraction_spikes in proptest::prelude::any::<bool>(),
+            star_field in proptest::prelude::any::<bool>(),
+            airy_disc in proptest::prelude::any::<bool>(),
+            rim_light in proptest::prelude::any::<bool>(),
+            fine_texture in proptest::prelude::any::<bool>(),
+            champleve in proptest::prelude::any::<bool>(),
+        ) {
+            let config = ResolvedEffectConfig {
+                enable_bloom: bloom,
+                enable_bloom_pyramid: bloom_pyramid,
+                enable_glow: glow,
+                enable_chromatic_bloom: chromatic,
+                enable_god_rays: god_rays,
+                enable_aether: aether,
+                enable_opalescence: opalescence,
+                enable_anamorphic_flare: anamorphic_flare,
+                enable_diffraction_spikes: diffraction_spikes,
+                enable_star_field: star_field,
+                enable_airy_disc: airy_disc,
+                enable_rim_light: rim_light,
+                enable_fine_texture: fine_texture,
+                enable_champleve: champleve,
+                blur_strength: pd::BLUR_STRENGTH.max,
+                dog_strength: pd::DOG_STRENGTH.max,
+                glow_strength: pd::GLOW_STRENGTH.max,
+                chromatic_bloom_strength: pd::CHROMATIC_BLOOM_STRENGTH.max,
+                aether_scattering_strength: pd::AETHER_SCATTERING_STRENGTH.max,
+                opalescence_strength: pd::OPALESCENCE_STRENGTH.max,
+                ..baseline_resolved_config()
+            };
+            let mut log = RandomizationLog::new();
+            let result = apply_conflict_detection(config, &mut log);
+            let post_energy = additive_weighted_energy(&result);
+            proptest::prop_assert!(
+                post_energy <= ADDITIVE_ENERGY_BUDGET + 1e-6,
+                "binary enable mask produced post-guard energy {} > budget {}",
+                post_energy,
                 ADDITIVE_ENERGY_BUDGET,
             );
         }
