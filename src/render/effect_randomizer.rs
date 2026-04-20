@@ -66,6 +66,11 @@ impl<'a> EffectRandomizer<'a> {
     }
 
     /// Get a random f64 in [0.0, 1.0) from the RNG.
+    /// Consume 4 bytes from the underlying RNG and return a value in `[0, 1)`.
+    pub fn random_unit(&mut self) -> f64 {
+        self.random_f64()
+    }
+
     fn random_f64(&mut self) -> f64 {
         let b0 = u32::from(self.rng.next_byte());
         let b1 = u32::from(self.rng.next_byte());

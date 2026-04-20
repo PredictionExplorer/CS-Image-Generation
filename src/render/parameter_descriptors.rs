@@ -56,7 +56,7 @@ pub const ENABLE_PROB_GLOW: f64 = 0.55;
 /// Probability that prismatic chromatic bloom is enabled during randomization.
 pub const ENABLE_PROB_CHROMATIC_BLOOM: f64 = 0.20;
 /// Probability that `OKLab` perceptual blur is enabled during randomization.
-pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.05;
+pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.18;
 /// Probability that micro-contrast enhancement is enabled during randomization.
 pub const ENABLE_PROB_MICRO_CONTRAST: f64 = 0.85;
 /// Probability that luxury gradient mapping is enabled during randomization.
@@ -552,19 +552,23 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
 // Nebula
 // ---------------------------------------------------------------------------
 
-/// Nebula cloud background opacity (currently disabled: range is `[0, 0]`).
+/// Nebula cloud background opacity.
+///
+/// Chosen so even the highest value keeps the nebula firmly in the
+/// background (never brighter than the trajectory subject) while the
+/// lower bound guarantees a visible cosmic atmosphere.
 pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "nebula_strength",
-    min: 0.0,
-    max: 0.0,
-    description: "Nebula cloud background opacity (currently disabled)",
+    min: 0.04,
+    max: 0.22,
+    description: "Nebula cloud background opacity",
 };
 
 /// Nebula noise detail octaves.
 pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
     name: "nebula_octaves",
     min: 3,
-    max: 4,
+    max: 5,
     description: "Nebula noise detail octaves",
 };
 
@@ -572,9 +576,128 @@ pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
 pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
     name: "nebula_base_frequency",
     min: 0.0010,
-    max: 0.0020,
+    max: 0.0028,
     description: "Nebula noise base frequency",
 };
+
+// ---------------------------------------------------------------------------
+// Composition / vignette offset
+// ---------------------------------------------------------------------------
+
+/// Vignette focal-point horizontal offset (fraction of half-width).
+pub const VIGNETTE_OFFSET_X: FloatParamDescriptor = FloatParamDescriptor {
+    name: "vignette_offset_x",
+    min: -0.18,
+    max: 0.18,
+    description: "Vignette focal-point horizontal offset",
+};
+
+/// Vignette focal-point vertical offset (fraction of half-height).
+pub const VIGNETTE_OFFSET_Y: FloatParamDescriptor = FloatParamDescriptor {
+    name: "vignette_offset_y",
+    min: -0.12,
+    max: 0.12,
+    description: "Vignette focal-point vertical offset",
+};
+
+// ---------------------------------------------------------------------------
+// Fine texture material params
+// ---------------------------------------------------------------------------
+
+/// Fine-texture orientation (radians).
+pub const FINE_TEXTURE_ANGLE: FloatParamDescriptor = FloatParamDescriptor {
+    name: "fine_texture_angle",
+    min: 0.0,
+    max: std::f64::consts::PI,
+    description: "Fine texture orientation angle (radians)",
+};
+
+/// Fine-texture anisotropy (1.0 = isotropic).
+pub const FINE_TEXTURE_ANISOTROPY: FloatParamDescriptor = FloatParamDescriptor {
+    name: "fine_texture_anisotropy",
+    min: 1.0,
+    max: 2.8,
+    description: "Fine texture anisotropy ratio",
+};
+
+// ---------------------------------------------------------------------------
+// Champleve material params
+// ---------------------------------------------------------------------------
+
+/// Champlevé cell density multiplier.
+pub const CHAMPLEVE_CELL_DENSITY: FloatParamDescriptor = FloatParamDescriptor {
+    name: "champleve_cell_density",
+    min: 0.7,
+    max: 2.1,
+    description: "Champlevé cell density",
+};
+
+/// Champlevé rim sharpness (0..1).
+pub const CHAMPLEVE_RIM_SHARPNESS: FloatParamDescriptor = FloatParamDescriptor {
+    name: "champleve_rim_sharpness",
+    min: 0.25,
+    max: 0.90,
+    description: "Champlevé rim sharpness",
+};
+
+// ---------------------------------------------------------------------------
+// Aether material params
+// ---------------------------------------------------------------------------
+
+/// Aether filament density.
+pub const AETHER_FILAMENT_DENSITY: FloatParamDescriptor = FloatParamDescriptor {
+    name: "aether_filament_density",
+    min: 0.6,
+    max: 2.0,
+    description: "Aether filament density",
+};
+
+/// Aether iridescence frequency (cycles across frame).
+pub const AETHER_IRIDESCENCE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
+    name: "aether_iridescence_frequency",
+    min: 0.6,
+    max: 2.4,
+    description: "Aether iridescence frequency",
+};
+
+// ---------------------------------------------------------------------------
+// Opalescence material params
+// ---------------------------------------------------------------------------
+
+/// Opalescence pearl-sheen amount (0..1).
+pub const OPALESCENCE_PEARL_SHEEN: FloatParamDescriptor = FloatParamDescriptor {
+    name: "opalescence_pearl_sheen",
+    min: 0.20,
+    max: 0.80,
+    description: "Opalescence pearl sheen",
+};
+
+/// Opalescence chromatic-shift (0..1).
+pub const OPALESCENCE_CHROMATIC_SHIFT: FloatParamDescriptor = FloatParamDescriptor {
+    name: "opalescence_chromatic_shift",
+    min: 0.10,
+    max: 0.50,
+    description: "Opalescence chromatic shift",
+};
+
+// ---------------------------------------------------------------------------
+// Chromatic dispersion
+// ---------------------------------------------------------------------------
+
+/// Radial chromatic dispersion strength (0..1).
+pub const DISPERSION_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
+    name: "dispersion_strength",
+    min: 0.0,
+    max: 0.35,
+    description: "Radial chromatic dispersion strength",
+};
+
+/// Probability that a style-influenced bloom mode is selected (vs
+/// trusting the style-bundle default). Currently unused because the
+/// bloom mode is chosen deterministically from the style — kept here
+/// for symmetry with other enable probabilities in case randomization
+/// is re-introduced.
+pub const ENABLE_PROB_BLOOM_MODE_OVERRIDE: f64 = 0.0;
 
 #[cfg(test)]
 mod tests {
@@ -636,6 +759,17 @@ mod tests {
         &CLIP_WHITE,
         &NEBULA_STRENGTH,
         &NEBULA_BASE_FREQUENCY,
+        &VIGNETTE_OFFSET_X,
+        &VIGNETTE_OFFSET_Y,
+        &FINE_TEXTURE_ANGLE,
+        &FINE_TEXTURE_ANISOTROPY,
+        &CHAMPLEVE_CELL_DENSITY,
+        &CHAMPLEVE_RIM_SHARPNESS,
+        &AETHER_FILAMENT_DENSITY,
+        &AETHER_IRIDESCENCE_FREQUENCY,
+        &OPALESCENCE_PEARL_SHEEN,
+        &OPALESCENCE_CHROMATIC_SHIFT,
+        &DISPERSION_STRENGTH,
     ];
 
     const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] =

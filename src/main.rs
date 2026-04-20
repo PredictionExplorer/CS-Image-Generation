@@ -59,6 +59,7 @@ enum DriftModeArg {
     Linear,
     Brownian,
     Elliptical,
+    Spiral,
 }
 
 impl DriftModeArg {
@@ -68,6 +69,7 @@ impl DriftModeArg {
             Self::Linear => "linear",
             Self::Brownian => "brownian",
             Self::Elliptical => "elliptical",
+            Self::Spiral => "spiral",
         }
     }
 }
@@ -239,6 +241,15 @@ fn build_generation_log_config(
         chaos_weight: borda_weights.chaos_weight,
         equil_weight: borda_weights.equil_weight,
         weights_randomized: borda_weights.was_randomized,
+        art_style: Some(resolved.art_style.name().to_string()),
+        nebula_palette: Some(resolved.nebula_palette.name().to_string()),
+        grade_preset: Some(resolved.grade_preset.name().to_string()),
+        hue_palette_mode: Some(resolved.hue_palette_mode.name().to_string()),
+        bloom_mode_choice: Some(resolved.bloom_mode_choice.as_str().to_string()),
+        drift_character: Some(resolved.drift_character.name().to_string()),
+        framing_zoom: Some(resolved.framing_zoom),
+        starfield_enabled: Some(resolved.enable_starfield),
+        lens_flare_enabled: Some(resolved.enable_lens_flare),
     }
 }
 
@@ -252,7 +263,17 @@ fn main() -> Result<()> {
 
     setup_logging(&args.log_level);
 
-    let enhancements = app::Enhancements::default();
+    let mut enhancements = app::Enhancements::default();
+    // Auto-enable aspect correction for non-16:9 outputs so the orbital bounding
+    // box is padded to match the target canvas. The default 16:9 pipeline still
+    // renders exactly as before.
+    {
+        let target_ar = f64::from(args.resolution.width) / f64::from(args.resolution.height);
+        let default_ar = 16.0_f64 / 9.0_f64;
+        if (target_ar - default_ar).abs() > 0.02 {
+            enhancements.aspect_correction = true;
+        }
+    }
     spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
     render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
@@ -321,16 +342,22 @@ fn main() -> Result<()> {
         )?
     };
 
-    let (colors, body_alphas) =
-        app::generate_colors(&mut rng, args.steps, DEFAULT_ALPHA_DENOM, &enhancements);
+    let (colors, body_alphas) = app::generate_colors_with_mode(
+        &mut rng,
+        args.steps,
+        DEFAULT_ALPHA_DENOM,
+        &enhancements,
+        Some(resolved_effect_config.hue_palette_mode),
+    );
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new(
+    let render_ctx = render::context::RenderContext::new_with_framing(
         args.resolution.width,
         args.resolution.height,
         &positions,
         enhancements.aspect_correction,
+        resolved_effect_config.framing_zoom,
     );
     let bbox = render_ctx.bounds();
     info!(
@@ -340,7 +367,7 @@ fn main() -> Result<()> {
 
     let render_config = RenderConfig {
         hdr_scale: resolved_effect_config.hdr_scale,
-        bloom_mode: render::BloomMode::Dog,
+        bloom_mode: resolved_effect_config.bloom_mode_choice,
     };
 
     let levels = app::build_histogram_and_levels(

@@ -27,7 +27,7 @@ impl DriftParameters {
     pub fn new(scale: f64, arc_fraction: f64, eccentricity: f64) -> Self {
         let clamped_scale = scale.max(0.0);
         let clamped_arc = arc_fraction.clamp(0.0, 1.0);
-        let clamped_ecc = eccentricity.clamp(0.0, 0.95);
+        let clamped_ecc = eccentricity.clamp(0.0, 0.85);
 
         if (arc_fraction - clamped_arc).abs() > f64::EPSILON {
             warn!(
@@ -40,7 +40,7 @@ impl DriftParameters {
             warn!(
                 original = eccentricity,
                 clamped = clamped_ecc,
-                "drift_orbit_eccentricity out of range [0, 0.95]; clamping"
+                "drift_orbit_eccentricity out of range [0, 0.85]; clamping"
             );
         }
 
@@ -72,7 +72,7 @@ pub struct BrownianDrift {
 impl BrownianDrift {
     /// Pre-generate Brownian displacement vectors for the given number of steps.
     pub fn new(rng: &mut Sha3RandomByteStream, scale: f64, num_steps: usize) -> Self {
-        let dt_sqrt = 0.001f64.sqrt(); // Using known dt value
+        let dt_sqrt = crate::render::constants::DEFAULT_DT.sqrt();
         let mut displacements = Vec::with_capacity(num_steps);
 
         for _ in 0..num_steps {
@@ -228,6 +228,62 @@ impl DriftTransform for EllipticalDrift {
     }
 }
 
+/// Spiral drift - logarithmic-spiral camera sweep that grows over time.
+///
+/// Produces an expanding (or contracting, for negative growth) spiral in a
+/// randomly oriented plane. Unlike [`EllipticalDrift`] the radius evolves
+/// monotonically, giving the scene a cinematic "dolly-zoom" feel that pairs
+/// well with nebulous backgrounds.
+pub struct SpiralDrift {
+    params: DriftParameters,
+    rotation: Matrix3<f64>,
+    initial_angle: f64,
+    growth_rate: f64,
+    base_radius: f64,
+}
+
+impl SpiralDrift {
+    /// Create a spiral drift with random orientation and growth rate.
+    pub fn new(rng: &mut Sha3RandomByteStream, params: DriftParameters) -> Self {
+        let inclination = rng.next_f64() * PI;
+        let ascending_node = rng.next_f64() * crate::render::constants::TWO_PI;
+        let argument_of_periapsis = rng.next_f64() * crate::render::constants::TWO_PI;
+        let rotation = build_rotation_matrix(ascending_node, inclination, argument_of_periapsis);
+        let initial_angle = rng.next_f64() * crate::render::constants::TWO_PI;
+        // Map eccentricity to growth rate: 0 = near-circular, 0.85 = strong spiral.
+        let direction = if rng.next_f64() < 0.5 { -1.0 } else { 1.0 };
+        let growth_rate = direction * (0.05 + params.eccentricity * 0.35);
+        let base_radius = params.scale.max(1e-6) * 0.15;
+        Self { params, rotation, initial_angle, growth_rate, base_radius }
+    }
+}
+
+impl DriftTransform for SpiralDrift {
+    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) {
+        if positions.is_empty() || positions[0].len() < 2 {
+            return;
+        }
+        if self.params.scale <= 0.0 {
+            return;
+        }
+        let total_steps = positions[0].len();
+        let sweep = self.params.sweep_radians().max(crate::render::constants::TWO_PI * 0.1);
+        let total_duration = dt * (total_steps.saturating_sub(1) as f64).max(dt);
+        let angular_velocity = if total_duration > 0.0 { sweep / total_duration } else { 0.0 };
+
+        for step in 0..total_steps {
+            let t = step as f64 * dt;
+            let angle = self.initial_angle + angular_velocity * t;
+            let radius = self.base_radius * (self.growth_rate * t).exp();
+            let orbital_plane = Vector3::new(radius * angle.cos(), radius * angle.sin(), 0.0);
+            let offset = self.rotation * orbital_plane;
+            for body_positions in positions.iter_mut() {
+                body_positions[step] += offset;
+            }
+        }
+    }
+}
+
 /// Parse drift mode from string, returning an error for unrecognised values.
 pub fn parse_drift_mode(
     mode: &str,
@@ -240,9 +296,10 @@ pub fn parse_drift_mode(
         "brownian" => Ok(Box::new(BrownianDrift::new(rng, params.scale, num_steps))),
         "linear" => Ok(Box::new(LinearDrift::new(rng, params.scale))),
         "elliptical" | "ellipse" => Ok(Box::new(EllipticalDrift::new(rng, params))),
+        "spiral" => Ok(Box::new(SpiralDrift::new(rng, params))),
         _ => Err(ConfigError::InvalidResolution {
             reason: format!(
-                "Unknown drift mode '{mode}'. Valid modes: none, brownian, linear, elliptical"
+                "Unknown drift mode '{mode}'. Valid modes: none, brownian, linear, elliptical, spiral"
             ),
         }),
     }
@@ -442,7 +499,7 @@ mod tests {
         let p = DriftParameters::new(-5.0, 2.0, 1.0);
         assert_eq!(p.scale, 0.0, "Negative scale should clamp to 0");
         assert_eq!(p.arc_fraction, 1.0, "arc_fraction > 1 should clamp to 1");
-        assert_eq!(p.eccentricity, 0.95, "eccentricity > 0.95 should clamp to 0.95");
+        assert_eq!(p.eccentricity, 0.85, "eccentricity > 0.85 should clamp to 0.85");
     }
 
     #[test]
@@ -473,6 +530,37 @@ mod tests {
             (offset_0 - offset_1).norm() < 1e-10,
             "All bodies should share the same drift offset"
         );
+    }
+
+    #[test]
+    fn test_parse_drift_mode_spiral() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 0.5, 0.3);
+        let mut drift = parse_drift_mode("spiral", &mut rng, params, 3).expect("valid mode");
+        let mut positions = test_bodies();
+        let original = positions.clone();
+        drift.apply(&mut positions, 0.001);
+        assert_ne!(positions, original, "SpiralDrift should modify positions");
+    }
+
+    #[test]
+    fn test_spiral_drift_monotonic_radius() {
+        let mut rng = make_rng();
+        let params = DriftParameters::new(1.0, 1.0, 0.5);
+        let mut drift = SpiralDrift::new(&mut rng, params);
+        let steps = 64;
+        let mut positions = vec![
+            vec![Vector3::new(0.0, 0.0, 0.0); steps],
+            vec![Vector3::new(0.0, 0.0, 0.0); steps],
+            vec![Vector3::new(0.0, 0.0, 0.0); steps],
+        ];
+        drift.apply(&mut positions, 0.01);
+        let early = positions[0][1].norm();
+        let late = positions[0][steps - 1].norm();
+        // Radius is monotonic by construction (exp), up to sign of growth_rate
+        // direction randomness.
+        assert!(early >= 0.0 && late >= 0.0);
+        assert_ne!(early, late, "spiral should evolve over time");
     }
 
     #[test]

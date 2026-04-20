@@ -19,6 +19,7 @@ use tracing::{debug, info};
 pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
+pub mod art_style;
 pub mod batch_drawing;
 pub mod color;
 pub mod constants;
@@ -27,7 +28,10 @@ pub mod drawing;
 pub mod effect_randomizer;
 pub mod effects;
 pub mod error;
+pub mod grade_presets;
 pub mod histogram;
+pub mod hue_palette;
+pub mod nebula_presets;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
 pub mod spectral_output;
@@ -369,16 +373,17 @@ fn build_nebula_config(
     resolved_config: &randomizable_config::ResolvedEffectConfig,
     noise_seed: i32,
 ) -> NebulaCloudConfig {
+    let preset = resolved_config.nebula_palette.preset();
     NebulaCloudConfig {
         strength: resolved_config.nebula_strength,
         octaves: resolved_config.nebula_octaves,
         base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,
-        persistence: 0.5,
+        lacunarity: preset.lacunarity,
+        persistence: preset.persistence,
         noise_seed: i64::from(noise_seed),
-        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
-        time_scale: 1.0,
-        edge_fade: 0.3,
+        colors: preset.colors,
+        time_scale: preset.time_scale,
+        edge_fade: preset.edge_fade,
     }
 }
 
@@ -481,17 +486,20 @@ fn build_color_grade_params(
     resolved: &randomizable_config::ResolvedEffectConfig,
     min_dim: usize,
 ) -> crate::post_effects::ColorGradeParams {
+    let grade = resolved.grade_preset.params();
     crate::post_effects::ColorGradeParams {
         strength: resolved.color_grade_strength,
         vignette_strength: resolved.vignette_strength,
         vignette_softness: resolved.vignette_softness,
-        vibrance: resolved.vibrance,
+        vibrance: (resolved.vibrance * grade.vibrance_bias).clamp(0.0, 2.0),
         clarity_strength: resolved.clarity_strength,
         clarity_radius: (0.0028 * min_dim as f64).round().max(1.0) as usize,
-        tone_curve: resolved.tone_curve_strength,
-        shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
-        highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
-        palette_wave_strength: 0.25,
+        tone_curve: (resolved.tone_curve_strength * grade.tone_curve_bias).clamp(0.0, 1.5),
+        shadow_tint: grade.shadow_tint,
+        highlight_tint: grade.highlight_tint,
+        palette_wave_strength: grade.palette_wave_strength,
+        vignette_offset_x: resolved.vignette_offset_x,
+        vignette_offset_y: resolved.vignette_offset_y,
     }
 }
 
@@ -511,13 +519,13 @@ fn build_glow_config(
 
 fn build_champleve_config(resolved: &randomizable_config::ResolvedEffectConfig) -> ChampleveConfig {
     ChampleveConfig {
-        cell_density: constants::DEFAULT_CHAMPLEVE_CELL_DENSITY,
+        cell_density: resolved.champleve_cell_density,
         flow_alignment: resolved.champleve_flow_alignment,
         interference_amplitude: resolved.champleve_interference_amplitude,
         interference_frequency: constants::DEFAULT_CHAMPLEVE_INTERFERENCE_FREQUENCY,
         rim_intensity: resolved.champleve_rim_intensity,
         rim_warmth: resolved.champleve_rim_warmth,
-        rim_sharpness: constants::DEFAULT_CHAMPLEVE_RIM_SHARPNESS,
+        rim_sharpness: resolved.champleve_rim_sharpness,
         interior_lift: resolved.champleve_interior_lift,
         anisotropy: constants::DEFAULT_CHAMPLEVE_ANISOTROPY,
         cell_softness: constants::DEFAULT_CHAMPLEVE_CELL_SOFTNESS,
@@ -526,12 +534,12 @@ fn build_champleve_config(resolved: &randomizable_config::ResolvedEffectConfig) 
 
 fn build_aether_config(resolved: &randomizable_config::ResolvedEffectConfig) -> AetherConfig {
     AetherConfig {
-        filament_density: constants::DEFAULT_AETHER_FILAMENT_DENSITY,
+        filament_density: resolved.aether_filament_density,
         flow_alignment: resolved.aether_flow_alignment,
         scattering_strength: resolved.aether_scattering_strength,
         scattering_falloff: constants::DEFAULT_AETHER_SCATTERING_FALLOFF,
         iridescence_amplitude: resolved.aether_iridescence_amplitude,
-        iridescence_frequency: constants::DEFAULT_AETHER_IRIDESCENCE_FREQUENCY,
+        iridescence_frequency: resolved.aether_iridescence_frequency,
         caustic_strength: resolved.aether_caustic_strength,
         caustic_softness: constants::DEFAULT_AETHER_CAUSTIC_SOFTNESS,
         luxury_mode: true,
@@ -548,9 +556,9 @@ fn build_opalescence_config(
         strength: resolved.opalescence_strength,
         scale: scale_abs,
         layers: resolved.opalescence_layers,
-        chromatic_shift: 0.5,
+        chromatic_shift: resolved.opalescence_chromatic_shift,
         angle_sensitivity: 0.8,
-        pearl_sheen: 0.3,
+        pearl_sheen: resolved.opalescence_pearl_sheen,
     }
 }
 
@@ -610,8 +618,8 @@ fn build_fine_texture_config(
             strength: resolved.fine_texture_strength * strength_scale,
             scale: scale_abs,
             contrast: resolved.fine_texture_contrast,
-            anisotropy: 0.3,
-            angle: 0.0,
+            anisotropy: resolved.fine_texture_anisotropy,
+            angle: resolved.fine_texture_angle,
         },
     )
 }
@@ -683,6 +691,45 @@ pub fn build_effect_config_from_resolved(
         atmospheric_depth_config: build_atmospheric_depth_config(resolved),
         fine_texture_enabled,
         fine_texture_config,
+
+        starfield_enabled: resolved.enable_starfield,
+        starfield_config: build_starfield_config(resolved),
+        lens_flare_enabled: resolved.enable_lens_flare,
+        lens_flare_config: build_lens_flare_config(resolved),
+    }
+}
+
+fn build_starfield_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> crate::post_effects::StarfieldConfig {
+    let seed = u64::from(resolved.width)
+        .wrapping_mul(1_000_003)
+        .wrapping_add(u64::from(resolved.height).wrapping_mul(31))
+        .wrapping_add(0xDEAD_BEEF_1234_5678);
+    crate::post_effects::StarfieldConfig {
+        strength: resolved.starfield_strength,
+        density: resolved.starfield_density,
+        min_brightness: 0.03,
+        max_brightness: 0.95,
+        max_radius: 1.8,
+        warmth_bias: 0.0,
+        seed,
+        avoid_luminous_regions: 0.35,
+    }
+}
+
+fn build_lens_flare_config(
+    resolved: &randomizable_config::ResolvedEffectConfig,
+) -> crate::post_effects::LensFlareConfig {
+    crate::post_effects::LensFlareConfig {
+        strength: resolved.lens_flare_strength,
+        luminance_threshold: 0.45,
+        ghost_count: 5,
+        ghost_spread: 0.55,
+        streak_strength: 0.30,
+        streak_length: 0.35,
+        streak_tint: [1.0, 0.95, 0.82],
+        ghost_tint: [0.92, 0.96, 1.05],
     }
 }
 
@@ -842,7 +889,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
@@ -889,8 +936,33 @@ fn pass_1_build_histogram_spectral_with_backend(
         accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
         histogram.reserve(ctx.pixel_count());
-        for &(r, g, b, a) in &trajectory_proxy {
-            histogram.push(r * a, g * a, b * a);
+        let nebula_strength = resolved_config.nebula_strength;
+        if nebula_strength > 0.0 {
+            // Composite mean nebula luminance behind each pixel so the
+            // histogram-driven tonemapper sees the actual display-referred
+            // distribution. Using the palette mean is a faithful proxy of
+            // what a full low-freq noise field would contribute.
+            let preset = resolved_config.nebula_palette.preset();
+            let mut nr = 0.0;
+            let mut ng = 0.0;
+            let mut nb = 0.0;
+            for stop in &preset.colors {
+                nr += stop[0];
+                ng += stop[1];
+                nb += stop[2];
+            }
+            let n = preset.colors.len() as f64;
+            let mean_r = nr / n * nebula_strength;
+            let mean_g = ng / n * nebula_strength;
+            let mean_b = nb / n * nebula_strength;
+            for &(r, g, b, a) in &trajectory_proxy {
+                let fill = 1.0 - a.clamp(0.0, 1.0);
+                histogram.push(r * a + mean_r * fill, g * a + mean_g * fill, b * a + mean_b * fill);
+            }
+        } else {
+            for &(r, g, b, a) in &trajectory_proxy {
+                histogram.push(r * a, g * a, b * a);
+            }
         }
 
         step_start = checkpoint_step + 1;
@@ -985,7 +1057,7 @@ fn pass_2_write_frames_spectral_with_backend(
         settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
     accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
         *s = [0.0; NUM_BINS];
@@ -1147,7 +1219,7 @@ fn render_final_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1258,7 +1330,7 @@ fn render_single_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1418,11 +1490,44 @@ mod tests {
             nebula_strength: 0.0,
             nebula_octaves: 4,
             nebula_base_frequency: 0.0015,
+            ..Default::default()
         }
     }
 
     fn image_energy(image: &ImageBuffer<Rgb<u16>, Vec<u16>>) -> u64 {
         image.as_raw().iter().map(|&channel| u64::from(channel)).sum()
+    }
+
+    #[test]
+    fn test_build_nebula_config_uses_resolved_palette() {
+        use crate::render::nebula_presets::NebulaPalette;
+
+        let mut resolved = baseline_resolved_config(192, 108);
+        resolved.nebula_strength = 0.18;
+        resolved.nebula_octaves = 4;
+        resolved.nebula_base_frequency = 0.0016;
+        resolved.nebula_palette = NebulaPalette::SolarFire;
+
+        let cfg = build_nebula_config(&resolved, 0x1234_5678);
+        let preset = NebulaPalette::SolarFire.preset();
+
+        assert!((cfg.strength - 0.18).abs() < 1e-12);
+        assert_eq!(cfg.octaves, 4);
+        assert!((cfg.base_frequency - 0.0016).abs() < 1e-12);
+        assert!((cfg.lacunarity - preset.lacunarity).abs() < 1e-12);
+        assert!((cfg.persistence - preset.persistence).abs() < 1e-12);
+        assert!((cfg.time_scale - preset.time_scale).abs() < 1e-12);
+        assert!((cfg.edge_fade - preset.edge_fade).abs() < 1e-12);
+        assert_eq!(cfg.colors, preset.colors);
+        assert_eq!(cfg.noise_seed, 0x1234_5678);
+    }
+
+    #[test]
+    fn test_build_nebula_config_zero_strength_disables_effect() {
+        let mut resolved = baseline_resolved_config(192, 108);
+        resolved.nebula_strength = 0.0;
+        let cfg = build_nebula_config(&resolved, 0);
+        assert!(cfg.strength <= f64::EPSILON);
     }
 
     type SceneData = (Vec<Vec<Vector3<f64>>>, Vec<Vec<OklabColor>>, Vec<f64>);

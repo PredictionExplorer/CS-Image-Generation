@@ -11,8 +11,8 @@ use tracing::info;
 const DRIFT_SCALE_MIN: f64 = 0.8;
 const DRIFT_SCALE_RANGE: f64 = 1.2;
 const DRIFT_ARC_FRACTION_RANGE: f64 = 0.8;
-const DRIFT_ECCENTRICITY_MIN: f64 = 0.4;
-const DRIFT_ECCENTRICITY_RANGE: f64 = 0.1;
+const DRIFT_ECCENTRICITY_MIN: f64 = 0.0;
+const DRIFT_ECCENTRICITY_RANGE: f64 = 0.85;
 
 /// Resolved drift configuration ready for use
 #[derive(Debug, Clone)]
@@ -112,7 +112,7 @@ mod tests {
             config.scale
         );
         assert!(config.arc_fraction >= 0.0 && config.arc_fraction <= 0.8);
-        assert!(config.orbit_eccentricity >= 0.4 && config.orbit_eccentricity <= 0.5);
+        assert!(config.orbit_eccentricity >= 0.0 && config.orbit_eccentricity <= 0.85);
         assert!(config.was_randomized);
     }
 

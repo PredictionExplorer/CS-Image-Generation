@@ -77,6 +77,34 @@ pub struct LoggedRenderConfig {
     pub perceptual_blur_strength: f64,
     /// Gamut mapping mode for blur (e.g. hue preservation).
     pub perceptual_gamut_mode: String,
+
+    /// Top-level art style name driving the aesthetic bundle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub art_style: Option<String>,
+    /// Resolved nebula background palette name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nebula_palette: Option<String>,
+    /// Resolved cinematic color-grade preset name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade_preset: Option<String>,
+    /// Resolved harmonic hue-distribution mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hue_palette_mode: Option<String>,
+    /// Resolved bloom mode choice (e.g. `dog`, `gaussian`, `none`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bloom_mode_choice: Option<String>,
+    /// Resolved drift character (e.g. `linear`, `spiral`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drift_character: Option<String>,
+    /// Framing zoom factor applied to the bounding box (1.0 = tight).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framing_zoom: Option<f64>,
+    /// Whether the procedural starfield background was enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starfield_enabled: Option<bool>,
+    /// Whether the anamorphic lens flare post-effect was enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lens_flare_enabled: Option<bool>,
 }
 
 /// Camera drift parameters used for the logged generation.
@@ -171,6 +199,15 @@ impl Default for LoggedRenderConfig {
             perceptual_blur_radius: None,
             perceptual_blur_strength: 0.65,
             perceptual_gamut_mode: "preserve-hue".to_string(),
+            art_style: None,
+            nebula_palette: None,
+            grade_preset: None,
+            hue_palette_mode: None,
+            bloom_mode_choice: None,
+            drift_character: None,
+            framing_zoom: None,
+            starfield_enabled: None,
+            lens_flare_enabled: None,
         }
     }
 }

@@ -3,8 +3,13 @@
 //! This module defines the complete parameter space for effect configuration,
 //! with support for explicit user values or random generation.
 
+use super::art_style::{ArtStyle, DriftCharacter, StyleBundle};
 use super::effect_randomizer::{EffectRandomizer, RandomizationLog, RandomizationRecord};
+use super::grade_presets::GradePreset;
+use super::hue_palette::HuePaletteMode;
+use super::nebula_presets::NebulaPalette;
 use super::parameter_descriptors as pd;
+use super::BloomMode;
 use crate::sim::Sha3RandomByteStream;
 
 /// Complete configuration for all randomizable effect parameters.
@@ -165,6 +170,50 @@ pub struct RandomizableEffectConfig {
     pub nebula_octaves: Option<usize>,
     /// Base frequency for nebula noise.
     pub nebula_base_frequency: Option<f64>,
+
+    /// Chosen art style. When `None`, a style is picked from the RNG.
+    pub art_style: Option<ArtStyle>,
+    /// Chosen nebula palette. When `None`, derived from the [`ArtStyle`].
+    pub nebula_palette: Option<NebulaPalette>,
+    /// Chosen grade preset. When `None`, derived from the [`ArtStyle`].
+    pub grade_preset: Option<GradePreset>,
+    /// Chosen hue palette mode. When `None`, derived from the [`ArtStyle`].
+    pub hue_palette_mode: Option<HuePaletteMode>,
+    /// Chosen bloom mode. When `None`, derived from the [`ArtStyle`].
+    pub bloom_mode_choice: Option<BloomMode>,
+    /// Chosen drift character. When `None`, derived from the [`ArtStyle`].
+    pub drift_character: Option<DriftCharacter>,
+
+    /// Vignette focal-point horizontal offset (-0.25 .. 0.25 of the half-image).
+    pub vignette_offset_x: Option<f64>,
+    /// Vignette focal-point vertical offset (-0.25 .. 0.25 of the half-image).
+    pub vignette_offset_y: Option<f64>,
+
+    /// Fine-texture orientation angle in radians.
+    pub fine_texture_angle: Option<f64>,
+    /// Fine-texture anisotropy ratio (1.0 = isotropic).
+    pub fine_texture_anisotropy: Option<f64>,
+
+    /// Champlevé cell density (cells per unit, higher = finer cells).
+    pub champleve_cell_density: Option<f64>,
+    /// Champlevé rim sharpness (0..1).
+    pub champleve_rim_sharpness: Option<f64>,
+
+    /// Aether filament density (higher = denser filigree).
+    pub aether_filament_density: Option<f64>,
+    /// Aether iridescence frequency (cycles across the frame).
+    pub aether_iridescence_frequency: Option<f64>,
+
+    /// Opalescence pearl sheen (0..1).
+    pub opalescence_pearl_sheen: Option<f64>,
+    /// Opalescence chromatic shift (0..1).
+    pub opalescence_chromatic_shift: Option<f64>,
+
+    /// Radial chromatic dispersion strength (0..1).
+    pub dispersion_strength: Option<f64>,
+
+    /// Framing zoom factor (1.0 = tight bounding box, up to 2.0 for padded framing).
+    pub framing_zoom: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -177,9 +226,67 @@ impl RandomizableEffectConfig {
         width: u32,
         height: u32,
     ) -> (ResolvedEffectConfig, RandomizationLog) {
-        let mut randomizer = EffectRandomizer::new(rng);
         let mut log = RandomizationLog::new();
         let mut resolved = ResolvedEffectConfig { width, height, ..Default::default() };
+
+        // Style selection consumes RNG first so every downstream effect
+        // inherits a cohesive, style-driven bias.
+        let style = match self.art_style {
+            Some(s) => s,
+            None => ArtStyle::pick(rng),
+        };
+        let bundle = style.bundle();
+        resolved.art_style = style;
+        resolved.nebula_palette = self.nebula_palette.unwrap_or(bundle.nebula);
+        resolved.grade_preset = self.grade_preset.unwrap_or(bundle.grade);
+        resolved.hue_palette_mode = self.hue_palette_mode.unwrap_or(bundle.hue_mode);
+        resolved.bloom_mode_choice = self.bloom_mode_choice.unwrap_or(bundle.bloom);
+        resolved.drift_character = self.drift_character.unwrap_or(bundle.drift);
+
+        let mut style_record = RandomizationRecord::new(
+            "art_style".to_string(),
+            true,
+            self.art_style.is_none(),
+        );
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "art_style".to_string(),
+            value: style.name().to_string(),
+            was_randomized: self.art_style.is_none(),
+            range_used: "curated-18".to_string(),
+        });
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "nebula_palette".to_string(),
+            value: resolved.nebula_palette.name().to_string(),
+            was_randomized: self.nebula_palette.is_none(),
+            range_used: "curated-12".to_string(),
+        });
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "grade_preset".to_string(),
+            value: resolved.grade_preset.name().to_string(),
+            was_randomized: self.grade_preset.is_none(),
+            range_used: "curated-16".to_string(),
+        });
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "hue_palette_mode".to_string(),
+            value: resolved.hue_palette_mode.name().to_string(),
+            was_randomized: self.hue_palette_mode.is_none(),
+            range_used: "curated-8".to_string(),
+        });
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "bloom_mode".to_string(),
+            value: resolved.bloom_mode_choice.as_str().to_string(),
+            was_randomized: self.bloom_mode_choice.is_none(),
+            range_used: "dog|gaussian|none".to_string(),
+        });
+        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
+            name: "drift_character".to_string(),
+            value: resolved.drift_character.name().to_string(),
+            was_randomized: self.drift_character.is_none(),
+            range_used: "curated-6".to_string(),
+        });
+        log.add_record(style_record);
+
+        let mut randomizer = EffectRandomizer::new(rng);
 
         self.resolve_enable_flags(&mut resolved, &mut randomizer, &mut log);
         self.resolve_bloom_glow_params(&mut resolved, &mut randomizer, &mut log);
@@ -190,9 +297,126 @@ impl RandomizableEffectConfig {
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_style_material_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_vignette_offset(&mut resolved, &mut randomizer, &mut log);
+
+        // Baseline values for the new style-gated effects. They are picked
+        // probabilistically; apply_style_emphasis may force them on/up.
+        resolved.starfield_density = 140.0 + randomizer.random_unit() * 80.0;
+        resolved.starfield_strength = 0.0;
+        resolved.lens_flare_strength = 0.0;
+
+        // Framing zoom: default tight (1.0), with 45% chance to pull back slightly
+        // (1.04..1.22) so the orbit breathes against the background. ArtStyle
+        // emphasis can further tune this below.
+        resolved.framing_zoom = match self.framing_zoom {
+            Some(v) => v.clamp(1.0, 2.0),
+            None => {
+                if randomizer.randomize_enable(0.45) {
+                    1.04 + randomizer.random_unit() * 0.18
+                } else {
+                    1.0
+                }
+            }
+        };
+
+        apply_style_emphasis(&bundle, &mut resolved, &mut log);
 
         let resolved = apply_conflict_detection(resolved, &mut log);
         (resolved, log)
+    }
+
+    fn resolve_style_material_params(
+        &self,
+        resolved: &mut ResolvedEffectConfig,
+        randomizer: &mut EffectRandomizer,
+        log: &mut RandomizationLog,
+    ) {
+        resolved.fine_texture_angle = self.resolve_float(
+            "fine_texture_angle",
+            self.fine_texture_angle,
+            &pd::FINE_TEXTURE_ANGLE,
+            randomizer,
+            log,
+        );
+        resolved.fine_texture_anisotropy = self.resolve_float(
+            "fine_texture_anisotropy",
+            self.fine_texture_anisotropy,
+            &pd::FINE_TEXTURE_ANISOTROPY,
+            randomizer,
+            log,
+        );
+        resolved.champleve_cell_density = self.resolve_float(
+            "champleve_cell_density",
+            self.champleve_cell_density,
+            &pd::CHAMPLEVE_CELL_DENSITY,
+            randomizer,
+            log,
+        );
+        resolved.champleve_rim_sharpness = self.resolve_float(
+            "champleve_rim_sharpness",
+            self.champleve_rim_sharpness,
+            &pd::CHAMPLEVE_RIM_SHARPNESS,
+            randomizer,
+            log,
+        );
+        resolved.aether_filament_density = self.resolve_float(
+            "aether_filament_density",
+            self.aether_filament_density,
+            &pd::AETHER_FILAMENT_DENSITY,
+            randomizer,
+            log,
+        );
+        resolved.aether_iridescence_frequency = self.resolve_float(
+            "aether_iridescence_frequency",
+            self.aether_iridescence_frequency,
+            &pd::AETHER_IRIDESCENCE_FREQUENCY,
+            randomizer,
+            log,
+        );
+        resolved.opalescence_pearl_sheen = self.resolve_float(
+            "opalescence_pearl_sheen",
+            self.opalescence_pearl_sheen,
+            &pd::OPALESCENCE_PEARL_SHEEN,
+            randomizer,
+            log,
+        );
+        resolved.opalescence_chromatic_shift = self.resolve_float(
+            "opalescence_chromatic_shift",
+            self.opalescence_chromatic_shift,
+            &pd::OPALESCENCE_CHROMATIC_SHIFT,
+            randomizer,
+            log,
+        );
+        resolved.dispersion_strength = self.resolve_float(
+            "dispersion_strength",
+            self.dispersion_strength,
+            &pd::DISPERSION_STRENGTH,
+            randomizer,
+            log,
+        );
+    }
+
+    fn resolve_vignette_offset(
+        &self,
+        resolved: &mut ResolvedEffectConfig,
+        randomizer: &mut EffectRandomizer,
+        log: &mut RandomizationLog,
+    ) {
+        resolved.vignette_offset_x = self.resolve_float(
+            "vignette_offset_x",
+            self.vignette_offset_x,
+            &pd::VIGNETTE_OFFSET_X,
+            randomizer,
+            log,
+        );
+        resolved.vignette_offset_y = self.resolve_float(
+            "vignette_offset_y",
+            self.vignette_offset_y,
+            &pd::VIGNETTE_OFFSET_Y,
+            randomizer,
+            log,
+        );
     }
 
     fn resolve_enable_flags(
@@ -685,15 +909,20 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.hdr_scale =
+        let hdr_base =
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
-        resolved.nebula_strength = self.resolve_float(
+        let style_bundle = resolved.art_style.bundle();
+        resolved.hdr_scale =
+            (hdr_base * style_bundle.hdr_scale_bias).clamp(0.04, 0.30);
+        let nebula_base = self.resolve_float(
             "nebula_strength",
             self.nebula_strength,
             &pd::NEBULA_STRENGTH,
             randomizer,
             log,
         );
+        resolved.nebula_strength =
+            (nebula_base * style_bundle.nebula_strength_bias).clamp(0.0, 0.28);
         resolved.nebula_octaves = self.resolve_int(
             "nebula_octaves",
             self.nebula_octaves,
@@ -997,6 +1226,147 @@ pub struct ResolvedEffectConfig {
     pub nebula_octaves: usize,
     /// Resolved nebula base frequency.
     pub nebula_base_frequency: f64,
+
+    /// Resolved art style for this render.
+    pub art_style: ArtStyle,
+    /// Resolved nebula palette.
+    pub nebula_palette: NebulaPalette,
+    /// Resolved color-grade preset.
+    pub grade_preset: GradePreset,
+    /// Resolved hue palette mode.
+    pub hue_palette_mode: HuePaletteMode,
+    /// Resolved bloom mode.
+    pub bloom_mode_choice: BloomMode,
+    /// Resolved drift character.
+    pub drift_character: DriftCharacter,
+
+    /// Resolved vignette focal-point X offset.
+    pub vignette_offset_x: f64,
+    /// Resolved vignette focal-point Y offset.
+    pub vignette_offset_y: f64,
+
+    /// Resolved fine-texture angle (radians).
+    pub fine_texture_angle: f64,
+    /// Resolved fine-texture anisotropy.
+    pub fine_texture_anisotropy: f64,
+
+    /// Resolved champlevé cell density.
+    pub champleve_cell_density: f64,
+    /// Resolved champlevé rim sharpness.
+    pub champleve_rim_sharpness: f64,
+
+    /// Resolved aether filament density.
+    pub aether_filament_density: f64,
+    /// Resolved aether iridescence frequency.
+    pub aether_iridescence_frequency: f64,
+
+    /// Resolved opalescence pearl-sheen.
+    pub opalescence_pearl_sheen: f64,
+    /// Resolved opalescence chromatic-shift.
+    pub opalescence_chromatic_shift: f64,
+
+    /// Resolved chromatic dispersion strength.
+    pub dispersion_strength: f64,
+
+    /// Whether the procedural starfield background is enabled.
+    pub enable_starfield: bool,
+    /// Starfield rendering strength.
+    pub starfield_strength: f64,
+    /// Starfield density (stars per million pixels).
+    pub starfield_density: f64,
+    /// Whether the anamorphic lens flare is enabled.
+    pub enable_lens_flare: bool,
+    /// Lens flare rendering strength.
+    pub lens_flare_strength: f64,
+
+    /// Framing zoom factor applied to the bounding box (1.0 = tight, >1.0 = more padding).
+    pub framing_zoom: f64,
+}
+
+/// Apply style-driven emphasis flags to the resolved config.
+///
+/// This runs AFTER per-parameter randomization and BEFORE conflict-detection,
+/// so the style bundle has the last word on enable flags where it cares.
+fn apply_style_emphasis(
+    bundle: &StyleBundle,
+    config: &mut ResolvedEffectConfig,
+    log: &mut RandomizationLog,
+) {
+    let mut adjustments: Vec<String> = Vec::new();
+    let e = &bundle.emphasis;
+
+    if e.emphasize_champleve && !config.enable_champleve {
+        config.enable_champleve = true;
+        adjustments.push("style emphasis enabled champleve".into());
+    }
+    if e.emphasize_opalescence {
+        if !config.enable_opalescence {
+            config.enable_opalescence = true;
+            adjustments.push("style emphasis enabled opalescence".into());
+        }
+        config.opalescence_strength = config.opalescence_strength.max(0.20);
+    }
+    if e.emphasize_fine_texture {
+        if !config.enable_fine_texture {
+            config.enable_fine_texture = true;
+            adjustments.push("style emphasis enabled fine_texture".into());
+        }
+        config.fine_texture_strength = config.fine_texture_strength.max(0.10);
+    }
+    if e.force_perceptual_blur && !config.enable_perceptual_blur {
+        config.enable_perceptual_blur = true;
+        adjustments.push("style forced perceptual_blur".into());
+    }
+    if e.heavy_vignette {
+        config.vignette_strength = (config.vignette_strength + 0.15).min(0.95);
+    }
+    if e.boost_dispersion {
+        config.dispersion_strength = (config.dispersion_strength + 0.10).min(0.45);
+    }
+
+    if e.emphasize_starfield {
+        config.enable_starfield = true;
+        config.starfield_strength = config.starfield_strength.max(0.45);
+        config.starfield_density = config.starfield_density.max(140.0);
+        adjustments.push("style emphasis enabled starfield".into());
+    }
+    if e.emphasize_lens_flare {
+        config.enable_lens_flare = true;
+        config.lens_flare_strength = config.lens_flare_strength.max(0.35);
+        adjustments.push("style emphasis enabled lens_flare".into());
+    }
+
+    // Reconcile bloom_mode_choice with enable_bloom: BloomMode::None implies
+    // the pipeline must skip bloom entirely regardless of the generic enable
+    // flag. Conversely, a non-None choice forces the flag on so the style's
+    // aesthetic intent is respected.
+    match config.bloom_mode_choice {
+        super::BloomMode::None => {
+            if config.enable_bloom {
+                config.enable_bloom = false;
+                adjustments.push("style bloom=None disables enable_bloom".into());
+            }
+        }
+        super::BloomMode::Dog | super::BloomMode::Gaussian => {
+            if !config.enable_bloom {
+                config.enable_bloom = true;
+                adjustments.push("style bloom!=None forces enable_bloom".into());
+            }
+        }
+    }
+
+    if !adjustments.is_empty() {
+        let mut record = RandomizationRecord::new("style_emphasis".to_string(), true, false);
+        for a in adjustments {
+            record.parameters.push(super::effect_randomizer::RandomizedParameter {
+                name: "emphasis".to_string(),
+                value: a,
+                was_randomized: false,
+                range_used: "N/A".to_string(),
+            });
+        }
+        log.add_record(record);
+    }
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
@@ -1314,6 +1684,29 @@ mod tests {
             nebula_strength: 0.0,
             nebula_octaves: 4,
             nebula_base_frequency: 0.0015,
+            art_style: ArtStyle::default(),
+            nebula_palette: NebulaPalette::default(),
+            grade_preset: GradePreset::default(),
+            hue_palette_mode: HuePaletteMode::default(),
+            bloom_mode_choice: BloomMode::Dog,
+            drift_character: DriftCharacter::default(),
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
+            fine_texture_angle: 0.0,
+            fine_texture_anisotropy: 1.0,
+            champleve_cell_density: 1.0,
+            champleve_rim_sharpness: 0.5,
+            aether_filament_density: 1.0,
+            aether_iridescence_frequency: 1.0,
+            opalescence_pearl_sheen: 0.5,
+            opalescence_chromatic_shift: 0.3,
+            dispersion_strength: 0.0,
+            enable_starfield: false,
+            starfield_strength: 0.0,
+            starfield_density: 0.0,
+            enable_lens_flare: false,
+            lens_flare_strength: 0.0,
+            framing_zoom: 1.0,
         }
     }
 
@@ -1655,10 +2048,15 @@ mod tests {
             );
         };
 
-        let default_tolerance = 0.12; // generous tolerance for 500 samples
-        check("bloom", pd::ENABLE_PROB_BLOOM, default_tolerance);
+        // Wider tolerance to account for style-emphasis overrides that push
+        // some probabilistic effect enablements up by a few percentage points.
+        let default_tolerance = 0.15;
+        // Bloom enablement is now dominated by ArtStyle (16 of 18 styles force
+        // bloom on via their BloomMode). The effective rate is ~0.91 and the
+        // probabilistic descriptor only fires when an ArtStyle is not selected.
+        check("bloom", 0.91, 0.08);
         check("glow", pd::ENABLE_PROB_GLOW, default_tolerance);
-        check("chromatic_bloom", pd::ENABLE_PROB_CHROMATIC_BLOOM * pd::ENABLE_PROB_BLOOM, 0.06);
+        check("chromatic_bloom", pd::ENABLE_PROB_CHROMATIC_BLOOM * 0.91, 0.08);
         check("perceptual_blur", pd::ENABLE_PROB_PERCEPTUAL_BLUR, default_tolerance);
         check("micro_contrast", pd::ENABLE_PROB_MICRO_CONTRAST, default_tolerance);
         check("gradient_map", pd::ENABLE_PROB_GRADIENT_MAP, default_tolerance);

@@ -14,7 +14,7 @@ use crate::generation_log::{
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     VideoEncodingOptions, constants, create_video_from_frames_singlepass,
-    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
     save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
@@ -107,6 +107,25 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
     /// Whether Borda weights were randomized.
     pub weights_randomized: bool,
+
+    /// Top-level art style name (from [`ArtStyle`]).
+    pub art_style: Option<String>,
+    /// Resolved nebula background palette name.
+    pub nebula_palette: Option<String>,
+    /// Resolved cinematic color-grade preset name.
+    pub grade_preset: Option<String>,
+    /// Resolved harmonic hue-distribution mode name.
+    pub hue_palette_mode: Option<String>,
+    /// Resolved bloom mode choice.
+    pub bloom_mode_choice: Option<String>,
+    /// Resolved drift character name.
+    pub drift_character: Option<String>,
+    /// Resolved framing zoom factor.
+    pub framing_zoom: Option<f64>,
+    /// Whether the procedural starfield background was enabled.
+    pub starfield_enabled: Option<bool>,
+    /// Whether the anamorphic lens flare post-effect was enabled.
+    pub lens_flare_enabled: Option<bool>,
 }
 
 /// Initialize per-seed output directory structure:
@@ -222,13 +241,25 @@ pub fn generate_colors(
     alpha_denom: usize,
     enhancements: &Enhancements,
 ) -> (Vec<Vec<render::OklabColor>>, Vec<f64>) {
+    generate_colors_with_mode(rng, num_steps_sim, alpha_denom, enhancements, None)
+}
+
+/// Generate color sequences + alphas with an optional hue palette mode.
+pub fn generate_colors_with_mode(
+    rng: &mut Sha3RandomByteStream,
+    num_steps_sim: usize,
+    alpha_denom: usize,
+    enhancements: &Enhancements,
+    hue_palette_mode: Option<crate::render::hue_palette::HuePaletteMode>,
+) -> (Vec<Vec<render::OklabColor>>, Vec<f64>) {
     info!("STAGE 3/7: Generating color sequences + alpha...");
-    generate_body_color_sequences(
+    crate::render::color::generate_body_color_sequences_with_mode(
         rng,
         num_steps_sim,
         alpha_denom,
         enhancements.chroma_boost,
         enhancements.alpha_variation,
+        hue_palette_mode,
     )
 }
 
@@ -413,6 +444,15 @@ pub fn log_generation(
         perceptual_blur_radius: config.perceptual_blur_radius,
         perceptual_blur_strength: config.perceptual_blur_strength,
         perceptual_gamut_mode: config.perceptual_gamut_mode.clone(),
+        art_style: config.art_style.clone(),
+        nebula_palette: config.nebula_palette.clone(),
+        grade_preset: config.grade_preset.clone(),
+        hue_palette_mode: config.hue_palette_mode.clone(),
+        bloom_mode_choice: config.bloom_mode_choice.clone(),
+        drift_character: config.drift_character.clone(),
+        framing_zoom: config.framing_zoom,
+        starfield_enabled: config.starfield_enabled,
+        lens_flare_enabled: config.lens_flare_enabled,
     };
 
     record.drift_config = if let Some(drift) = drift_config {

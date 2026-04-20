@@ -47,6 +47,12 @@ pub struct ColorGradeParams {
     pub highlight_tint: [f64; 3],
     /// Strength of the complementary palette-wave accent shift.
     pub palette_wave_strength: f64,
+    /// Horizontal vignette focal-point offset as a fraction of the image
+    /// half-width (-0.5..0.5). Default 0.0 = centred.
+    pub vignette_offset_x: f64,
+    /// Vertical vignette focal-point offset as a fraction of the image
+    /// half-height (-0.5..0.5). Default 0.0 = centred.
+    pub vignette_offset_y: f64,
 }
 
 impl Default for ColorGradeParams {
@@ -72,6 +78,8 @@ impl ColorGradeParams {
             shadow_tint: [-0.04, -0.01, 0.08],
             highlight_tint: [0.03, 0.02, 0.0],
             palette_wave_strength: 0.0,
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
         }
     }
 }
@@ -215,9 +223,13 @@ impl PostEffect for CinematicColorGrade {
             return Ok(input.clone());
         }
 
-        let center_x = (width as f64 - 1.0) * 0.5;
-        let center_y = (height as f64 - 1.0) * 0.5;
-        let inv_radius = 1.0 / center_x.max(center_y).max(1.0);
+        let half_w = (width as f64 - 1.0) * 0.5;
+        let half_h = (height as f64 - 1.0) * 0.5;
+        let off_x = self.params.vignette_offset_x.clamp(-0.5, 0.5);
+        let off_y = self.params.vignette_offset_y.clamp(-0.5, 0.5);
+        let center_x = half_w * (1.0 + off_x);
+        let center_y = half_h * (1.0 + off_y);
+        let inv_radius = 1.0 / half_w.max(half_h).max(1.0);
         let softness = self.params.vignette_softness.max(1.0);
 
         let clarity_buffer = if self.params.clarity_strength > 0.0 && self.params.clarity_radius > 0
@@ -262,6 +274,8 @@ mod tests {
             shadow_tint: [0.0, 0.0, 0.2],
             highlight_tint: [0.2, 0.0, 0.0],
             palette_wave_strength: 1.0,
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
         }
     }
 
@@ -297,5 +311,41 @@ mod tests {
             colorful_spread > neutral_spread,
             "palette sway should stay more restrained on low-chroma pixels"
         );
+    }
+
+    #[test]
+    fn test_process_all_grade_presets_yield_finite_output() {
+        use crate::render::grade_presets::GradePreset;
+
+        let width = 16usize;
+        let height = 16usize;
+        let input: PixelBuffer = (0..(width * height))
+            .map(|i| {
+                let t = (i as f64) / ((width * height) as f64);
+                (t, 1.0 - t, (0.5 + t).clamp(0.0, 1.0), 1.0)
+            })
+            .collect();
+
+        for idx in 0..16 {
+            let preset = GradePreset::from_index(idx);
+            let params = preset.params();
+            let mut grade_cfg = test_params();
+            grade_cfg.shadow_tint = params.shadow_tint;
+            grade_cfg.highlight_tint = params.highlight_tint;
+            grade_cfg.palette_wave_strength = params.palette_wave_strength;
+            let grade = CinematicColorGrade::new(grade_cfg);
+            let out = grade
+                .process(&input, width, height)
+                .expect("color grade should not fail on a simple buffer");
+            assert_eq!(out.len(), input.len());
+            for (i, &(r, g, b, a)) in out.iter().enumerate() {
+                assert!(
+                    r.is_finite() && g.is_finite() && b.is_finite() && a.is_finite(),
+                    "non-finite output from preset {} at pixel {i}",
+                    preset.name()
+                );
+                assert!((0.0..=1.0).contains(&a));
+            }
+        }
     }
 }

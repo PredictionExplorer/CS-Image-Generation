@@ -1,11 +1,12 @@
 //! Color space conversions and utilities
 
 use crate::render::constants::{
-    BASE_HUE_DRIFT, BODY_HUE_PHASE, BODY_HUE_SEPARATION, HUE_DRIFT_SCALE, HUE_FULL_CIRCLE,
-    HUE_WAVE_AMPLITUDE, OKLAB_CHROMA_BASE, OKLAB_CHROMA_BASE_BOOSTED, OKLAB_CHROMA_RANGE,
-    OKLAB_CHROMA_RANGE_BOOSTED, OKLAB_CHROMA_WAVE_AMPLITUDE, OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED,
-    OKLAB_LIGHTNESS_BASE, OKLAB_LIGHTNESS_RANGE, OKLAB_LIGHTNESS_WAVE_AMPLITUDE,
+    BASE_HUE_DRIFT, HUE_DRIFT_SCALE, HUE_FULL_CIRCLE, HUE_WAVE_AMPLITUDE, OKLAB_CHROMA_BASE,
+    OKLAB_CHROMA_BASE_BOOSTED, OKLAB_CHROMA_RANGE, OKLAB_CHROMA_RANGE_BOOSTED,
+    OKLAB_CHROMA_WAVE_AMPLITUDE, OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED, OKLAB_LIGHTNESS_BASE,
+    OKLAB_LIGHTNESS_RANGE, OKLAB_LIGHTNESS_WAVE_AMPLITUDE,
 };
+use crate::render::hue_palette::{HuePaletteMode, hues_for_mode};
 use crate::sim::Sha3RandomByteStream;
 use tracing::info;
 
@@ -27,6 +28,7 @@ pub fn generate_color_gradient_oklab(
     base_hue_offset: f64,
     chroma_boost: bool,
     hue_wave_freq: f64,
+    base_hue_override: Option<f64>,
 ) -> Vec<OklabColor> {
     let chroma_base = if chroma_boost { OKLAB_CHROMA_BASE_BOOSTED } else { OKLAB_CHROMA_BASE };
     let chroma_range = if chroma_boost { OKLAB_CHROMA_RANGE_BOOSTED } else { OKLAB_CHROMA_RANGE };
@@ -38,9 +40,15 @@ pub fn generate_color_gradient_oklab(
 
     let mut colors = Vec::with_capacity(length);
 
-    let base_hue = rng.next_f64() * HUE_FULL_CIRCLE
-        + body_index as f64 * BODY_HUE_SEPARATION
-        + BODY_HUE_PHASE[body_index % BODY_HUE_PHASE.len()];
+    let base_hue = if let Some(h) = base_hue_override {
+        h
+    } else {
+        // Legacy behaviour: random anchor plus 120-degree separation.
+        use crate::render::constants::{BODY_HUE_PHASE, BODY_HUE_SEPARATION};
+        rng.next_f64() * HUE_FULL_CIRCLE
+            + body_index as f64 * BODY_HUE_SEPARATION
+            + BODY_HUE_PHASE[body_index % BODY_HUE_PHASE.len()]
+    };
 
     let ln_cache: Vec<f64> =
         (0..length).map(|i| if i > 0 { (i as f64).ln() } else { 0.0 }).collect();
@@ -102,17 +110,61 @@ pub fn generate_body_color_sequences(
     chroma_boost: bool,
     alpha_variation: bool,
 ) -> (Vec<Vec<OklabColor>>, Vec<f64>) {
+    generate_body_color_sequences_with_mode(
+        rng,
+        length,
+        alpha_denom,
+        chroma_boost,
+        alpha_variation,
+        None,
+    )
+}
+
+/// Same as [`generate_body_color_sequences`] but parameterised on an
+/// optional [`HuePaletteMode`]. When `mode` is `Some`, the three body
+/// hues are chosen according to the harmonic relationship encoded by the
+/// mode; otherwise the legacy 120° triad is used.
+pub fn generate_body_color_sequences_with_mode(
+    rng: &mut Sha3RandomByteStream,
+    length: usize,
+    alpha_denom: usize,
+    chroma_boost: bool,
+    alpha_variation: bool,
+    mode: Option<HuePaletteMode>,
+) -> (Vec<Vec<OklabColor>>, Vec<f64>) {
     let base_hue_offset = BASE_HUE_DRIFT;
 
-    // #14: randomize hue wave frequency per seed for unique color rhythm
-    let hue_wave_freq = 1.8 + rng.next_f64() * 2.2; // [1.8, 4.0]
+    let hue_wave_freq = 1.8 + rng.next_f64() * 2.2;
 
-    let b1 =
-        generate_color_gradient_oklab(rng, length, 0, base_hue_offset, chroma_boost, hue_wave_freq);
-    let b2 =
-        generate_color_gradient_oklab(rng, length, 1, base_hue_offset, chroma_boost, hue_wave_freq);
-    let b3 =
-        generate_color_gradient_oklab(rng, length, 2, base_hue_offset, chroma_boost, hue_wave_freq);
+    let base_hues: Option<[f64; 3]> = mode.map(|m| hues_for_mode(m, rng));
+
+    let b1 = generate_color_gradient_oklab(
+        rng,
+        length,
+        0,
+        base_hue_offset,
+        chroma_boost,
+        hue_wave_freq,
+        base_hues.map(|h| h[0]),
+    );
+    let b2 = generate_color_gradient_oklab(
+        rng,
+        length,
+        1,
+        base_hue_offset,
+        chroma_boost,
+        hue_wave_freq,
+        base_hues.map(|h| h[1]),
+    );
+    let b3 = generate_color_gradient_oklab(
+        rng,
+        length,
+        2,
+        base_hue_offset,
+        chroma_boost,
+        hue_wave_freq,
+        base_hues.map(|h| h[2]),
+    );
 
     let body_alphas = if alpha_variation {
         // Shuffle [13M, 15M, 17M] using the RNG for per-body depth hierarchy
@@ -145,7 +197,8 @@ mod tests {
     fn test_color_gradient_generation() {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 1.0, 1.0, 1.0, 1.0);
         let length = 100;
-        let colors = generate_color_gradient_oklab(&mut rng, length, 0, BASE_HUE_DRIFT, false, 2.6);
+        let colors =
+            generate_color_gradient_oklab(&mut rng, length, 0, BASE_HUE_DRIFT, false, 2.6, None);
 
         assert_eq!(colors.len(), length);
         for (l, a, b) in &colors {
@@ -160,8 +213,10 @@ mod tests {
         let mut rng1 = Sha3RandomByteStream::new(&[1, 2, 3, 4], 1.0, 1.0, 1.0, 1.0);
         let mut rng2 = Sha3RandomByteStream::new(&[1, 2, 3, 4], 1.0, 1.0, 1.0, 1.0);
 
-        let normal = generate_color_gradient_oklab(&mut rng1, 100, 0, BASE_HUE_DRIFT, false, 2.6);
-        let boosted = generate_color_gradient_oklab(&mut rng2, 100, 0, BASE_HUE_DRIFT, true, 2.6);
+        let normal =
+            generate_color_gradient_oklab(&mut rng1, 100, 0, BASE_HUE_DRIFT, false, 2.6, None);
+        let boosted =
+            generate_color_gradient_oklab(&mut rng2, 100, 0, BASE_HUE_DRIFT, true, 2.6, None);
 
         let avg_chroma = |cols: &[(f64, f64, f64)]| {
             cols.iter().map(|(_, a, b)| (a * a + b * b).sqrt()).sum::<f64>() / cols.len() as f64

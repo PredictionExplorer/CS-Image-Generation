@@ -42,7 +42,7 @@ unused_self                  = "allow"
 [dependencies]
 bytemuck = "1.25.0"
 chrono   = "0.4.44"
-clap     = { version = "4.6.0", features = ["derive"] }
+clap     = { version = "4.6.1", features = ["derive"] }
 hex      = "0.4.3"
 image    = { version = "0.25.10", default-features = false, features = ["png"] }
 nalgebra = { version = "0.34.2", default-features = false, features = ["std"] }
@@ -68,6 +68,10 @@ harness = false
 
 [[bench]]
 name    = "post_effects"
+harness = false
+
+[[bench]]
+name    = "style_meta"
 harness = false
 
 [features]

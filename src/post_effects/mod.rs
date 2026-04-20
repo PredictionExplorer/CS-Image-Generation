@@ -122,10 +122,12 @@ pub mod fine_texture;
 pub mod gaussian_bloom;
 pub mod glow_enhancement;
 pub mod gradient_map;
+pub mod lens_flare;
 pub mod micro_contrast;
 pub mod nebula_clouds;
 pub mod opalescence;
 pub mod perceptual_blur;
+pub mod starfield;
 pub mod temporal_smoothing;
 pub(super) mod utils;
 
@@ -140,10 +142,12 @@ pub use fine_texture::{FineTexture, FineTextureConfig};
 pub use gaussian_bloom::GaussianBloom;
 pub use glow_enhancement::{GlowEnhancement, GlowEnhancementConfig};
 pub use gradient_map::{GradientMap, GradientMapConfig, LuxuryPalette};
+pub use lens_flare::{LensFlare, LensFlareConfig};
 pub use micro_contrast::{MicroContrast, MicroContrastConfig};
 pub use nebula_clouds::{NebulaCloudConfig, NebulaClouds};
 pub use opalescence::{Opalescence, OpalescenceConfig};
 pub use perceptual_blur::{PerceptualBlur, PerceptualBlurConfig};
+pub use starfield::{Starfield, StarfieldConfig};
 pub use temporal_smoothing::{TemporalSmoothing, TemporalSmoothingConfig};
 
 #[cfg(test)]

@@ -428,4 +428,33 @@ mod tests {
         assert!((r - g).abs() < 0.25);
         assert!((g - b).abs() < 0.25);
     }
+
+    #[test]
+    fn test_all_palettes_process_without_error() {
+        let width = 16usize;
+        let height = 16usize;
+        let input: PixelBuffer = (0..(width * height))
+            .map(|i| {
+                let t = (i as f64) / ((width * height) as f64);
+                (t, 1.0 - t, (0.5 - t * 0.25).clamp(0.0, 1.0), 0.9)
+            })
+            .collect();
+
+        for idx in 0..15 {
+            let palette = LuxuryPalette::from_index(idx);
+            let gradient = GradientMap::new(GradientMapConfig {
+                palette,
+                strength: 0.8,
+                hue_preservation: 0.3,
+            });
+            let out = gradient
+                .process(&input, width, height)
+                .expect("gradient map process should succeed for every palette");
+            assert_eq!(out.len(), input.len());
+            for &(r, g, b, a) in &out {
+                assert!(r.is_finite() && g.is_finite() && b.is_finite() && a.is_finite());
+                assert!((0.0..=1.0).contains(&a));
+            }
+        }
+    }
 }

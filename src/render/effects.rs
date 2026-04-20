@@ -11,9 +11,10 @@ use crate::post_effects::{
     AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
     ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
     EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
-    GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
-    Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    GlowEnhancementConfig, GradientMap, GradientMapConfig, LensFlare, LensFlareConfig,
+    MicroContrast, MicroContrastConfig, Opalescence, OpalescenceConfig, PerceptualBlur,
+    PerceptualBlurConfig, PostEffect, PostEffectChain, Starfield, StarfieldConfig,
+    aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba};
 use rayon::prelude::*;
@@ -96,6 +97,15 @@ pub struct EffectConfig {
     pub fine_texture_enabled: bool,
     /// Fine texture configuration
     pub fine_texture_config: FineTextureConfig,
+
+    /// Whether the starfield background effect is enabled.
+    pub starfield_enabled: bool,
+    /// Starfield effect configuration.
+    pub starfield_config: StarfieldConfig,
+    /// Whether the anamorphic lens-flare effect is enabled.
+    pub lens_flare_enabled: bool,
+    /// Lens flare configuration.
+    pub lens_flare_config: LensFlareConfig,
 }
 
 /// Per-frame parameters that may vary
@@ -238,6 +248,20 @@ impl FinishEffectPipeline {
 
         if config.fine_texture_enabled {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
+        }
+
+        // Lens flare reads luminous areas created by the trajectory pipeline
+        // and the nebula background, so it runs after composition but before
+        // the starfield so flare ghosts can sparkle on top of each other.
+        if config.lens_flare_enabled {
+            chain.add(Box::new(LensFlare::new(config.lens_flare_config.clone())));
+        }
+
+        // Starfield is the last step before tonemapping-adjacent passes so
+        // it sits visibly above the nebula background without being blurred
+        // by bloom or washed by grading.
+        if config.starfield_enabled {
+            chain.add(Box::new(Starfield::new(config.starfield_config.clone())));
         }
 
         chain
@@ -639,6 +663,10 @@ mod tests {
             atmospheric_depth_config: AtmosphericDepthConfig::default(),
             fine_texture_enabled: false,
             fine_texture_config: FineTextureConfig::default(),
+            starfield_enabled: false,
+            starfield_config: StarfieldConfig::default(),
+            lens_flare_enabled: false,
+            lens_flare_config: LensFlareConfig::default(),
         }
     }
 

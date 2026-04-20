@@ -1,0 +1,9 @@
+{
+    "seed": "0x46205528",
+    "width": 512,
+    "height": 288,
+    "num_steps": 100000,
+    "drift_mode": "brownian",
+    "timestamp": "2026-04-20T19:11:17Z",
+    "sha256": "42d1bfe3cf8cebb9840b58d876ed29cb819e7241f3a8a68f0eec42158495648f"
+}

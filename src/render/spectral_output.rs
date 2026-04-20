@@ -284,6 +284,8 @@ pub fn generate_spectral_sweep_video(
         shadow_tint: [0.0; 3],
         highlight_tint: [0.0; 3],
         palette_wave_strength: 0.0,
+        vignette_offset_x: 0.0,
+        vignette_offset_y: 0.0,
     });
 
     info!("Encoding spectral sweep video...");
