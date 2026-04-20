@@ -1180,6 +1180,101 @@ fn normalize_strength(value: f64, desc: &pd::FloatParamDescriptor) -> f64 {
     ((value - desc.min) / span).clamp(0.0, 1.0)
 }
 
+/// Per-effect count of "high-compounding" binary additives — the
+/// effects whose failure mode on the remote 50-seed sweep was
+/// *spatial compounding* on dense inked regions (overlapping arms,
+/// rings, or enamel lifts that add per-pixel faster than
+/// [`additive_weighted_energy`] predicts). Used to density-tighten
+/// [`ADDITIVE_ENERGY_BUDGET`] at resolve time as a cheap proxy for
+/// viewport occupancy (which is only known post-framing and so can't
+/// be read inside `resolve()` without an architectural refactor).
+///
+/// Membership was derived from the `0x3d8c8c21b240` /
+/// `0x4d5af082584d` / `0x8df990f92766` image-inspection pass which
+/// identified `diffraction_spikes = True` as a 100% predictor of
+/// blowout; `airy_disc`, `champleve`, and `anamorphic_flare` are
+/// close analogues with the same overlap-compound signature.
+#[must_use]
+pub fn high_compounding_additive_count(config: &ResolvedEffectConfig) -> u32 {
+    let mut n = 0u32;
+    if config.enable_diffraction_spikes {
+        n += 1;
+    }
+    if config.enable_airy_disc {
+        n += 1;
+    }
+    if config.enable_champleve {
+        n += 1;
+    }
+    if config.enable_anamorphic_flare {
+        n += 1;
+    }
+    n
+}
+
+/// Density-tightened Guard 7 budget. Returns [`base`] when
+/// [`high_compound_count`] is 0 or 1 (ordinary stacks should keep
+/// the full budget for variety), and drops linearly toward a floor
+/// as more high-compounding additives are stacked:
+///
+/// * 0-1 high-compounding: full budget (no tightening)
+/// * 2:   0.85 × base
+/// * 3:   0.70 × base
+/// * 4+:  0.55 × base
+///
+/// The tightening factor is capped so a full-stack of high-
+/// compounders doesn't drop below ~0.55 × base — Guard 7's own
+/// rescale + the binary cascade still need enough headroom to
+/// disable the highest-risk binaries before we crush strengths on
+/// everything else.
+#[must_use]
+pub fn density_tightened_budget(base: f64, high_compound_count: u32) -> f64 {
+    match high_compound_count {
+        0 | 1 => base,
+        2 => base * 0.85,
+        3 => base * 0.70,
+        _ => base * 0.55,
+    }
+}
+
+/// The "flat" (un-rescalable) portion of [`additive_weighted_energy`]
+/// — every enabled effect that has no strength knob, so Guard 7
+/// cannot reduce its contribution via the normalized rescale. These
+/// costs set a floor on post-rescale energy; if the floor exceeds
+/// the budget, the binary cascade must disable effects instead.
+#[must_use]
+pub fn guard7_flat_energy(config: &ResolvedEffectConfig) -> f64 {
+    let mut flat = 0.0;
+    if config.enable_god_rays {
+        flat += W_GOD_RAYS;
+    }
+    if config.enable_bloom_pyramid {
+        flat += W_BLOOM_PYRAMID_FLAT;
+    }
+    if config.enable_anamorphic_flare {
+        flat += W_ANAMORPHIC_FLARE;
+    }
+    if config.enable_diffraction_spikes {
+        flat += W_DIFFRACTION_SPIKES;
+    }
+    if config.enable_star_field {
+        flat += W_STAR_FIELD;
+    }
+    if config.enable_airy_disc {
+        flat += W_AIRY_DISC;
+    }
+    if config.enable_rim_light {
+        flat += W_RIM_LIGHT;
+    }
+    if config.enable_fine_texture {
+        flat += W_FINE_TEXTURE;
+    }
+    if config.enable_champleve {
+        flat += W_CHAMPLEVE;
+    }
+    flat
+}
+
 /// Compute the weighted additive energy of every enabled
 /// HDR-brightening effect in `config`. Returns a scalar that can be
 /// compared directly to [`ADDITIVE_ENERGY_BUDGET`]. Used both by
@@ -1671,10 +1766,48 @@ fn apply_conflict_detection(
     // mood-driven randomizer the typical energy is ~1.5–2.0 and no
     // scaling is applied; seeds near the failure boundary land at
     // ~3.0+ and are pulled back to exactly BUDGET.
+    //
+    // **Density-aware tightening.** Seeds `0x3d8c8c21b240`,
+    // `0x4d5af082584d`, and `0x8df990f92766` revealed that a dense
+    // inked region + spike-style additives (diffraction_spikes, airy
+    // disc, champlevé) compound spatially: every source paints arms
+    // into its neighbours, and the additive-energy proxy underestimates
+    // the true per-pixel brightness. We don't have a cheap occupancy
+    // signal at resolve time, but we *do* know which effects are the
+    // riskiest co-occurrences (the "high-compounding" stack). If
+    // enough of them are enabled together we tighten the budget so
+    // Guard 7 engages earlier — before the combined energy has a
+    // chance to pile up on a dense region. This is a proactive
+    // complement to the per-kernel adaptive strength in
+    // `diffraction_spikes.rs`.
+    let high_compound_count = high_compounding_additive_count(&config);
+    let budget = density_tightened_budget(ADDITIVE_ENERGY_BUDGET, high_compound_count);
+    if (budget - ADDITIVE_ENERGY_BUDGET).abs() > f64::EPSILON {
+        adjustments.push(format!(
+            "Quality guard 7 density-aware: tightened budget to {budget:.3} (from {ADDITIVE_ENERGY_BUDGET:.3}) due to high-compounding additive stack ({high_compound_count} of [diffraction_spikes, airy_disc, champleve, anamorphic_flare])"
+        ));
+    }
     let total_energy = additive_weighted_energy(&config);
 
-    if total_energy > ADDITIVE_ENERGY_BUDGET {
-        let scale = ADDITIVE_ENERGY_BUDGET / total_energy;
+    if total_energy > budget {
+        // Flat-cost baseline: energy that Guard 7 cannot touch via
+        // the strength rescale because the effect has no knob (god_rays,
+        // bloom_pyramid_flat, binary additives). The naive
+        // `scale = budget / total_energy` only brings **total** energy
+        // down proportionally, which leaves the rescalable portion far
+        // above its share of the budget whenever flat costs dominate.
+        // We instead compute a scale that targets the *rescalable*
+        // slice of the budget, so post-rescale energy exactly meets
+        // `budget` (modulo clamp) — unless flat costs alone exceed it,
+        // in which case the binary cascade below picks up the slack.
+        let flat_energy = guard7_flat_energy(&config);
+        let rescalable_energy = (total_energy - flat_energy).max(0.0);
+        let rescalable_budget = (budget - flat_energy).max(0.0);
+        let scale = if rescalable_energy > 1e-9 {
+            (rescalable_budget / rescalable_energy).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
 
         /// Rescale a strength by scaling its *normalized* position
         /// inside the descriptor range, then projecting back to
@@ -1733,7 +1866,7 @@ fn apply_conflict_detection(
         adjustments.push(format!(
             "Quality guard 7: Weighted additive energy {:.3} exceeds budget {:.3}; rescaled by {:.3}x (blur: {:.3} -> {:.3}, dog: {:.3} -> {:.3}, glow: {:.3} -> {:.3}, chromatic: {:.3} -> {:.3}, aether: {:.3} -> {:.3}, opal: {:.3} -> {:.3}, micro: {:.3} -> {:.3}, edge: {:.3} -> {:.3})",
             total_energy,
-            ADDITIVE_ENERGY_BUDGET,
+            budget,
             scale,
             original_blur,
             config.blur_strength,
@@ -1767,9 +1900,10 @@ fn apply_conflict_detection(
         // stay on the longest because disabling them meaningfully
         // changes the aesthetic.
         let mut disabled: Vec<&'static str> = Vec::new();
+        let cascade_budget = budget;
         macro_rules! cascade_step {
             ($field:ident, $label:expr) => {
-                if additive_weighted_energy(&config) > ADDITIVE_ENERGY_BUDGET && config.$field {
+                if additive_weighted_energy(&config) > cascade_budget && config.$field {
                     config.$field = false;
                     disabled.push($label);
                 }
@@ -1783,7 +1917,7 @@ fn apply_conflict_detection(
         if !disabled.is_empty() {
             let residual_energy = additive_weighted_energy(&config);
             adjustments.push(format!(
-                "Quality guard 7b: Disabled binary additives {disabled:?} after strength rescale; residual energy {residual_energy:.3} vs budget {ADDITIVE_ENERGY_BUDGET:.3}"
+                "Quality guard 7b: Disabled binary additives {disabled:?} after strength rescale; residual energy {residual_energy:.3} vs budget {cascade_budget:.3}"
             ));
         }
     }
@@ -2614,6 +2748,111 @@ mod tests {
         assert!(result.enable_god_rays, "god_rays must survive the binary cascade");
         assert!(result.enable_rim_light, "rim_light must survive the binary cascade");
         assert!(result.enable_champleve, "champleve must survive the binary cascade");
+    }
+
+    #[test]
+    fn density_tightened_budget_shape() {
+        // 0 or 1 high-compounding additives: full budget preserved so
+        // ordinary stacks keep their variety.
+        assert_eq!(density_tightened_budget(3.0, 0), 3.0);
+        assert_eq!(density_tightened_budget(3.0, 1), 3.0);
+        // Tightening kicks in at 2+; monotonically decreasing with
+        // count, floored at 0.55× base.
+        assert!((density_tightened_budget(3.0, 2) - 3.0 * 0.85).abs() < 1e-12);
+        assert!((density_tightened_budget(3.0, 3) - 3.0 * 0.70).abs() < 1e-12);
+        assert!((density_tightened_budget(3.0, 4) - 3.0 * 0.55).abs() < 1e-12);
+        assert!((density_tightened_budget(3.0, 99) - 3.0 * 0.55).abs() < 1e-12);
+        // Monotonicity check: a larger high-compound count must not
+        // produce a *larger* budget.
+        let mut prev = density_tightened_budget(3.0, 0);
+        for n in 1..=10 {
+            let cur = density_tightened_budget(3.0, n);
+            assert!(cur <= prev + 1e-12, "non-monotone at n={n}: {prev} -> {cur}");
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn high_compounding_additive_count_matches_membership() {
+        let mut c = baseline_resolved_config();
+        assert_eq!(high_compounding_additive_count(&c), 0);
+        c.enable_diffraction_spikes = true;
+        assert_eq!(high_compounding_additive_count(&c), 1);
+        c.enable_airy_disc = true;
+        assert_eq!(high_compounding_additive_count(&c), 2);
+        c.enable_champleve = true;
+        assert_eq!(high_compounding_additive_count(&c), 3);
+        c.enable_anamorphic_flare = true;
+        assert_eq!(high_compounding_additive_count(&c), 4);
+        // Non-members must not contribute.
+        c.enable_bloom = true;
+        c.enable_glow = true;
+        c.enable_star_field = true;
+        c.enable_fine_texture = true;
+        c.enable_rim_light = true;
+        c.enable_god_rays = true;
+        assert_eq!(high_compounding_additive_count(&c), 4);
+    }
+
+    #[test]
+    fn guard7_tightens_budget_when_high_compound_stack_engages() {
+        // A binary-additive stack that sits between the tightened
+        // budget (1.65) and the base budget (3.0): 4 high-compounders
+        // + fine_texture. Pre-energy ≈ 0.8 + 0.5 + 0.5 + 0.6 + 0.2 = 2.6.
+        // Under the legacy budget of 3.0, Guard 7 would *not* fire.
+        // Under the density-tightened budget of 1.65, Guard 7 must
+        // fire and the binary cascade must disable at least one of
+        // the high-compound binaries.
+        let config = ResolvedEffectConfig {
+            enable_diffraction_spikes: true,
+            enable_airy_disc: true,
+            enable_champleve: true,
+            enable_anamorphic_flare: true,
+            enable_fine_texture: true,
+            ..baseline_resolved_config()
+        };
+        let pre_energy = additive_weighted_energy(&config);
+        let tightened = density_tightened_budget(ADDITIVE_ENERGY_BUDGET, 4);
+        assert!(
+            pre_energy > tightened,
+            "precondition: energy {pre_energy} must exceed tightened budget {tightened}"
+        );
+        assert!(
+            pre_energy <= ADDITIVE_ENERGY_BUDGET,
+            "precondition: energy {pre_energy} must not exceed legacy budget"
+        );
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        let post_energy = additive_weighted_energy(&result);
+        assert!(
+            post_energy <= tightened + 1e-6,
+            "Guard 7 (density-tightened) did not bring energy under {tightened}: {post_energy}"
+        );
+    }
+
+    #[test]
+    fn guard7_does_not_tighten_when_only_one_high_compounder() {
+        // A single high-compounder (diffraction_spikes) plus a big
+        // bloom stack. high_compound_count = 1 → no tightening, so
+        // Guard 7 fires only if energy > 3.0 (not 2.55).
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_bloom_pyramid: true,
+            enable_diffraction_spikes: true,
+            blur_strength: pd::BLUR_STRENGTH.min + (pd::BLUR_STRENGTH.max - pd::BLUR_STRENGTH.min) * 0.3,
+            dog_strength: pd::DOG_STRENGTH.min + (pd::DOG_STRENGTH.max - pd::DOG_STRENGTH.min) * 0.3,
+            ..baseline_resolved_config()
+        };
+        let _pre_energy = additive_weighted_energy(&config);
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config.clone(), &mut log);
+        // diffraction_spikes must still be enabled (we did not tighten
+        // to the point of disabling it).
+        assert!(
+            result.enable_diffraction_spikes,
+            "single high-compounder must not trigger density tightening"
+        );
     }
 
     // Property test: for any random seed, the resolved+attenuated

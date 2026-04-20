@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 60ea6ca7ebcf077500904a8fd4c009b37a8fc06510fabd80416fbe28c429cae8 # shrinks to bloom = false, bloom_pyramid = true, glow = false, chromatic = false, god_rays = true, aether = false, opalescence = false, anamorphic_flare = false, diffraction_spikes = false, star_field = false, airy_disc = false, rim_light = false, fine_texture = false, champleve = false

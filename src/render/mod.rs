@@ -325,52 +325,141 @@ fn record_stage(label: &str, buffer: &PixelBuffer, space: LuminanceSpace) {
     crate::generation_log::record_stage_luminance(label, stats);
 }
 
+/// Luma-shoulder knee for [`apply_display_headroom`]. Pixels with
+/// display-space luminance below this are passed through unchanged,
+/// so well-exposed midtones never lose contrast.
+const HEADROOM_LUMA_KNEE: f64 = 0.70;
+/// Exponential asymptote for the luma shoulder. Highlights above the
+/// knee compress toward this value — chosen below
+/// [`SAFETY_SHOULDER_KNEE`] so the per-pixel shoulder downstream has
+/// nothing left to do on a well-behaved frame.
+const HEADROOM_LUMA_ASYMPTOTE: f64 = 0.80;
+/// Hue-preserving per-channel cap applied after the luma shoulder.
+/// Catches the edge case where a strongly tinted pixel keeps the
+/// max channel above 1.0 even though rec709 luminance is compressed
+/// (e.g. saturated red: R dominates the value but contributes only
+/// 21.3% to rec709 luminance, so the luma shoulder alone isn't
+/// enough). The cap is a uniform-scale-by-max, so hue is preserved
+/// exactly.
+const HEADROOM_CHANNEL_CEILING: f64 = 0.92;
+/// Target p99 luminance for the residual-gain fallback. Sits just
+/// below [`SAFETY_SHOULDER_KNEE`] (0.90) so the per-pixel shoulder
+/// still has room to smooth any residual outliers without engaging
+/// on a normal frame.
+const HEADROOM_P99_CAP: f64 = 0.85;
+/// Maximum fraction of pixels allowed above 0.85 luminance before
+/// the residual uniform gain engages. Calibrated from a healthy
+/// reference run (`0xe7dcb1f0ff4e`: 0.0% bright) vs the failing
+/// seeds (17-30% bright) — 5% leaves room for a bright-but-not-
+/// blown-out hero moment.
+const HEADROOM_BRIGHT_CAP: f64 = 0.05;
+/// Hard floor on the residual uniform gain so the headroom guard
+/// never produces the "flat grey blob" failure mode seen with the
+/// legacy implementation (`0x3d8c8c21b240` was dimmed to p99 = 0.38).
+/// If stages 1 and 2 cannot bring the distribution under the caps,
+/// the safety shoulder downstream picks up the remaining highlights;
+/// midtones must still reach the viewer.
+const HEADROOM_RESIDUAL_GAIN_FLOOR: f64 = 0.80;
+
+/// Hue-preserving display-space highlight compressor used by
+/// [`apply_display_headroom`]. Mirrors
+/// [`compress_display_safety_shoulder`] in shape but engages at a
+/// lower knee and asymptote so it can absorb a much larger bright
+/// tail without flattening midtone contrast.
+#[inline]
+fn compress_headroom_highlights(rgb: [f64; 3], knee: f64, asymptote: f64, ceiling: f64) -> [f64; 3] {
+    let mut out = rgb;
+
+    // Stage 1: luma-based shoulder. Any above-knee luminance is
+    // rolled onto an exponential asymptote at `asymptote`, with every
+    // channel scaled uniformly so hue is preserved exactly.
+    let luminance = constants::rec709_luminance(out[0], out[1], out[2]);
+    if luminance > knee && luminance > 1e-10 {
+        let span = (asymptote - knee).max(1e-6);
+        let excess = luminance - knee;
+        let compressed = knee + span * (1.0 - (-excess / span).exp());
+        let scale = compressed / luminance;
+        out = [out[0] * scale, out[1] * scale, out[2] * scale];
+    }
+
+    // Stage 2: per-channel gamut preservation. A pixel can have
+    // luminance below `knee` but still hold a single channel above
+    // `ceiling` — e.g. a saturated red where R dominates value but
+    // contributes only 21.3% to rec709 luminance. Hard per-channel
+    // clamping would break hue; instead, find the max channel and
+    // scale *all* channels uniformly so the max lands on `ceiling`,
+    // preserving the R:G:B ratios exactly.
+    let max_ch = out[0].max(out[1]).max(out[2]);
+    if max_ch > ceiling {
+        let scale = ceiling / max_ch;
+        out[0] *= scale;
+        out[1] *= scale;
+        out[2] *= scale;
+    }
+    out
+}
+
 /// Distribution-aware display-space headroom cap applied between
 /// `process_image` (the image chain: diffraction spikes, anamorphic
 /// flare, fine texture, vignette, ...) and
-/// `apply_display_safety_shoulder` (a per-pixel hue-preserving
-/// roll-off).
+/// [`apply_display_safety_shoulder`] (a per-pixel hue-preserving
+/// roll-off at 0.90-0.985).
 ///
-/// The safety shoulder is per-pixel and cannot prevent a large
-/// contiguous region of already-bright pixels from hitting the
-/// quantize clamp; it can only roll each pixel individually, so a
-/// 30%-of-frame "white blob" still comes out white. This helper
-/// measures the display-space distribution (p99 luminance + fraction
-/// of pixels above `0.85`) and, if either metric exceeds its cap,
-/// uniformly scales RGB across the whole buffer (not per pixel). The
-/// uniform scale preserves hue exactly and keeps the ratio between
-/// pixels intact, so no effect is "cancelled" — the whole image is
-/// just dimmed back into a safe exposure.
+/// # Why three stages
 ///
-/// A pure uniform gain means `final_bright_fraction <= BRIGHT_CAP`
-/// and `final_p99 <= P99_CAP` by construction; the downstream safety
-/// shoulder is still free to roll off individual outliers that stay
-/// above the knee.
+/// The image chain can push pixels past 1.0 in display space on
+/// dense bright regions (seeds `0x3d8c8c21b240`, `0x4d5af082584d`,
+/// `0x8df990f92766`, ...). The legacy implementation responded with
+/// a uniform RGB dim scaled by `sqrt(BRIGHT_CAP / bright_fraction)`.
+/// For a 30% bright blob that is a ~0.38× dim — correct in the sense
+/// of bringing the distribution under the caps, but *catastrophic*
+/// for perceptual quality because midtone contrast is compressed too.
+/// The resulting image looks like a flat grey blob, which is what the
+/// original "white blob" reports identified on the remote server.
+///
+/// The fix uses three stages:
+///
+/// 1. **Hue-preserving highlight shoulder** (`compress_headroom_highlights`):
+///    pixels with luminance in `[HEADROOM_LUMA_KNEE, ∞)` are rolled
+///    onto an exponential asymptote at `HEADROOM_LUMA_ASYMPTOTE` with
+///    a uniform-scale-by-max per-channel cap at
+///    `HEADROOM_CHANNEL_CEILING`. Midtones (luma < knee) pass through
+///    bit-for-bit so contrast is preserved.
+/// 2. **Residual uniform gain**, but only if stage 1 left the
+///    distribution out of spec *and* the required gain does not drop
+///    below `HEADROOM_RESIDUAL_GAIN_FLOOR`. The floor prevents the
+///    old flat-grey regression.
+/// 3. Implicitly, the downstream [`apply_display_safety_shoulder`]
+///    still catches any remaining outliers in `[SAFETY_SHOULDER_KNEE,
+///    SAFETY_SHOULDER_CEILING]`.
+///
+/// On a healthy reference buffer (luma ≤ knee everywhere) this
+/// function is a bit-for-bit no-op: neither stage fires.
 fn apply_display_headroom(buffer: &mut PixelBuffer) {
-    /// Target p99 luminance in display space. Sits just below the
-    /// `SAFETY_SHOULDER_KNEE` (0.90) so the per-pixel shoulder still
-    /// has room to smooth residual outliers without engaging on 1%
-    /// of a normal frame.
-    const P99_CAP: f64 = 0.85;
-    /// Maximum fraction of pixels allowed above `0.85` luminance.
-    /// Calibrated from a healthy reference run (`0xe7dcb1f0ff4e`:
-    /// 0.0% bright) vs the failing seeds (17-30% bright) — 5% leaves
-    /// room for a bright-but-not-blown-out hero moment.
-    const BRIGHT_CAP: f64 = 0.05;
-
     if buffer.is_empty() {
         return;
     }
 
+    // Stage 1: hue-preserving highlight shoulder. Applied per-pixel,
+    // so midtones below HEADROOM_LUMA_KNEE are guaranteed unchanged.
+    buffer.par_iter_mut().for_each(|pixel| {
+        let rolled = compress_headroom_highlights(
+            [pixel.0, pixel.1, pixel.2],
+            HEADROOM_LUMA_KNEE,
+            HEADROOM_LUMA_ASYMPTOTE,
+            HEADROOM_CHANNEL_CEILING,
+        );
+        pixel.0 = rolled[0];
+        pixel.1 = rolled[1];
+        pixel.2 = rolled[2];
+    });
+
+    // Stage 2: residual uniform gain (only if stage 1 left the
+    // distribution out of spec). Measure post-shoulder distribution.
     let lums: Vec<f64> =
         buffer.par_iter().map(|&(r, g, b, _)| constants::rec709_luminance(r, g, b)).collect();
 
-    let mut bright_count: u64 = 0;
-    for &l in &lums {
-        if l > 0.85 {
-            bright_count += 1;
-        }
-    }
+    let bright_count = lums.iter().filter(|&&l| l > HEADROOM_P99_CAP).count();
     #[allow(clippy::cast_precision_loss)]
     let bright_fraction = bright_count as f64 / lums.len() as f64;
 
@@ -382,20 +471,17 @@ fn apply_display_headroom(buffer: &mut PixelBuffer) {
     });
     let p99 = *p99_ref;
 
-    // Derive the uniform gain that pulls p99 down to P99_CAP. For the
-    // bright-fraction constraint, we use a conservative gain: if the
-    // fraction is `f > BRIGHT_CAP` we need to dim such that roughly a
-    // `BRIGHT_CAP` fraction of pixels remains bright. Assuming a
-    // well-behaved shoulder distribution, a uniform gain of
-    // `(BRIGHT_CAP / f).sqrt()` empirically pulls the bright tail back
-    // into spec without over-darkening the midtones.
-    let gain_p99 = if p99 > P99_CAP { P99_CAP / p99 } else { 1.0 };
-    let gain_bright = if bright_fraction > BRIGHT_CAP {
-        (BRIGHT_CAP / bright_fraction.max(1e-6)).sqrt()
+    let gain_p99 = if p99 > HEADROOM_P99_CAP { HEADROOM_P99_CAP / p99 } else { 1.0 };
+    let gain_bright = if bright_fraction > HEADROOM_BRIGHT_CAP {
+        (HEADROOM_BRIGHT_CAP / bright_fraction.max(1e-6)).sqrt()
     } else {
         1.0
     };
-    let gain = gain_p99.min(gain_bright);
+    // Clamp to the floor: if stage 1 cannot bring the distribution
+    // under the caps by itself, we accept a slight residual bright
+    // tail rather than collapsing midtones. The safety shoulder
+    // downstream will pick up the rest.
+    let gain = gain_p99.min(gain_bright).max(HEADROOM_RESIDUAL_GAIN_FLOOR);
 
     if gain < 1.0 - 1e-6 {
         buffer.par_iter_mut().for_each(|p| {
@@ -2111,6 +2197,195 @@ mod tests {
         let ratio_rb = p.0 / p.2;
         assert!((ratio_rg - 4.0).abs() < 1e-6, "r/g hue drift: {ratio_rg}");
         assert!((ratio_rb - 2.0).abs() < 1e-6, "r/b hue drift: {ratio_rb}");
+    }
+
+    /// Midtones (luma < `HEADROOM_LUMA_KNEE`) must pass through
+    /// bit-for-bit — this is the key contrast-preservation property
+    /// the legacy uniform-dim implementation violated. A 30%-bright
+    /// buffer with a midtone background must leave the midtone
+    /// untouched.
+    #[test]
+    fn display_headroom_preserves_midtone_contrast() {
+        // 30% bright-white pixels + 70% pixels spanning [0.1, 0.65]
+        // luma (all below the HEADROOM_LUMA_KNEE=0.70 cut). The bright
+        // pixels get compressed but the midtones must emerge identical.
+        let mut buffer: PixelBuffer = Vec::with_capacity(10_000);
+        for i in 0..10_000 {
+            if i < 3_000 {
+                buffer.push((1.2, 1.2, 1.2, 1.0));
+            } else {
+                let v = 0.1 + f64::from(i % 11) * 0.05;
+                buffer.push((v, v, v, 1.0));
+            }
+        }
+        let before = buffer.clone();
+        apply_display_headroom(&mut buffer);
+        // Every midtone pixel (originally below knee) must be exactly
+        // equal to its pre-guard value.
+        for i in 3_000..10_000 {
+            assert_eq!(
+                buffer[i], before[i],
+                "midtone pixel {i} drifted: {:?} -> {:?}",
+                before[i], buffer[i]
+            );
+        }
+        // The bright pixels must have been compressed to strictly
+        // below the knee (so the stage 1 shoulder actually engaged).
+        let bright = buffer[0];
+        let bright_luma = constants::rec709_luminance(bright.0, bright.1, bright.2);
+        assert!(
+            bright_luma < 0.85 + 1e-6,
+            "bright pixel not compressed: {bright:?} luma={bright_luma}"
+        );
+    }
+
+    /// Stage 2 (per-channel gamut cap) must engage for strongly
+    /// tinted pixels whose rec709 luminance is below the knee but
+    /// whose max channel is above `HEADROOM_CHANNEL_CEILING` (e.g.
+    /// saturated red: R contributes only 21.3% of luma).
+    #[test]
+    fn display_headroom_stage2_caps_saturated_tints() {
+        // Saturated red: R=1.5, G=0.1, B=0.05.
+        // rec709 luma = 0.2126*1.5 + 0.7152*0.1 + 0.0722*0.05 = 0.394
+        // — comfortably below HEADROOM_LUMA_KNEE=0.70, so stage 1
+        // does nothing. But max channel = 1.5 > HEADROOM_CHANNEL_
+        // CEILING=0.92, so stage 2 must rescale hue-preservingly.
+        let mut buffer: PixelBuffer = vec![(1.5, 0.1, 0.05, 1.0); 500];
+        apply_display_headroom(&mut buffer);
+        let p = buffer[0];
+        // Max channel must land at the ceiling (within f64 eps).
+        assert!(
+            (p.0 - HEADROOM_CHANNEL_CEILING).abs() < 1e-9,
+            "stage 2 did not cap max channel: {p:?}"
+        );
+        // Hue ratios preserved (R:G = 15, R:B = 30).
+        assert!((p.0 / p.1 - 15.0).abs() < 1e-6, "R/G drifted: {}", p.0 / p.1);
+        assert!((p.0 / p.2 - 30.0).abs() < 1e-6, "R/B drifted: {}", p.0 / p.2);
+    }
+
+    /// Stage 1 shoulder must be monotonic: a brighter input must
+    /// produce an equal-or-brighter output, so highlights remain
+    /// ordered (no inversions). This is the classical tonemapper
+    /// contract — the exponential asymptote preserves it.
+    #[test]
+    fn display_headroom_is_monotonic_in_luminance() {
+        let lums = [0.71_f64, 0.80, 0.90, 1.00, 1.20, 1.50, 2.00, 5.00];
+        let mut outs = Vec::new();
+        for &l in &lums {
+            let rolled = compress_headroom_highlights(
+                [l, l, l],
+                HEADROOM_LUMA_KNEE,
+                HEADROOM_LUMA_ASYMPTOTE,
+                HEADROOM_CHANNEL_CEILING,
+            );
+            outs.push(rolled[0]);
+        }
+        for w in outs.windows(2) {
+            assert!(w[0] <= w[1] + 1e-12, "monotonicity violated: {outs:?}");
+        }
+        // And the top of the range must not exceed the asymptote
+        // (modulo the channel ceiling which is higher than it).
+        let last = outs.last().copied().unwrap();
+        assert!(
+            last <= HEADROOM_LUMA_ASYMPTOTE + 1e-9,
+            "asymptote violated: {last} > {HEADROOM_LUMA_ASYMPTOTE}"
+        );
+    }
+
+    /// Hue is preserved exactly under `compress_headroom_highlights`
+    /// for any positive RGB — a property-style sanity check.
+    #[test]
+    fn compress_headroom_highlights_preserves_hue_exactly() {
+        let samples = [
+            [0.71_f64, 0.36, 0.18], // Bright tinted.
+            [1.20, 0.60, 0.30],
+            [0.50, 1.00, 0.25],
+            [0.05, 0.05, 0.05], // Untouched midtone.
+            [2.00, 2.00, 2.00], // Uniform bright.
+            [1.50, 0.10, 0.05], // Saturated — exercises stage 2.
+        ];
+        for rgb in samples {
+            let out = compress_headroom_highlights(
+                rgb,
+                HEADROOM_LUMA_KNEE,
+                HEADROOM_LUMA_ASYMPTOTE,
+                HEADROOM_CHANNEL_CEILING,
+            );
+            // Hue ratio: R/G and R/B must match (skip zero channels).
+            if rgb[1] > 1e-9 && out[1] > 1e-9 {
+                let orig = rgb[0] / rgb[1];
+                let new = out[0] / out[1];
+                assert!(
+                    (orig - new).abs() / orig.max(1e-12) < 1e-9,
+                    "R/G drift for {rgb:?}: {orig} -> {new}"
+                );
+            }
+            if rgb[2] > 1e-9 && out[2] > 1e-9 {
+                let orig = rgb[0] / rgb[2];
+                let new = out[0] / out[2];
+                assert!(
+                    (orig - new).abs() / orig.max(1e-12) < 1e-9,
+                    "R/B drift for {rgb:?}: {orig} -> {new}"
+                );
+            }
+        }
+    }
+
+    /// If stage 1 alone is enough to bring the distribution under
+    /// spec, stage 3 must NOT engage — the residual uniform gain is
+    /// a last-resort fallback.
+    #[test]
+    fn display_headroom_skips_residual_gain_when_shoulder_suffices() {
+        // 40% of pixels at luma = 0.92 (above the P99 cap). Stage 1
+        // compresses luma to ~0.78, well below cap. Stage 3 must NOT
+        // apply a further uniform dim: midtones must stay at exactly
+        // their input value.
+        let mut buffer: PixelBuffer = Vec::with_capacity(10_000);
+        for i in 0..10_000 {
+            if i < 4_000 {
+                buffer.push((0.92, 0.92, 0.92, 1.0));
+            } else {
+                buffer.push((0.3, 0.3, 0.3, 1.0));
+            }
+        }
+        apply_display_headroom(&mut buffer);
+        // Midtone pixel: must be exactly 0.3 (no residual gain).
+        let mid = buffer[5_000];
+        assert!(
+            (mid.0 - 0.3).abs() < 1e-12,
+            "midtone got dimmed by residual gain: {mid:?}"
+        );
+    }
+
+    /// Residual gain never drops below `HEADROOM_RESIDUAL_GAIN_FLOOR`,
+    /// even on adversarial inputs where stage 1 can't pull things
+    /// under the caps. This prevents the legacy "flat grey blob"
+    /// regression where a 30%-bright blob dimmed the whole image to
+    /// near-black.
+    #[test]
+    fn display_headroom_residual_gain_floors_midtone_dim() {
+        // Pathological: 99% of pixels at uniform bright white, 1% at
+        // dim. Stage 1 compresses luma to ~0.80. Stage 3 can only
+        // attenuate by HEADROOM_RESIDUAL_GAIN_FLOOR.
+        let mut buffer: PixelBuffer = Vec::with_capacity(10_000);
+        for i in 0..10_000 {
+            if i < 9_900 {
+                buffer.push((2.0, 2.0, 2.0, 1.0));
+            } else {
+                buffer.push((0.3, 0.3, 0.3, 1.0));
+            }
+        }
+        let dim_before = buffer[9_999];
+        apply_display_headroom(&mut buffer);
+        let dim_after = buffer[9_999];
+        // The dim pixel started below the knee so stage 1 left it
+        // alone. Stage 3 can dim it at most by
+        // HEADROOM_RESIDUAL_GAIN_FLOOR.
+        let ratio = dim_after.0 / dim_before.0;
+        assert!(
+            ratio >= HEADROOM_RESIDUAL_GAIN_FLOOR - 1e-9,
+            "midtone dimmed below residual gain floor: {ratio} < {HEADROOM_RESIDUAL_GAIN_FLOOR}"
+        );
     }
 
     /// End-to-end safeguard-stack regression for the observed white-blob
