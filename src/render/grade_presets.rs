@@ -298,8 +298,7 @@ mod tests {
 
     #[test]
     fn every_preset_has_unique_name() {
-        let names: HashSet<&'static str> =
-            GradePreset::all().iter().map(|p| p.name()).collect();
+        let names: HashSet<&'static str> = GradePreset::all().iter().map(|p| p.name()).collect();
         assert_eq!(names.len(), GradePreset::all().len());
     }
 

@@ -263,17 +263,11 @@ fn main() -> Result<()> {
 
     setup_logging(&args.log_level);
 
-    let mut enhancements = app::Enhancements::default();
-    // Auto-enable aspect correction for non-16:9 outputs so the orbital bounding
-    // box is padded to match the target canvas. The default 16:9 pipeline still
-    // renders exactly as before.
-    {
-        let target_ar = f64::from(args.resolution.width) / f64::from(args.resolution.height);
-        let default_ar = 16.0_f64 / 9.0_f64;
-        if (target_ar - default_ar).abs() > 0.02 {
-            enhancements.aspect_correction = true;
-        }
-    }
+    // Always pad the orbital bounding box to the target aspect ratio. This
+    // preserves the orbit's natural 2D proportions (no asymmetric x/y
+    // stretching) and keeps the trajectory centroid at the canvas center for
+    // every output resolution -- the foundation of museum-quality framing.
+    let enhancements = app::Enhancements { aspect_correction: true, ..Default::default() };
     spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
     render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);

@@ -182,10 +182,7 @@ fn pinned_seeds_produce_deterministic_output() {
         // not returning a fully-clipped black canvas). We allow zero pixels for
         // very rare seeds where the trajectory collapses to sub-pixel extent.
         let energy: u64 = run_a.pixels.iter().map(|&v| u64::from(v)).sum();
-        assert!(
-            energy > 0,
-            "seed 0x{seed:016x} produced an all-zero canvas (total energy 0)"
-        );
+        assert!(energy > 0, "seed 0x{seed:016x} produced an all-zero canvas (total energy 0)");
     }
 }
 
@@ -196,17 +193,18 @@ fn pinned_final_frame_round_trips_through_png_without_going_black() {
 
     let image = ImageBuffer::<Rgb<u16>, Vec<u16>>::from_raw(WIDTH, HEIGHT, run.pixels.clone())
         .expect("raw render pixels should form a valid 16-bit RGB image");
-    let temp_dir =
-        std::env::temp_dir().join(format!("three_body_png_roundtrip_{}_{}", std::process::id(), seed));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "three_body_png_roundtrip_{}_{}",
+        std::process::id(),
+        seed
+    ));
     fs::create_dir_all(&temp_dir).expect("temp output dir should be creatable");
     let png_path = temp_dir.join("image.png");
     let png_path_str = png_path.to_string_lossy().into_owned();
 
     save_image_as_png_16bit(&image, &png_path_str).expect("PNG save should succeed");
 
-    let loaded = image::open(&png_path)
-        .expect("saved PNG should be readable")
-        .into_rgb16();
+    let loaded = image::open(&png_path).expect("saved PNG should be readable").into_rgb16();
     let roundtrip_energy: u64 = loaded.into_raw().into_iter().map(u64::from).sum();
     assert!(
         roundtrip_energy > 0,

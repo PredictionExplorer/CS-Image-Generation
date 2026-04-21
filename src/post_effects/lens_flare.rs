@@ -61,7 +61,12 @@ impl LensFlare {
         Self { config }
     }
 
-    fn find_centroid(&self, input: &PixelBuffer, width: usize, height: usize) -> Option<(f64, f64, f64)> {
+    fn find_centroid(
+        &self,
+        input: &PixelBuffer,
+        width: usize,
+        height: usize,
+    ) -> Option<(f64, f64, f64)> {
         let threshold = self.config.luminance_threshold.max(0.0);
         let mut sum_lum = 0.0f64;
         let mut sum_x = 0.0f64;
@@ -83,11 +88,7 @@ impl LensFlare {
             sum_lum += weight;
         }
         let _ = height;
-        if sum_lum <= 1e-6 {
-            None
-        } else {
-            Some((sum_x / sum_lum, sum_y / sum_lum, sum_lum))
-        }
+        if sum_lum <= 1e-6 { None } else { Some((sum_x / sum_lum, sum_y / sum_lum, sum_lum)) }
     }
 }
 
@@ -214,8 +215,7 @@ mod tests {
         let mut input = vec![(0.0, 0.0, 0.0, 0.0); 32 * 32];
         let center = 10 * 32 + 10;
         input[center] = (1.5, 1.5, 1.5, 1.0);
-        let cfg =
-            LensFlareConfig { strength: 0.8, ghost_count: 3, ..Default::default() };
+        let cfg = LensFlareConfig { strength: 0.8, ghost_count: 3, ..Default::default() };
         let lens = LensFlare::new(cfg);
         let out = lens.process(&input, 32, 32).unwrap();
         let sum_in: f64 = input.iter().map(|p| p.0 + p.1 + p.2).sum();

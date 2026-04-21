@@ -134,7 +134,14 @@ impl PostEffect for Starfield {
                 let r_frac = hash_u01(self.config.seed, i, 3);
                 let radius = (0.4 + r_frac * max_radius).max(0.35);
                 let (cr, cg, cb) = star_color(i, self.config.seed, self.config.warmth_bias);
-                (fx * width as f64, fy * height as f64, brightness, cr * brightness, cg * brightness, cb * brightness + radius * 0.0)
+                (
+                    fx * width as f64,
+                    fy * height as f64,
+                    brightness,
+                    cr * brightness,
+                    cg * brightness,
+                    cb * brightness + radius * 0.0,
+                )
             })
             .collect();
 
@@ -157,7 +164,8 @@ impl PostEffect for Starfield {
                     }
                     let idx = y * width + x;
                     let existing = output[idx];
-                    let existing_lum = 0.2126 * existing.0 + 0.7152 * existing.1 + 0.0722 * existing.2;
+                    let existing_lum =
+                        0.2126 * existing.0 + 0.7152 * existing.1 + 0.0722 * existing.2;
                     let mask = (1.0 - existing_lum.min(1.0) * avoid).max(0.0);
                     let k = falloff * strength * mask;
                     output[idx].0 += cr * k;
@@ -201,7 +209,8 @@ mod tests {
 
     #[test]
     fn strength_nonzero_adds_light() {
-        let cfg = StarfieldConfig { strength: 0.5, density: 5_000.0, seed: 42, ..Default::default() };
+        let cfg =
+            StarfieldConfig { strength: 0.5, density: 5_000.0, seed: 42, ..Default::default() };
         let sf = Starfield::new(cfg);
         let input = black(64, 64);
         let out = sf.process(&input, 64, 64).unwrap();

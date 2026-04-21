@@ -417,4 +417,112 @@ mod tests {
             "framing zoom > 1 should enlarge the bounding box"
         );
     }
+
+    #[test]
+    fn test_aspect_correction_equal_scale_x_y() {
+        // After aspect correction, the world-to-pixel scale factor must be
+        // identical on both axes -- any difference is an asymmetric stretch,
+        // which distorts the orbit and off-centers it visually.
+        for &(target_w, target_h) in &[(1920u32, 1080u32), (1080, 1920), (800, 600), (1024, 1024)] {
+            let mut bbox = BoundingBox {
+                min_x: -10.0,
+                max_x: 170.0,
+                min_y: 5.0,
+                max_y: 55.0,
+                width: 180.0,
+                height: 50.0,
+            };
+            bbox.apply_aspect_correction(target_w, target_h);
+            let scale_x = bbox.width / f64::from(target_w);
+            let scale_y = bbox.height / f64::from(target_h);
+            assert!(
+                (scale_x - scale_y).abs() < 1e-9,
+                "isotropy broken: target {target_w}x{target_h}, scale_x={scale_x}, scale_y={scale_y}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_combined_correction_and_zoom_preserves_center() {
+        // The bounding-box midpoint (where the orbit centroid lives after
+        // utils::bounding_box padding) must survive both aspect correction
+        // and framing zoom untouched. If this invariant breaks, the
+        // rendered image drifts off-center.
+        let cases = [
+            (0.0, 100.0, 0.0, 50.0, 1920u32, 1080u32, 1.0),
+            (0.0, 100.0, 0.0, 50.0, 1920, 1080, 1.15),
+            (-50.0, 50.0, -80.0, 20.0, 1080, 1920, 1.25),
+            (10.0, 30.0, 10.0, 90.0, 2048, 1536, 1.08),
+            (-12.5, 17.5, -12.5, 17.5, 1024, 1024, 2.0),
+        ];
+        for (min_x, max_x, min_y, max_y, w, h, zoom) in cases {
+            let mut bbox = BoundingBox {
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                width: max_x - min_x,
+                height: max_y - min_y,
+            };
+            let cx_before = f64::midpoint(bbox.min_x, bbox.max_x);
+            let cy_before = f64::midpoint(bbox.min_y, bbox.max_y);
+            bbox.apply_aspect_correction(w, h);
+            bbox.apply_framing_zoom(zoom);
+            let cx_after = f64::midpoint(bbox.min_x, bbox.max_x);
+            let cy_after = f64::midpoint(bbox.min_y, bbox.max_y);
+            assert!(
+                (cx_before - cx_after).abs() < 1e-9,
+                "center X drifted for case ({min_x},{max_x},{min_y},{max_y},{w}x{h},zoom={zoom}): before={cx_before}, after={cx_after}"
+            );
+            assert!(
+                (cy_before - cy_after).abs() < 1e-9,
+                "center Y drifted for case ({min_x},{max_x},{min_y},{max_y},{w}x{h},zoom={zoom}): before={cy_before}, after={cy_after}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_context_centers_orbit_centroid() {
+        // For every sane target resolution, the midpoint of the orbit's
+        // padded bounding box must map exactly to the image center.
+        let positions = make_positions(&[(-5.0, 2.0), (15.0, 22.0), (3.0, 7.0)]);
+        for &(w, h) in &[(1920u32, 1080u32), (1080, 1920), (512, 512), (2560, 1080)] {
+            let ctx = RenderContext::new_with_framing(w, h, &positions, true, 1.0);
+            let bbox = ctx.bounds();
+            let cx_world = f64::midpoint(bbox.min_x, bbox.max_x);
+            let cy_world = f64::midpoint(bbox.min_y, bbox.max_y);
+            let (px, py) = ctx.to_pixel(cx_world, cy_world);
+            assert!(
+                (f64::from(px) - f64::from(w) * 0.5).abs() < 0.5,
+                "center X off at {w}x{h}: px={px}, expected ~{}",
+                f64::from(w) * 0.5
+            );
+            assert!(
+                (f64::from(py) - f64::from(h) * 0.5).abs() < 0.5,
+                "center Y off at {w}x{h}: py={py}, expected ~{}",
+                f64::from(h) * 0.5
+            );
+        }
+    }
+
+    #[test]
+    fn test_aspect_correction_idempotent() {
+        // Applying aspect correction twice must be a no-op on pass 2 --
+        // otherwise repeated pipeline resets could grow the bounding box
+        // unboundedly.
+        let mut bbox = BoundingBox {
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 0.0,
+            max_y: 30.0,
+            width: 100.0,
+            height: 30.0,
+        };
+        bbox.apply_aspect_correction(1920, 1080);
+        let w1 = bbox.width;
+        let h1 = bbox.height;
+        bbox.apply_aspect_correction(1920, 1080);
+        assert!((bbox.width - w1).abs() < 1e-9);
+        assert!((bbox.height - h1).abs() < 1e-9);
+    }
 }

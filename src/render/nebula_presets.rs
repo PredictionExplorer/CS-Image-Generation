@@ -283,8 +283,7 @@ mod tests {
 
     #[test]
     fn every_palette_has_unique_name() {
-        let names: HashSet<&'static str> =
-            NebulaPalette::all().iter().map(|p| p.name()).collect();
+        let names: HashSet<&'static str> = NebulaPalette::all().iter().map(|p| p.name()).collect();
         assert_eq!(names.len(), NebulaPalette::all().len(), "duplicate palette names");
     }
 
@@ -368,11 +367,7 @@ mod tests {
                     break;
                 }
             }
-            assert!(
-                seen_chromatic_stop,
-                "palette {} has no chromatic stops",
-                palette.name()
-            );
+            assert!(seen_chromatic_stop, "palette {} has no chromatic stops", palette.name());
         }
     }
 

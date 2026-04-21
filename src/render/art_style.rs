@@ -10,10 +10,10 @@
 //! into the effect config before per-effect randomization runs, which
 //! ensures every image is a coherent composition.
 
+use super::BloomMode;
 use super::grade_presets::GradePreset;
 use super::hue_palette::HuePaletteMode;
 use super::nebula_presets::NebulaPalette;
-use super::BloomMode;
 use crate::sim::Sha3RandomByteStream;
 use serde::{Deserialize, Serialize};
 
@@ -193,32 +193,35 @@ impl ArtStyle {
         }
     }
 
-    /// Pick a style from the RNG with a curated uniform-ish distribution.
+    /// Pick a style from the RNG with a curated near-uniform distribution.
     ///
-    /// A small weighting favours the most universally-beautiful styles so
-    /// that the Shannon entropy over 1024+ seeds stays >= 3.8 bits while
-    /// median output quality remains high.
+    /// Weights are intentionally flat: no single style exceeds 8/130 of the
+    /// probability mass. The Shannon entropy over 1024+ seeds stays
+    /// comfortably above 3.8 bits, and no legacy style dominates the
+    /// aesthetic sample. Every style is already curated for museum-tier
+    /// output, so flatter weights translate directly into higher variety
+    /// without any quality trade-off.
     #[must_use]
     pub fn pick(rng: &mut Sha3RandomByteStream) -> ArtStyle {
         const WEIGHTS: [(ArtStyle, u32); 18] = [
-            (ArtStyle::DeepCosmos, 10),
-            (ArtStyle::AuroraBorealis, 9),
-            (ArtStyle::SolarFurnace, 9),
+            (ArtStyle::DeepCosmos, 8),
+            (ArtStyle::AuroraBorealis, 8),
+            (ArtStyle::SolarFurnace, 8),
             (ArtStyle::OceanicAbyss, 8),
             (ArtStyle::RoseNebula, 8),
-            (ArtStyle::ArtNouveau, 6),
+            (ArtStyle::ArtNouveau, 7),
             (ArtStyle::BaroqueChiaroscuro, 7),
-            (ArtStyle::TokyoNeon, 9),
+            (ArtStyle::TokyoNeon, 8),
             (ArtStyle::ArcticSilence, 7),
             (ArtStyle::MoltenGold, 8),
             (ArtStyle::RoyalVelvet, 7),
-            (ArtStyle::DesertMirage, 6),
+            (ArtStyle::DesertMirage, 7),
             (ArtStyle::EmeraldCity, 8),
-            (ArtStyle::PorcelainPastel, 6),
+            (ArtStyle::PorcelainPastel, 7),
             (ArtStyle::IridescentPrism, 7),
-            (ArtStyle::Monochrome, 6),
-            (ArtStyle::Duotone, 6),
-            (ArtStyle::CosmicEthereal, 7),
+            (ArtStyle::Monochrome, 7),
+            (ArtStyle::Duotone, 7),
+            (ArtStyle::CosmicEthereal, 8),
         ];
         let total: u32 = WEIGHTS.iter().map(|(_, w)| *w).sum();
         let b0 = u32::from(rng.next_byte());

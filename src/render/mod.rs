@@ -353,9 +353,53 @@ fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     buf_16bit
 }
 
+/// Minimum per-channel intensity (in 16-bit units) that counts as "visible
+/// signal". A single linear step above pitch-black: anything at-or-below this
+/// value is indistinguishable from black to the viewer.
+const RESCUE_MIN_VISIBLE_U16: u16 = 16;
+
+/// Minimum fraction of pixels that must carry visible signal to avoid the
+/// rescue path. `0.05%` of a 1080p frame is ~1000 pixels, which is the floor
+/// for perceptible structure in any downstream viewer.
+const RESCUE_MIN_VISIBLE_FRACTION: f64 = 0.0005;
+
+/// Minimum mean per-channel intensity (in 16-bit units) that counts as an
+/// exposed frame. Below 4/65535 the composite reads as uniform black even if
+/// a handful of highlights happen to land above `RESCUE_MIN_VISIBLE_U16`.
+const RESCUE_MIN_MEAN_U16: f64 = 4.0;
+
+/// Returns `true` when the quantized RGB buffer is either all-zero or so close
+/// to pitch black that the viewer cannot distinguish it from a blank canvas.
+///
+/// This predicate drives the black-frame rescue: any frame that trips it is
+/// re-rendered with escalating exposure, and, failing that, with levels
+/// derived from the fully accumulated composite. The thresholds are deliberate:
+///
+/// * Fewer than [`RESCUE_MIN_VISIBLE_FRACTION`] of samples above
+///   [`RESCUE_MIN_VISIBLE_U16`] -> the composite has no perceptible structure.
+/// * Mean per-channel value below [`RESCUE_MIN_MEAN_U16`] -> the average
+///   pixel is at or below a single quantization step above black.
+///
+/// Either signal is enough on its own to trigger rescue, so sparse-but-bright
+/// composites and uniformly-dim composites are both caught.
 #[inline]
-fn quantized_rgb_is_all_zero(buf_16bit: &[u16]) -> bool {
-    buf_16bit.iter().all(|&v| v == 0)
+fn quantized_rgb_is_effectively_black(buf_16bit: &[u16]) -> bool {
+    if buf_16bit.is_empty() {
+        return true;
+    }
+    let mut visible_count: u64 = 0;
+    let mut sum: u64 = 0;
+    for &v in buf_16bit {
+        if v > RESCUE_MIN_VISIBLE_U16 {
+            visible_count += 1;
+        }
+        sum += u64::from(v);
+    }
+    let total = buf_16bit.len() as f64;
+    let visible_fraction = visible_count as f64 / total;
+    let mean = sum as f64 / total;
+
+    visible_fraction < RESCUE_MIN_VISIBLE_FRACTION || mean < RESCUE_MIN_MEAN_U16
 }
 
 fn normalize_rescue_display_buffer(pixels: &mut PixelBuffer) {
@@ -976,7 +1020,13 @@ fn pass_1_build_histogram_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
@@ -1144,7 +1194,13 @@ fn pass_2_write_frames_spectral_with_backend(
         settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
         *s = [0.0; NUM_BINS];
@@ -1235,8 +1291,10 @@ fn pass_2_write_frames_spectral_with_backend(
                 reason: e.to_string(),
             })?;
         let mut buf_16bit = quantize_display_buffer_to_16bit(&final_display);
-        if checkpoint_step + 1 == total_steps && quantized_rgb_is_all_zero(&buf_16bit) {
-            warn!("Final video frame quantized to all-zero RGB; attempting minimal black-frame rescue");
+        if checkpoint_step + 1 == total_steps && quantized_rgb_is_effectively_black(&buf_16bit) {
+            warn!(
+                "Final video frame quantized to effectively black RGB; attempting minimal black-frame rescue"
+            );
             for multiplier in [1.5, 2.0, 3.0, 4.0, 6.0] {
                 let rescue_levels = levels_with_exposure_multiplier(levels, multiplier);
                 let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
@@ -1248,13 +1306,15 @@ fn pass_2_write_frames_spectral_with_backend(
                     })?;
                 normalize_rescue_display_buffer(&mut rescue_final_display);
                 let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
-                if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                if !quantized_rgb_is_effectively_black(&rescue_buf_16bit) {
                     buf_16bit = rescue_buf_16bit;
                     break;
                 }
             }
-            if quantized_rgb_is_all_zero(&buf_16bit) {
-                warn!("Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite");
+            if quantized_rgb_is_effectively_black(&buf_16bit) {
+                warn!(
+                    "Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite"
+                );
                 let rescue_levels = derive_rescue_levels_from_final_signal(
                     &composited,
                     resolved_config.clip_black,
@@ -1271,7 +1331,7 @@ fn pass_2_write_frames_spectral_with_backend(
                     })?;
                 normalize_rescue_display_buffer(&mut rescue_final_display);
                 let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
-                if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                if !quantized_rgb_is_effectively_black(&rescue_buf_16bit) {
                     buf_16bit = rescue_buf_16bit;
                 }
             }
@@ -1347,7 +1407,13 @@ fn render_final_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1408,8 +1474,10 @@ fn render_final_frame_spectral_with_backend(
             reason: e.to_string(),
         })?;
     let mut buf_16bit = quantize_display_buffer_to_16bit(&final_display);
-    if quantized_rgb_is_all_zero(&buf_16bit) {
-        warn!("Final accumulated still frame quantized to all-zero RGB; attempting minimal black-frame rescue");
+    if quantized_rgb_is_effectively_black(&buf_16bit) {
+        warn!(
+            "Final accumulated still frame quantized to effectively black RGB; attempting minimal black-frame rescue"
+        );
         for multiplier in [1.5, 2.0, 3.0, 4.0, 6.0] {
             let rescue_levels = levels_with_exposure_multiplier(levels, multiplier);
             let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
@@ -1421,13 +1489,15 @@ fn render_final_frame_spectral_with_backend(
                 })?;
             normalize_rescue_display_buffer(&mut rescue_final_display);
             let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
-            if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+            if !quantized_rgb_is_effectively_black(&rescue_buf_16bit) {
                 buf_16bit = rescue_buf_16bit;
                 break;
             }
         }
-        if quantized_rgb_is_all_zero(&buf_16bit) {
-            warn!("Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite");
+        if quantized_rgb_is_effectively_black(&buf_16bit) {
+            warn!(
+                "Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite"
+            );
             let rescue_levels = derive_rescue_levels_from_final_signal(
                 &composited,
                 resolved_config.clip_black,
@@ -1444,7 +1514,7 @@ fn render_final_frame_spectral_with_backend(
                 })?;
             normalize_rescue_display_buffer(&mut rescue_final_display);
             let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
-            if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+            if !quantized_rgb_is_effectively_black(&rescue_buf_16bit) {
                 buf_16bit = rescue_buf_16bit;
             }
         }
@@ -1504,7 +1574,13 @@ fn render_legacy_first_slice_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
-    let ctx = RenderContext::new_with_framing(width, height, scene.positions, aspect_correction, resolved_config.framing_zoom);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1940,10 +2016,8 @@ mod tests {
 
         normalize_rescue_display_buffer(&mut pixels);
 
-        let mut lumas: Vec<f64> = pixels
-            .iter()
-            .map(|&(r, g, b, _a)| constants::rec709_luminance(r, g, b))
-            .collect();
+        let mut lumas: Vec<f64> =
+            pixels.iter().map(|&(r, g, b, _a)| constants::rec709_luminance(r, g, b)).collect();
         let mean = lumas.iter().sum::<f64>() / lumas.len() as f64;
         lumas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let p95 = lumas[((lumas.len() as f64) * 0.95).floor() as usize]
@@ -1951,6 +2025,84 @@ mod tests {
 
         assert!(mean <= 0.15 + 1e-6, "mean luminance should be rescue-capped, got {mean}");
         assert!(p95 <= 0.38 + 1e-6, "p95 luminance should be rescue-capped, got {p95}");
+    }
+
+    #[test]
+    fn test_quantized_rgb_is_effectively_black_flags_empty_and_zero() {
+        assert!(quantized_rgb_is_effectively_black(&[]), "empty buffer must be treated as black");
+        let zeros = vec![0u16; 3 * 64 * 64];
+        assert!(
+            quantized_rgb_is_effectively_black(&zeros),
+            "all-zero buffer must be flagged as black"
+        );
+    }
+
+    #[test]
+    fn test_quantized_rgb_is_effectively_black_flags_speckled_near_black() {
+        // 99.99% of a 1080p canvas at pure black, with 300 pixels at a dim
+        // highlight (above the `RESCUE_MIN_VISIBLE_U16` threshold). Fewer
+        // than 0.05% of total 16-bit *samples* exceed the threshold, so the
+        // predicate must still flag this as black.
+        let width: usize = 1920;
+        let height: usize = 1080;
+        let mut buf = vec![0u16; 3 * width * height];
+        for i in 0..300 {
+            let base = i * 3;
+            buf[base] = 80;
+            buf[base + 1] = 70;
+            buf[base + 2] = 60;
+        }
+        assert!(
+            quantized_rgb_is_effectively_black(&buf),
+            "speckled near-black buffer must trigger rescue"
+        );
+    }
+
+    #[test]
+    fn test_quantized_rgb_is_effectively_black_passes_mid_grey() {
+        // A uniform mid-grey frame (~10% of the 16-bit range per channel)
+        // has a clear mean and plenty of visible samples -- no rescue
+        // should be triggered.
+        let width: usize = 512;
+        let height: usize = 512;
+        let buf = vec![6553u16; 3 * width * height];
+        assert!(
+            !quantized_rgb_is_effectively_black(&buf),
+            "mid-grey buffer must NOT be flagged as black"
+        );
+    }
+
+    #[test]
+    fn test_quantized_rgb_is_effectively_black_passes_bright_sparse() {
+        // A mostly-black frame with a very bright ~5% of visible samples is
+        // NOT flagged: 5% >> 0.05% crosses the visible-fraction floor, and
+        // the mean of ~0.05 * 30000 / channel ~= 1500 clears the mean floor.
+        let width: usize = 256;
+        let height: usize = 256;
+        let total_pixels = width * height;
+        let highlights = total_pixels / 20;
+        let mut buf = vec![0u16; 3 * total_pixels];
+        for i in 0..highlights {
+            let base = i * 3;
+            buf[base] = 30_000;
+            buf[base + 1] = 30_000;
+            buf[base + 2] = 30_000;
+        }
+        assert!(
+            !quantized_rgb_is_effectively_black(&buf),
+            "frame with 5% bright samples must NOT be flagged as black"
+        );
+    }
+
+    #[test]
+    fn test_quantized_rgb_is_effectively_black_flags_uniform_dim() {
+        // A uniform dim buffer at value 3 -- mean is below the 4/65535 floor
+        // even though every single pixel carries some signal.
+        let buf = vec![3u16; 3 * 64 * 64];
+        assert!(
+            quantized_rgb_is_effectively_black(&buf),
+            "uniformly dim buffer must trigger rescue on the mean floor"
+        );
     }
 
     #[test]
@@ -2316,7 +2468,7 @@ mod tests {
 
         let serial_single =
             render_legacy_first_slice_spectral_serial_reference(scene, &levels, settings)
-            .expect("serial single frame render should succeed");
+                .expect("serial single frame render should succeed");
         let serial_final = render_final_frame_spectral_serial_reference(scene, &levels, settings)
             .expect("serial final frame render should succeed");
 

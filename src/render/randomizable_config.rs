@@ -3,13 +3,13 @@
 //! This module defines the complete parameter space for effect configuration,
 //! with support for explicit user values or random generation.
 
+use super::BloomMode;
 use super::art_style::{ArtStyle, DriftCharacter, StyleBundle};
 use super::effect_randomizer::{EffectRandomizer, RandomizationLog, RandomizationRecord};
 use super::grade_presets::GradePreset;
 use super::hue_palette::HuePaletteMode;
 use super::nebula_presets::NebulaPalette;
 use super::parameter_descriptors as pd;
-use super::BloomMode;
 use crate::sim::Sha3RandomByteStream;
 
 /// Complete configuration for all randomizable effect parameters.
@@ -243,11 +243,8 @@ impl RandomizableEffectConfig {
         resolved.bloom_mode_choice = self.bloom_mode_choice.unwrap_or(bundle.bloom);
         resolved.drift_character = self.drift_character.unwrap_or(bundle.drift);
 
-        let mut style_record = RandomizationRecord::new(
-            "art_style".to_string(),
-            true,
-            self.art_style.is_none(),
-        );
+        let mut style_record =
+            RandomizationRecord::new("art_style".to_string(), true, self.art_style.is_none());
         style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
             name: "art_style".to_string(),
             value: style.name().to_string(),
@@ -306,14 +303,18 @@ impl RandomizableEffectConfig {
         resolved.starfield_strength = 0.0;
         resolved.lens_flare_strength = 0.0;
 
-        // Framing zoom: default tight (1.0), with 45% chance to pull back slightly
-        // (1.04..1.22) so the orbit breathes against the background. ArtStyle
-        // emphasis can further tune this below.
+        // Framing zoom: default tight (1.0) for close-crop museum classics,
+        // with a 55% chance to pull back modestly (1.05..1.25) so the orbit
+        // breathes against the background. The slight bias toward wider shots
+        // flattens the tight-vs-wide population and makes negative space the
+        // norm rather than the exception, while still leaving a strong tight
+        // population (variety.rs enforces both > 20 / 256). ArtStyle emphasis
+        // can further tune this below.
         resolved.framing_zoom = match self.framing_zoom {
             Some(v) => v.clamp(1.0, 2.0),
             None => {
-                if randomizer.randomize_enable(0.45) {
-                    1.04 + randomizer.random_unit() * 0.18
+                if randomizer.randomize_enable(0.55) {
+                    1.05 + randomizer.random_unit() * 0.20
                 } else {
                     1.0
                 }
@@ -912,8 +913,7 @@ impl RandomizableEffectConfig {
         let hdr_base =
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
         let style_bundle = resolved.art_style.bundle();
-        resolved.hdr_scale =
-            (hdr_base * style_bundle.hdr_scale_bias).clamp(0.04, 0.30);
+        resolved.hdr_scale = (hdr_base * style_bundle.hdr_scale_bias).clamp(0.04, 0.30);
         let nebula_base = self.resolve_float(
             "nebula_strength",
             self.nebula_strength,

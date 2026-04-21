@@ -14,8 +14,7 @@ use crate::generation_log::{
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     VideoEncodingOptions, constants, create_video_from_frames_singlepass,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    save_image_as_png_16bit,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};

@@ -106,17 +106,11 @@ fn wrap_hue(h: f64) -> f64 {
 pub fn hues_for_mode(mode: HuePaletteMode, rng: &mut Sha3RandomByteStream) -> [f64; 3] {
     let base = draw_unit(rng) * 360.0;
     match mode {
-        HuePaletteMode::Triadic => {
-            [wrap_hue(base), wrap_hue(base + 120.0), wrap_hue(base + 240.0)]
-        }
+        HuePaletteMode::Triadic => [wrap_hue(base), wrap_hue(base + 120.0), wrap_hue(base + 240.0)],
         HuePaletteMode::Complementary => {
             // Two opposite poles + a neutral midpoint.
             let jitter = (draw_unit(rng) - 0.5) * 12.0;
-            [
-                wrap_hue(base),
-                wrap_hue(base + 180.0 + jitter),
-                wrap_hue(base + 90.0 + jitter * 0.5),
-            ]
+            [wrap_hue(base), wrap_hue(base + 180.0 + jitter), wrap_hue(base + 90.0 + jitter * 0.5)]
         }
         HuePaletteMode::SplitComplementary => {
             // Primary + two hues flanking the complement.
@@ -204,10 +198,7 @@ mod tests {
             let mut rng = make_rng(seed);
             let hues = hues_for_mode(HuePaletteMode::Complementary, &mut rng);
             let d = wrap_distance(hues[0], hues[1]);
-            assert!(
-                (d - 180.0).abs() < 10.0,
-                "seed {seed} got d01 = {d} (hues = {hues:?})",
-            );
+            assert!((d - 180.0).abs() < 10.0, "seed {seed} got d01 = {d} (hues = {hues:?})",);
         }
     }
 
@@ -227,7 +218,12 @@ mod tests {
             let mut rng = make_rng(seed);
             let hues = hues_for_mode(HuePaletteMode::Duotone, &mut rng);
             let d02 = wrap_distance(hues[0], hues[2]);
-            assert!(d02 < 0.001, "duotone must repeat hue 0 on body 2, got {} vs {}", hues[0], hues[2]);
+            assert!(
+                d02 < 0.001,
+                "duotone must repeat hue 0 on body 2, got {} vs {}",
+                hues[0],
+                hues[2]
+            );
             let d01 = wrap_distance(hues[0], hues[1]);
             assert!(d01 > 130.0 && d01 < 185.0);
         }
@@ -247,8 +243,7 @@ mod tests {
     #[test]
     fn all_modes_have_distinct_names() {
         use std::collections::HashSet;
-        let names: HashSet<&'static str> =
-            HuePaletteMode::all().iter().map(|m| m.name()).collect();
+        let names: HashSet<&'static str> = HuePaletteMode::all().iter().map(|m| m.name()).collect();
         assert_eq!(names.len(), HuePaletteMode::all().len());
     }
 

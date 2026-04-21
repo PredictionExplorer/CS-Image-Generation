@@ -14,15 +14,18 @@ use three_body_problem::post_effects::{
     CinematicColorGrade, ColorGradeParams, EdgeLuminance, EdgeLuminanceConfig, FineTexture,
     FineTextureConfig, GlowEnhancement, GlowEnhancementConfig, GradientMap, GradientMapConfig,
     LensFlare, LensFlareConfig, MicroContrast, MicroContrastConfig, NebulaCloudConfig,
-    NebulaClouds, Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PixelBuffer,
-    PostEffect, Starfield, StarfieldConfig,
+    NebulaClouds, Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig,
+    PixelBuffer, PostEffect, Starfield, StarfieldConfig,
 };
 use three_body_problem::render::art_style::{ArtStyle, DriftCharacter};
+use three_body_problem::render::context::RenderContext;
 use three_body_problem::render::grade_presets::GradePreset;
 use three_body_problem::render::hue_palette::{HuePaletteMode, hues_for_mode};
 use three_body_problem::render::nebula_presets::NebulaPalette;
 use three_body_problem::render::randomizable_config::RandomizableEffectConfig;
 use three_body_problem::sim::Sha3RandomByteStream;
+
+use nalgebra::Vector3;
 
 const MIN_MASS: f64 = 100.0;
 const MAX_MASS: f64 = 300.0;
@@ -338,4 +341,86 @@ fn post_effect_configs_have_sensible_defaults() {
     let _ = NebulaCloudConfig::default();
     let _ = StarfieldConfig::default();
     let _ = LensFlareConfig::default();
+}
+
+// ---------------------------------------------------------------------------
+// Framing invariants: the orbit centroid must land at the image center, and
+// the world-to-pixel scale must be isotropic after aspect correction.
+// ---------------------------------------------------------------------------
+//
+// The rendering pipeline always turns on aspect correction now, so these two
+// invariants are the foundation of "images are centered" across every
+// supported resolution. A regression here (e.g. accidentally asymmetric
+// padding) would squish or off-center every future render.
+
+fn make_positions(points: &[(f64, f64)]) -> Vec<Vec<Vector3<f64>>> {
+    (0..3).map(|_| points.iter().map(|&(x, y)| Vector3::new(x, y, 0.0)).collect()).collect()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+    #[test]
+    fn centered_render_context_maps_bounds_midpoint_to_image_center(
+        min_x in -500.0f64..500.0,
+        max_x_offset in 1.0f64..400.0,
+        min_y in -500.0f64..500.0,
+        max_y_offset in 1.0f64..400.0,
+        target_w in 64u32..2560,
+        target_h in 64u32..2560,
+        zoom in 1.0f64..2.0,
+    ) {
+        let positions = make_positions(&[
+            (min_x, min_y),
+            (min_x + max_x_offset, min_y + max_y_offset),
+        ]);
+        let ctx = RenderContext::new_with_framing(target_w, target_h, &positions, true, zoom);
+        let bbox = ctx.bounds();
+        let cx_world = f64::midpoint(bbox.min_x, bbox.max_x);
+        let cy_world = f64::midpoint(bbox.min_y, bbox.max_y);
+        let (px, py) = ctx.to_pixel(cx_world, cy_world);
+
+        // The midpoint of the framing bbox must land within half a pixel of
+        // the image center. Half a pixel is the quantization floor for a
+        // world-to-pixel mapping done in f64 and cast to f32.
+        prop_assert!(
+            (f64::from(px) - f64::from(target_w) * 0.5).abs() <= 0.5,
+            "center X off at {target_w}x{target_h} zoom {zoom}: px={px}, expected ~{}",
+            f64::from(target_w) * 0.5
+        );
+        prop_assert!(
+            (f64::from(py) - f64::from(target_h) * 0.5).abs() <= 0.5,
+            "center Y off at {target_w}x{target_h} zoom {zoom}: py={py}, expected ~{}",
+            f64::from(target_h) * 0.5
+        );
+    }
+
+    #[test]
+    fn proportional_scale_after_aspect_correction_is_isotropic(
+        min_x in -500.0f64..500.0,
+        max_x_offset in 1.0f64..400.0,
+        min_y in -500.0f64..500.0,
+        max_y_offset in 1.0f64..400.0,
+        target_w in 64u32..2560,
+        target_h in 64u32..2560,
+    ) {
+        let positions = make_positions(&[
+            (min_x, min_y),
+            (min_x + max_x_offset, min_y + max_y_offset),
+        ]);
+        let ctx = RenderContext::new_with_framing(target_w, target_h, &positions, true, 1.0);
+        let bbox = ctx.bounds();
+
+        let scale_x = bbox.width / f64::from(target_w);
+        let scale_y = bbox.height / f64::from(target_h);
+        let rel = (scale_x - scale_y).abs() / scale_x.max(scale_y).max(1e-12);
+
+        // Aspect correction pads the shorter axis of the bounding box so the
+        // world-to-pixel scale is identical on x and y. Any relative mismatch
+        // above 1e-6 means the image will be subtly stretched.
+        prop_assert!(
+            rel <= 1e-6,
+            "isotropy broken at {target_w}x{target_h}: scale_x={scale_x}, scale_y={scale_y}, rel={rel}",
+        );
+    }
 }
