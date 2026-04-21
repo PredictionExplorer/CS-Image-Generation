@@ -211,20 +211,12 @@ impl CuratedChoices {
         let finish_cluster = weighted_pick(
             randomizer,
             &[
-                (FinishCluster::Crisp, 46),
-                (FinishCluster::Balanced, 36),
-                (FinishCluster::Velvet, 18),
+                (FinishCluster::Crisp, 50),
+                (FinishCluster::Balanced, 38),
+                (FinishCluster::Velvet, 12),
             ],
         );
-        let grade_family = weighted_pick(
-            randomizer,
-            &[
-                (GradeFamily::Filmic, 34),
-                (GradeFamily::Jewel, 30),
-                (GradeFamily::Graphic, 18),
-                (GradeFamily::Atmospheric, 18),
-            ],
-        );
+        let grade_family = grade_family_for(randomizer, composition_mode, finish_cluster);
 
         let grade_candidates = grade_family.grade_candidates();
         let grade_preset = grade_candidates[random_index(randomizer, grade_candidates.len())];
@@ -367,11 +359,11 @@ fn composition_profile(
 
 fn drift_profile(mode: CompositionMode) -> (f64, f64, f64) {
     match mode {
-        CompositionMode::CenteredMonument => (0.90, 0.88, 1.00),
-        CompositionMode::WideStage => (0.96, 1.02, 1.01),
-        CompositionMode::OffAxisTension => (1.08, 1.12, 1.03),
+        CompositionMode::CenteredMonument => (0.70, 0.55, 0.98),
+        CompositionMode::WideStage => (0.82, 0.78, 1.00),
+        CompositionMode::OffAxisTension => (0.76, 0.72, 1.00),
         CompositionMode::DiagonalSweep => (1.12, 1.18, 1.05),
-        CompositionMode::IntimateFocus => (0.92, 0.84, 0.98),
+        CompositionMode::IntimateFocus => (0.74, 0.62, 0.96),
     }
 }
 
@@ -406,53 +398,93 @@ fn finish_profile(
         ),
         FinishCluster::Balanced => (
             EnableProbabilities {
-                bloom: 0.24,
-                glow: 0.48,
-                chromatic_bloom: 0.12,
+                bloom: 0.22,
+                glow: 0.42,
+                chromatic_bloom: 0.10,
                 perceptual_blur: 0.03,
                 micro_contrast: 0.92,
                 gradient_map: 0.16,
-                color_grade: 0.74,
+                color_grade: 0.78,
                 champleve: 0.22,
                 aether: 0.28,
                 opalescence: 0.20,
-                edge_luminance: 0.70,
+                edge_luminance: 0.76,
                 atmospheric_depth: 0.10,
                 fine_texture: 0.52,
             },
-            0.95,
-            1.08,
+            0.90,
+            1.10,
             1.00,
             1.00,
             1.02,
             1.00,
-            0.50,
+            0.54,
         ),
         FinishCluster::Velvet => (
             EnableProbabilities {
-                bloom: 0.32,
-                glow: 0.62,
-                chromatic_bloom: 0.18,
-                perceptual_blur: 0.08,
-                micro_contrast: 0.72,
-                gradient_map: 0.20,
-                color_grade: 0.68,
+                bloom: 0.22,
+                glow: 0.40,
+                chromatic_bloom: 0.10,
+                perceptual_blur: 0.05,
+                micro_contrast: 0.80,
+                gradient_map: 0.08,
+                color_grade: 0.84,
                 champleve: 0.26,
                 aether: 0.36,
                 opalescence: 0.24,
-                edge_luminance: 0.42,
-                atmospheric_depth: 0.16,
-                fine_texture: 0.32,
+                edge_luminance: 0.58,
+                atmospheric_depth: 0.10,
+                fine_texture: 0.22,
             },
-            1.08,
-            0.94,
-            0.95,
+            1.02,
+            0.98,
+            0.98,
             0.90,
             0.94,
-            0.88,
+            0.82,
             0.58,
         ),
     }
+}
+
+fn grade_family_for(
+    randomizer: &mut EffectRandomizer<'_>,
+    composition_mode: CompositionMode,
+    finish_cluster: FinishCluster,
+) -> GradeFamily {
+    let weighted: &[(GradeFamily, u32)] = match finish_cluster {
+        FinishCluster::Crisp => &[
+            (GradeFamily::Filmic, 38),
+            (GradeFamily::Graphic, 26),
+            (GradeFamily::Jewel, 24),
+            (GradeFamily::Atmospheric, 12),
+        ],
+        FinishCluster::Balanced => &[
+            (GradeFamily::Filmic, 36),
+            (GradeFamily::Jewel, 24),
+            (GradeFamily::Graphic, 14),
+            (GradeFamily::Atmospheric, 26),
+        ],
+        FinishCluster::Velvet => &[
+            (GradeFamily::Filmic, 34),
+            (GradeFamily::Jewel, 12),
+            (GradeFamily::Graphic, 4),
+            (GradeFamily::Atmospheric, 50),
+        ],
+    };
+    let mut family = weighted_pick(randomizer, weighted);
+
+    if matches!(composition_mode, CompositionMode::OffAxisTension | CompositionMode::IntimateFocus)
+        && family == GradeFamily::Graphic
+        && finish_cluster != FinishCluster::Crisp
+    {
+        family = GradeFamily::Filmic;
+    }
+    if composition_mode == CompositionMode::IntimateFocus && family == GradeFamily::Jewel {
+        family = GradeFamily::Atmospheric;
+    }
+
+    family
 }
 
 fn surface_preset(randomizer: &mut EffectRandomizer<'_>, cluster: FinishCluster) -> SurfacePreset {
@@ -557,6 +589,31 @@ mod tests {
             assert!(choices.vignette_offset_x.abs() <= 0.22);
             assert!(choices.vignette_offset_y.abs() <= 0.16);
             assert!(choices.gradient_palette_index <= 14);
+        }
+    }
+
+    #[test]
+    fn centered_and_intimate_modes_keep_drift_calmer_than_diagonal() {
+        let centered = drift_profile(CompositionMode::CenteredMonument);
+        let intimate = drift_profile(CompositionMode::IntimateFocus);
+        let diagonal = drift_profile(CompositionMode::DiagonalSweep);
+
+        assert!(centered.0 < diagonal.0);
+        assert!(centered.1 < diagonal.1);
+        assert!(intimate.0 < diagonal.0);
+        assert!(intimate.1 < diagonal.1);
+    }
+
+    #[test]
+    fn softer_off_center_modes_avoid_graphic_family() {
+        let mut randomizer = make_randomizer(17);
+        for _ in 0..128 {
+            let family = grade_family_for(
+                &mut randomizer,
+                CompositionMode::OffAxisTension,
+                FinishCluster::Velvet,
+            );
+            assert_ne!(family, GradeFamily::Graphic);
         }
     }
 }

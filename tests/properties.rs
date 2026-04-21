@@ -56,9 +56,9 @@ proptest! {
         prop_assert!(resolved.vignette_offset_y >= pd::VIGNETTE_OFFSET_Y.min);
         prop_assert!(resolved.vignette_offset_y <= pd::VIGNETTE_OFFSET_Y.max);
         prop_assert!(resolved.gradient_map_palette <= pd::GRADIENT_MAP_PALETTE.max);
-        prop_assert!(resolved.drift_scale_bias >= 0.85 && resolved.drift_scale_bias <= 1.15);
-        prop_assert!(resolved.drift_arc_bias >= 0.80 && resolved.drift_arc_bias <= 1.20);
-        prop_assert!(resolved.drift_eccentricity_bias >= 0.95 && resolved.drift_eccentricity_bias <= 1.08);
+        prop_assert!(resolved.drift_scale_bias >= 0.70 && resolved.drift_scale_bias <= 1.12);
+        prop_assert!(resolved.drift_arc_bias >= 0.55 && resolved.drift_arc_bias <= 1.20);
+        prop_assert!(resolved.drift_eccentricity_bias >= 0.95 && resolved.drift_eccentricity_bias <= 1.05);
         prop_assert!(resolved.fine_texture_anisotropy >= 0.0 && resolved.fine_texture_anisotropy <= 1.0);
         prop_assert!(resolved.fine_texture_angle.is_finite());
         prop_assert!(resolved.champleve_cell_density > 0.0);

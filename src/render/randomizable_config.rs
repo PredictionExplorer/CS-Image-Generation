@@ -1325,11 +1325,40 @@ fn apply_conflict_detection(
         }
     }
 
+    if config.finish_cluster == FinishCluster::Velvet
+        && config.enable_gradient_map
+        && !config.enable_color_grade
+    {
+        config.enable_gradient_map = false;
+        adjustments.push(
+            "Quality guard: Disabled gradient_map for velvet finish without color grade, avoiding flat graphic haze"
+                .to_string(),
+        );
+    }
+
+    if config.finish_cluster == FinishCluster::Velvet && config.enable_glow && !config.enable_bloom {
+        let original_glow_strength = config.glow_strength;
+        let original_glow_radius_scale = config.glow_radius_scale;
+        config.glow_strength = config.glow_strength.min(0.24);
+        config.glow_radius_scale = config.glow_radius_scale.min(0.0030);
+        if (config.glow_strength - original_glow_strength).abs() > f64::EPSILON
+            || (config.glow_radius_scale - original_glow_radius_scale).abs() > f64::EPSILON
+        {
+            adjustments.push(format!(
+                "Quality guard: Soft-capped glow for velvet finish without bloom (strength: {:.3} -> {:.3}, radius: {:.4} -> {:.4})",
+                original_glow_strength,
+                config.glow_strength,
+                original_glow_radius_scale,
+                config.glow_radius_scale
+            ));
+        }
+    }
+
     // ============================================================================
     // QUALITY GUARD 4: Limit softness stacks and turn on detail rescue
     // ============================================================================
     let softness_score = softness_stack_score(&config);
-    if softness_score >= 2.0 {
+    if softness_score >= 1.5 {
         let original_micro_enabled = config.enable_micro_contrast;
         let original_edge_enabled = config.enable_edge_luminance;
         let original_dog_strength = config.dog_strength;
@@ -1393,7 +1422,7 @@ fn apply_conflict_detection(
     // ============================================================================
     // QUALITY GUARD 5: Remove redundant perceptual blur from extreme softness stacks
     // ============================================================================
-    if softness_score >= 2.6 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
+    if softness_score >= 2.3 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
         config.enable_perceptual_blur = false;
         adjustments.push(format!(
             "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {softness_score:.2})"
@@ -1796,8 +1825,11 @@ mod tests {
         }
     }
 
-    /// Test that per-effect enable probabilities produce statistically correct distributions.
-    /// Runs many resolutions and verifies each effect's enable rate matches its probability.
+    /// Test that curated effect-enable rates stay within healthy statistical bands.
+    ///
+    /// The curation layer intentionally biases these probabilities, so this test
+    /// asserts broad, meaningful ranges rather than matching the raw descriptor
+    /// constants exactly.
     #[test]
     fn test_effect_enable_probabilities_statistical() {
         let n = 500;
@@ -1850,29 +1882,28 @@ mod tests {
             }
         }
 
-        let check = |name: &str, expected_prob: f64, tolerance: f64| {
+        let check = |name: &str, min_rate: f64, max_rate: f64| {
             let count = *counts.get(name).unwrap_or(&0) as f64;
             let rate = count / f64::from(n);
             assert!(
-                (rate - expected_prob).abs() < tolerance,
-                "{name}: rate {rate:.3} deviates from expected {expected_prob:.2} by more than {tolerance:.2}",
+                (min_rate..=max_rate).contains(&rate),
+                "{name}: rate {rate:.3} outside expected [{min_rate:.2}, {max_rate:.2}]",
             );
         };
 
-        let default_tolerance = 0.12; // generous tolerance for 500 samples
-        check("bloom", pd::ENABLE_PROB_BLOOM, default_tolerance);
-        check("glow", pd::ENABLE_PROB_GLOW, default_tolerance);
-        check("chromatic_bloom", pd::ENABLE_PROB_CHROMATIC_BLOOM * pd::ENABLE_PROB_BLOOM, 0.06);
-        check("perceptual_blur", pd::ENABLE_PROB_PERCEPTUAL_BLUR, default_tolerance);
-        check("micro_contrast", pd::ENABLE_PROB_MICRO_CONTRAST, default_tolerance);
-        check("gradient_map", pd::ENABLE_PROB_GRADIENT_MAP, default_tolerance);
-        check("color_grade", pd::ENABLE_PROB_COLOR_GRADE, default_tolerance);
-        check("champleve", pd::ENABLE_PROB_CHAMPLEVE, default_tolerance);
-        check("aether", pd::ENABLE_PROB_AETHER, default_tolerance);
-        check("opalescence", pd::ENABLE_PROB_OPALESCENCE, default_tolerance);
-        check("edge_luminance", pd::ENABLE_PROB_EDGE_LUMINANCE, default_tolerance);
-        check("atmospheric_depth", pd::ENABLE_PROB_ATMOSPHERIC_DEPTH, default_tolerance);
-        check("fine_texture", pd::ENABLE_PROB_FINE_TEXTURE, default_tolerance);
+        check("bloom", 0.12, 0.30);
+        check("glow", 0.22, 0.50);
+        check("chromatic_bloom", 0.01, 0.14);
+        check("perceptual_blur", 0.0, 0.05);
+        check("micro_contrast", 0.75, 1.0);
+        check("gradient_map", 0.05, 0.22);
+        check("color_grade", 0.65, 0.90);
+        check("champleve", 0.10, 0.32);
+        check("aether", 0.14, 0.42);
+        check("opalescence", 0.10, 0.30);
+        check("edge_luminance", 0.55, 0.90);
+        check("atmospheric_depth", 0.04, 0.18);
+        check("fine_texture", 0.15, 0.60);
     }
 
     /// Test that explicit enable values always override the probability.
@@ -1971,6 +2002,44 @@ mod tests {
                     .iter()
                     .any(|parameter| parameter.value.contains("Disabled perceptual_blur"))
         }));
+    }
+
+    #[test]
+    fn test_velvet_finish_disables_gradient_map_without_grade() {
+        let config = ResolvedEffectConfig {
+            finish_cluster: FinishCluster::Velvet,
+            enable_gradient_map: true,
+            enable_color_grade: false,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        assert!(!result.enable_gradient_map, "velvet finish should not keep ungraded gradient map");
+        assert!(log.effects.iter().any(|record| {
+            record.effect_name == "render_constraints"
+                && record
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.value.contains("Disabled gradient_map"))
+        }));
+    }
+
+    #[test]
+    fn test_velvet_finish_soft_caps_glow_without_bloom() {
+        let config = ResolvedEffectConfig {
+            finish_cluster: FinishCluster::Velvet,
+            enable_glow: true,
+            enable_bloom: false,
+            glow_strength: 0.31,
+            glow_radius_scale: 0.0038,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+        assert!(result.glow_strength <= 0.24);
+        assert!(result.glow_radius_scale <= 0.0030);
     }
 
     /// Test that vibrance always falls within the curated range [1.10, 1.35].
