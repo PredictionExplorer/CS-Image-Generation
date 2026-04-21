@@ -709,13 +709,13 @@ mod tests {
 
         let image = match mode {
             PipelineRenderMode::DefaultParallel => {
-                render::render_single_frame_spectral(scene, &levels, settings)
+                render::render_final_frame_spectral(scene, &levels, settings)
             }
             PipelineRenderMode::SerialReference => {
-                render::render_single_frame_spectral_serial_reference(scene, &levels, settings)
+                render::render_final_frame_spectral_serial_reference(scene, &levels, settings)
             }
         }
-        .expect("render should succeed");
+        .expect("full pipeline should render the final accumulated frame");
 
         image.into_raw()
     }
@@ -730,6 +730,18 @@ mod tests {
     }
 
     #[test]
+    fn test_end_to_end_pipeline_renders_non_black_final_frame() {
+        for seed in [[0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
+            let pixels = run_full_pipeline(&seed, PipelineRenderMode::DefaultParallel);
+            let energy: u64 = pixels.iter().map(|&value| u64::from(value)).sum();
+            assert!(
+                energy > 0,
+                "full pipeline produced an all-zero final frame for seed {seed:02X?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_setup_seed_directory_returns_correct_path() {
         let result = setup_seed_directory("test_seed_42");
         assert!(result.is_ok());
@@ -738,6 +750,15 @@ mod tests {
         assert!(std::path::Path::new("output/test_seed_42").is_dir());
         assert!(std::path::Path::new("output/test_seed_42/spectral").is_dir());
         let _ = fs::remove_dir_all("output/test_seed_42");
+    }
+
+    #[test]
+    fn test_setup_seed_directory_with_default_output_name_is_explicit() {
+        let result = setup_seed_directory("output");
+        assert!(result.is_ok());
+        let seed_dir = result.expect("default output directory name should be valid");
+        assert_eq!(seed_dir, "output/output");
+        let _ = fs::remove_dir_all("output/output");
     }
 
     #[test]

@@ -15,7 +15,9 @@
 //! distinct styles appear across seeds).
 
 use std::collections::HashMap;
+use std::fs;
 
+use image::{ImageBuffer, Rgb};
 use three_body_problem::app::{
     Enhancements, apply_drift_transformation, generate_colors_with_mode, simulate_best_orbit,
 };
@@ -25,6 +27,7 @@ use three_body_problem::render::randomizable_config::RandomizableEffectConfig;
 use three_body_problem::render::{
     ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     histogram, pass_1_build_histogram_spectral, render_final_frame_spectral,
+    save_image_as_png_16bit,
 };
 use three_body_problem::sim::{Sha3RandomByteStream, select_best_trajectory};
 
@@ -184,6 +187,34 @@ fn pinned_seeds_produce_deterministic_output() {
             "seed 0x{seed:016x} produced an all-zero canvas (total energy 0)"
         );
     }
+}
+
+#[test]
+fn pinned_final_frame_round_trips_through_png_without_going_black() {
+    let seed = 0x0000_0000_DEAD_BEEFu64;
+    let run = run_full_render(&seed_from_u64(seed));
+
+    let image = ImageBuffer::<Rgb<u16>, Vec<u16>>::from_raw(WIDTH, HEIGHT, run.pixels.clone())
+        .expect("raw render pixels should form a valid 16-bit RGB image");
+    let temp_dir =
+        std::env::temp_dir().join(format!("three_body_png_roundtrip_{}_{}", std::process::id(), seed));
+    fs::create_dir_all(&temp_dir).expect("temp output dir should be creatable");
+    let png_path = temp_dir.join("image.png");
+    let png_path_str = png_path.to_string_lossy().into_owned();
+
+    save_image_as_png_16bit(&image, &png_path_str).expect("PNG save should succeed");
+
+    let loaded = image::open(&png_path)
+        .expect("saved PNG should be readable")
+        .into_rgb16();
+    let roundtrip_energy: u64 = loaded.into_raw().into_iter().map(u64::from).sum();
+    assert!(
+        roundtrip_energy > 0,
+        "round-tripped PNG for seed 0x{seed:016x} should retain non-zero image energy"
+    );
+
+    let _ = fs::remove_file(&png_path);
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 // ---------------------------------------------------------------------------

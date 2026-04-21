@@ -13,7 +13,7 @@ use crate::utils::f64_to_usize_saturating;
 use nalgebra::Vector3;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// When true, tonemapping uses the `AgX` punchy output matrix instead of default `AgX`.
 pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -351,6 +351,93 @@ fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
         chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
     });
     buf_16bit
+}
+
+#[inline]
+fn quantized_rgb_is_all_zero(buf_16bit: &[u16]) -> bool {
+    buf_16bit.iter().all(|&v| v == 0)
+}
+
+fn normalize_rescue_display_buffer(pixels: &mut PixelBuffer) {
+    const TARGET_MEAN_LUMA: f64 = 0.15;
+    const TARGET_P95_LUMA: f64 = 0.38;
+
+    if pixels.is_empty() {
+        return;
+    }
+
+    let mut lumas = Vec::with_capacity(pixels.len());
+    let mut sum = 0.0;
+    for &(r, g, b, _a) in pixels.iter() {
+        let luma = constants::rec709_luminance(r, g, b);
+        lumas.push(luma);
+        sum += luma;
+    }
+    let mean = sum / pixels.len() as f64;
+    lumas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p95_idx = ((lumas.len() as f64) * 0.95).floor() as usize;
+    let p95 = lumas[p95_idx.min(lumas.len().saturating_sub(1))];
+
+    let mut scale: f64 = 1.0;
+    if mean > TARGET_MEAN_LUMA {
+        scale = scale.min(TARGET_MEAN_LUMA / mean);
+    }
+    if p95 > TARGET_P95_LUMA {
+        scale = scale.min(TARGET_P95_LUMA / p95);
+    }
+
+    if scale < 1.0 {
+        for pixel in pixels.iter_mut() {
+            pixel.0 *= scale;
+            pixel.1 *= scale;
+            pixel.2 *= scale;
+        }
+    }
+}
+
+fn derive_rescue_levels_from_final_signal(
+    pixels: &PixelBuffer,
+    clip_black: f64,
+    clip_white: f64,
+    paper_white: f64,
+    highlight_rolloff: f64,
+) -> ChannelLevels {
+    let mut histogram = HistogramData::with_capacity(pixels.len());
+    histogram.reserve(pixels.len());
+    for &(r, g, b, a) in pixels {
+        histogram.push(r * a, g * a, b * a);
+    }
+    let analysis = histogram::analyze_tonemapping(histogram.data(), clip_black, clip_white);
+    ChannelLevels::with_tone_mapping(
+        analysis.black_r,
+        analysis.white_r,
+        analysis.black_g,
+        analysis.white_g,
+        analysis.black_b,
+        analysis.white_b,
+        ToneMappingControls {
+            exposure_scale: analysis.exposure_scale,
+            paper_white,
+            highlight_rolloff,
+        },
+    )
+}
+
+#[inline]
+fn levels_with_exposure_multiplier(levels: &ChannelLevels, multiplier: f64) -> ChannelLevels {
+    ChannelLevels::with_tone_mapping(
+        levels.black[0],
+        levels.black[0] + levels.range[0],
+        levels.black[1],
+        levels.black[1] + levels.range[1],
+        levels.black[2],
+        levels.black[2] + levels.range[2],
+        ToneMappingControls {
+            exposure_scale: levels.exposure_scale * multiplier,
+            paper_white: levels.paper_white,
+            highlight_rolloff: levels.highlight_rolloff,
+        },
+    )
 }
 
 // ====================== HELPER FUNCTIONS ===========================
@@ -1135,12 +1222,6 @@ fn pass_2_write_frames_spectral_with_backend(
 
         let composited = composite_buffers(nebula_ref, &trajectory_pixels);
 
-        // Reclaim the trajectory buffer's allocation back into accum_rgba.
-        // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
-        // so we just need the capacity -- no need to clear or resize.
-        trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
-        accum_rgba = trajectory_pixels;
-
         let display_buffer = tonemap_to_display_buffer(&composited, levels);
         let smoothed_display = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(display_buffer),
@@ -1153,13 +1234,60 @@ fn pass_2_write_frames_spectral_with_backend(
                 effect_name: "image_chain".into(),
                 reason: e.to_string(),
             })?;
-        let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
+        let mut buf_16bit = quantize_display_buffer_to_16bit(&final_display);
+        if checkpoint_step + 1 == total_steps && quantized_rgb_is_all_zero(&buf_16bit) {
+            warn!("Final video frame quantized to all-zero RGB; attempting minimal black-frame rescue");
+            for multiplier in [1.5, 2.0, 3.0, 4.0, 6.0] {
+                let rescue_levels = levels_with_exposure_multiplier(levels, multiplier);
+                let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
+                let mut rescue_final_display = finish_pipeline
+                    .process_image(rescue_display, width as usize, height as usize, &frame_params)
+                    .map_err(|e| RenderError::EffectChain {
+                        effect_name: "image_chain".into(),
+                        reason: format!("black-frame rescue failed: {e}"),
+                    })?;
+                normalize_rescue_display_buffer(&mut rescue_final_display);
+                let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
+                if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                    buf_16bit = rescue_buf_16bit;
+                    break;
+                }
+            }
+            if quantized_rgb_is_all_zero(&buf_16bit) {
+                warn!("Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite");
+                let rescue_levels = derive_rescue_levels_from_final_signal(
+                    &composited,
+                    resolved_config.clip_black,
+                    resolved_config.clip_white,
+                    levels.paper_white,
+                    levels.highlight_rolloff,
+                );
+                let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
+                let mut rescue_final_display = finish_pipeline
+                    .process_image(rescue_display, width as usize, height as usize, &frame_params)
+                    .map_err(|e| RenderError::EffectChain {
+                        effect_name: "image_chain".into(),
+                        reason: format!("black-frame rescue failed: {e}"),
+                    })?;
+                normalize_rescue_display_buffer(&mut rescue_final_display);
+                let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
+                if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                    buf_16bit = rescue_buf_16bit;
+                }
+            }
+        }
         let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
         frame_sink(buf_bytes)?;
         if checkpoint_step + 1 == total_steps {
             *last_frame_out = ImageBuffer::from_raw(width, height, buf_16bit);
         }
+
+        // Reclaim the trajectory buffer's allocation back into accum_rgba.
+        // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
+        // so we just need the capacity -- no need to clear or resize.
+        trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
+        accum_rgba = trajectory_pixels;
 
         step_start = checkpoint_step + 1;
     }
@@ -1279,7 +1407,48 @@ fn render_final_frame_spectral_with_backend(
             effect_name: "image_chain".into(),
             reason: e.to_string(),
         })?;
-    let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
+    let mut buf_16bit = quantize_display_buffer_to_16bit(&final_display);
+    if quantized_rgb_is_all_zero(&buf_16bit) {
+        warn!("Final accumulated still frame quantized to all-zero RGB; attempting minimal black-frame rescue");
+        for multiplier in [1.5, 2.0, 3.0, 4.0, 6.0] {
+            let rescue_levels = levels_with_exposure_multiplier(levels, multiplier);
+            let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
+            let mut rescue_final_display = finish_pipeline
+                .process_image(rescue_display, width as usize, height as usize, &frame_params)
+                .map_err(|e| RenderError::EffectChain {
+                    effect_name: "image_chain".into(),
+                    reason: format!("black-frame rescue failed: {e}"),
+                })?;
+            normalize_rescue_display_buffer(&mut rescue_final_display);
+            let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
+            if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                buf_16bit = rescue_buf_16bit;
+                break;
+            }
+        }
+        if quantized_rgb_is_all_zero(&buf_16bit) {
+            warn!("Minimal black-frame rescue failed; retrying with levels derived from the fully accumulated composite");
+            let rescue_levels = derive_rescue_levels_from_final_signal(
+                &composited,
+                resolved_config.clip_black,
+                resolved_config.clip_white,
+                levels.paper_white,
+                levels.highlight_rolloff,
+            );
+            let rescue_display = tonemap_to_display_buffer(&composited, &rescue_levels);
+            let mut rescue_final_display = finish_pipeline
+                .process_image(rescue_display, width as usize, height as usize, &frame_params)
+                .map_err(|e| RenderError::EffectChain {
+                    effect_name: "image_chain".into(),
+                    reason: format!("black-frame rescue failed: {e}"),
+                })?;
+            normalize_rescue_display_buffer(&mut rescue_final_display);
+            let rescue_buf_16bit = quantize_display_buffer_to_16bit(&rescue_final_display);
+            if !quantized_rgb_is_all_zero(&rescue_buf_16bit) {
+                buf_16bit = rescue_buf_16bit;
+            }
+        }
+    }
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
         reason: "Failed to create 16-bit image buffer".into(),
@@ -1287,14 +1456,19 @@ fn render_final_frame_spectral_with_backend(
 }
 
 // ====================== SINGLE FRAME RENDERING ===========================
-/// Render the first timeline slice only for tests.
+/// Render only the first video-interval timeline slice.
+///
+/// This is a legacy preview helper kept strictly for tests that need to
+/// compare "early slice" output against the fully accumulated final frame.
+/// It is intentionally *not* the renderer callers should use when they want
+/// the real still image for QA or end-to-end pipeline validation.
 #[cfg(test)]
-pub(crate) fn render_single_frame_spectral(
+pub(crate) fn render_legacy_first_slice_spectral(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    render_single_frame_spectral_with_backend(
+    render_legacy_first_slice_spectral_with_backend(
         scene,
         levels,
         settings,
@@ -1303,12 +1477,12 @@ pub(crate) fn render_single_frame_spectral(
 }
 
 #[cfg(test)]
-pub(crate) fn render_single_frame_spectral_serial_reference(
+pub(crate) fn render_legacy_first_slice_spectral_serial_reference(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    render_single_frame_spectral_with_backend(
+    render_legacy_first_slice_spectral_with_backend(
         scene,
         levels,
         settings,
@@ -1317,7 +1491,7 @@ pub(crate) fn render_single_frame_spectral_serial_reference(
 }
 
 #[cfg(test)]
-fn render_single_frame_spectral_with_backend(
+fn render_legacy_first_slice_spectral_with_backend(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
@@ -1746,6 +1920,40 @@ mod tests {
     }
 
     #[test]
+    fn test_tonemap_alpha_attenuates_low_coverage_input() {
+        let levels = default_levels();
+        let with_full_alpha = tonemap_core(0.18, 0.12, 0.09, 1.0, &levels);
+        let with_partial_alpha = tonemap_core(0.18, 0.12, 0.09, 0.25, &levels);
+
+        for (full, partial) in with_full_alpha.into_iter().zip(with_partial_alpha) {
+            assert!(
+                partial < full,
+                "lower alpha should attenuate the same RGB sample under the shipping tonemap: {partial} !< {full}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_normalize_rescue_display_buffer_caps_mean_and_p95_luma() {
+        let mut pixels: PixelBuffer = vec![(0.55, 0.55, 0.55, 1.0); 95];
+        pixels.extend(vec![(0.95, 0.92, 0.90, 1.0); 5]);
+
+        normalize_rescue_display_buffer(&mut pixels);
+
+        let mut lumas: Vec<f64> = pixels
+            .iter()
+            .map(|&(r, g, b, _a)| constants::rec709_luminance(r, g, b))
+            .collect();
+        let mean = lumas.iter().sum::<f64>() / lumas.len() as f64;
+        lumas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p95 = lumas[((lumas.len() as f64) * 0.95).floor() as usize]
+            .min(*lumas.last().expect("non-empty luminance vector"));
+
+        assert!(mean <= 0.15 + 1e-6, "mean luminance should be rescue-capped, got {mean}");
+        assert!(p95 <= 0.38 + 1e-6, "p95 luminance should be rescue-capped, got {p95}");
+    }
+
+    #[test]
     fn test_tonemap_reserves_paper_white_headroom() {
         let levels = ChannelLevels::with_tone_mapping(
             0.0,
@@ -2074,7 +2282,7 @@ mod tests {
         let body_alphas = vec![1.0, 1.0, 1.0];
         let levels = ChannelLevels::new(0.0, 0.05, 0.0, 0.05, 0.0, 0.05);
 
-        let single_frame = render_single_frame_spectral(
+        let single_frame = render_legacy_first_slice_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             &levels,
             SpectralRenderSettings::new(&resolved, &render_config, 7, false),
@@ -2106,7 +2314,8 @@ mod tests {
         let settings = SpectralRenderSettings::new(&resolved, &render_config, 29, false);
         let levels = ChannelLevels::new(0.0, 0.12, 0.0, 0.12, 0.0, 0.12);
 
-        let serial_single = render_single_frame_spectral_serial_reference(scene, &levels, settings)
+        let serial_single =
+            render_legacy_first_slice_spectral_serial_reference(scene, &levels, settings)
             .expect("serial single frame render should succeed");
         let serial_final = render_final_frame_spectral_serial_reference(scene, &levels, settings)
             .expect("serial final frame render should succeed");
@@ -2118,7 +2327,7 @@ mod tests {
                 .expect("thread pool should build")
                 .install(|| {
                     (
-                        render_single_frame_spectral(scene, &levels, settings)
+                        render_legacy_first_slice_spectral(scene, &levels, settings)
                             .expect("parallel single frame render should succeed"),
                         render_final_frame_spectral(scene, &levels, settings)
                             .expect("parallel final frame render should succeed"),
