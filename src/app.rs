@@ -150,13 +150,6 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
 }
 
-/// Derive noise seed from simulation seed for nebula generation
-#[must_use]
-pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
-    let get_or_zero = |idx| seed_bytes.get(idx).copied().unwrap_or(0);
-    i32::from_le_bytes([get_or_zero(0), get_or_zero(1), get_or_zero(2), get_or_zero(3)])
-}
-
 /// Run Borda selection to find the best orbit
 pub fn run_borda_selection(
     rng: &mut Sha3RandomByteStream,
@@ -193,12 +186,25 @@ pub fn apply_drift_transformation(
     drift_scale: Option<f64>,
     drift_arc_fraction: Option<f64>,
     drift_orbit_eccentricity: Option<f64>,
+    drift_scale_bias: f64,
+    drift_arc_fraction_bias: f64,
+    drift_orbit_eccentricity_bias: f64,
     rng: &mut Sha3RandomByteStream,
 ) -> Result<Option<ResolvedDriftConfig>> {
     info!("STAGE 2.5/7: Resolving drift configuration...");
 
-    let resolved =
+    let mut resolved =
         resolve_drift_config(drift_scale, drift_arc_fraction, drift_orbit_eccentricity, rng)?;
+    if drift_scale.is_none() {
+        resolved.scale = (resolved.scale * drift_scale_bias).clamp(0.8, 2.2);
+    }
+    if drift_arc_fraction.is_none() {
+        resolved.arc_fraction = (resolved.arc_fraction * drift_arc_fraction_bias).clamp(0.0, 0.8);
+    }
+    if drift_orbit_eccentricity.is_none() {
+        resolved.orbit_eccentricity =
+            (resolved.orbit_eccentricity * drift_orbit_eccentricity_bias).clamp(0.35, 0.65);
+    }
 
     info!("Applying {} drift...", drift_mode);
     let num_steps = positions[0].len();
@@ -240,7 +246,6 @@ pub fn build_histogram_and_levels(
     colors: &[Vec<render::OklabColor>],
     body_alphas: &[f64],
     resolved_config: &render::randomizable_config::ResolvedEffectConfig,
-    noise_seed: i32,
     render_config: &RenderConfig,
     aspect_correction: bool,
 ) -> Result<ChannelLevels> {
@@ -252,7 +257,7 @@ pub fn build_histogram_and_levels(
     let histogram = pass_1_build_histogram_spectral(
         SpectralScene::new(positions, colors, body_alphas),
         frame_interval,
-        SpectralRenderSettings::new(resolved_config, render_config, noise_seed, aspect_correction),
+        SpectralRenderSettings::new(resolved_config, render_config, aspect_correction),
     );
 
     info!("STAGE 6/7: Determine global black/white/gamma...");
@@ -490,13 +495,6 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_noise_seed() {
-        let seed = vec![0x01, 0x02, 0x03, 0x04, 0x05];
-        let noise = derive_noise_seed(&seed);
-        assert_eq!(noise, i32::from_le_bytes([0x01, 0x02, 0x03, 0x04]));
-    }
-
-    #[test]
     fn test_enhancements_default_quality_profile() {
         let e = Enhancements::default();
         assert!(e.chroma_boost);
@@ -591,7 +589,6 @@ mod tests {
         let num_sims = 20;
         let num_steps = 5_000;
 
-        let noise_seed = derive_noise_seed(seed);
         let mut rng = Sha3RandomByteStream::new(seed, 100.0, 300.0, 300.0, 1.0);
 
         let config = render::randomizable_config::RandomizableEffectConfig {
@@ -608,7 +605,6 @@ mod tests {
             enable_edge_luminance: Some(false),
             enable_atmospheric_depth: Some(false),
             enable_fine_texture: Some(false),
-            nebula_strength: Some(0.0),
             ..Default::default()
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);
@@ -619,7 +615,17 @@ mod tests {
 
         let mut positions = simulate_best_orbit(best_bodies, num_steps);
 
-        apply_drift_transformation(&mut positions, "elliptical", None, None, None, &mut rng)
+        apply_drift_transformation(
+            &mut positions,
+            "elliptical",
+            None,
+            None,
+            None,
+            resolved.drift_scale_bias,
+            resolved.drift_arc_bias,
+            resolved.drift_eccentricity_bias,
+            &mut rng,
+        )
             .expect("drift config resolution should succeed with all-None args");
 
         let enhancements = Enhancements {
@@ -635,7 +641,7 @@ mod tests {
         let render_config =
             render::RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, noise_seed, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let frame_interval = (scene.step_count()
             / render::constants::DEFAULT_HISTOGRAM_SAMPLE_FRAMES as usize)
             .max(1);

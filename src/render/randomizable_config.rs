@@ -1,9 +1,11 @@
 //! Randomizable configuration for all effect parameters.
 //!
 //! This module defines the complete parameter space for effect configuration,
-//! with support for explicit user values or random generation.
+//! with support for explicit user values or curated random generation.
 
+use super::curation::{CompositionMode, CuratedChoices, FinishCluster, GradeFamily};
 use super::effect_randomizer::{EffectRandomizer, RandomizationLog, RandomizationRecord};
+use super::grade_presets::GradePreset;
 use super::parameter_descriptors as pd;
 use crate::sim::Sha3RandomByteStream;
 
@@ -159,15 +161,16 @@ pub struct RandomizableEffectConfig {
     /// White point clipping threshold.
     pub clip_white: Option<f64>,
 
-    /// Nebula overlay strength.
-    pub nebula_strength: Option<f64>,
-    /// Number of noise octaves for nebula generation.
-    pub nebula_octaves: Option<usize>,
-    /// Base frequency for nebula noise.
-    pub nebula_base_frequency: Option<f64>,
-
     /// Framing zoom factor (1.0 = tight bounding box, larger adds padding).
     pub framing_zoom: Option<f64>,
+    /// Horizontal framing shift (normalized to bounding-box width).
+    pub framing_shift_x: Option<f64>,
+    /// Vertical framing shift (normalized to bounding-box height).
+    pub framing_shift_y: Option<f64>,
+    /// Horizontal vignette focal offset.
+    pub vignette_offset_x: Option<f64>,
+    /// Vertical vignette focal offset.
+    pub vignette_offset_y: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -183,26 +186,53 @@ impl RandomizableEffectConfig {
         let mut randomizer = EffectRandomizer::new(rng);
         let mut log = RandomizationLog::new();
         let mut resolved = ResolvedEffectConfig { width, height, ..Default::default() };
+        let curated = CuratedChoices::choose(&mut randomizer);
 
-        self.resolve_enable_flags(&mut resolved, &mut randomizer, &mut log);
+        log_curated_choices(&curated, &mut log);
+        self.resolve_enable_flags(&curated, &mut resolved, &mut randomizer, &mut log);
         self.resolve_bloom_glow_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_chromatic_bloom_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_color_grade_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_material_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_color_grade_params(&curated, &mut resolved, &mut randomizer, &mut log);
+        self.resolve_material_params(&curated, &mut resolved, &mut randomizer, &mut log);
         self.resolve_detail_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_hdr_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
-        resolved.framing_zoom = match self.framing_zoom {
-            Some(value) => value.clamp(1.0, 2.0),
-            None => {
-                if randomizer.randomize_enable(0.45) {
-                    1.04 + randomizer.random_unit() * 0.18
-                } else {
-                    1.0
-                }
-            }
-        };
+        resolved.composition_mode = curated.composition_mode;
+        resolved.finish_cluster = curated.finish_cluster;
+        resolved.grade_family = curated.grade_family;
+        resolved.grade_preset = curated.grade_preset;
+        resolved.framing_zoom = self.framing_zoom.unwrap_or(curated.framing_zoom).clamp(1.0, 2.0);
+        resolved.framing_shift_x = self
+            .framing_shift_x
+            .unwrap_or(curated.framing_shift_x)
+            .clamp(pd::FRAMING_SHIFT_X.min, pd::FRAMING_SHIFT_X.max);
+        resolved.framing_shift_y = self
+            .framing_shift_y
+            .unwrap_or(curated.framing_shift_y)
+            .clamp(pd::FRAMING_SHIFT_Y.min, pd::FRAMING_SHIFT_Y.max);
+        resolved.vignette_offset_x = self
+            .vignette_offset_x
+            .unwrap_or(curated.vignette_offset_x)
+            .clamp(pd::VIGNETTE_OFFSET_X.min, pd::VIGNETTE_OFFSET_X.max);
+        resolved.vignette_offset_y = self
+            .vignette_offset_y
+            .unwrap_or(curated.vignette_offset_y)
+            .clamp(pd::VIGNETTE_OFFSET_Y.min, pd::VIGNETTE_OFFSET_Y.max);
+        resolved.drift_scale_bias = curated.drift_scale_bias;
+        resolved.drift_arc_bias = curated.drift_arc_bias;
+        resolved.drift_eccentricity_bias = curated.drift_eccentricity_bias;
+        resolved.fine_texture_anisotropy = curated.surface_preset.fine_texture_anisotropy;
+        resolved.fine_texture_angle = curated.surface_preset.fine_texture_angle;
+        resolved.opalescence_chromatic_shift =
+            curated.material_preset.opalescence_chromatic_shift;
+        resolved.opalescence_pearl_sheen = curated.material_preset.opalescence_pearl_sheen;
+        resolved.champleve_cell_density = curated.material_preset.champleve_cell_density;
+        resolved.champleve_rim_sharpness = curated.material_preset.champleve_rim_sharpness;
+        resolved.aether_filament_density = curated.material_preset.aether_filament_density;
+        resolved.aether_iridescence_frequency =
+            curated.material_preset.aether_iridescence_frequency;
+        apply_curated_biases(&curated, &mut resolved);
 
         let resolved = apply_conflict_detection(resolved, &mut log);
         (resolved, log)
@@ -210,88 +240,89 @@ impl RandomizableEffectConfig {
 
     fn resolve_enable_flags(
         &self,
+        curated: &CuratedChoices,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
         resolved.enable_bloom =
-            self.resolve_enable("bloom", self.enable_bloom, pd::ENABLE_PROB_BLOOM, randomizer, log);
+            self.resolve_enable("bloom", self.enable_bloom, curated.probabilities.bloom, randomizer, log);
         resolved.enable_glow =
-            self.resolve_enable("glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log);
+            self.resolve_enable("glow", self.enable_glow, curated.probabilities.glow, randomizer, log);
         resolved.enable_chromatic_bloom = self.resolve_enable(
             "chromatic_bloom",
             self.enable_chromatic_bloom,
-            pd::ENABLE_PROB_CHROMATIC_BLOOM,
+            curated.probabilities.chromatic_bloom,
             randomizer,
             log,
         );
         resolved.enable_perceptual_blur = self.resolve_enable(
             "perceptual_blur",
             self.enable_perceptual_blur,
-            pd::ENABLE_PROB_PERCEPTUAL_BLUR,
+            curated.probabilities.perceptual_blur,
             randomizer,
             log,
         );
         resolved.enable_micro_contrast = self.resolve_enable(
             "micro_contrast",
             self.enable_micro_contrast,
-            pd::ENABLE_PROB_MICRO_CONTRAST,
+            curated.probabilities.micro_contrast,
             randomizer,
             log,
         );
         resolved.enable_gradient_map = self.resolve_enable(
             "gradient_map",
             self.enable_gradient_map,
-            pd::ENABLE_PROB_GRADIENT_MAP,
+            curated.probabilities.gradient_map,
             randomizer,
             log,
         );
         resolved.enable_color_grade = self.resolve_enable(
             "color_grade",
             self.enable_color_grade,
-            pd::ENABLE_PROB_COLOR_GRADE,
+            curated.probabilities.color_grade,
             randomizer,
             log,
         );
         resolved.enable_champleve = self.resolve_enable(
             "champleve",
             self.enable_champleve,
-            pd::ENABLE_PROB_CHAMPLEVE,
+            curated.probabilities.champleve,
             randomizer,
             log,
         );
         resolved.enable_aether = self.resolve_enable(
             "aether",
             self.enable_aether,
-            pd::ENABLE_PROB_AETHER,
+            curated.probabilities.aether,
             randomizer,
             log,
         );
         resolved.enable_opalescence = self.resolve_enable(
             "opalescence",
             self.enable_opalescence,
-            pd::ENABLE_PROB_OPALESCENCE,
+            curated.probabilities.opalescence,
             randomizer,
             log,
         );
         resolved.enable_edge_luminance = self.resolve_enable(
             "edge_luminance",
             self.enable_edge_luminance,
-            pd::ENABLE_PROB_EDGE_LUMINANCE,
+            curated.probabilities.edge_luminance,
             randomizer,
             log,
         );
         resolved.enable_atmospheric_depth = self.resolve_enable(
             "atmospheric_depth",
             self.enable_atmospheric_depth,
-            pd::ENABLE_PROB_ATMOSPHERIC_DEPTH,
+            curated.probabilities.atmospheric_depth,
             randomizer,
             log,
         );
         resolved.enable_fine_texture = self.resolve_enable(
             "fine_texture",
             self.enable_fine_texture,
-            pd::ENABLE_PROB_FINE_TEXTURE,
+            curated.probabilities.fine_texture,
             randomizer,
             log,
         );
@@ -415,6 +446,7 @@ impl RandomizableEffectConfig {
 
     fn resolve_color_grade_params(
         &self,
+        curated: &CuratedChoices,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
@@ -447,6 +479,14 @@ impl RandomizableEffectConfig {
             randomizer,
             log,
         );
+        resolved.vignette_offset_x = self
+            .vignette_offset_x
+            .unwrap_or(curated.vignette_offset_x)
+            .clamp(pd::VIGNETTE_OFFSET_X.min, pd::VIGNETTE_OFFSET_X.max);
+        resolved.vignette_offset_y = self
+            .vignette_offset_y
+            .unwrap_or(curated.vignette_offset_y)
+            .clamp(pd::VIGNETTE_OFFSET_Y.min, pd::VIGNETTE_OFFSET_Y.max);
         resolved.vibrance =
             self.resolve_float("vibrance", self.vibrance, &pd::VIBRANCE, randomizer, log);
         resolved.clarity_strength = self.resolve_float(
@@ -477,17 +517,37 @@ impl RandomizableEffectConfig {
             randomizer,
             log,
         );
-        resolved.gradient_map_palette = self.resolve_int(
-            "gradient_map_palette",
-            self.gradient_map_palette,
-            &pd::GRADIENT_MAP_PALETTE,
-            randomizer,
-            log,
+        resolved.gradient_map_palette = match self.gradient_map_palette {
+            Some(value) => value.clamp(pd::GRADIENT_MAP_PALETTE.min, pd::GRADIENT_MAP_PALETTE.max),
+            None => curated.gradient_palette_index,
+        };
+        resolved.grade_preset = curated.grade_preset;
+
+        let mut record = RandomizationRecord::new("grade_family".to_string(), true, false);
+        record.add_float(
+            "vignette_offset_x".to_string(),
+            resolved.vignette_offset_x,
+            self.vignette_offset_x.is_none(),
+            (pd::VIGNETTE_OFFSET_X.min, pd::VIGNETTE_OFFSET_X.max),
         );
+        record.add_float(
+            "vignette_offset_y".to_string(),
+            resolved.vignette_offset_y,
+            self.vignette_offset_y.is_none(),
+            (pd::VIGNETTE_OFFSET_Y.min, pd::VIGNETTE_OFFSET_Y.max),
+        );
+        record.add_int(
+            "gradient_map_palette".to_string(),
+            resolved.gradient_map_palette,
+            self.gradient_map_palette.is_none(),
+            (pd::GRADIENT_MAP_PALETTE.min, pd::GRADIENT_MAP_PALETTE.max),
+        );
+        log.add_record(record);
     }
 
     fn resolve_material_params(
         &self,
+        curated: &CuratedChoices,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
@@ -576,6 +636,15 @@ impl RandomizableEffectConfig {
             randomizer,
             log,
         );
+        resolved.fine_texture_anisotropy = curated.surface_preset.fine_texture_anisotropy;
+        resolved.fine_texture_angle = curated.surface_preset.fine_texture_angle;
+        resolved.opalescence_chromatic_shift = curated.material_preset.opalescence_chromatic_shift;
+        resolved.opalescence_pearl_sheen = curated.material_preset.opalescence_pearl_sheen;
+        resolved.champleve_cell_density = curated.material_preset.champleve_cell_density;
+        resolved.champleve_rim_sharpness = curated.material_preset.champleve_rim_sharpness;
+        resolved.aether_filament_density = curated.material_preset.aether_filament_density;
+        resolved.aether_iridescence_frequency =
+            curated.material_preset.aether_iridescence_frequency;
     }
 
     fn resolve_detail_params(
@@ -692,7 +761,7 @@ impl RandomizableEffectConfig {
         );
     }
 
-    fn resolve_hdr_nebula_params(
+    fn resolve_hdr_params(
         &self,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
@@ -700,27 +769,6 @@ impl RandomizableEffectConfig {
     ) {
         resolved.hdr_scale =
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
-        resolved.nebula_strength = self.resolve_float(
-            "nebula_strength",
-            self.nebula_strength,
-            &pd::NEBULA_STRENGTH,
-            randomizer,
-            log,
-        );
-        resolved.nebula_octaves = self.resolve_int(
-            "nebula_octaves",
-            self.nebula_octaves,
-            &pd::NEBULA_OCTAVES,
-            randomizer,
-            log,
-        );
-        resolved.nebula_base_frequency = self.resolve_float(
-            "nebula_base_frequency",
-            self.nebula_base_frequency,
-            &pd::NEBULA_BASE_FREQUENCY,
-            randomizer,
-            log,
-        );
     }
 
     fn resolve_clip_params(
@@ -850,7 +898,8 @@ impl RandomizableEffectConfig {
             "edge_luminance",
             "color_grade",
             "tone_curve",
-            "nebula_base",
+            "vignette_offset",
+            "framing_shift",
         ];
         for prefix in MULTI_WORD_PREFIXES {
             if param_name.starts_with(prefix) {
@@ -859,6 +908,97 @@ impl RandomizableEffectConfig {
         }
         param_name.split('_').next().unwrap_or(param_name).to_string()
     }
+}
+
+fn log_curated_choices(curated: &CuratedChoices, log: &mut RandomizationLog) {
+    let mut record = RandomizationRecord::new("curation".to_string(), true, true);
+    record.parameters.push(crate::render::effect_randomizer::RandomizedParameter {
+        name: "composition_mode".to_string(),
+        value: curated.composition_mode.name().to_string(),
+        was_randomized: true,
+        range_used: "curated_modes".to_string(),
+    });
+    record.parameters.push(crate::render::effect_randomizer::RandomizedParameter {
+        name: "finish_cluster".to_string(),
+        value: curated.finish_cluster.name().to_string(),
+        was_randomized: true,
+        range_used: "curated_finish_clusters".to_string(),
+    });
+    record.parameters.push(crate::render::effect_randomizer::RandomizedParameter {
+        name: "grade_family".to_string(),
+        value: curated.grade_family.name().to_string(),
+        was_randomized: true,
+        range_used: "curated_grade_families".to_string(),
+    });
+    record.parameters.push(crate::render::effect_randomizer::RandomizedParameter {
+        name: "grade_preset".to_string(),
+        value: curated.grade_preset.name().to_string(),
+        was_randomized: true,
+        range_used: "family_subset".to_string(),
+    });
+    log.add_record(record);
+}
+
+fn apply_curated_biases(curated: &CuratedChoices, resolved: &mut ResolvedEffectConfig) {
+    resolved.blur_strength =
+        (resolved.blur_strength * curated.softness_scale).clamp(pd::BLUR_STRENGTH.min, pd::BLUR_STRENGTH.max);
+    resolved.blur_radius_scale = (resolved.blur_radius_scale * curated.softness_scale)
+        .clamp(pd::BLUR_RADIUS_SCALE.min, pd::BLUR_RADIUS_SCALE.max);
+    resolved.blur_core_brightness = resolved
+        .blur_core_brightness
+        .min(match curated.finish_cluster {
+            FinishCluster::Crisp => 11.0,
+            FinishCluster::Balanced => 12.0,
+            FinishCluster::Velvet => pd::BLUR_CORE_BRIGHTNESS.max,
+        });
+    resolved.dog_strength =
+        (resolved.dog_strength * curated.detail_scale).clamp(pd::DOG_STRENGTH.min, pd::DOG_STRENGTH.max);
+    resolved.glow_strength =
+        (resolved.glow_strength * curated.softness_scale).clamp(pd::GLOW_STRENGTH.min, pd::GLOW_STRENGTH.max);
+    resolved.glow_radius_scale = (resolved.glow_radius_scale * curated.softness_scale)
+        .clamp(pd::GLOW_RADIUS_SCALE.min, pd::GLOW_RADIUS_SCALE.max);
+    resolved.chromatic_bloom_strength = (resolved.chromatic_bloom_strength * curated.softness_scale)
+        .clamp(pd::CHROMATIC_BLOOM_STRENGTH.min, pd::CHROMATIC_BLOOM_STRENGTH.max);
+    resolved.chromatic_bloom_radius_scale =
+        (resolved.chromatic_bloom_radius_scale * curated.softness_scale)
+            .clamp(pd::CHROMATIC_BLOOM_RADIUS_SCALE.min, pd::CHROMATIC_BLOOM_RADIUS_SCALE.max);
+    resolved.chromatic_bloom_separation_scale =
+        (resolved.chromatic_bloom_separation_scale * curated.softness_scale)
+            .clamp(
+                pd::CHROMATIC_BLOOM_SEPARATION_SCALE.min,
+                pd::CHROMATIC_BLOOM_SEPARATION_SCALE.max,
+            );
+    resolved.perceptual_blur_strength = (resolved.perceptual_blur_strength * curated.softness_scale)
+        .clamp(pd::PERCEPTUAL_BLUR_STRENGTH.min, pd::PERCEPTUAL_BLUR_STRENGTH.max);
+    resolved.micro_contrast_strength = (resolved.micro_contrast_strength * curated.detail_scale)
+        .clamp(pd::MICRO_CONTRAST_STRENGTH.min, pd::MICRO_CONTRAST_STRENGTH.max);
+    resolved.edge_luminance_strength = (resolved.edge_luminance_strength * curated.detail_scale)
+        .clamp(pd::EDGE_LUMINANCE_STRENGTH.min, pd::EDGE_LUMINANCE_STRENGTH.max);
+    resolved.edge_luminance_brightness_boost =
+        (resolved.edge_luminance_brightness_boost * curated.detail_scale)
+            .clamp(
+                pd::EDGE_LUMINANCE_BRIGHTNESS_BOOST.min,
+                pd::EDGE_LUMINANCE_BRIGHTNESS_BOOST.max,
+            );
+    resolved.clarity_strength = (resolved.clarity_strength * curated.detail_scale)
+        .clamp(pd::CLARITY_STRENGTH.min, pd::CLARITY_STRENGTH.max);
+    resolved.color_grade_strength = (resolved.color_grade_strength * curated.grade_strength_scale)
+        .clamp(pd::COLOR_GRADE_STRENGTH.min, pd::COLOR_GRADE_STRENGTH.max);
+    resolved.vibrance =
+        (resolved.vibrance * curated.vibrance_scale).clamp(pd::VIBRANCE.min, pd::VIBRANCE.max);
+    resolved.tone_curve_strength =
+        (resolved.tone_curve_strength * curated.tone_curve_scale)
+            .clamp(pd::TONE_CURVE_STRENGTH.min, pd::TONE_CURVE_STRENGTH.max);
+    resolved.gradient_map_strength = (resolved.gradient_map_strength * curated.gradient_strength_scale)
+        .clamp(pd::GRADIENT_MAP_STRENGTH.min, pd::GRADIENT_MAP_STRENGTH.max);
+    resolved.gradient_map_hue_preservation = resolved
+        .gradient_map_hue_preservation
+        .max(curated.gradient_hue_preservation_floor)
+        .clamp(
+            pd::GRADIENT_MAP_HUE_PRESERVATION.min,
+            pd::GRADIENT_MAP_HUE_PRESERVATION.max,
+        );
+
 }
 
 /// Fully resolved effect configuration with all parameters determined.
@@ -1004,14 +1144,46 @@ pub struct ResolvedEffectConfig {
     pub clip_black: f64,
     /// Resolved white point clipping threshold.
     pub clip_white: f64,
-    /// Resolved nebula overlay strength.
-    pub nebula_strength: f64,
-    /// Resolved number of nebula noise octaves.
-    pub nebula_octaves: usize,
-    /// Resolved nebula base frequency.
-    pub nebula_base_frequency: f64,
+    /// Chosen composition family for this seed.
+    pub composition_mode: CompositionMode,
+    /// Chosen finish family for this seed.
+    pub finish_cluster: FinishCluster,
+    /// Chosen grade family for this seed.
+    pub grade_family: GradeFamily,
+    /// Concrete grade preset derived from the chosen family.
+    pub grade_preset: GradePreset,
     /// Framing zoom factor applied to the bounding box.
     pub framing_zoom: f64,
+    /// Horizontal framing shift applied after zoom.
+    pub framing_shift_x: f64,
+    /// Vertical framing shift applied after zoom.
+    pub framing_shift_y: f64,
+    /// Horizontal vignette focal offset.
+    pub vignette_offset_x: f64,
+    /// Vertical vignette focal offset.
+    pub vignette_offset_y: f64,
+    /// Drift scale multiplier derived from composition mode.
+    pub drift_scale_bias: f64,
+    /// Drift arc-fraction multiplier derived from composition mode.
+    pub drift_arc_bias: f64,
+    /// Drift eccentricity multiplier derived from composition mode.
+    pub drift_eccentricity_bias: f64,
+    /// Fine texture anisotropy from the curated surface preset.
+    pub fine_texture_anisotropy: f64,
+    /// Fine texture angle from the curated surface preset.
+    pub fine_texture_angle: f64,
+    /// Opalescence chromatic shift from the curated material preset.
+    pub opalescence_chromatic_shift: f64,
+    /// Opalescence pearl sheen from the curated material preset.
+    pub opalescence_pearl_sheen: f64,
+    /// Champleve cell density from the curated material preset.
+    pub champleve_cell_density: f64,
+    /// Champleve rim sharpness from the curated material preset.
+    pub champleve_rim_sharpness: f64,
+    /// Aether filament density from the curated material preset.
+    pub aether_filament_density: f64,
+    /// Aether iridescence frequency from the curated material preset.
+    pub aether_iridescence_frequency: f64,
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
@@ -1326,10 +1498,26 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
+            composition_mode: CompositionMode::CenteredMonument,
+            finish_cluster: FinishCluster::Balanced,
+            grade_family: GradeFamily::Filmic,
+            grade_preset: GradePreset::CinematicTeal,
             framing_zoom: 1.0,
+            framing_shift_x: 0.0,
+            framing_shift_y: 0.0,
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
+            drift_scale_bias: 1.0,
+            drift_arc_bias: 1.0,
+            drift_eccentricity_bias: 1.0,
+            fine_texture_anisotropy: 0.24,
+            fine_texture_angle: 36.0,
+            opalescence_chromatic_shift: 0.32,
+            opalescence_pearl_sheen: 0.44,
+            champleve_cell_density: 1.0,
+            champleve_rim_sharpness: 0.52,
+            aether_filament_density: 1.0,
+            aether_iridescence_frequency: 1.0,
         }
     }
 

@@ -33,6 +33,10 @@ pub struct ColorGradeParams {
     pub vignette_strength: f64,
     /// Falloff softness of the vignette gradient.
     pub vignette_softness: f64,
+    /// Horizontal shift of the vignette center as a fraction of half-width.
+    pub vignette_offset_x: f64,
+    /// Vertical shift of the vignette center as a fraction of half-height.
+    pub vignette_offset_y: f64,
     /// Midtone vibrance boost factor.
     pub vibrance: f64,
     /// Strength of the local-contrast clarity adjustment.
@@ -65,6 +69,8 @@ impl ColorGradeParams {
             strength: constants::DEFAULT_COLOR_GRADE_STRENGTH * 0.5,
             vignette_strength: constants::DEFAULT_COLOR_GRADE_VIGNETTE * 0.6,
             vignette_softness: constants::DEFAULT_COLOR_GRADE_VIGNETTE_SOFTNESS,
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
             vibrance: constants::DEFAULT_COLOR_GRADE_VIBRANCE * 0.8,
             clarity_strength: constants::DEFAULT_COLOR_GRADE_CLARITY * 0.7,
             clarity_radius: (0.0028 * min_dim).round().max(1.0) as usize,
@@ -215,9 +221,13 @@ impl PostEffect for CinematicColorGrade {
             return Ok(input.clone());
         }
 
-        let center_x = (width as f64 - 1.0) * 0.5;
-        let center_y = (height as f64 - 1.0) * 0.5;
-        let inv_radius = 1.0 / center_x.max(center_y).max(1.0);
+        let half_width = (width as f64 - 1.0) * 0.5;
+        let half_height = (height as f64 - 1.0) * 0.5;
+        let center_x =
+            half_width + self.params.vignette_offset_x.clamp(-0.5, 0.5) * half_width.max(1.0);
+        let center_y =
+            half_height + self.params.vignette_offset_y.clamp(-0.5, 0.5) * half_height.max(1.0);
+        let inv_radius = 1.0 / half_width.max(half_height).max(1.0);
         let softness = self.params.vignette_softness.max(1.0);
 
         let clarity_buffer = if self.params.clarity_strength > 0.0 && self.params.clarity_radius > 0
@@ -255,6 +265,8 @@ mod tests {
             strength: 1.0,
             vignette_strength: 0.0,
             vignette_softness: 2.0,
+            vignette_offset_x: 0.0,
+            vignette_offset_y: 0.0,
             vibrance: 0.0,
             clarity_strength: 0.0,
             clarity_radius: 0,

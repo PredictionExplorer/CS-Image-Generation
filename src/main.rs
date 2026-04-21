@@ -266,7 +266,6 @@ fn main() -> Result<()> {
     let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
 
     let seed_dir = app::setup_seed_directory(&args.output)?;
-    let noise_seed = app::derive_noise_seed(&seed_bytes);
 
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
@@ -318,6 +317,9 @@ fn main() -> Result<()> {
             None,
             None,
             None,
+            resolved_effect_config.drift_scale_bias,
+            resolved_effect_config.drift_arc_bias,
+            resolved_effect_config.drift_eccentricity_bias,
             &mut rng,
         )?
     };
@@ -327,12 +329,14 @@ fn main() -> Result<()> {
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new_with_framing(
+    let render_ctx = render::context::RenderContext::new_with_composition(
         args.resolution.width,
         args.resolution.height,
         &positions,
         enhancements.aspect_correction,
         resolved_effect_config.framing_zoom,
+        resolved_effect_config.framing_shift_x,
+        resolved_effect_config.framing_shift_y,
     );
     let bbox = render_ctx.bounds();
     info!(
@@ -350,7 +354,6 @@ fn main() -> Result<()> {
         &colors,
         &body_alphas,
         &resolved_effect_config,
-        noise_seed,
         &render_config,
         enhancements.aspect_correction,
     )?;
@@ -364,7 +367,6 @@ fn main() -> Result<()> {
         render::SpectralRenderSettings::new(
             &resolved_effect_config,
             &render_config,
-            noise_seed,
             enhancements.aspect_correction,
         ),
         &output_vid,

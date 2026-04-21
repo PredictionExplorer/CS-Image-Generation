@@ -47,11 +47,26 @@ impl RenderContext {
         aspect_correction: bool,
         framing_zoom: f64,
     ) -> Self {
+        Self::new_with_composition(width, height, positions, aspect_correction, framing_zoom, 0.0, 0.0)
+    }
+
+    /// Creates a new render context with framing zoom and bounded center shifts.
+    #[must_use]
+    pub fn new_with_composition(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+        framing_zoom: f64,
+        framing_shift_x: f64,
+        framing_shift_y: f64,
+    ) -> Self {
         let mut bounds = BoundingBox::from_positions(positions);
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
         bounds.apply_framing_zoom(framing_zoom);
+        bounds.apply_framing_shift(framing_shift_x, framing_shift_y);
 
         Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
     }
@@ -154,6 +169,26 @@ impl BoundingBox {
         self.max_y = center_y + new_height * 0.5;
         self.width = new_width;
         self.height = new_height;
+    }
+
+    /// Shift the framing center within the existing bounds, normalized to the
+    /// current width/height so composition can bias toward negative space.
+    pub fn apply_framing_shift(&mut self, shift_x: f64, shift_y: f64) {
+        if !shift_x.is_finite() || !shift_y.is_finite() {
+            return;
+        }
+        let shift_x = shift_x.clamp(-0.45, 0.45);
+        let shift_y = shift_y.clamp(-0.45, 0.45);
+        if shift_x.abs() < 1e-9 && shift_y.abs() < 1e-9 {
+            return;
+        }
+
+        let dx = self.width * shift_x;
+        let dy = self.height * shift_y;
+        self.min_x += dx;
+        self.max_x += dx;
+        self.min_y += dy;
+        self.max_y += dy;
     }
 
     /// Pad the bounding box so its aspect ratio matches the target output dimensions.
@@ -401,5 +436,18 @@ mod tests {
         let zoomed = RenderContext::new_with_framing(800, 800, &positions, false, 1.25);
         assert!(zoomed.bounds().width > tight.bounds().width);
         assert!(zoomed.bounds().height > tight.bounds().height);
+    }
+
+    #[test]
+    fn test_framing_shift_moves_center_without_resizing() {
+        let positions = make_positions(&[(0.0, 0.0), (100.0, 100.0)]);
+        let centered = RenderContext::new_with_composition(800, 800, &positions, false, 1.0, 0.0, 0.0);
+        let shifted = RenderContext::new_with_composition(800, 800, &positions, false, 1.0, 0.12, -0.08);
+        let centered_bounds = centered.bounds();
+        let shifted_bounds = shifted.bounds();
+        assert!((centered_bounds.width - shifted_bounds.width).abs() < 1e-9);
+        assert!((centered_bounds.height - shifted_bounds.height).abs() < 1e-9);
+        assert!(shifted_bounds.min_x > centered_bounds.min_x);
+        assert!(shifted_bounds.min_y < centered_bounds.min_y);
     }
 }

@@ -244,6 +244,22 @@ pub const VIGNETTE_SOFTNESS: FloatParamDescriptor = FloatParamDescriptor {
     description: "Vignette edge softness exponent",
 };
 
+/// Horizontal offset for the vignette focal point.
+pub const VIGNETTE_OFFSET_X: FloatParamDescriptor = FloatParamDescriptor {
+    name: "vignette_offset_x",
+    min: -0.20,
+    max: 0.20,
+    description: "Horizontal offset for the vignette focal point",
+};
+
+/// Vertical offset for the vignette focal point.
+pub const VIGNETTE_OFFSET_Y: FloatParamDescriptor = FloatParamDescriptor {
+    name: "vignette_offset_y",
+    min: -0.14,
+    max: 0.14,
+    description: "Vertical offset for the vignette focal point",
+};
+
 /// Color vibrance multiplier (values > 1 boost saturation).
 pub const VIBRANCE: FloatParamDescriptor = FloatParamDescriptor {
     name: "vibrance",
@@ -517,6 +533,26 @@ pub const FINE_TEXTURE_CONTRAST: FloatParamDescriptor = FloatParamDescriptor {
 };
 
 // ---------------------------------------------------------------------------
+// Composition
+// ---------------------------------------------------------------------------
+
+/// Horizontal shift of the framing center, normalized to the bounding box width.
+pub const FRAMING_SHIFT_X: FloatParamDescriptor = FloatParamDescriptor {
+    name: "framing_shift_x",
+    min: -0.18,
+    max: 0.18,
+    description: "Horizontal shift of the framing center",
+};
+
+/// Vertical shift of the framing center, normalized to the bounding box height.
+pub const FRAMING_SHIFT_Y: FloatParamDescriptor = FloatParamDescriptor {
+    name: "framing_shift_y",
+    min: -0.12,
+    max: 0.12,
+    description: "Vertical shift of the framing center",
+};
+
+// ---------------------------------------------------------------------------
 // HDR & exposure
 // ---------------------------------------------------------------------------
 
@@ -548,34 +584,6 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
     description: "White point percentile clipping",
 };
 
-// ---------------------------------------------------------------------------
-// Nebula
-// ---------------------------------------------------------------------------
-
-/// Nebula cloud background opacity (currently disabled: range is `[0, 0]`).
-pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_strength",
-    min: 0.0,
-    max: 0.0,
-    description: "Nebula cloud background opacity (currently disabled)",
-};
-
-/// Nebula noise detail octaves.
-pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
-    name: "nebula_octaves",
-    min: 3,
-    max: 4,
-    description: "Nebula noise detail octaves",
-};
-
-/// Nebula noise base frequency.
-pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_base_frequency",
-    min: 0.0010,
-    max: 0.0020,
-    description: "Nebula noise base frequency",
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,6 +610,8 @@ mod tests {
         &COLOR_GRADE_STRENGTH,
         &VIGNETTE_STRENGTH,
         &VIGNETTE_SOFTNESS,
+        &VIGNETTE_OFFSET_X,
+        &VIGNETTE_OFFSET_Y,
         &VIBRANCE,
         &CLARITY_STRENGTH,
         &TONE_CURVE_STRENGTH,
@@ -631,15 +641,15 @@ mod tests {
         &FINE_TEXTURE_STRENGTH,
         &FINE_TEXTURE_SCALE,
         &FINE_TEXTURE_CONTRAST,
+        &FRAMING_SHIFT_X,
+        &FRAMING_SHIFT_Y,
         &HDR_SCALE,
         &CLIP_BLACK,
         &CLIP_WHITE,
-        &NEBULA_STRENGTH,
-        &NEBULA_BASE_FREQUENCY,
     ];
 
     const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] =
-        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS, &NEBULA_OCTAVES];
+        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS];
 
     const ALL_ENABLE_PROBS: &[(&str, f64)] = &[
         ("bloom", ENABLE_PROB_BLOOM),

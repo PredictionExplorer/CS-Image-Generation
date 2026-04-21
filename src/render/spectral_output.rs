@@ -277,6 +277,8 @@ pub fn generate_spectral_sweep_video(
         strength: 1.0,
         vignette_strength: constants::SWEEP_VIGNETTE_STRENGTH,
         vignette_softness: constants::SWEEP_VIGNETTE_SOFTNESS,
+        vignette_offset_x: 0.0,
+        vignette_offset_y: 0.0,
         vibrance: constants::SWEEP_VIBRANCE,
         clarity_strength: 0.0,
         clarity_radius: 1,
