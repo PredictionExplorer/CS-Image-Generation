@@ -77,6 +77,9 @@ pub struct LoggedRenderConfig {
     pub perceptual_blur_strength: f64,
     /// Gamut mapping mode for blur (e.g. hue preservation).
     pub perceptual_gamut_mode: String,
+    /// Framing zoom factor applied to the render bounds (1.0 = legacy framing).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framing_zoom: Option<f64>,
 }
 
 /// Camera drift parameters used for the logged generation.
@@ -171,6 +174,7 @@ impl Default for LoggedRenderConfig {
             perceptual_blur_radius: None,
             perceptual_blur_strength: 0.65,
             perceptual_gamut_mode: "preserve-hue".to_string(),
+            framing_zoom: None,
         }
     }
 }

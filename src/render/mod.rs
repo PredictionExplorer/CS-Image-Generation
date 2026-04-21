@@ -842,7 +842,13 @@ fn pass_1_build_histogram_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
@@ -985,7 +991,13 @@ fn pass_2_write_frames_spectral_with_backend(
         settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
         *s = [0.0; NUM_BINS];
@@ -1147,7 +1159,13 @@ fn render_final_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1258,7 +1276,13 @@ fn render_single_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     // Create render context
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        resolved_config.framing_zoom,
+    );
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1418,6 +1442,7 @@ mod tests {
             nebula_strength: 0.0,
             nebula_octaves: 4,
             nebula_base_frequency: 0.0015,
+            framing_zoom: 1.0,
         }
     }
 

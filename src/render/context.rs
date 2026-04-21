@@ -34,10 +34,24 @@ impl RenderContext {
         positions: &[Vec<Vector3<f64>>],
         aspect_correction: bool,
     ) -> Self {
+        Self::new_with_framing(width, height, positions, aspect_correction, 1.0)
+    }
+
+    /// Creates a new render context from position data, optionally padding the
+    /// bounding box to leave more negative space around the orbit.
+    #[must_use]
+    pub fn new_with_framing(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+        framing_zoom: f64,
+    ) -> Self {
         let mut bounds = BoundingBox::from_positions(positions);
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
+        bounds.apply_framing_zoom(framing_zoom);
 
         Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
     }
@@ -113,6 +127,33 @@ impl BoundingBox {
         let px = nx * f64::from(width);
         let py = ny * f64::from(height);
         (px as f32, py as f32)
+    }
+
+    /// Inflate the bounding box symmetrically around its center.
+    ///
+    /// Values below `1.0` are treated as `1.0` so the orbit is never cropped
+    /// more tightly than the legacy framing. Values above `2.0` are clamped to
+    /// keep the camera pull-back conservative.
+    pub fn apply_framing_zoom(&mut self, factor: f64) {
+        if !factor.is_finite() {
+            return;
+        }
+        let factor = factor.clamp(1.0, 2.0);
+        if (factor - 1.0).abs() < 1e-9 {
+            return;
+        }
+
+        let center_x = f64::midpoint(self.min_x, self.max_x);
+        let center_y = f64::midpoint(self.min_y, self.max_y);
+        let new_width = self.width * factor;
+        let new_height = self.height * factor;
+
+        self.min_x = center_x - new_width * 0.5;
+        self.max_x = center_x + new_width * 0.5;
+        self.min_y = center_y - new_height * 0.5;
+        self.max_y = center_y + new_height * 0.5;
+        self.width = new_width;
+        self.height = new_height;
     }
 
     /// Pad the bounding box so its aspect ratio matches the target output dimensions.
@@ -294,5 +335,71 @@ mod tests {
         let positions = make_positions(&[(0.0, 0.0), (10.0, 10.0)]);
         let ctx = RenderContext::new(1920, 1080, &positions, false);
         assert_eq!(ctx.pixel_count(), 1920 * 1080);
+    }
+
+    #[test]
+    fn test_framing_zoom_identity_is_noop() {
+        let mut bbox = BoundingBox {
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 0.0,
+            max_y: 50.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        bbox.apply_framing_zoom(1.0);
+        assert!((bbox.width - 100.0).abs() < 1e-9);
+        assert!((bbox.height - 50.0).abs() < 1e-9);
+        assert!((bbox.min_x - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_framing_zoom_inflates_symmetrically() {
+        let mut bbox = BoundingBox {
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 0.0,
+            max_y: 50.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        let center_x_before = f64::midpoint(bbox.min_x, bbox.max_x);
+        let center_y_before = f64::midpoint(bbox.min_y, bbox.max_y);
+
+        bbox.apply_framing_zoom(1.5);
+
+        let center_x_after = f64::midpoint(bbox.min_x, bbox.max_x);
+        let center_y_after = f64::midpoint(bbox.min_y, bbox.max_y);
+        assert!((bbox.width - 150.0).abs() < 1e-6);
+        assert!((bbox.height - 75.0).abs() < 1e-6);
+        assert!((center_x_before - center_x_after).abs() < 1e-9);
+        assert!((center_y_before - center_y_after).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_framing_zoom_clamps_outside_range() {
+        let mut bbox = BoundingBox {
+            min_x: 0.0,
+            max_x: 100.0,
+            min_y: 0.0,
+            max_y: 50.0,
+            width: 100.0,
+            height: 50.0,
+        };
+
+        bbox.apply_framing_zoom(0.5);
+        assert!((bbox.width - 100.0).abs() < 1e-9);
+
+        bbox.apply_framing_zoom(8.0);
+        assert!((bbox.width - 200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_render_context_new_with_framing_adds_padding() {
+        let positions = make_positions(&[(0.0, 0.0), (100.0, 100.0)]);
+        let tight = RenderContext::new_with_framing(800, 800, &positions, false, 1.0);
+        let zoomed = RenderContext::new_with_framing(800, 800, &positions, false, 1.25);
+        assert!(zoomed.bounds().width > tight.bounds().width);
+        assert!(zoomed.bounds().height > tight.bounds().height);
     }
 }

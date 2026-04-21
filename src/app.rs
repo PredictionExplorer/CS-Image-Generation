@@ -107,6 +107,8 @@ pub struct GenerationLogConfig {
     pub equil_weight: f64,
     /// Whether Borda weights were randomized.
     pub weights_randomized: bool,
+    /// Resolved framing zoom factor applied to the render bounds.
+    pub framing_zoom: Option<f64>,
 }
 
 /// Initialize per-seed output directory structure:
@@ -413,6 +415,7 @@ pub fn log_generation(
         perceptual_blur_radius: config.perceptual_blur_radius,
         perceptual_blur_strength: config.perceptual_blur_strength,
         perceptual_gamut_mode: config.perceptual_gamut_mode.clone(),
+        framing_zoom: config.framing_zoom,
     };
 
     record.drift_config = if let Some(drift) = drift_config {

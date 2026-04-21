@@ -239,6 +239,7 @@ fn build_generation_log_config(
         chaos_weight: borda_weights.chaos_weight,
         equil_weight: borda_weights.equil_weight,
         weights_randomized: borda_weights.was_randomized,
+        framing_zoom: Some(resolved.framing_zoom),
     }
 }
 
@@ -326,11 +327,12 @@ fn main() -> Result<()> {
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new(
+    let render_ctx = render::context::RenderContext::new_with_framing(
         args.resolution.width,
         args.resolution.height,
         &positions,
         enhancements.aspect_correction,
+        resolved_effect_config.framing_zoom,
     );
     let bbox = render_ctx.bounds();
     info!(

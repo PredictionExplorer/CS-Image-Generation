@@ -52,6 +52,11 @@ impl<'a> EffectRandomizer<'a> {
         if val_a < val_b { (val_a, val_b) } else { (val_b, val_a) }
     }
 
+    /// Sample a raw unit-interval value from the deterministic RNG.
+    pub fn random_unit(&mut self) -> f64 {
+        self.random_f64()
+    }
+
     /// Generate a random float in [min, max] using the RNG.
     fn random_range(&mut self, min: f64, max: f64) -> f64 {
         let t = self.random_f64();

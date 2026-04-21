@@ -165,6 +165,9 @@ pub struct RandomizableEffectConfig {
     pub nebula_octaves: Option<usize>,
     /// Base frequency for nebula noise.
     pub nebula_base_frequency: Option<f64>,
+
+    /// Framing zoom factor (1.0 = tight bounding box, larger adds padding).
+    pub framing_zoom: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -190,6 +193,16 @@ impl RandomizableEffectConfig {
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
+        resolved.framing_zoom = match self.framing_zoom {
+            Some(value) => value.clamp(1.0, 2.0),
+            None => {
+                if randomizer.randomize_enable(0.45) {
+                    1.04 + randomizer.random_unit() * 0.18
+                } else {
+                    1.0
+                }
+            }
+        };
 
         let resolved = apply_conflict_detection(resolved, &mut log);
         (resolved, log)
@@ -997,6 +1010,8 @@ pub struct ResolvedEffectConfig {
     pub nebula_octaves: usize,
     /// Resolved nebula base frequency.
     pub nebula_base_frequency: f64,
+    /// Framing zoom factor applied to the bounding box.
+    pub framing_zoom: f64,
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
@@ -1314,6 +1329,7 @@ mod tests {
             nebula_strength: 0.0,
             nebula_octaves: 4,
             nebula_base_frequency: 0.0015,
+            framing_zoom: 1.0,
         }
     }
 
