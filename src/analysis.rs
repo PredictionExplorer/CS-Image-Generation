@@ -52,13 +52,17 @@ pub fn calculate_total_angular_momentum(bodies: &[Body]) -> Vector3<f64> {
     total_l
 }
 
-/// A measure of "regularity" vs "chaos", smaller => more chaotic
-#[must_use]
-pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
+/// Distance from each body to the centre-of-mass of the other two.
+///
+/// Returns `(r1, r2, r3)` where `r_i[step]` is the distance from body `i`
+/// to the COM of the other two bodies at timestep `step`.
+fn compute_com_distances(
+    m1: f64,
+    m2: f64,
+    m3: f64,
+    positions: &[Vec<Vector3<f64>>],
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let len = positions[0].len();
-    if len == 0 {
-        return 0.0;
-    }
     let mut r1 = vec![0.0; len];
     let mut r2 = vec![0.0; len];
     let mut r3 = vec![0.0; len];
@@ -73,13 +77,195 @@ pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>
         r2[i] = (p2 - cm2).norm();
         r3[i] = (p3 - cm3).norm();
     }
+    (r1, r2, r3)
+}
+
+/// Spectral flatness (Wiener entropy) of an FFT magnitude sequence.
+///
+/// Returns `geometric_mean(power) / arithmetic_mean(power)` over the
+/// positive-frequency bins (DC excluded). Result ∈ [0, 1]: `1.0` means a
+/// white-noise spectrum (maximally chaotic), `0.0` means a pure-tone
+/// spectrum (maximally regular).
+fn flatness_from_magnitudes(mags: &[f64]) -> f64 {
+    let n = mags.len();
+    let half = n / 2;
+    if half <= 1 {
+        return 0.0;
+    }
+    const MIN_POWER: f64 = 1e-12;
+    let mut log_sum = 0.0;
+    let mut arith_sum = 0.0;
+    let mut raw_sum = 0.0;
+    let mut count = 0_usize;
+    for bin in mags.iter().take(half).skip(1) {
+        let power_raw = bin * bin;
+        let power = power_raw.max(MIN_POWER);
+        log_sum += power.ln();
+        arith_sum += power;
+        raw_sum += power_raw;
+        count += 1;
+    }
+    if count == 0 || arith_sum <= 0.0 {
+        return 0.0;
+    }
+    let count_f = count as f64;
+    // Guard against DC-only signals: if AC energy is indistinguishable from
+    // the clamp floor, the signal is constant (maximally regular), not
+    // maximally flat. Without this guard a rigidly-rotating symmetric triangle
+    // would mis-score as fully chaotic.
+    if raw_sum < count_f * MIN_POWER * 4.0 {
+        return 0.0;
+    }
+    let geo_mean = (log_sum / count_f).exp();
+    let arith_mean = arith_sum / count_f;
+    (geo_mean / arith_mean).clamp(0.0, 1.0)
+}
+
+/// Permutation entropy (Bandt–Pompe) of a single time series, embedding
+/// dimension `m = 4`, lag `τ = 1`.
+///
+/// Slides a 4-wide window across the series, converts each window into the
+/// rank-order permutation of its values, counts pattern frequencies, and
+/// returns the Shannon entropy divided by `ln(4!)`. Result ∈ [0, 1]: `1.0`
+/// means all 24 ordinal patterns are equally likely (maximally chaotic),
+/// `0.0` means the series is perfectly monotone.
+fn single_series_permutation_entropy(series: &[f64]) -> f64 {
+    const EMBED_DIM: usize = 4;
+    const NUM_PATTERNS: usize = 24; // 4!
+    let n = series.len();
+    if n < EMBED_DIM {
+        return 0.0;
+    }
+    // Encode each permutation of [0..4) as a u8 by packing 2-bit indices.
+    // Max encoded value = 3 | (3<<2) | (3<<4) | (3<<6) = 255. Only 24 slots
+    // ever populate (distinct indices), rest stay zero.
+    let mut counts = [0_u32; 256];
+    let mut total = 0_u32;
+    let mut indices = [0_usize; EMBED_DIM];
+    for i in 0..=n - EMBED_DIM {
+        for (j, idx) in indices.iter_mut().enumerate() {
+            *idx = j;
+        }
+        indices.sort_by(|&a, &b| series[i + a].total_cmp(&series[i + b]));
+        let key = indices[0] | (indices[1] << 2) | (indices[2] << 4) | (indices[3] << 6);
+        counts[key] = counts[key].saturating_add(1);
+        total = total.saturating_add(1);
+    }
+    if total == 0 {
+        return 0.0;
+    }
+    let total_f = f64::from(total);
+    let mut entropy = 0.0_f64;
+    for &c in &counts {
+        if c == 0 {
+            continue;
+        }
+        let p = f64::from(c) / total_f;
+        entropy -= p * p.ln();
+    }
+    let max_entropy = (NUM_PATTERNS as f64).ln();
+    if max_entropy < 1e-14 {
+        return 0.0;
+    }
+    (entropy / max_entropy).clamp(0.0, 1.0)
+}
+
+/// Spatial-extent stability across the trajectory.
+///
+/// Splits the trajectory into five equal windows along the time axis. In each
+/// window, measures the largest instantaneous distance from any body to the
+/// three-body centroid. Returns `min(extents) / max(extents)` — `1.0` means
+/// the bodies stayed within a stable extent throughout (bounded), and values
+/// approaching `0.0` mean one or more bodies drifted far away in some window
+/// (slow escape, fly-off, or hierarchical separation).
+///
+/// Used as a hard viability gate so we never select orbits where a body flies
+/// off and the final frame loses its composition.
+#[must_use]
+pub fn boundedness_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
+    let len = positions[0].len();
+    const NUM_WINDOWS: usize = 5;
+    if len < NUM_WINDOWS * 4 {
+        return 0.0;
+    }
+    let mut extents = [0.0_f64; NUM_WINDOWS];
+    for (w, extent) in extents.iter_mut().enumerate() {
+        let start = (w * len) / NUM_WINDOWS;
+        let end = ((w + 1) * len) / NUM_WINDOWS;
+        let mut max_d = 0.0_f64;
+        let iter = positions[0][start..end]
+            .iter()
+            .zip(positions[1][start..end].iter())
+            .zip(positions[2][start..end].iter());
+        for ((&p0, &p1), &p2) in iter {
+            let centroid = (p0 + p1 + p2) / 3.0;
+            max_d = max_d.max((p0 - centroid).norm());
+            max_d = max_d.max((p1 - centroid).norm());
+            max_d = max_d.max((p2 - centroid).norm());
+        }
+        *extent = max_d;
+    }
+    let min_e = extents.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_e = extents.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if max_e < 1e-14 {
+        return 0.0;
+    }
+    (min_e / max_e).clamp(0.0, 1.0)
+}
+
+/// Bundle of chaos metrics computed in a single pass over the trajectory.
+///
+/// All three metrics share the three FFTs over the body-to-COM distance
+/// signals, so this is much cheaper than calling three separate pipelines.
+#[derive(Clone, Copy, Debug)]
+pub struct ChaosMetrics {
+    /// Legacy FFT-magnitude std-dev (smaller => more chaotic).
+    pub non_chaoticness: f64,
+    /// Wiener entropy of the power spectrum (higher => more chaotic, ∈ [0, 1]).
+    pub spectral_flatness: f64,
+    /// Bandt–Pompe ordinal-pattern entropy (higher => more chaotic, ∈ [0, 1]).
+    pub permutation_entropy: f64,
+}
+
+/// Compute all chaos metrics in one pass, sharing the three FFTs.
+///
+/// The trajectory's body-to-COM distance signals are Fourier-transformed
+/// once; the transforms then feed into both the FFT-magnitude std-dev
+/// (`non_chaoticness`) and the spectral-flatness (Wiener entropy) metric.
+/// Permutation entropy is computed directly on the time series without FFT.
+#[must_use]
+pub fn compute_chaos_metrics(
+    m1: f64,
+    m2: f64,
+    m3: f64,
+    positions: &[Vec<Vector3<f64>>],
+) -> ChaosMetrics {
+    let len = positions[0].len();
+    if len < 4 {
+        return ChaosMetrics {
+            non_chaoticness: 0.0,
+            spectral_flatness: 0.0,
+            permutation_entropy: 0.0,
+        };
+    }
+    let (r1, r2, r3) = compute_com_distances(m1, m2, m3, positions);
+
     let abs1: Vec<f64> = fourier_transform(&r1).iter().map(|c| c.norm()).collect();
     let abs2: Vec<f64> = fourier_transform(&r2).iter().map(|c| c.norm()).collect();
     let abs3: Vec<f64> = fourier_transform(&r3).iter().map(|c| c.norm()).collect();
-    let sd1 = sample_std_dev(&abs1);
-    let sd2 = sample_std_dev(&abs2);
-    let sd3 = sample_std_dev(&abs3);
-    (sd1 + sd2 + sd3) / 3.0
+
+    let non_chaoticness =
+        (sample_std_dev(&abs1) + sample_std_dev(&abs2) + sample_std_dev(&abs3)) / 3.0;
+    let spectral_flatness = (flatness_from_magnitudes(&abs1)
+        + flatness_from_magnitudes(&abs2)
+        + flatness_from_magnitudes(&abs3))
+        / 3.0;
+    let permutation_entropy = (single_series_permutation_entropy(&r1)
+        + single_series_permutation_entropy(&r2)
+        + single_series_permutation_entropy(&r3))
+        / 3.0;
+
+    ChaosMetrics { non_chaoticness, spectral_flatness, permutation_entropy }
 }
 
 /// Score how "equilateral" the 3-body triangle is over time
@@ -166,15 +352,17 @@ mod tests {
     }
 
     #[test]
-    fn test_non_chaoticness_empty_returns_zero() {
+    fn test_chaos_metrics_empty_returns_zero() {
         let positions = vec![vec![], vec![], vec![]];
-        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
-        assert_eq!(result, 0.0);
+        let m = compute_chaos_metrics(1.0, 1.0, 1.0, &positions);
+        assert_eq!(m.non_chaoticness, 0.0);
+        assert_eq!(m.spectral_flatness, 0.0);
+        assert_eq!(m.permutation_entropy, 0.0);
     }
 
     #[test]
-    fn test_non_chaoticness_returns_finite() {
-        let n = 100;
+    fn test_chaos_metrics_finite_on_periodic_orbit() {
+        let n: i32 = 256;
         let positions: Vec<Vec<Vector3<f64>>> = (0..3)
             .map(|body| {
                 (0..n)
@@ -186,9 +374,10 @@ mod tests {
                     .collect()
             })
             .collect();
-        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
-        assert!(result.is_finite(), "non_chaoticness should return a finite value");
-        assert!(result >= 0.0);
+        let m = compute_chaos_metrics(1.0, 1.0, 1.0, &positions);
+        assert!(m.non_chaoticness.is_finite() && m.non_chaoticness >= 0.0);
+        assert!((0.0..=1.0).contains(&m.spectral_flatness));
+        assert!((0.0..=1.0).contains(&m.permutation_entropy));
     }
 
     #[test]
@@ -220,5 +409,139 @@ mod tests {
     fn test_equilateralness_empty_returns_zero() {
         let positions = vec![vec![], vec![], vec![]];
         assert_eq!(equilateralness_score(&positions), 0.0);
+    }
+
+    // --- New chaos metrics --------------------------------------------------
+
+    fn periodic_positions(num_steps: i32) -> Vec<Vec<Vector3<f64>>> {
+        // Asymmetric circular orbits: different radii and angular velocities
+        // per body so the body-to-COM distance signals actually oscillate
+        // (non-constant → peaked FFT → low spectral flatness). A perfectly
+        // symmetric rotating triangle would collapse to constant distances.
+        const RADIUS: [f64; 3] = [1.0, 1.4, 0.8];
+        const OMEGA: [f64; 3] = [1.0, 1.3, 0.7];
+        (0..3)
+            .map(|body| {
+                let idx = body as usize;
+                (0..num_steps)
+                    .map(|step| {
+                        let t = f64::from(step) * 0.05;
+                        let angle = OMEGA[idx] * t + f64::from(body) * std::f64::consts::TAU / 3.0;
+                        Vector3::new(RADIUS[idx] * angle.cos(), RADIUS[idx] * angle.sin(), 0.0)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn pseudo_random_positions(num_steps: i32) -> Vec<Vec<Vector3<f64>>> {
+        // Deterministic LCG — gives a broadband spectrum so we can confirm
+        // the chaos metrics return values close to their noise-limit without
+        // pulling a real RNG into the analysis tests.
+        let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+        let mut step = || -> f64 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let high = (state >> 33) as u32;
+            f64::from(high) / f64::from(u32::MAX)
+        };
+        (0..3)
+            .map(|_| {
+                (0..num_steps)
+                    .map(|_| {
+                        let x = step() * 2.0 - 1.0;
+                        let y = step() * 2.0 - 1.0;
+                        let z = step() * 2.0 - 1.0;
+                        Vector3::new(x, y, z)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn spectral_flatness_rewards_broadband_over_periodic() {
+        let regular = periodic_positions(2048);
+        let chaotic = pseudo_random_positions(2048);
+        let sf_r = compute_chaos_metrics(1.0, 1.0, 1.0, &regular).spectral_flatness;
+        let sf_c = compute_chaos_metrics(1.0, 1.0, 1.0, &chaotic).spectral_flatness;
+        assert!(
+            (0.0..=1.0).contains(&sf_r) && (0.0..=1.0).contains(&sf_c),
+            "spectral flatness out of [0, 1]: regular={sf_r}, chaotic={sf_c}"
+        );
+        assert!(
+            sf_c > sf_r,
+            "chaotic spectrum ({sf_c}) should be flatter than regular spectrum ({sf_r})"
+        );
+    }
+
+    #[test]
+    fn permutation_entropy_rewards_disorder_over_periodic() {
+        let regular = periodic_positions(2048);
+        let chaotic = pseudo_random_positions(2048);
+        let pe_r = compute_chaos_metrics(1.0, 1.0, 1.0, &regular).permutation_entropy;
+        let pe_c = compute_chaos_metrics(1.0, 1.0, 1.0, &chaotic).permutation_entropy;
+        assert!(
+            (0.0..=1.0).contains(&pe_r) && (0.0..=1.0).contains(&pe_c),
+            "permutation entropy out of [0, 1]: regular={pe_r}, chaotic={pe_c}"
+        );
+        assert!(
+            pe_c > pe_r,
+            "chaotic orbit ({pe_c}) should score higher than periodic orbit ({pe_r})"
+        );
+    }
+
+    #[test]
+    fn permutation_entropy_monotone_is_zero() {
+        // A strictly monotone series only ever produces the identity pattern
+        // (0, 1, 2, 3), so the entropy should be ~0.
+        let n: i32 = 256;
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                (0..n)
+                    .map(|step| {
+                        let t = f64::from(step) + f64::from(body);
+                        Vector3::new(t, 0.0, 0.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let pe = compute_chaos_metrics(1.0, 1.0, 1.0, &positions).permutation_entropy;
+        assert!(pe < 1e-9, "monotone series should have near-zero permutation entropy, got {pe}");
+    }
+
+    #[test]
+    fn boundedness_of_static_triangle_is_one() {
+        let n = 200;
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                let angle = f64::from(body) * std::f64::consts::TAU / 3.0;
+                vec![Vector3::new(angle.cos(), angle.sin(), 0.0); n]
+            })
+            .collect();
+        let b = boundedness_score(&positions);
+        assert!((b - 1.0).abs() < 1e-9, "static triangle should score 1.0, got {b}");
+    }
+
+    #[test]
+    fn boundedness_penalises_drifting_body() {
+        // Two bodies stay put; one drifts outward along +x.
+        let n: i32 = 500;
+        let cap = n as usize;
+        let mut positions: Vec<Vec<Vector3<f64>>> =
+            (0..3).map(|_| Vec::with_capacity(cap)).collect();
+        for step in 0..n {
+            let frac = f64::from(step) / f64::from(n);
+            positions[0].push(Vector3::new(-1.0, 0.0, 0.0));
+            positions[1].push(Vector3::new(0.0, 1.0, 0.0));
+            positions[2].push(Vector3::new(1.0 + 20.0 * frac, 0.0, 0.0));
+        }
+        let b = boundedness_score(&positions);
+        assert!(b < 0.4, "drifting body should push boundedness well below 0.4, got {b}");
+    }
+
+    #[test]
+    fn boundedness_short_trajectory_is_zero() {
+        let positions: Vec<Vec<Vector3<f64>>> = vec![vec![Vector3::zeros(); 3]; 3];
+        assert_eq!(boundedness_score(&positions), 0.0);
     }
 }

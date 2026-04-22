@@ -35,14 +35,18 @@ pub struct IntParamDescriptor {
 
 /// Equilateralness-to-chaos Borda weight ratio descriptor.
 ///
-/// Sampled log-uniformly with a moderate bias toward equilateralness.
-/// Ratio range: 1/5 to 125 (median ~5.0).
+/// Sampled log-uniformly with a strong bias toward chaos: we want chaotic
+/// orbits to win most of the time, while still letting equilateralness
+/// pressure break ties. At ratio = 0.2 (the geometric median) chaos is
+/// weighted 5× more than equilateralness; at ratio = 5.0 they flip.
+///
+/// Ratio range: 1/125 to 5 (median ~0.2).
 /// At ratio < 1 chaos dominates; at ratio > 1 equilateralness dominates.
 pub const EQUIL_CHAOS_RATIO: FloatParamDescriptor = FloatParamDescriptor {
     name: "equil_chaos_ratio",
-    min: 0.2,
-    max: 125.0,
-    description: "Equilateralness-to-chaos Borda weight ratio (log-uniform, 1/5x to 125x)",
+    min: 0.008,
+    max: 5.0,
+    description: "Equilateralness-to-chaos Borda weight ratio (log-uniform, 1/125x to 5x)",
 };
 
 // ---------------------------------------------------------------------------

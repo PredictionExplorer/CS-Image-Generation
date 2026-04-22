@@ -1,8 +1,8 @@
 //! Simulation module: 3-body orbits, RNG, integrator, and Borda search
 
 use crate::analysis::{
-    calculate_total_angular_momentum, calculate_total_energy, equilateralness_score,
-    non_chaoticness,
+    ChaosMetrics, boundedness_score, calculate_total_angular_momentum, calculate_total_energy,
+    compute_chaos_metrics, equilateralness_score,
 };
 use crate::error::{Result, SimulationError};
 use nalgebra::Vector3;
@@ -336,11 +336,28 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
 /// Outcome of a Borda-count trajectory search over many random orbits.
 #[derive(Clone)]
 pub struct TrajectoryResult {
-    /// Non-chaoticness score (higher = more regular orbit).
+    /// Legacy FFT-magnitude std-dev (smaller => more chaotic).
+    ///
+    /// Retained for logging and determinism tests; no longer drives the
+    /// Borda chaos ranking — see [`chaos_combined`] for that.
+    ///
+    /// [`chaos_combined`]: Self::chaos_combined
     pub chaos: f64,
+    /// Wiener-entropy spectral flatness, averaged across the three
+    /// body-to-COM signals (higher => more chaotic, range `[0, 1]`).
+    pub spectral_flatness: f64,
+    /// Bandt–Pompe permutation entropy, averaged across the three
+    /// body-to-COM signals (higher => more chaotic, range `[0, 1]`).
+    pub permutation_entropy: f64,
+    /// Combined chaos score used for Borda ranking —
+    /// `(spectral_flatness + permutation_entropy) / 2`.
+    pub chaos_combined: f64,
     /// Equilateralness score (higher = more triangular).
     pub equilateralness: f64,
-    /// Borda points awarded for non-chaoticness rank.
+    /// Spatial-extent stability across the trajectory (higher = more
+    /// bounded, range `[0, 1]`). Also used as a hard viability gate.
+    pub boundedness: f64,
+    /// Borda points awarded for the combined chaos rank.
     pub chaos_pts: usize,
     /// Borda points awarded for equilateralness rank.
     pub equil_pts: usize,
@@ -354,6 +371,15 @@ pub struct TrajectoryResult {
     pub discarded_count: usize,
 }
 
+/// Minimum boundedness score an orbit must reach to be considered for ranking.
+///
+/// The score is `min(window_extents) / max(window_extents)` over five time
+/// windows. A value of `0.4` means no window's extent may exceed `2.5×`
+/// the tightest window — enough slack for genuinely chaotic but bound
+/// motion, tight enough to reject orbits where a body drifts off and the
+/// final composition loses a third of its subject.
+pub const MIN_BOUNDEDNESS: f64 = 0.4;
+
 fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
     Body::new(
         rng.random_mass(),
@@ -364,15 +390,19 @@ fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
 
 /// Assign Borda-count points and sort trajectories by weighted score.
 ///
-/// Flattens `results` (discarding `None`s), ranks by non-chaoticness and equilateralness,
-/// assigns Borda points, and returns the list sorted by descending weighted score.
+/// Flattens `results` (discarding `None`s), ranks each candidate by the
+/// combined chaos score (descending — higher `chaos_combined` = more
+/// chaotic = more points) and by equilateralness (descending), assigns
+/// Borda points, and returns the list sorted by descending weighted score.
 fn rank_trajectories(
     results: Vec<Option<(TrajectoryResult, usize)>>,
     cw: f64,
     ew: f64,
 ) -> Vec<(TrajectoryResult, usize)> {
-    fn assign(vals: &mut [(f64, usize)], hb: bool) -> Vec<usize> {
-        if hb {
+    // Rank points: rank 0 (best) gets `n` points, rank `n-1` (worst) gets `1`.
+    // `descending = true` means larger values rank higher (get more points).
+    fn assign(vals: &mut [(f64, usize)], descending: bool) -> Vec<usize> {
+        if descending {
             vals.sort_by(|a, b| b.0.total_cmp(&a.0));
         } else {
             vals.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -393,10 +423,13 @@ fn rank_trajectories(
     let mut cv = Vec::with_capacity(iv.len());
     let mut ev = Vec::with_capacity(iv.len());
     for (i, (t, _)) in iv.iter().enumerate() {
-        cv.push((t.chaos, i));
+        cv.push((t.chaos_combined, i));
         ev.push((t.equilateralness, i));
     }
-    let cps = assign(&mut cv, false);
+    // Both axes rank with "higher value = more points". Combined chaos is on
+    // a [0, 1] scale where 1.0 = maximally broadband / ordinal-random; we want
+    // those to win. Equilateralness is also "higher is better".
+    let cps = assign(&mut cv, true);
     let eps = assign(&mut ev, true);
     for (i, (t, _)) in iv.iter_mut().enumerate() {
         t.chaos_pts = cps[i];
@@ -432,66 +465,77 @@ pub fn select_best_trajectory(
     let pc = AtomicUsize::new(0);
     let cs = (num_sims / 10).max(1);
     let dc = AtomicUsize::new(0);
-    let results: Vec<Option<(TrajectoryResult, usize)>> = many
-        .par_iter()
-        .enumerate()
-        .map(|(i, b)| {
-            let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
-            if cnt.is_multiple_of(cs) {
-                // usize→f64: cnt and num_sims are bounded by num_sims (≤ ~10^6 in practice)
-                info!(
-                    "   Borda search: {:.0}% done",
-                    (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
-                );
-            }
-            // Quick rejection: check energy and angular momentum first
-            let e = calculate_total_energy(b);
-            let ang = calculate_total_angular_momentum(b).norm();
-            if e > 10.0 || ang < 10.0 {
-                dc.fetch_add(1, Ordering::Relaxed);
-                return None;
-            }
+    let results: Vec<Option<(TrajectoryResult, usize)>> =
+        many.par_iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
+                if cnt.is_multiple_of(cs) {
+                    // usize→f64: cnt and num_sims are bounded by num_sims (≤ ~10^6 in practice)
+                    info!(
+                        "   Borda search: {:.0}% done",
+                        (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
+                    );
+                }
+                // Quick rejection: check energy and angular momentum first
+                let e = calculate_total_energy(b);
+                let ang = calculate_total_angular_momentum(b).norm();
+                if e > 10.0 || ang < 10.0 {
+                    dc.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
 
-            // Run simulation with early-exit checks for escaping bodies
-            let Some(simr) = get_positions_with_early_exit(b.clone(), steps, th) else {
-                dc.fetch_add(1, Ordering::Relaxed);
-                return None;
-            };
+                // Run simulation with early-exit checks for escaping bodies
+                let Some(simr) = get_positions_with_early_exit(b.clone(), steps, th) else {
+                    dc.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                };
 
-            let pos = simr.positions;
-            let m1 = b[0].mass;
-            let m2 = b[1].mass;
-            let m3 = b[2].mass;
+                let pos = simr.positions;
+                let m1 = b[0].mass;
+                let m2 = b[1].mass;
+                let m3 = b[2].mass;
 
-            // Compute quality metrics
-            let c = non_chaoticness(m1, m2, m3, &pos);
-            let eq = equilateralness_score(&pos);
+                // Viability gate: make sure all three bodies stayed within a
+                // stable spatial extent across the whole trajectory. Orbits
+                // that pass the energy-based escape check can still have a
+                // body slowly drift away — those produce lopsided final
+                // frames that aren't museum-grade, so we throw them out here.
+                let bnd = boundedness_score(&pos);
+                if bnd < MIN_BOUNDEDNESS {
+                    dc.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
 
-            // Early rejection: if both metrics are terrible, skip
-            // This saves time on Borda ranking for clearly unsuitable candidates
-            const MIN_VIABLE_CHAOS: f64 = 0.1; // Below this, too chaotic
-            const MIN_VIABLE_EQUILATERAL: f64 = 0.01; // Below this, too linear
+                // Compute chaos metrics in a single pass (shares the three FFTs
+                // across non_chaoticness and spectral_flatness).
+                let ChaosMetrics {
+                    non_chaoticness: c,
+                    spectral_flatness: sf,
+                    permutation_entropy: pe,
+                } = compute_chaos_metrics(m1, m2, m3, &pos);
+                let chaos_combined = (sf + pe) * 0.5;
+                let eq = equilateralness_score(&pos);
 
-            if c < MIN_VIABLE_CHAOS && eq < MIN_VIABLE_EQUILATERAL {
-                dc.fetch_add(1, Ordering::Relaxed);
-                return None;
-            }
-
-            Some((
-                TrajectoryResult {
-                    chaos: c,
-                    equilateralness: eq,
-                    chaos_pts: 0,
-                    equil_pts: 0,
-                    total_score: 0,
-                    total_score_weighted: 0.0,
-                    selected_index: 0,
-                    discarded_count: 0,
-                },
-                i,
-            ))
-        })
-        .collect();
+                Some((
+                    TrajectoryResult {
+                        chaos: c,
+                        spectral_flatness: sf,
+                        permutation_entropy: pe,
+                        chaos_combined,
+                        equilateralness: eq,
+                        boundedness: bnd,
+                        chaos_pts: 0,
+                        equil_pts: 0,
+                        total_score: 0,
+                        total_score_weighted: 0.0,
+                        selected_index: 0,
+                        discarded_count: 0,
+                    },
+                    i,
+                ))
+            })
+            .collect();
     let dtot = dc.load(Ordering::Relaxed);
     // usize→f64: dtot and num_sims are bounded by num_sims (≤ ~10^6 in practice)
     info!(
@@ -505,7 +549,8 @@ pub fn select_best_trajectory(
             discarded: dtot,
             reason: format!(
                 "All orbits filtered out due to: high energy (E > 10), \
-                low angular momentum (L < 10), or escaping bodies (threshold: {th})"
+                low angular momentum (L < 10), escaping bodies (threshold: {th}), \
+                or unbounded spatial extent (boundedness < {MIN_BOUNDEDNESS})"
             ),
         }
         .into());

@@ -148,9 +148,12 @@ struct ResolvedBordaWeights {
 
 /// Draw a log-uniform equil/chaos ratio and derive weights from it.
 ///
-/// Log-uniform sampling ensures that chaos-dominant ratios (e.g. 1/20)
-/// and equil-dominant ratios (e.g. 20) are equally likely.  The ratio
-/// is expressed as `equil_weight` / `chaos_weight`.
+/// Log-uniform sampling in `EQUIL_CHAOS_RATIO`'s range biases toward chaos:
+/// the geometric median is ≈0.2, so on a typical run chaos is weighted 5×
+/// more than equilateralness. This keeps the search strongly aimed at the
+/// broadband / high-permutation-entropy tail of the orbit distribution,
+/// while still occasionally letting equilateralness dominate for variety.
+/// The ratio is expressed as `equil_weight` / `chaos_weight`.
 fn resolve_borda_weights(
     chaos_opt: Option<f64>,
     equil_opt: Option<f64>,
@@ -496,7 +499,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.008..=5.0).contains(&ratio), "ratio {ratio} outside [0.008, 5.0]");
     }
 
     #[test]
@@ -515,7 +518,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.008..=5.0).contains(&ratio), "ratio {ratio} outside [0.008, 5.0]");
     }
 
     #[test]
@@ -525,7 +528,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.008..=5.0).contains(&ratio), "ratio {ratio} outside [0.008, 5.0]");
     }
 
     #[test]
@@ -537,8 +540,8 @@ mod tests {
             assert_eq!(w.chaos_weight, 1.0);
             let ratio = w.equil_weight / w.chaos_weight;
             assert!(
-                (0.2..=125.0).contains(&ratio),
-                "seed {seed_byte} produced ratio {ratio} outside [0.2, 125.0]"
+                (0.008..=5.0).contains(&ratio),
+                "seed {seed_byte} produced ratio {ratio} outside [0.008, 5.0]"
             );
         }
     }
