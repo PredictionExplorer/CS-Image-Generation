@@ -80,45 +80,45 @@ fn compute_com_distances(
     (r1, r2, r3)
 }
 
-/// Spectral flatness (Wiener entropy) of an FFT magnitude sequence.
+/// Spectral entropy of an FFT magnitude sequence.
 ///
-/// Returns `geometric_mean(power) / arithmetic_mean(power)` over the
-/// positive-frequency bins (DC excluded). Result ∈ [0, 1]: `1.0` means a
-/// white-noise spectrum (maximally chaotic), `0.0` means a pure-tone
-/// spectrum (maximally regular).
-fn flatness_from_magnitudes(mags: &[f64]) -> f64 {
+/// Computes the Shannon entropy of the normalised power spectrum over the
+/// positive-frequency bins (DC excluded), divided by `ln(N_bins)`. Result
+/// ∈ [0, 1]: `1.0` means power is spread perfectly uniformly across bins
+/// (broadband, maximally chaotic); `0.0` means all power is in one bin
+/// (pure tone, maximally regular).
+///
+/// We previously used Wiener spectral flatness (`geo_mean / arith_mean`) but
+/// the geometric mean is dominated by the noise floor for FFT sizes in the
+/// hundreds of thousands, collapsing the metric to ~10⁻⁹ for every realistic
+/// orbit. Shannon entropy of the normalised PSD discriminates much better
+/// across the typical 0.3–0.95 range.
+fn spectral_entropy_from_magnitudes(mags: &[f64]) -> f64 {
     let n = mags.len();
     let half = n / 2;
     if half <= 1 {
         return 0.0;
     }
-    const MIN_POWER: f64 = 1e-12;
-    let mut log_sum = 0.0;
-    let mut arith_sum = 0.0;
-    let mut raw_sum = 0.0;
-    let mut count = 0_usize;
+    let mut total_power = 0.0;
     for bin in mags.iter().take(half).skip(1) {
-        let power_raw = bin * bin;
-        let power = power_raw.max(MIN_POWER);
-        log_sum += power.ln();
-        arith_sum += power;
-        raw_sum += power_raw;
-        count += 1;
+        total_power += bin * bin;
     }
-    if count == 0 || arith_sum <= 0.0 {
+    if total_power <= 1e-30 {
         return 0.0;
     }
-    let count_f = count as f64;
-    // Guard against DC-only signals: if AC energy is indistinguishable from
-    // the clamp floor, the signal is constant (maximally regular), not
-    // maximally flat. Without this guard a rigidly-rotating symmetric triangle
-    // would mis-score as fully chaotic.
-    if raw_sum < count_f * MIN_POWER * 4.0 {
+    let inv_total = 1.0 / total_power;
+    let mut entropy = 0.0;
+    for bin in mags.iter().take(half).skip(1) {
+        let p = bin * bin * inv_total;
+        if p > 1e-30 {
+            entropy -= p * p.ln();
+        }
+    }
+    let max_entropy = ((half - 1) as f64).ln();
+    if max_entropy < 1e-14 {
         return 0.0;
     }
-    let geo_mean = (log_sum / count_f).exp();
-    let arith_mean = arith_sum / count_f;
-    (geo_mean / arith_mean).clamp(0.0, 1.0)
+    (entropy / max_entropy).clamp(0.0, 1.0)
 }
 
 /// Permutation entropy (Bandt–Pompe) of a single time series, embedding
@@ -221,8 +221,9 @@ pub fn boundedness_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
 pub struct ChaosMetrics {
     /// Legacy FFT-magnitude std-dev (smaller => more chaotic).
     pub non_chaoticness: f64,
-    /// Wiener entropy of the power spectrum (higher => more chaotic, ∈ [0, 1]).
-    pub spectral_flatness: f64,
+    /// Shannon entropy of the normalised power spectrum
+    /// (higher => more broadband / more chaotic, ∈ [0, 1]).
+    pub spectral_entropy: f64,
     /// Bandt–Pompe ordinal-pattern entropy (higher => more chaotic, ∈ [0, 1]).
     pub permutation_entropy: f64,
 }
@@ -231,8 +232,8 @@ pub struct ChaosMetrics {
 ///
 /// The trajectory's body-to-COM distance signals are Fourier-transformed
 /// once; the transforms then feed into both the FFT-magnitude std-dev
-/// (`non_chaoticness`) and the spectral-flatness (Wiener entropy) metric.
-/// Permutation entropy is computed directly on the time series without FFT.
+/// (`non_chaoticness`) and the spectral-entropy metric. Permutation entropy
+/// is computed directly on the time series without FFT.
 #[must_use]
 pub fn compute_chaos_metrics(
     m1: f64,
@@ -244,7 +245,7 @@ pub fn compute_chaos_metrics(
     if len < 4 {
         return ChaosMetrics {
             non_chaoticness: 0.0,
-            spectral_flatness: 0.0,
+            spectral_entropy: 0.0,
             permutation_entropy: 0.0,
         };
     }
@@ -256,16 +257,82 @@ pub fn compute_chaos_metrics(
 
     let non_chaoticness =
         (sample_std_dev(&abs1) + sample_std_dev(&abs2) + sample_std_dev(&abs3)) / 3.0;
-    let spectral_flatness = (flatness_from_magnitudes(&abs1)
-        + flatness_from_magnitudes(&abs2)
-        + flatness_from_magnitudes(&abs3))
+    let spectral_entropy = (spectral_entropy_from_magnitudes(&abs1)
+        + spectral_entropy_from_magnitudes(&abs2)
+        + spectral_entropy_from_magnitudes(&abs3))
         / 3.0;
     let permutation_entropy = (single_series_permutation_entropy(&r1)
         + single_series_permutation_entropy(&r2)
         + single_series_permutation_entropy(&r3))
         / 3.0;
 
-    ChaosMetrics { non_chaoticness, spectral_flatness, permutation_entropy }
+    ChaosMetrics { non_chaoticness, spectral_entropy, permutation_entropy }
+}
+
+/// Shannon entropy of the 2D dwell distribution across a coarse 32×32 grid
+/// fitted to the trajectory's bounding box.
+///
+/// Returns a value in `[0, 1]`: `1.0` means body positions are perfectly
+/// uniform across all grid cells (the trajectory fills the canvas);
+/// `0.0` means all dwell concentrates in a single cell (a tight blob).
+///
+/// This is a direct visual-quality signal: orbits where bodies execute
+/// tiny tight motions and rare excursions — Lagrangian-triangle rotations,
+/// concentrated near-collisions, etc. — score very low because most of
+/// the dwell is in a few cells. Genuinely chaotic dances that sweep the
+/// frame score high.
+#[must_use]
+pub fn dwell_entropy_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
+    const GRID: usize = 32;
+    if positions.is_empty() || positions[0].is_empty() {
+        return 0.0;
+    }
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for body in positions {
+        for p in body {
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+        }
+    }
+    let w = (max_x - min_x).max(1e-12);
+    let h = (max_y - min_y).max(1e-12);
+
+    let mut counts = vec![0_u64; GRID * GRID];
+    let mut total = 0_u64;
+    let grid_f = GRID as f64;
+    let max_idx = (GRID - 1) as f64;
+    for body in positions {
+        for p in body {
+            let fx = ((p.x - min_x) / w * grid_f).clamp(0.0, max_idx);
+            let fy = ((p.y - min_y) / h * grid_f).clamp(0.0, max_idx);
+            let gx = fx as usize;
+            let gy = fy as usize;
+            counts[gy * GRID + gx] += 1;
+            total += 1;
+        }
+    }
+    if total == 0 {
+        return 0.0;
+    }
+    let total_f = total as f64;
+    let mut entropy = 0.0_f64;
+    for &c in &counts {
+        if c > 0 {
+            let p = c as f64 / total_f;
+            entropy -= p * p.ln();
+        }
+    }
+    let max_entropy = ((GRID * GRID) as f64).ln();
+    if max_entropy < 1e-14 {
+        return 0.0;
+    }
+    (entropy / max_entropy).clamp(0.0, 1.0)
 }
 
 /// Score how "equilateral" the 3-body triangle is over time
@@ -356,7 +423,7 @@ mod tests {
         let positions = vec![vec![], vec![], vec![]];
         let m = compute_chaos_metrics(1.0, 1.0, 1.0, &positions);
         assert_eq!(m.non_chaoticness, 0.0);
-        assert_eq!(m.spectral_flatness, 0.0);
+        assert_eq!(m.spectral_entropy, 0.0);
         assert_eq!(m.permutation_entropy, 0.0);
     }
 
@@ -376,7 +443,7 @@ mod tests {
             .collect();
         let m = compute_chaos_metrics(1.0, 1.0, 1.0, &positions);
         assert!(m.non_chaoticness.is_finite() && m.non_chaoticness >= 0.0);
-        assert!((0.0..=1.0).contains(&m.spectral_flatness));
+        assert!((0.0..=1.0).contains(&m.spectral_entropy));
         assert!((0.0..=1.0).contains(&m.permutation_entropy));
     }
 
@@ -459,18 +526,18 @@ mod tests {
     }
 
     #[test]
-    fn spectral_flatness_rewards_broadband_over_periodic() {
+    fn spectral_entropy_rewards_broadband_over_periodic() {
         let regular = periodic_positions(2048);
         let chaotic = pseudo_random_positions(2048);
-        let sf_r = compute_chaos_metrics(1.0, 1.0, 1.0, &regular).spectral_flatness;
-        let sf_c = compute_chaos_metrics(1.0, 1.0, 1.0, &chaotic).spectral_flatness;
+        let se_r = compute_chaos_metrics(1.0, 1.0, 1.0, &regular).spectral_entropy;
+        let se_c = compute_chaos_metrics(1.0, 1.0, 1.0, &chaotic).spectral_entropy;
         assert!(
-            (0.0..=1.0).contains(&sf_r) && (0.0..=1.0).contains(&sf_c),
-            "spectral flatness out of [0, 1]: regular={sf_r}, chaotic={sf_c}"
+            (0.0..=1.0).contains(&se_r) && (0.0..=1.0).contains(&se_c),
+            "spectral entropy out of [0, 1]: regular={se_r}, chaotic={se_c}"
         );
         assert!(
-            sf_c > sf_r,
-            "chaotic spectrum ({sf_c}) should be flatter than regular spectrum ({sf_r})"
+            se_c > se_r,
+            "chaotic spectrum ({se_c}) should have higher entropy than regular ({se_r})"
         );
     }
 
@@ -543,5 +610,62 @@ mod tests {
     fn boundedness_short_trajectory_is_zero() {
         let positions: Vec<Vec<Vector3<f64>>> = vec![vec![Vector3::zeros(); 3]; 3];
         assert_eq!(boundedness_score(&positions), 0.0);
+    }
+
+    #[test]
+    fn dwell_entropy_zero_for_static_orbit() {
+        // All bodies sit at one location → all dwell in one cell → entropy 0.
+        let n = 200;
+        let positions: Vec<Vec<Vector3<f64>>> =
+            (0..3).map(|_| vec![Vector3::new(1.0, 1.0, 0.0); n]).collect();
+        let d = dwell_entropy_score(&positions);
+        assert!(d < 1e-9, "static orbit should have ~0 dwell entropy, got {d}");
+    }
+
+    #[test]
+    fn dwell_entropy_higher_for_distributed_than_clustered() {
+        // Cluster: 90% of dwell at one point, 10% along a short arc.
+        let n: i32 = 500;
+        let cap = n as usize;
+        let mut clustered: Vec<Vec<Vector3<f64>>> =
+            (0..3).map(|_| Vec::with_capacity(cap)).collect();
+        for step in 0..n {
+            let frac = f64::from(step) / f64::from(n);
+            let in_cluster = frac < 0.9;
+            for (body, body_positions) in clustered.iter_mut().enumerate() {
+                let p = if in_cluster {
+                    Vector3::new(0.0, 0.0, 0.0)
+                } else {
+                    let theta = (frac - 0.9) * std::f64::consts::TAU * 4.0 + body as f64;
+                    Vector3::new(theta.cos(), theta.sin(), 0.0)
+                };
+                body_positions.push(p);
+            }
+        }
+        // Distributed: bodies sweep wide circles continuously.
+        let distributed: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                (0..n)
+                    .map(|step| {
+                        let t = f64::from(step) / f64::from(n) * std::f64::consts::TAU * 5.0;
+                        let phase = f64::from(body) * std::f64::consts::TAU / 3.0;
+                        let r = 1.0 + 0.3 * (t * 0.7).sin();
+                        Vector3::new(r * (t + phase).cos(), r * (t + phase).sin(), 0.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let d_cluster = dwell_entropy_score(&clustered);
+        let d_dist = dwell_entropy_score(&distributed);
+        assert!(
+            d_dist > d_cluster,
+            "distributed dwell ({d_dist}) should beat clustered dwell ({d_cluster})"
+        );
+    }
+
+    #[test]
+    fn dwell_entropy_empty_returns_zero() {
+        let positions: Vec<Vec<Vector3<f64>>> = vec![vec![], vec![], vec![]];
+        assert_eq!(dwell_entropy_score(&positions), 0.0);
     }
 }

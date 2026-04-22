@@ -2,7 +2,7 @@
 
 use crate::analysis::{
     ChaosMetrics, boundedness_score, calculate_total_angular_momentum, calculate_total_energy,
-    compute_chaos_metrics, equilateralness_score,
+    compute_chaos_metrics, dwell_entropy_score, equilateralness_score,
 };
 use crate::error::{Result, SimulationError};
 use nalgebra::Vector3;
@@ -343,20 +343,24 @@ pub struct TrajectoryResult {
     ///
     /// [`chaos_combined`]: Self::chaos_combined
     pub chaos: f64,
-    /// Wiener-entropy spectral flatness, averaged across the three
-    /// body-to-COM signals (higher => more chaotic, range `[0, 1]`).
-    pub spectral_flatness: f64,
+    /// Shannon entropy of the normalised power spectrum, averaged across
+    /// the three body-to-COM signals (higher => more chaotic, range `[0, 1]`).
+    pub spectral_entropy: f64,
     /// Bandt–Pompe permutation entropy, averaged across the three
     /// body-to-COM signals (higher => more chaotic, range `[0, 1]`).
     pub permutation_entropy: f64,
     /// Combined chaos score used for Borda ranking —
-    /// `(spectral_flatness + permutation_entropy) / 2`.
+    /// `(spectral_entropy + permutation_entropy) / 2`.
     pub chaos_combined: f64,
     /// Equilateralness score (higher = more triangular).
     pub equilateralness: f64,
     /// Spatial-extent stability across the trajectory (higher = more
-    /// bounded, range `[0, 1]`). Also used as a hard viability gate.
+    /// bounded, range `[0, 1]`). Used as a soft viability gate.
     pub boundedness: f64,
+    /// Shannon entropy of the 2D dwell distribution over a 32×32 grid
+    /// (higher => more spread across the canvas, range `[0, 1]`).
+    /// Used as the primary visual-quality gate.
+    pub dwell_entropy: f64,
     /// Borda points awarded for the combined chaos rank.
     pub chaos_pts: usize,
     /// Borda points awarded for equilateralness rank.
@@ -374,11 +378,21 @@ pub struct TrajectoryResult {
 /// Minimum boundedness score an orbit must reach to be considered for ranking.
 ///
 /// The score is `min(window_extents) / max(window_extents)` over five time
-/// windows. A value of `0.4` means no window's extent may exceed `2.5×`
-/// the tightest window — enough slack for genuinely chaotic but bound
-/// motion, tight enough to reject orbits where a body drifts off and the
-/// final composition loses a third of its subject.
-pub const MIN_BOUNDEDNESS: f64 = 0.4;
+/// windows. A value of `0.15` means no window's extent may exceed `~6.7×`
+/// the tightest window — loose enough to admit genuinely chaotic dances
+/// (which naturally vary in scale across windows), tight enough to reject
+/// gross slow escapes where the orbit grows unbounded over time.
+pub const MIN_BOUNDEDNESS: f64 = 0.15;
+
+/// Minimum 2D dwell-entropy an orbit must reach to be considered for ranking.
+///
+/// The score is the Shannon entropy of body positions binned into a 32×32
+/// grid over the trajectory's bounding box, normalised to `[0, 1]`. A
+/// threshold of `0.4` rejects orbits that pile their dwell into a tiny
+/// fraction of the canvas (Lagrangian-triangle rotations, near-collision
+/// blobs, single-circle figures) while admitting any orbit whose bodies
+/// actually sweep through the frame in a visually-rich way.
+pub const MIN_DWELL_ENTROPY: f64 = 0.4;
 
 fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
     Body::new(
@@ -465,77 +479,84 @@ pub fn select_best_trajectory(
     let pc = AtomicUsize::new(0);
     let cs = (num_sims / 10).max(1);
     let dc = AtomicUsize::new(0);
-    let results: Vec<Option<(TrajectoryResult, usize)>> =
-        many.par_iter()
-            .enumerate()
-            .map(|(i, b)| {
-                let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
-                if cnt.is_multiple_of(cs) {
-                    // usize→f64: cnt and num_sims are bounded by num_sims (≤ ~10^6 in practice)
-                    info!(
-                        "   Borda search: {:.0}% done",
-                        (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
-                    );
-                }
-                // Quick rejection: check energy and angular momentum first
-                let e = calculate_total_energy(b);
-                let ang = calculate_total_angular_momentum(b).norm();
-                if e > 10.0 || ang < 10.0 {
-                    dc.fetch_add(1, Ordering::Relaxed);
-                    return None;
-                }
+    let results: Vec<Option<(TrajectoryResult, usize)>> = many
+        .par_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let cnt = pc.fetch_add(1, Ordering::Relaxed) + 1;
+            if cnt.is_multiple_of(cs) {
+                // usize→f64: cnt and num_sims are bounded by num_sims (≤ ~10^6 in practice)
+                info!(
+                    "   Borda search: {:.0}% done",
+                    (cnt as f64 / num_sims as f64) * crate::render::constants::PERCENT_FACTOR
+                );
+            }
+            // Quick rejection: check energy and angular momentum first
+            let e = calculate_total_energy(b);
+            let ang = calculate_total_angular_momentum(b).norm();
+            if e > 10.0 || ang < 10.0 {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
 
-                // Run simulation with early-exit checks for escaping bodies
-                let Some(simr) = get_positions_with_early_exit(b.clone(), steps, th) else {
-                    dc.fetch_add(1, Ordering::Relaxed);
-                    return None;
-                };
+            // Run simulation with early-exit checks for escaping bodies
+            let Some(simr) = get_positions_with_early_exit(b.clone(), steps, th) else {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
+            };
 
-                let pos = simr.positions;
-                let m1 = b[0].mass;
-                let m2 = b[1].mass;
-                let m3 = b[2].mass;
+            let pos = simr.positions;
+            let m1 = b[0].mass;
+            let m2 = b[1].mass;
+            let m3 = b[2].mass;
 
-                // Viability gate: make sure all three bodies stayed within a
-                // stable spatial extent across the whole trajectory. Orbits
-                // that pass the energy-based escape check can still have a
-                // body slowly drift away — those produce lopsided final
-                // frames that aren't museum-grade, so we throw them out here.
-                let bnd = boundedness_score(&pos);
-                if bnd < MIN_BOUNDEDNESS {
-                    dc.fetch_add(1, Ordering::Relaxed);
-                    return None;
-                }
+            // Soft viability gate: catch gross slow escapes where the
+            // trajectory's spatial extent grows unbounded over time.
+            // Loose enough to admit genuinely chaotic dances.
+            let bnd = boundedness_score(&pos);
+            if bnd < MIN_BOUNDEDNESS {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
 
-                // Compute chaos metrics in a single pass (shares the three FFTs
-                // across non_chaoticness and spectral_flatness).
-                let ChaosMetrics {
-                    non_chaoticness: c,
-                    spectral_flatness: sf,
+            // Hard visual-quality gate: reject orbits whose dwell is
+            // concentrated in a tiny fraction of the canvas — these
+            // render as a single bright blob against a nebula
+            // background and look nothing like museum art, no matter
+            // how "chaotic" the spectral metrics claim.
+            let dwell = dwell_entropy_score(&pos);
+            if dwell < MIN_DWELL_ENTROPY {
+                dc.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+
+            // Compute chaos metrics in a single pass (shares the three FFTs
+            // across non_chaoticness and spectral_entropy).
+            let ChaosMetrics { non_chaoticness: c, spectral_entropy: se, permutation_entropy: pe } =
+                compute_chaos_metrics(m1, m2, m3, &pos);
+            let chaos_combined = (se + pe) * 0.5;
+            let eq = equilateralness_score(&pos);
+
+            Some((
+                TrajectoryResult {
+                    chaos: c,
+                    spectral_entropy: se,
                     permutation_entropy: pe,
-                } = compute_chaos_metrics(m1, m2, m3, &pos);
-                let chaos_combined = (sf + pe) * 0.5;
-                let eq = equilateralness_score(&pos);
-
-                Some((
-                    TrajectoryResult {
-                        chaos: c,
-                        spectral_flatness: sf,
-                        permutation_entropy: pe,
-                        chaos_combined,
-                        equilateralness: eq,
-                        boundedness: bnd,
-                        chaos_pts: 0,
-                        equil_pts: 0,
-                        total_score: 0,
-                        total_score_weighted: 0.0,
-                        selected_index: 0,
-                        discarded_count: 0,
-                    },
-                    i,
-                ))
-            })
-            .collect();
+                    chaos_combined,
+                    equilateralness: eq,
+                    boundedness: bnd,
+                    dwell_entropy: dwell,
+                    chaos_pts: 0,
+                    equil_pts: 0,
+                    total_score: 0,
+                    total_score_weighted: 0.0,
+                    selected_index: 0,
+                    discarded_count: 0,
+                },
+                i,
+            ))
+        })
+        .collect();
     let dtot = dc.load(Ordering::Relaxed);
     // usize→f64: dtot and num_sims are bounded by num_sims (≤ ~10^6 in practice)
     info!(
@@ -550,7 +571,8 @@ pub fn select_best_trajectory(
             reason: format!(
                 "All orbits filtered out due to: high energy (E > 10), \
                 low angular momentum (L < 10), escaping bodies (threshold: {th}), \
-                or unbounded spatial extent (boundedness < {MIN_BOUNDEDNESS})"
+                unbounded spatial extent (boundedness < {MIN_BOUNDEDNESS}), \
+                or concentrated dwell distribution (dwell entropy < {MIN_DWELL_ENTROPY})"
             ),
         }
         .into());

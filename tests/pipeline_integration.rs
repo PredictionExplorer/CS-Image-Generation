@@ -35,8 +35,13 @@ const MIN_MASS: f64 = 100.0;
 const MAX_MASS: f64 = 300.0;
 const LOCATION: f64 = 300.0;
 const VELOCITY: f64 = 1.0;
-const SIM_STEPS: usize = 2_000;
-const NUM_SIMS: usize = 12;
+// Bumped from (2_000, 12) to (20_000, 200) so the dwell-entropy filter
+// in `select_best_trajectory` can find at least one orbit whose bodies
+// cover enough of the canvas. At small step counts the bounded chaotic
+// dance hasn't had time to fill the frame, so the visual-quality gate
+// rejects every candidate.
+const SIM_STEPS: usize = 20_000;
+const NUM_SIMS: usize = 200;
 const WIDTH: u32 = 192;
 const HEIGHT: u32 = 108;
 

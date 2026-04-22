@@ -624,8 +624,13 @@ mod tests {
 
         let width = 64u32;
         let height = 36u32;
-        let num_sims = 20;
-        let num_steps = 5_000;
+        // Bumped from (20, 5_000) to (200, 20_000) after the dwell-entropy
+        // filter landed. At 5_000 steps even chaotic orbits don't sweep
+        // enough of the canvas to clear the visual-quality gate; at 20_000
+        // steps with 200 candidates the Borda reliably finds a passing
+        // orbit while still keeping the smoke test under a few seconds.
+        let num_sims = 200;
+        let num_steps = 20_000;
 
         let noise_seed = derive_noise_seed(seed);
         let mut rng = Sha3RandomByteStream::new(seed, 100.0, 300.0, 300.0, 1.0);

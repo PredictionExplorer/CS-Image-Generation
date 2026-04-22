@@ -43,7 +43,7 @@ fn same_seed_produces_identical_simulation() {
     let seed_bytes = app::parse_seed(TEST_SEED).expect("seed should parse");
 
     let mut rng = make_rng(&seed_bytes);
-    let (bodies, _) = app::run_borda_selection(&mut rng, 200, 2_000, 1.0, 5.0, -0.3)
+    let (bodies, _) = app::run_borda_selection(&mut rng, 200, 20_000, 1.0, 5.0, -0.3)
         .expect("borda selection should succeed");
 
     let positions1 = app::simulate_best_orbit(bodies.clone(), 2_000);
@@ -72,9 +72,9 @@ fn different_seeds_produce_different_orbits() {
     let mut rng_a = make_rng(&seed_a);
     let mut rng_b = make_rng(&seed_b);
 
-    let (bodies_a, _) = app::run_borda_selection(&mut rng_a, 200, 2_000, 1.0, 5.0, -0.3)
+    let (bodies_a, _) = app::run_borda_selection(&mut rng_a, 200, 20_000, 1.0, 5.0, -0.3)
         .expect("borda selection should succeed");
-    let (bodies_b, _) = app::run_borda_selection(&mut rng_b, 200, 2_000, 1.0, 5.0, -0.3)
+    let (bodies_b, _) = app::run_borda_selection(&mut rng_b, 200, 20_000, 1.0, 5.0, -0.3)
         .expect("borda selection should succeed");
 
     let all_same = bodies_a.iter().zip(&bodies_b).all(|(a, b)| {
