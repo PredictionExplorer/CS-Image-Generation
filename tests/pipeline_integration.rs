@@ -5,8 +5,8 @@
 //!
 //! * `run_full_render` is deterministic: identical seed produces bit-identical
 //!   output over multiple runs (SHA-256 of the raw 16-bit buffer).
-//! * The art-style meta-system produces diverse `ArtStyle` / `NebulaPalette`
-//!   selections over 64 seeds (Shannon-entropy-style coverage).
+//! * The art-style meta-system produces diverse `ArtStyle` selections over
+//!   64 seeds (Shannon-entropy-style coverage).
 //! * The generation log now exposes the new style fields.
 //!
 //! These tests deliberately avoid encoding exact hashes in source, because
@@ -22,7 +22,6 @@ use three_body_problem::app::{
     Enhancements, apply_drift_transformation, generate_colors_with_mode, simulate_best_orbit,
 };
 use three_body_problem::render::art_style::ArtStyle;
-use three_body_problem::render::nebula_presets::NebulaPalette;
 use three_body_problem::render::randomizable_config::RandomizableEffectConfig;
 use three_body_problem::render::{
     ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
@@ -68,7 +67,6 @@ fn hash_u16_buffer(buf: &[u16]) -> u64 {
 struct PipelineOutput {
     pixels: Vec<u16>,
     art_style: ArtStyle,
-    nebula_palette: NebulaPalette,
 }
 
 fn run_full_render(seed_bytes: &[u8]) -> PipelineOutput {
@@ -76,8 +74,8 @@ fn run_full_render(seed_bytes: &[u8]) -> PipelineOutput {
 
     // Use a minimal config where downstream post-effects are disabled so the
     // integration test is insulated from their randomised parameter ranges.
-    // ArtStyle / NebulaPalette still flow through the resolver so we can
-    // verify that they are selected deterministically.
+    // ArtStyle still flows through the resolver so we can verify that it is
+    // selected deterministically.
     let randomizable = RandomizableEffectConfig {
         enable_bloom: Some(false),
         enable_glow: Some(false),
@@ -92,7 +90,6 @@ fn run_full_render(seed_bytes: &[u8]) -> PipelineOutput {
         enable_edge_luminance: Some(false),
         enable_atmospheric_depth: Some(false),
         enable_fine_texture: Some(false),
-        nebula_strength: Some(0.0),
         ..Default::default()
     };
     let (resolved, _log) = randomizable.resolve(&mut rng, WIDTH, HEIGHT);
@@ -143,11 +140,7 @@ fn run_full_render(seed_bytes: &[u8]) -> PipelineOutput {
     let image = render_final_frame_spectral(scene, &levels, settings)
         .expect("final frame render should succeed");
 
-    PipelineOutput {
-        pixels: image.into_raw(),
-        art_style: resolved.art_style,
-        nebula_palette: resolved.nebula_palette,
-    }
+    PipelineOutput { pixels: image.into_raw(), art_style: resolved.art_style }
 }
 
 fn seed_from_u64(value: u64) -> [u8; 8] {
@@ -178,10 +171,6 @@ fn pinned_seeds_produce_deterministic_output() {
         assert_eq!(
             run_a.art_style, run_b.art_style,
             "seed 0x{seed:016x} should pick the same ArtStyle across runs",
-        );
-        assert_eq!(
-            run_a.nebula_palette, run_b.nebula_palette,
-            "seed 0x{seed:016x} should pick the same NebulaPalette across runs",
         );
         // Image must contain at least some non-trivial pixels (the pipeline is
         // not returning a fully-clipped black canvas). We allow zero pixels for
@@ -221,13 +210,12 @@ fn pinned_final_frame_round_trips_through_png_without_going_black() {
 }
 
 // ---------------------------------------------------------------------------
-// Art-style / nebula coverage over 64 seeds
+// Art-style coverage over 64 seeds
 // ---------------------------------------------------------------------------
 
 #[test]
 fn art_style_distribution_is_diverse_over_64_seeds() {
     let mut style_counts: HashMap<ArtStyle, usize> = HashMap::new();
-    let mut nebula_counts: HashMap<NebulaPalette, usize> = HashMap::new();
 
     for seed in 0u64..64 {
         let seed_bytes = seed_from_u64(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
@@ -236,21 +224,13 @@ fn art_style_distribution_is_diverse_over_64_seeds() {
         let randomizable = RandomizableEffectConfig::default();
         let (resolved, _) = randomizable.resolve(&mut rng, WIDTH, HEIGHT);
         *style_counts.entry(resolved.art_style).or_default() += 1;
-        *nebula_counts.entry(resolved.nebula_palette).or_default() += 1;
     }
 
-    // We should see at least half of the 18 ArtStyle variants across 64 seeds.
+    // We should see at least half of the 17 ArtStyle variants across 64 seeds.
     assert!(
         style_counts.len() >= 9,
         "only {} distinct ArtStyle variants seen in 64 seeds (want >= 9): {style_counts:?}",
         style_counts.len(),
-    );
-
-    // Nebula palettes are style-driven but still must show meaningful spread.
-    assert!(
-        nebula_counts.len() >= 6,
-        "only {} distinct NebulaPalette variants seen in 64 seeds (want >= 6): {nebula_counts:?}",
-        nebula_counts.len(),
     );
 
     // No single art style may dominate more than 50% of 64 seeds.
@@ -271,7 +251,6 @@ fn generation_log_exposes_style_fields_when_populated() {
 
     let cfg = LoggedRenderConfig {
         art_style: Some("DeepCosmos".to_string()),
-        nebula_palette: Some("DeepSpace".to_string()),
         grade_preset: Some("CinematicTeal".to_string()),
         hue_palette_mode: Some("Triadic".to_string()),
         bloom_mode_choice: Some("dog".to_string()),
@@ -286,7 +265,6 @@ fn generation_log_exposes_style_fields_when_populated() {
     let obj = json.as_object().expect("LoggedRenderConfig should be a JSON object");
     for key in [
         "art_style",
-        "nebula_palette",
         "grade_preset",
         "hue_palette_mode",
         "bloom_mode_choice",
@@ -311,7 +289,6 @@ fn generation_log_default_omits_new_style_fields() {
     // skip_serializing_if should drop None fields from the default record.
     for key in [
         "art_style",
-        "nebula_palette",
         "grade_preset",
         "hue_palette_mode",
         "bloom_mode_choice",

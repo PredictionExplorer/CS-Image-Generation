@@ -81,9 +81,6 @@ pub struct LoggedRenderConfig {
     /// Top-level art style name driving the aesthetic bundle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub art_style: Option<String>,
-    /// Resolved nebula background palette name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nebula_palette: Option<String>,
     /// Resolved cinematic color-grade preset name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grade_preset: Option<String>,
@@ -200,7 +197,6 @@ impl Default for LoggedRenderConfig {
             perceptual_blur_strength: 0.65,
             perceptual_gamut_mode: "preserve-hue".to_string(),
             art_style: None,
-            nebula_palette: None,
             grade_preset: None,
             hue_palette_mode: None,
             bloom_mode_choice: None,

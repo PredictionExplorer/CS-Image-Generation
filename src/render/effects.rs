@@ -250,16 +250,16 @@ impl FinishEffectPipeline {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
         }
 
-        // Lens flare reads luminous areas created by the trajectory pipeline
-        // and the nebula background, so it runs after composition but before
-        // the starfield so flare ghosts can sparkle on top of each other.
+        // Lens flare reads luminous areas created by the trajectory pipeline,
+        // so it runs after the main pass but before the starfield so flare
+        // ghosts can sparkle on top of each other.
         if config.lens_flare_enabled {
             chain.add(Box::new(LensFlare::new(config.lens_flare_config.clone())));
         }
 
         // Starfield is the last step before tonemapping-adjacent passes so
-        // it sits visibly above the nebula background without being blurred
-        // by bloom or washed by grading.
+        // it sits visibly on top without being blurred by bloom or washed
+        // by grading.
         if config.starfield_enabled {
             chain.add(Box::new(Starfield::new(config.starfield_config.clone())));
         }

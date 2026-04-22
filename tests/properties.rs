@@ -13,15 +13,13 @@ use three_body_problem::post_effects::{
     AtmosphericDepth, AtmosphericDepthConfig, ChromaticBloom, ChromaticBloomConfig,
     CinematicColorGrade, ColorGradeParams, EdgeLuminance, EdgeLuminanceConfig, FineTexture,
     FineTextureConfig, GlowEnhancement, GlowEnhancementConfig, GradientMap, GradientMapConfig,
-    LensFlare, LensFlareConfig, MicroContrast, MicroContrastConfig, NebulaCloudConfig,
-    NebulaClouds, Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig,
-    PixelBuffer, PostEffect, Starfield, StarfieldConfig,
+    LensFlare, LensFlareConfig, MicroContrast, MicroContrastConfig, Opalescence, OpalescenceConfig,
+    PerceptualBlur, PerceptualBlurConfig, PixelBuffer, PostEffect, Starfield, StarfieldConfig,
 };
 use three_body_problem::render::art_style::{ArtStyle, DriftCharacter};
 use three_body_problem::render::context::RenderContext;
 use three_body_problem::render::grade_presets::GradePreset;
 use three_body_problem::render::hue_palette::{HuePaletteMode, hues_for_mode};
-use three_body_problem::render::nebula_presets::NebulaPalette;
 use three_body_problem::render::randomizable_config::RandomizableEffectConfig;
 use three_body_problem::sim::Sha3RandomByteStream;
 
@@ -74,7 +72,6 @@ proptest! {
         let (r1, _) = cfg.resolve(&mut rng_a, 640, 360);
         let (r2, _) = cfg.resolve(&mut rng_b, 640, 360);
         prop_assert_eq!(r1.art_style, r2.art_style);
-        prop_assert_eq!(r1.nebula_palette, r2.nebula_palette);
         prop_assert_eq!(r1.grade_preset, r2.grade_preset);
         prop_assert_eq!(r1.hue_palette_mode, r2.hue_palette_mode);
         prop_assert_eq!(r1.drift_character, r2.drift_character);
@@ -94,25 +91,10 @@ proptest! {
         prop_assert!(r.clip_white > 0.5 && r.clip_white <= 1.0);
         prop_assert!(r.framing_zoom >= 1.0 && r.framing_zoom <= 2.0,
             "framing_zoom out of clamp: {}", r.framing_zoom);
-        prop_assert!(r.nebula_strength >= 0.0 && r.nebula_strength <= 1.0);
         prop_assert!(r.vignette_offset_x.abs() <= 0.5);
         prop_assert!(r.vignette_offset_y.abs() <= 0.5);
         prop_assert!(r.starfield_strength >= 0.0 && r.starfield_strength <= 1.0);
         prop_assert!(r.lens_flare_strength >= 0.0 && r.lens_flare_strength <= 1.0);
-    }
-
-    #[test]
-    fn nebula_palette_colors_are_bounded(palette_index in 0usize..12) {
-        let palette = NebulaPalette::from_index(palette_index);
-        let preset = palette.preset();
-        for stop in &preset.colors {
-            for &ch in stop {
-                prop_assert!((0.0..=1.0).contains(&ch), "nebula color out of range: {}", ch);
-            }
-        }
-        prop_assert!(preset.persistence > 0.0 && preset.persistence <= 1.0);
-        prop_assert!((1.5..=3.5).contains(&preset.lacunarity));
-        prop_assert!((0.0..=1.0).contains(&preset.edge_fade));
     }
 
     #[test]
@@ -163,10 +145,7 @@ proptest! {
         prop_assert_eq!(bundle.style, style);
         // name() must return a non-empty, ASCII-ish identifier.
         let name = style.name();
-        prop_assert!(!name.is_empty());
-        prop_assert!(name.chars().all(|c| c.is_ascii_graphic()));
-        // Nebula bias is clamped to a sane range.
-        prop_assert!(bundle.nebula_strength_bias >= 0.0);
+        prop_assert!(!name.is_empty());        prop_assert!(name.chars().all(|c| c.is_ascii_graphic()));
         prop_assert!(bundle.hdr_scale_bias > 0.0 && bundle.hdr_scale_bias <= 3.0);
         // Drift character must be a valid enum variant.
         match bundle.drift {
@@ -279,7 +258,6 @@ proptest! {
             Box::new(FineTexture::new(FineTextureConfig::default())),
             Box::new(Opalescence::new(OpalescenceConfig::default())),
             Box::new(GradientMap::new(GradientMapConfig::default())),
-            Box::new(NebulaClouds::new(NebulaCloudConfig::default())),
             Box::new(Starfield::new(StarfieldConfig {
                 strength: 0.4,
                 density: 200.0,
@@ -338,7 +316,6 @@ fn post_effect_configs_have_sensible_defaults() {
     let _ = FineTextureConfig::default();
     let _ = OpalescenceConfig::default();
     let _ = GradientMapConfig::default();
-    let _ = NebulaCloudConfig::default();
     let _ = StarfieldConfig::default();
     let _ = LensFlareConfig::default();
 }

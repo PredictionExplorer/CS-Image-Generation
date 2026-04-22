@@ -245,7 +245,6 @@ fn build_generation_log_config(
         equil_weight: borda_weights.equil_weight,
         weights_randomized: borda_weights.was_randomized,
         art_style: Some(resolved.art_style.name().to_string()),
-        nebula_palette: Some(resolved.nebula_palette.name().to_string()),
         grade_preset: Some(resolved.grade_preset.name().to_string()),
         hue_palette_mode: Some(resolved.hue_palette_mode.name().to_string()),
         bloom_mode_choice: Some(resolved.bloom_mode_choice.as_str().to_string()),

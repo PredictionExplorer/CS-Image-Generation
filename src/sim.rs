@@ -521,9 +521,9 @@ pub fn select_best_trajectory(
 
             // Hard visual-quality gate: reject orbits whose dwell is
             // concentrated in a tiny fraction of the canvas — these
-            // render as a single bright blob against a nebula
-            // background and look nothing like museum art, no matter
-            // how "chaotic" the spectral metrics claim.
+            // render as a single bright blob and look nothing like
+            // museum art, no matter how "chaotic" the spectral metrics
+            // claim.
             let dwell = dwell_entropy_score(&pos);
             if dwell < MIN_DWELL_ENTROPY {
                 dc.fetch_add(1, Ordering::Relaxed);

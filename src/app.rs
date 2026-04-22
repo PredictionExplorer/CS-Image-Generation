@@ -109,8 +109,6 @@ pub struct GenerationLogConfig {
 
     /// Top-level art style name (from [`ArtStyle`]).
     pub art_style: Option<String>,
-    /// Resolved nebula background palette name.
-    pub nebula_palette: Option<String>,
     /// Resolved cinematic color-grade preset name.
     pub grade_preset: Option<String>,
     /// Resolved harmonic hue-distribution mode name.
@@ -166,7 +164,7 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
 }
 
-/// Derive noise seed from simulation seed for nebula generation
+/// Derive noise seed from simulation seed for procedural noise (textures, etc.).
 #[must_use]
 pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
     let get_or_zero = |idx| seed_bytes.get(idx).copied().unwrap_or(0);
@@ -444,7 +442,6 @@ pub fn log_generation(
         perceptual_blur_strength: config.perceptual_blur_strength,
         perceptual_gamut_mode: config.perceptual_gamut_mode.clone(),
         art_style: config.art_style.clone(),
-        nebula_palette: config.nebula_palette.clone(),
         grade_preset: config.grade_preset.clone(),
         hue_palette_mode: config.hue_palette_mode.clone(),
         bloom_mode_choice: config.bloom_mode_choice.clone(),
@@ -649,7 +646,6 @@ mod tests {
             enable_edge_luminance: Some(false),
             enable_atmospheric_depth: Some(false),
             enable_fine_texture: Some(false),
-            nebula_strength: Some(0.0),
             ..Default::default()
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);

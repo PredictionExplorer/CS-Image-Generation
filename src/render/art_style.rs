@@ -3,8 +3,8 @@
 //! Instead of sampling every effect parameter independently (which tends
 //! to regress toward a mean "teal/orange cinematic" look) we pick a single
 //! cohesive [`ArtStyle`] per seed. Each variant is a fully-considered
-//! aesthetic that bundles a nebula palette, a grade preset, a hue palette
-//! mode, a drift character, a bloom mode, and optional emphasis knobs.
+//! aesthetic that bundles a grade preset, a hue palette mode, a drift
+//! character, a bloom mode, and optional emphasis knobs.
 //!
 //! The style is chosen early (with weighted probability) and then baked
 //! into the effect config before per-effect randomization runs, which
@@ -13,7 +13,6 @@
 use super::BloomMode;
 use super::grade_presets::GradePreset;
 use super::hue_palette::HuePaletteMode;
-use super::nebula_presets::NebulaPalette;
 use crate::sim::Sha3RandomByteStream;
 use serde::{Deserialize, Serialize};
 
@@ -86,8 +85,6 @@ pub enum ArtStyle {
     SolarFurnace,
     /// Deep abyssal ocean blues.
     OceanicAbyss,
-    /// Soft rose-nebula nursery.
-    RoseNebula,
     /// Mucha-inspired art nouveau.
     ArtNouveau,
     /// High-contrast baroque chiaroscuro.
@@ -122,7 +119,6 @@ pub const ALL_ART_STYLES: &[ArtStyle] = &[
     ArtStyle::AuroraBorealis,
     ArtStyle::SolarFurnace,
     ArtStyle::OceanicAbyss,
-    ArtStyle::RoseNebula,
     ArtStyle::ArtNouveau,
     ArtStyle::BaroqueChiaroscuro,
     ArtStyle::TokyoNeon,
@@ -143,8 +139,6 @@ pub const ALL_ART_STYLES: &[ArtStyle] = &[
 pub struct StyleBundle {
     /// Chosen style.
     pub style: ArtStyle,
-    /// Matching nebula palette.
-    pub nebula: NebulaPalette,
     /// Matching color-grade preset.
     pub grade: GradePreset,
     /// Matching hue-palette mode.
@@ -155,8 +149,6 @@ pub struct StyleBundle {
     pub bloom: BloomMode,
     /// Optional emphasis knobs.
     pub emphasis: StyleEmphasis,
-    /// Nebula strength multiplier (0..=1.2) applied on top of the randomized base.
-    pub nebula_strength_bias: f64,
     /// Multiplier applied to HDR scale after resolve.
     pub hdr_scale_bias: f64,
 }
@@ -176,7 +168,6 @@ impl ArtStyle {
             ArtStyle::AuroraBorealis => "aurora_borealis",
             ArtStyle::SolarFurnace => "solar_furnace",
             ArtStyle::OceanicAbyss => "oceanic_abyss",
-            ArtStyle::RoseNebula => "rose_nebula",
             ArtStyle::ArtNouveau => "art_nouveau",
             ArtStyle::BaroqueChiaroscuro => "baroque_chiaroscuro",
             ArtStyle::TokyoNeon => "tokyo_neon",
@@ -195,20 +186,19 @@ impl ArtStyle {
 
     /// Pick a style from the RNG with a curated near-uniform distribution.
     ///
-    /// Weights are intentionally flat: no single style exceeds 8/130 of the
+    /// Weights are intentionally flat: no single style exceeds 8/123 of the
     /// probability mass. The Shannon entropy over 1024+ seeds stays
-    /// comfortably above 3.8 bits, and no legacy style dominates the
-    /// aesthetic sample. Every style is already curated for museum-tier
-    /// output, so flatter weights translate directly into higher variety
-    /// without any quality trade-off.
+    /// comfortably high, and no legacy style dominates the aesthetic
+    /// sample. Every style is already curated for museum-tier output, so
+    /// flatter weights translate directly into higher variety without any
+    /// quality trade-off.
     #[must_use]
     pub fn pick(rng: &mut Sha3RandomByteStream) -> ArtStyle {
-        const WEIGHTS: [(ArtStyle, u32); 18] = [
+        const WEIGHTS: [(ArtStyle, u32); 17] = [
             (ArtStyle::DeepCosmos, 8),
             (ArtStyle::AuroraBorealis, 8),
             (ArtStyle::SolarFurnace, 8),
             (ArtStyle::OceanicAbyss, 8),
-            (ArtStyle::RoseNebula, 8),
             (ArtStyle::ArtNouveau, 7),
             (ArtStyle::BaroqueChiaroscuro, 7),
             (ArtStyle::TokyoNeon, 8),
@@ -246,84 +236,60 @@ impl ArtStyle {
         match self {
             ArtStyle::DeepCosmos => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::DeepSpace,
                 grade: GradePreset::NightSky,
                 hue_mode: HuePaletteMode::Triadic,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis { emphasize_starfield: true, ..Default::default() },
-                nebula_strength_bias: 0.9,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::AuroraBorealis => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Aurora,
                 grade: GradePreset::NordicCool,
                 hue_mode: HuePaletteMode::Complementary,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Dog,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 1.15,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::SolarFurnace => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::SolarFire,
                 grade: GradePreset::GoldenHour,
                 hue_mode: HuePaletteMode::Analogous,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Dog,
                 emphasis: StyleEmphasis { emphasize_lens_flare: true, ..Default::default() },
-                nebula_strength_bias: 1.1,
                 hdr_scale_bias: 1.05,
             },
             ArtStyle::OceanicAbyss => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::AbyssalOcean,
                 grade: GradePreset::UnderwaterTeal,
                 hue_mode: HuePaletteMode::Monochromatic,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 1.0,
-                hdr_scale_bias: 1.0,
-            },
-            ArtStyle::RoseNebula => StyleBundle {
-                style: self,
-                nebula: NebulaPalette::RoseNebula,
-                grade: GradePreset::PastelDream,
-                hue_mode: HuePaletteMode::SplitComplementary,
-                drift: DriftCharacter::Elliptical,
-                bloom: BloomMode::Gaussian,
-                emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 1.1,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::ArtNouveau => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::EmeraldReef,
                 grade: GradePreset::ArtNouveauEarth,
                 hue_mode: HuePaletteMode::TetradicSquare,
                 drift: DriftCharacter::Circular,
                 bloom: BloomMode::None,
                 emphasis: StyleEmphasis { emphasize_champleve: true, ..Default::default() },
-                nebula_strength_bias: 0.95,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::BaroqueChiaroscuro => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Monochrome,
                 grade: GradePreset::NoirContrast,
                 hue_mode: HuePaletteMode::Duotone,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Dog,
                 emphasis: StyleEmphasis { heavy_vignette: true, ..Default::default() },
-                nebula_strength_bias: 0.7,
                 hdr_scale_bias: 1.1,
             },
             ArtStyle::TokyoNeon => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::TokyoNeon,
                 grade: GradePreset::NeonNoir,
                 hue_mode: HuePaletteMode::Complementary,
                 drift: DriftCharacter::Linear,
@@ -333,23 +299,19 @@ impl ArtStyle {
                     boost_dispersion: true,
                     ..Default::default()
                 },
-                nebula_strength_bias: 1.15,
                 hdr_scale_bias: 1.1,
             },
             ArtStyle::ArcticSilence => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::ArcticCrystal,
                 grade: GradePreset::IcyPlatinum,
                 hue_mode: HuePaletteMode::Monochromatic,
                 drift: DriftCharacter::None,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 0.85,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::MoltenGold => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::MoltenGold,
                 grade: GradePreset::WarmBrass,
                 hue_mode: HuePaletteMode::Analogous,
                 drift: DriftCharacter::Spiral,
@@ -359,56 +321,46 @@ impl ArtStyle {
                     emphasize_fine_texture: true,
                     ..Default::default()
                 },
-                nebula_strength_bias: 1.05,
                 hdr_scale_bias: 1.05,
             },
             ArtStyle::RoyalVelvet => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Amethyst,
                 grade: GradePreset::RoyalAmethyst,
                 hue_mode: HuePaletteMode::Complementary,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis { emphasize_champleve: true, ..Default::default() },
-                nebula_strength_bias: 1.0,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::DesertMirage => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Sepia,
                 grade: GradePreset::VintageSepia,
                 hue_mode: HuePaletteMode::Analogous,
                 drift: DriftCharacter::Linear,
                 bloom: BloomMode::None,
                 emphasis: StyleEmphasis { emphasize_fine_texture: true, ..Default::default() },
-                nebula_strength_bias: 0.95,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::EmeraldCity => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::EmeraldReef,
                 grade: GradePreset::CinematicTeal,
                 hue_mode: HuePaletteMode::Triadic,
                 drift: DriftCharacter::Elliptical,
                 bloom: BloomMode::Dog,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 1.05,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::PorcelainPastel => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::RoseNebula,
                 grade: GradePreset::PastelDream,
-                hue_mode: HuePaletteMode::Analogous,
+                hue_mode: HuePaletteMode::SplitComplementary,
                 drift: DriftCharacter::Circular,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 1.0,
                 hdr_scale_bias: 0.95,
             },
             ArtStyle::IridescentPrism => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::DeepSpace,
                 grade: GradePreset::SaturatedRainbow,
                 hue_mode: HuePaletteMode::TetradicSquare,
                 drift: DriftCharacter::Elliptical,
@@ -418,12 +370,10 @@ impl ArtStyle {
                     boost_dispersion: true,
                     ..Default::default()
                 },
-                nebula_strength_bias: 0.85,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::Monochrome => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Monochrome,
                 grade: GradePreset::HighContrastBW,
                 hue_mode: HuePaletteMode::Monochromatic,
                 drift: DriftCharacter::Elliptical,
@@ -433,29 +383,24 @@ impl ArtStyle {
                     heavy_vignette: true,
                     ..Default::default()
                 },
-                nebula_strength_bias: 0.85,
                 hdr_scale_bias: 1.05,
             },
             ArtStyle::Duotone => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::DeepSpace,
                 grade: GradePreset::NeonNoir,
                 hue_mode: HuePaletteMode::Duotone,
                 drift: DriftCharacter::Linear,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis::default(),
-                nebula_strength_bias: 0.95,
                 hdr_scale_bias: 1.0,
             },
             ArtStyle::CosmicEthereal => StyleBundle {
                 style: self,
-                nebula: NebulaPalette::Aurora,
                 grade: GradePreset::EtherealSoft,
                 hue_mode: HuePaletteMode::CosmicWarmCool,
                 drift: DriftCharacter::Brownian,
                 bloom: BloomMode::Gaussian,
                 emphasis: StyleEmphasis { force_perceptual_blur: true, ..Default::default() },
-                nebula_strength_bias: 1.10,
                 hdr_scale_bias: 0.95,
             },
         }
@@ -473,8 +418,8 @@ mod tests {
     }
 
     #[test]
-    fn exactly_eighteen_styles() {
-        assert_eq!(ArtStyle::all().len(), 18);
+    fn exactly_seventeen_styles() {
+        assert_eq!(ArtStyle::all().len(), 17);
     }
 
     #[test]
@@ -488,11 +433,6 @@ mod tests {
         for &style in ArtStyle::all() {
             let bundle = style.bundle();
             assert_eq!(bundle.style, style);
-            assert!(
-                (0.5..=1.5).contains(&bundle.nebula_strength_bias),
-                "{} nebula_bias out of range",
-                style.name()
-            );
             assert!(
                 (0.8..=1.25).contains(&bundle.hdr_scale_bias),
                 "{} hdr_bias out of range",
@@ -521,8 +461,8 @@ mod tests {
 
     #[test]
     fn pick_distribution_has_high_entropy() {
-        // Over many seeds, Shannon entropy of picked styles must exceed 3.8 bits
-        // (18 variants => log2(18) ~ 4.17 maximum).
+        // Over many seeds, Shannon entropy of picked styles must exceed 3.7 bits
+        // (17 variants => log2(17) ~ 4.087 maximum).
         let mut counts: HashMap<ArtStyle, u32> = HashMap::new();
         let total = 1024u32;
         for seed in 0..total {
@@ -540,7 +480,7 @@ mod tests {
                 entropy -= p * p.log2();
             }
         }
-        assert!(entropy >= 3.8, "entropy too low: {entropy}");
+        assert!(entropy >= 3.7, "entropy too low: {entropy}");
     }
 
     #[test]
@@ -555,13 +495,6 @@ mod tests {
         ];
         let names: HashSet<&'static str> = characters.iter().map(|d| d.name()).collect();
         assert_eq!(names.len(), characters.len());
-    }
-
-    #[test]
-    fn coverage_is_broad_across_nebula_palettes() {
-        let nebulas: HashSet<NebulaPalette> =
-            ArtStyle::all().iter().map(|s| s.bundle().nebula).collect();
-        assert!(nebulas.len() >= 10, "only {} distinct nebulas", nebulas.len());
     }
 
     #[test]

@@ -8,7 +8,6 @@ use super::art_style::{ArtStyle, DriftCharacter, StyleBundle};
 use super::effect_randomizer::{EffectRandomizer, RandomizationLog, RandomizationRecord};
 use super::grade_presets::GradePreset;
 use super::hue_palette::HuePaletteMode;
-use super::nebula_presets::NebulaPalette;
 use super::parameter_descriptors as pd;
 use crate::sim::Sha3RandomByteStream;
 
@@ -164,17 +163,8 @@ pub struct RandomizableEffectConfig {
     /// White point clipping threshold.
     pub clip_white: Option<f64>,
 
-    /// Nebula overlay strength.
-    pub nebula_strength: Option<f64>,
-    /// Number of noise octaves for nebula generation.
-    pub nebula_octaves: Option<usize>,
-    /// Base frequency for nebula noise.
-    pub nebula_base_frequency: Option<f64>,
-
     /// Chosen art style. When `None`, a style is picked from the RNG.
     pub art_style: Option<ArtStyle>,
-    /// Chosen nebula palette. When `None`, derived from the [`ArtStyle`].
-    pub nebula_palette: Option<NebulaPalette>,
     /// Chosen grade preset. When `None`, derived from the [`ArtStyle`].
     pub grade_preset: Option<GradePreset>,
     /// Chosen hue palette mode. When `None`, derived from the [`ArtStyle`].
@@ -237,7 +227,6 @@ impl RandomizableEffectConfig {
         };
         let bundle = style.bundle();
         resolved.art_style = style;
-        resolved.nebula_palette = self.nebula_palette.unwrap_or(bundle.nebula);
         resolved.grade_preset = self.grade_preset.unwrap_or(bundle.grade);
         resolved.hue_palette_mode = self.hue_palette_mode.unwrap_or(bundle.hue_mode);
         resolved.bloom_mode_choice = self.bloom_mode_choice.unwrap_or(bundle.bloom);
@@ -250,12 +239,6 @@ impl RandomizableEffectConfig {
             value: style.name().to_string(),
             was_randomized: self.art_style.is_none(),
             range_used: "curated-18".to_string(),
-        });
-        style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
-            name: "nebula_palette".to_string(),
-            value: resolved.nebula_palette.name().to_string(),
-            was_randomized: self.nebula_palette.is_none(),
-            range_used: "curated-12".to_string(),
         });
         style_record.parameters.push(super::effect_randomizer::RandomizedParameter {
             name: "grade_preset".to_string(),
@@ -292,7 +275,7 @@ impl RandomizableEffectConfig {
         self.resolve_material_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_detail_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_hdr_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_style_material_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_vignette_offset(&mut resolved, &mut randomizer, &mut log);
@@ -904,7 +887,7 @@ impl RandomizableEffectConfig {
         );
     }
 
-    fn resolve_hdr_nebula_params(
+    fn resolve_hdr_params(
         &self,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
@@ -914,29 +897,6 @@ impl RandomizableEffectConfig {
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
         let style_bundle = resolved.art_style.bundle();
         resolved.hdr_scale = (hdr_base * style_bundle.hdr_scale_bias).clamp(0.04, 0.30);
-        let nebula_base = self.resolve_float(
-            "nebula_strength",
-            self.nebula_strength,
-            &pd::NEBULA_STRENGTH,
-            randomizer,
-            log,
-        );
-        resolved.nebula_strength =
-            (nebula_base * style_bundle.nebula_strength_bias).clamp(0.0, 0.28);
-        resolved.nebula_octaves = self.resolve_int(
-            "nebula_octaves",
-            self.nebula_octaves,
-            &pd::NEBULA_OCTAVES,
-            randomizer,
-            log,
-        );
-        resolved.nebula_base_frequency = self.resolve_float(
-            "nebula_base_frequency",
-            self.nebula_base_frequency,
-            &pd::NEBULA_BASE_FREQUENCY,
-            randomizer,
-            log,
-        );
     }
 
     fn resolve_clip_params(
@@ -1066,7 +1026,6 @@ impl RandomizableEffectConfig {
             "edge_luminance",
             "color_grade",
             "tone_curve",
-            "nebula_base",
         ];
         for prefix in MULTI_WORD_PREFIXES {
             if param_name.starts_with(prefix) {
@@ -1220,17 +1179,9 @@ pub struct ResolvedEffectConfig {
     pub clip_black: f64,
     /// Resolved white point clipping threshold.
     pub clip_white: f64,
-    /// Resolved nebula overlay strength.
-    pub nebula_strength: f64,
-    /// Resolved number of nebula noise octaves.
-    pub nebula_octaves: usize,
-    /// Resolved nebula base frequency.
-    pub nebula_base_frequency: f64,
 
     /// Resolved art style for this render.
     pub art_style: ArtStyle,
-    /// Resolved nebula palette.
-    pub nebula_palette: NebulaPalette,
     /// Resolved color-grade preset.
     pub grade_preset: GradePreset,
     /// Resolved hue palette mode.
@@ -1681,11 +1632,7 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
             art_style: ArtStyle::default(),
-            nebula_palette: NebulaPalette::default(),
             grade_preset: GradePreset::default(),
             hue_palette_mode: HuePaletteMode::default(),
             bloom_mode_choice: BloomMode::Dog,

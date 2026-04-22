@@ -553,38 +553,6 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
 };
 
 // ---------------------------------------------------------------------------
-// Nebula
-// ---------------------------------------------------------------------------
-
-/// Nebula cloud background opacity.
-///
-/// Chosen so even the highest value keeps the nebula firmly in the
-/// background (never brighter than the trajectory subject) while the
-/// lower bound guarantees a visible cosmic atmosphere.
-pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_strength",
-    min: 0.04,
-    max: 0.22,
-    description: "Nebula cloud background opacity",
-};
-
-/// Nebula noise detail octaves.
-pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
-    name: "nebula_octaves",
-    min: 3,
-    max: 5,
-    description: "Nebula noise detail octaves",
-};
-
-/// Nebula noise base frequency.
-pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_base_frequency",
-    min: 0.0010,
-    max: 0.0028,
-    description: "Nebula noise base frequency",
-};
-
-// ---------------------------------------------------------------------------
 // Composition / vignette offset
 // ---------------------------------------------------------------------------
 
@@ -761,8 +729,6 @@ mod tests {
         &HDR_SCALE,
         &CLIP_BLACK,
         &CLIP_WHITE,
-        &NEBULA_STRENGTH,
-        &NEBULA_BASE_FREQUENCY,
         &VIGNETTE_OFFSET_X,
         &VIGNETTE_OFFSET_Y,
         &FINE_TEXTURE_ANGLE,
@@ -777,7 +743,7 @@ mod tests {
     ];
 
     const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] =
-        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS, &NEBULA_OCTAVES];
+        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS];
 
     const ALL_ENABLE_PROBS: &[(&str, f64)] = &[
         ("bloom", ENABLE_PROB_BLOOM),

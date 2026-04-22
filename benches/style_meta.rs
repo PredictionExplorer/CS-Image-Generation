@@ -5,16 +5,13 @@
 //! - `ArtStyle::pick` over a Sha3-seeded RNG.
 //! - `Starfield::process` on a 1080p-class buffer.
 //! - `LensFlare::process` on a 1080p-class buffer.
-//! - `NebulaClouds::process` with a production-representative config.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use three_body_problem::post_effects::{
-    LensFlare, LensFlareConfig, NebulaCloudConfig, NebulaClouds, PostEffect, Starfield,
-    StarfieldConfig,
+    LensFlare, LensFlareConfig, PostEffect, Starfield, StarfieldConfig,
 };
 use three_body_problem::render::art_style::ArtStyle;
-use three_body_problem::render::nebula_presets::NebulaPalette;
 use three_body_problem::sim::Sha3RandomByteStream;
 
 const WIDTH: usize = 960;
@@ -89,35 +86,5 @@ fn bench_lens_flare_1080p(c: &mut Criterion) {
     });
 }
 
-fn bench_nebula_clouds_1080p(c: &mut Criterion) {
-    let buffer = make_dim_buffer();
-    let preset = NebulaPalette::DeepSpace.preset();
-    let cfg = NebulaCloudConfig {
-        strength: 0.16,
-        octaves: 5,
-        base_frequency: 0.0015,
-        lacunarity: preset.lacunarity,
-        persistence: preset.persistence,
-        noise_seed: 0x1234_5678,
-        colors: preset.colors,
-        time_scale: preset.time_scale,
-        edge_fade: preset.edge_fade,
-    };
-    let effect = NebulaClouds::new(cfg);
-
-    c.bench_function("post_effects/nebula_clouds_960x540", |b| {
-        b.iter(|| {
-            black_box(effect.process(&buffer, WIDTH, HEIGHT))
-                .expect("nebula clouds should succeed");
-        });
-    });
-}
-
-criterion_group!(
-    benches,
-    bench_art_style_pick,
-    bench_starfield_1080p,
-    bench_lens_flare_1080p,
-    bench_nebula_clouds_1080p,
-);
+criterion_group!(benches, bench_art_style_pick, bench_starfield_1080p, bench_lens_flare_1080p,);
 criterion_main!(benches);
