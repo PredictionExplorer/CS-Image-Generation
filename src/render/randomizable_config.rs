@@ -1032,31 +1032,7 @@ fn apply_conflict_detection(
     let mut adjustments = Vec::new();
 
     // ============================================================================
-    // ESSENTIAL CONSTRAINT 1: Performance Guard - Extreme Blur
-    // ============================================================================
-    // Prevents: Out-of-memory errors or multi-hour render times
-    // Threshold: Only triggers at truly extreme combinations (top 5% of range)
-    //
-    // Large blur radius (>60px at 1080p) combined with high iteration count
-    // can cause >3GB memory allocation and >10 minutes per frame
-    if config.enable_bloom && config.blur_radius_scale > 0.060 && config.blur_strength > 24.0 {
-        let original_radius = config.blur_radius_scale;
-        let original_strength = config.blur_strength;
-
-        // Scale back just enough to stay within performance envelope
-        let performance_factor = 0.85;
-        config.blur_radius_scale *= performance_factor;
-        config.blur_strength *= performance_factor;
-
-        adjustments.push(format!(
-            "Performance guard: Scaled extreme blur parameters (radius: {:.4} -> {:.4}, strength: {:.2} -> {:.2}) to prevent memory/time issues",
-            original_radius, config.blur_radius_scale,
-            original_strength, config.blur_strength
-        ));
-    }
-
-    // ============================================================================
-    // ESSENTIAL CONSTRAINT 2: Exponential Cost Guard - Opalescence Layers
+    // ESSENTIAL CONSTRAINT 1: Exponential Cost Guard - Opalescence Layers
     // ============================================================================
     // Prevents: Exponential performance degradation
     // Threshold: Only restricts most extreme combination (6+ layers at high strength)
@@ -1139,7 +1115,39 @@ fn apply_conflict_detection(
     }
 
     // ============================================================================
-    // QUALITY GUARD 4: Limit softness stacks and turn on detail rescue
+    // QUALITY GUARD 4: Break heavy softness stacks (disable weakest blurs)
+    // ============================================================================
+    // When two or more of {bloom, chromatic_bloom, perceptual_blur} are on AND
+    // the cumulative softness score clears 2.0 (i.e. at least one *additional*
+    // softener is stacked on top of the heavy pair), disable the weakest
+    // contributor(s) in priority order (perceptual_blur -> chromatic_bloom).
+    // `bloom` is never disabled: a total absence of the base bloom tends to
+    // read as flat rather than crisp. The 2.0 threshold preserves pure
+    // bloom+chromatic (score 1.95) as a rare variety case.
+    let heavy_count = |c: &ResolvedEffectConfig| -> usize {
+        usize::from(c.enable_bloom)
+            + usize::from(c.enable_chromatic_bloom)
+            + usize::from(c.enable_perceptual_blur)
+    };
+    while heavy_count(&config) >= 2 && softness_stack_score(&config) >= 2.0 {
+        let score_before = softness_stack_score(&config);
+        if config.enable_perceptual_blur {
+            config.enable_perceptual_blur = false;
+            adjustments.push(format!(
+                "Quality guard: Disabled perceptual_blur to break softness stack (score: {score_before:.2})"
+            ));
+        } else if config.enable_chromatic_bloom {
+            config.enable_chromatic_bloom = false;
+            adjustments.push(format!(
+                "Quality guard: Disabled chromatic_bloom to break softness stack (score: {score_before:.2})"
+            ));
+        } else {
+            break;
+        }
+    }
+
+    // ============================================================================
+    // QUALITY GUARD 5: Limit softness stacks and turn on detail rescue
     // ============================================================================
     let softness_score = softness_stack_score(&config);
     if softness_score >= 2.0 {
@@ -1204,7 +1212,7 @@ fn apply_conflict_detection(
     }
 
     // ============================================================================
-    // QUALITY GUARD 5: Remove redundant perceptual blur from extreme softness stacks
+    // QUALITY GUARD 6: Remove redundant perceptual blur from extreme softness stacks
     // ============================================================================
     if softness_score >= 2.6 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
         config.enable_perceptual_blur = false;
@@ -1315,64 +1323,6 @@ mod tests {
             nebula_octaves: 4,
             nebula_base_frequency: 0.0015,
         }
-    }
-
-    /// Test that extreme blur parameters trigger performance guard
-    #[test]
-    fn test_extreme_blur_performance_guard() {
-        let config = ResolvedEffectConfig {
-            enable_bloom: true,
-            blur_radius_scale: 0.070,
-            blur_strength: 26.0,
-            ..baseline_resolved_config()
-        };
-
-        let mut log = RandomizationLog::new();
-        let result = apply_conflict_detection(config.clone(), &mut log);
-
-        // Verify that both parameters were scaled down
-        assert!(
-            result.blur_radius_scale < config.blur_radius_scale,
-            "Blur radius should be reduced by performance guard"
-        );
-        assert!(
-            result.blur_strength < config.blur_strength,
-            "Blur strength should be reduced by performance guard"
-        );
-
-        // Verify adjustment was logged
-        assert!(!log.effects.is_empty(), "Performance adjustment should be logged");
-        assert_eq!(
-            log.effects[0].effect_name, "render_constraints",
-            "Should log render constraints"
-        );
-    }
-
-    /// Test that extreme blur parameters below threshold are NOT affected
-    #[test]
-    fn test_below_threshold_blur_not_affected() {
-        let config = ResolvedEffectConfig {
-            enable_bloom: true,
-            blur_radius_scale: 0.055,
-            blur_strength: 23.0,
-            ..baseline_resolved_config()
-        };
-
-        let mut log = RandomizationLog::new();
-        let result = apply_conflict_detection(config.clone(), &mut log);
-
-        // Verify parameters are unchanged
-        assert_eq!(
-            result.blur_radius_scale, config.blur_radius_scale,
-            "Blur radius should not change below threshold"
-        );
-        assert_eq!(
-            result.blur_strength, config.blur_strength,
-            "Blur strength should not change below threshold"
-        );
-
-        // Verify no adjustment was logged
-        assert!(log.effects.is_empty(), "No adjustment should be logged for safe parameters");
     }
 
     /// Test that extreme opalescence layers are capped at high strength
@@ -1695,51 +1645,117 @@ mod tests {
     }
 
     #[test]
-    fn test_softness_stack_enables_detail_rescue_and_caps_softeners() {
+    fn test_heavy_softness_stack_disables_weakest_blurs() {
+        // All three heavy blurs on: bloom + chromatic + perceptual.
+        // The stack-cap guard should cascade, disabling perceptual first then
+        // chromatic, leaving only bloom as the remaining heavy blur.
         let config = ResolvedEffectConfig {
             enable_bloom: true,
             enable_glow: true,
             enable_chromatic_bloom: true,
             enable_perceptual_blur: true,
-            dog_strength: 0.30,
-            dog_sigma_scale: 0.0060,
-            glow_strength: 0.32,
-            glow_radius_scale: 0.0038,
-            chromatic_bloom_strength: 0.40,
-            chromatic_bloom_radius_scale: 0.0052,
-            chromatic_bloom_separation_scale: 0.0012,
-            perceptual_blur_strength: 0.48,
-            micro_contrast_strength: 0.15,
-            edge_luminance_strength: 0.12,
-            edge_luminance_threshold: 0.25,
-            edge_luminance_brightness_boost: 0.20,
             ..baseline_resolved_config()
         };
 
         let mut log = RandomizationLog::new();
         let result = apply_conflict_detection(config, &mut log);
 
-        assert!(result.enable_micro_contrast);
-        assert!(result.enable_edge_luminance);
-        assert!(result.dog_strength <= 0.28);
-        assert!(result.dog_sigma_scale <= 0.0054);
-        assert!(result.glow_strength <= 0.28);
-        assert!(result.glow_radius_scale <= 0.0034);
-        assert!(result.chromatic_bloom_strength <= 0.36);
-        assert!(result.chromatic_bloom_radius_scale <= 0.0046);
-        assert!(result.chromatic_bloom_separation_scale <= 0.0010);
-        assert!(result.perceptual_blur_strength <= 0.44);
-        assert!(result.micro_contrast_strength >= 0.24);
-        assert!(result.edge_luminance_strength >= 0.18);
-        assert!(result.edge_luminance_threshold <= 0.20);
-        assert!(result.edge_luminance_brightness_boost >= 0.28);
-        assert!(log.effects.iter().any(|record| {
-            record.effect_name == "render_constraints"
-                && record
-                    .parameters
-                    .iter()
-                    .any(|parameter| parameter.value.contains("Tightened softness stack"))
-        }));
+        assert!(result.enable_bloom, "bloom should remain on (never disabled by stack-cap)");
+        assert!(!result.enable_perceptual_blur, "perceptual blur should be disabled first");
+        assert!(!result.enable_chromatic_bloom, "chromatic bloom should be disabled second");
+
+        let records: Vec<_> = log
+            .effects
+            .iter()
+            .filter(|record| record.effect_name == "render_constraints")
+            .flat_map(|record| record.parameters.iter())
+            .map(|parameter| parameter.value.as_str())
+            .collect();
+
+        assert!(
+            records.iter().any(|value| value.contains("Disabled perceptual_blur")
+                && value.contains("break softness stack")),
+            "stack-cap log entry for perceptual_blur missing: {records:?}"
+        );
+        assert!(
+            records.iter().any(|value| value.contains("Disabled chromatic_bloom")
+                && value.contains("break softness stack")),
+            "stack-cap log entry for chromatic_bloom missing: {records:?}"
+        );
+    }
+
+    #[test]
+    fn test_stack_cap_preserves_single_heavy_blur() {
+        // Only one heavy blur on (bloom) — stack-cap must not fire.
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_glow: true,
+            enable_atmospheric_depth: true,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_bloom);
+        assert!(result.enable_glow);
+        assert!(result.enable_atmospheric_depth);
+
+        let stack_cap_fired = log.effects.iter().any(|record| {
+            record
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.contains("break softness stack"))
+        });
+        assert!(!stack_cap_fired, "stack-cap guard should not fire with only one heavy blur");
+    }
+
+    #[test]
+    fn test_stack_cap_disables_chromatic_when_perceptual_off() {
+        // bloom + chromatic + glow (no perceptual): score 2.50, heavy_count 2.
+        // Stack-cap should disable chromatic (never bloom), since perceptual
+        // is off and cannot be the first-choice victim.
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_chromatic_bloom: true,
+            enable_glow: true,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_bloom);
+        assert!(!result.enable_chromatic_bloom);
+        assert!(result.enable_glow);
+        assert!(log.effects.iter().any(|record| record
+            .parameters
+            .iter()
+            .any(|parameter| parameter.value.contains("Disabled chromatic_bloom"))));
+    }
+
+    #[test]
+    fn test_stack_cap_preserves_pure_bloom_plus_chromatic() {
+        // bloom + chromatic alone (score 1.95) is preserved — it's only a
+        // mild softening that we treat as a rare variety case, not a stack.
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_chromatic_bloom: true,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_bloom);
+        assert!(result.enable_chromatic_bloom);
+        let stack_cap_fired = log.effects.iter().any(|record| {
+            record
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.contains("break softness stack"))
+        });
+        assert!(!stack_cap_fired);
     }
 
     #[test]

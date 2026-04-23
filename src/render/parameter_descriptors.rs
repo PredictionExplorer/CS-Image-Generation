@@ -54,11 +54,11 @@ pub const ENABLE_PROB_BLOOM: f64 = 0.28;
 /// Probability that the tight glow enhancement is enabled during randomization.
 pub const ENABLE_PROB_GLOW: f64 = 0.55;
 /// Probability that prismatic chromatic bloom is enabled during randomization.
-pub const ENABLE_PROB_CHROMATIC_BLOOM: f64 = 0.20;
+pub const ENABLE_PROB_CHROMATIC_BLOOM: f64 = 0.10;
 /// Probability that `OKLab` perceptual blur is enabled during randomization.
-pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.05;
+pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.03;
 /// Probability that micro-contrast enhancement is enabled during randomization.
-pub const ENABLE_PROB_MICRO_CONTRAST: f64 = 0.85;
+pub const ENABLE_PROB_MICRO_CONTRAST: f64 = 0.95;
 /// Probability that luxury gradient mapping is enabled during randomization.
 pub const ENABLE_PROB_GRADIENT_MAP: f64 = 0.18;
 /// Probability that cinematic color grading is enabled during randomization.
@@ -66,13 +66,13 @@ pub const ENABLE_PROB_COLOR_GRADE: f64 = 0.60;
 /// Probability that the champlevé enamel effect is enabled during randomization.
 pub const ENABLE_PROB_CHAMPLEVE: f64 = 0.25;
 /// Probability that the aether filament effect is enabled during randomization.
-pub const ENABLE_PROB_AETHER: f64 = 0.35;
+pub const ENABLE_PROB_AETHER: f64 = 0.22;
 /// Probability that opalescence shimmer is enabled during randomization.
 pub const ENABLE_PROB_OPALESCENCE: f64 = 0.25;
 /// Probability that edge luminance brightening is enabled during randomization.
-pub const ENABLE_PROB_EDGE_LUMINANCE: f64 = 0.55;
+pub const ENABLE_PROB_EDGE_LUMINANCE: f64 = 0.75;
 /// Probability that atmospheric depth perspective is enabled during randomization.
-pub const ENABLE_PROB_ATMOSPHERIC_DEPTH: f64 = 0.18;
+pub const ENABLE_PROB_ATMOSPHERIC_DEPTH: f64 = 0.10;
 /// Probability that fine canvas texture is enabled during randomization.
 pub const ENABLE_PROB_FINE_TEXTURE: f64 = 0.45;
 
@@ -175,16 +175,16 @@ pub const GLOW_SATURATION_BOOST: FloatParamDescriptor = FloatParamDescriptor {
 /// Prismatic color separation strength for chromatic bloom.
 pub const CHROMATIC_BLOOM_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_strength",
-    min: 0.30,
-    max: 0.55,
+    min: 0.25,
+    max: 0.42,
     description: "Prismatic color separation strength",
 };
 
 /// Chromatic bloom blur radius scale.
 pub const CHROMATIC_BLOOM_RADIUS_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_radius_scale",
-    min: 0.0035,
-    max: 0.0065,
+    min: 0.0030,
+    max: 0.0048,
     description: "Chromatic bloom radius scale",
 };
 
@@ -211,8 +211,8 @@ pub const CHROMATIC_BLOOM_THRESHOLD: FloatParamDescriptor = FloatParamDescriptor
 /// `OKLab`-space perceptual blur strength.
 pub const PERCEPTUAL_BLUR_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "perceptual_blur_strength",
-    min: 0.40,
-    max: 0.60,
+    min: 0.35,
+    max: 0.50,
     description: "OKLab perceptual blur strength",
 };
 
@@ -375,8 +375,8 @@ pub const AETHER_FLOW_ALIGNMENT: FloatParamDescriptor = FloatParamDescriptor {
 /// Volumetric scattering intensity for the aether effect.
 pub const AETHER_SCATTERING_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "aether_scattering_strength",
-    min: 0.60,
-    max: 1.20,
+    min: 0.55,
+    max: 0.95,
     description: "Volumetric scattering intensity",
 };
 
@@ -403,8 +403,8 @@ pub const AETHER_CAUSTIC_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
 /// Local micro-contrast enhancement strength.
 pub const MICRO_CONTRAST_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "micro_contrast_strength",
-    min: 0.15,
-    max: 0.35,
+    min: 0.20,
+    max: 0.38,
     description: "Local contrast enhancement strength",
 };
 
@@ -419,8 +419,8 @@ pub const MICRO_CONTRAST_RADIUS: IntParamDescriptor = IntParamDescriptor {
 /// Edge luminance brightening strength.
 pub const EDGE_LUMINANCE_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "edge_luminance_strength",
-    min: 0.12,
-    max: 0.30,
+    min: 0.15,
+    max: 0.32,
     description: "Edge brightening strength",
 };
 
@@ -447,16 +447,16 @@ pub const EDGE_LUMINANCE_BRIGHTNESS_BOOST: FloatParamDescriptor = FloatParamDesc
 /// Atmospheric perspective strength.
 pub const ATMOSPHERIC_DEPTH_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "atmospheric_depth_strength",
-    min: 0.06,
-    max: 0.18,
+    min: 0.05,
+    max: 0.12,
     description: "Atmospheric perspective strength",
 };
 
 /// Depth-based desaturation amount.
 pub const ATMOSPHERIC_DESATURATION: FloatParamDescriptor = FloatParamDescriptor {
     name: "atmospheric_desaturation",
-    min: 0.08,
-    max: 0.22,
+    min: 0.06,
+    max: 0.15,
     description: "Depth-based desaturation",
 };
 
