@@ -109,6 +109,16 @@ struct Args {
     /// Omit to randomize from a curated range.
     #[arg(long)]
     equil_weight: Option<f64>,
+
+    /// Borda weight for curvature-entropy (turning-angle diversity) rank points.
+    /// Omit to randomize from a curated range.
+    #[arg(long)]
+    curvature_weight: Option<f64>,
+
+    /// Borda weight for permutation-entropy (Bandt-Pompe complexity) rank points.
+    /// Omit to randomize from a curated range.
+    #[arg(long)]
+    permutation_weight: Option<f64>,
 }
 
 fn parse_bounded_sims(value: &str) -> std::result::Result<usize, String> {
@@ -141,58 +151,89 @@ fn setup_logging(level: &str) {
 struct ResolvedBordaWeights {
     chaos_weight: f64,
     equil_weight: f64,
+    curvature_weight: f64,
+    permutation_weight: f64,
     was_randomized: bool,
 }
 
-/// Draw a log-uniform equil/chaos ratio and derive weights from it.
+impl ResolvedBordaWeights {
+    fn to_borda_weights(&self) -> three_body_problem::sim::BordaWeights {
+        three_body_problem::sim::BordaWeights::new(
+            self.chaos_weight,
+            self.equil_weight,
+            self.curvature_weight,
+            self.permutation_weight,
+        )
+    }
+}
+
+/// Log-uniform sample of a single Borda weight.
 ///
-/// Log-uniform sampling ensures that chaos-dominant ratios (e.g. 1/20)
-/// and equil-dominant ratios (e.g. 20) are equally likely.  The ratio
-/// is expressed as `equil_weight` / `chaos_weight`.
+/// Returns the explicit value and `false` if the user provided one; otherwise
+/// draws log-uniformly from `EQUIL_CHAOS_RATIO.min..=max` and returns `true`.
+/// Because Borda is scale-invariant, sampling each weight *absolutely* from
+/// the same log-uniform range is equivalent (up to an overall scale that does
+/// not affect winners) to the earlier 2-weight "ratio" scheme, while being
+/// trivially symmetric across arbitrarily many axes.
+fn resolve_single_weight(user_value: Option<f64>, rng: &mut Sha3RandomByteStream) -> (f64, bool) {
+    use render::parameter_descriptors::EQUIL_CHAOS_RATIO;
+    if let Some(v) = user_value {
+        return (v, false);
+    }
+    let log_min = EQUIL_CHAOS_RATIO.min.ln();
+    let log_max = EQUIL_CHAOS_RATIO.max.ln();
+    let value = (log_min + rng.next_f64() * (log_max - log_min)).exp();
+    (value, true)
+}
+
+/// Resolve all four Borda weights for this run.
+///
+/// Independent log-uniform sampling over a wide range ensures that on any
+/// given run one or two axes will dominate the ranking, giving visual variety
+/// across generations while preserving strong selection pressure for
+/// whichever axis came out on top.  Explicit CLI values are honoured
+/// verbatim.
 fn resolve_borda_weights(
     chaos_opt: Option<f64>,
     equil_opt: Option<f64>,
+    curvature_opt: Option<f64>,
+    permutation_opt: Option<f64>,
     rng: &mut Sha3RandomByteStream,
 ) -> ResolvedBordaWeights {
-    use render::parameter_descriptors::EQUIL_CHAOS_RATIO;
+    // Sampling order is stable (chaos → equil → curvature → permutation) so
+    // that a given seed always consumes the same RNG bytes for the same
+    // unspecified axes.  This preserves determinism when the CLI toggles
+    // which weights are explicit vs randomized across the SAME set of axes.
+    let (chaos_weight, chaos_rand) = resolve_single_weight(chaos_opt, rng);
+    let (equil_weight, equil_rand) = resolve_single_weight(equil_opt, rng);
+    let (curvature_weight, curve_rand) = resolve_single_weight(curvature_opt, rng);
+    let (permutation_weight, perm_rand) = resolve_single_weight(permutation_opt, rng);
+    let was_randomized = chaos_rand || equil_rand || curve_rand || perm_rand;
 
-    let (chaos_weight, equil_weight, was_randomized) = match (chaos_opt, equil_opt) {
-        (Some(cw), Some(ew)) => (cw, ew, false),
-        (None, None) => {
-            let log_min = EQUIL_CHAOS_RATIO.min.ln();
-            let log_max = EQUIL_CHAOS_RATIO.max.ln();
-            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
-            (1.0, ratio, true)
-        }
-        (Some(cw), None) => {
-            let log_min = EQUIL_CHAOS_RATIO.min.ln();
-            let log_max = EQUIL_CHAOS_RATIO.max.ln();
-            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
-            (cw, cw * ratio, true)
-        }
-        (None, Some(ew)) => {
-            let log_min = EQUIL_CHAOS_RATIO.min.ln();
-            let log_max = EQUIL_CHAOS_RATIO.max.ln();
-            let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
-            (ew / ratio, ew, true)
-        }
-    };
+    let dominant = [
+        ("chaos", chaos_weight),
+        ("equil", equil_weight),
+        ("curvature", curvature_weight),
+        ("permutation", permutation_weight),
+    ]
+    .into_iter()
+    .max_by(|a, b| a.1.total_cmp(&b.1))
+    .map_or("chaos", |(name, _)| name);
 
-    let ratio = equil_weight / chaos_weight;
-    let label = if ratio >= 1.0 {
-        format!("equil {ratio:.1}x")
-    } else {
-        format!("chaos {:.1}x", 1.0 / ratio)
-    };
     info!(
-        "Borda weights: chaos={:.3}, equil={:.3} ({}){}",
-        chaos_weight,
-        equil_weight,
-        label,
-        if was_randomized { " [randomized]" } else { " [explicit]" }
+        "Borda weights: chaos={chaos_weight:.3}, equil={equil_weight:.3}, \
+         curvature={curvature_weight:.3}, permutation={permutation_weight:.3} \
+         (dominant: {dominant}){randomized}",
+        randomized = if was_randomized { " [randomized]" } else { " [explicit]" },
     );
 
-    ResolvedBordaWeights { chaos_weight, equil_weight, was_randomized }
+    ResolvedBordaWeights {
+        chaos_weight,
+        equil_weight,
+        curvature_weight,
+        permutation_weight,
+        was_randomized,
+    }
 }
 
 fn build_generation_log_config(
@@ -238,6 +279,8 @@ fn build_generation_log_config(
         velocity: DEFAULT_VELOCITY,
         chaos_weight: borda_weights.chaos_weight,
         equil_weight: borda_weights.equil_weight,
+        curvature_weight: borda_weights.curvature_weight,
+        permutation_weight: borda_weights.permutation_weight,
         weights_randomized: borda_weights.was_randomized,
     }
 }
@@ -294,14 +337,19 @@ fn main() -> Result<()> {
             - num_randomized
     );
 
-    let borda_weights = resolve_borda_weights(args.chaos_weight, args.equil_weight, &mut rng);
+    let borda_weights = resolve_borda_weights(
+        args.chaos_weight,
+        args.equil_weight,
+        args.curvature_weight,
+        args.permutation_weight,
+        &mut rng,
+    );
 
     let (best_bodies, best_info) = app::run_borda_selection(
         &mut rng,
         args.sims,
         args.steps,
-        borda_weights.chaos_weight,
-        borda_weights.equil_weight,
+        borda_weights.to_borda_weights(),
         DEFAULT_ESCAPE_THRESHOLD,
     )?;
 
@@ -428,6 +476,8 @@ mod tests {
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);
         assert!(args.chaos_weight.is_none());
         assert!(args.equil_weight.is_none());
+        assert!(args.curvature_weight.is_none());
+        assert!(args.permutation_weight.is_none());
     }
 
     #[test]
@@ -463,63 +513,104 @@ mod tests {
             "1.5",
             "--equil-weight",
             "8.0",
+            "--curvature-weight",
+            "3.3",
+            "--permutation-weight",
+            "0.4",
         ]);
         assert_eq!(args.chaos_weight, Some(1.5));
         assert_eq!(args.equil_weight, Some(8.0));
+        assert_eq!(args.curvature_weight, Some(3.3));
+        assert_eq!(args.permutation_weight, Some(0.4));
+    }
+
+    fn fresh_rng() -> Sha3RandomByteStream {
+        Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0)
+    }
+
+    fn assert_in_range(label: &str, value: f64) {
+        assert!((0.2..=125.0).contains(&value), "{label} weight {value} outside [0.2, 125.0]",);
     }
 
     #[test]
-    fn test_resolve_borda_weights_randomized() {
-        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
-        let w = resolve_borda_weights(None, None, &mut rng);
+    fn resolve_borda_weights_all_none_randomizes_in_range() {
+        let mut rng = fresh_rng();
+        let w = resolve_borda_weights(None, None, None, None, &mut rng);
         assert!(w.was_randomized);
-        assert_eq!(w.chaos_weight, 1.0);
-        let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert_in_range("chaos", w.chaos_weight);
+        assert_in_range("equil", w.equil_weight);
+        assert_in_range("curvature", w.curvature_weight);
+        assert_in_range("permutation", w.permutation_weight);
     }
 
     #[test]
-    fn test_resolve_borda_weights_explicit() {
-        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
-        let w = resolve_borda_weights(Some(1.0), Some(10.0), &mut rng);
+    fn resolve_borda_weights_all_some_uses_explicit_values() {
+        let mut rng = fresh_rng();
+        let w = resolve_borda_weights(Some(1.0), Some(10.0), Some(2.5), Some(0.3), &mut rng);
         assert!(!w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         assert_eq!(w.equil_weight, 10.0);
+        assert_eq!(w.curvature_weight, 2.5);
+        assert_eq!(w.permutation_weight, 0.3);
     }
 
     #[test]
-    fn test_resolve_borda_weights_partial_chaos_explicit() {
-        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
-        let w = resolve_borda_weights(Some(0.5), None, &mut rng);
+    fn resolve_borda_weights_partial_some_mixes() {
+        let mut rng = fresh_rng();
+        let w = resolve_borda_weights(Some(1.0), None, Some(2.5), None, &mut rng);
         assert!(w.was_randomized);
-        assert_eq!(w.chaos_weight, 0.5);
-        let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert_eq!(w.chaos_weight, 1.0);
+        assert_eq!(w.curvature_weight, 2.5);
+        assert_in_range("equil", w.equil_weight);
+        assert_in_range("permutation", w.permutation_weight);
     }
 
     #[test]
-    fn test_resolve_borda_weights_partial_equil_explicit() {
-        let mut rng = Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0);
-        let w = resolve_borda_weights(None, Some(5.0), &mut rng);
-        assert!(w.was_randomized);
-        assert_eq!(w.equil_weight, 5.0);
-        let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+    fn resolve_borda_weights_is_deterministic_under_seed() {
+        let mut rng1 = fresh_rng();
+        let mut rng2 = fresh_rng();
+        let w1 = resolve_borda_weights(None, None, None, None, &mut rng1);
+        let w2 = resolve_borda_weights(None, None, None, None, &mut rng2);
+        assert_eq!(w1.chaos_weight.to_bits(), w2.chaos_weight.to_bits());
+        assert_eq!(w1.equil_weight.to_bits(), w2.equil_weight.to_bits());
+        assert_eq!(w1.curvature_weight.to_bits(), w2.curvature_weight.to_bits());
+        assert_eq!(w1.permutation_weight.to_bits(), w2.permutation_weight.to_bits());
     }
 
     #[test]
-    fn test_resolve_borda_weights_range_coverage() {
+    fn resolve_borda_weights_range_coverage_all_seeds() {
         for seed_byte in 0u8..=255 {
             let seed = [seed_byte; 32];
             let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
-            let w = resolve_borda_weights(None, None, &mut rng);
-            assert_eq!(w.chaos_weight, 1.0);
-            let ratio = w.equil_weight / w.chaos_weight;
-            assert!(
-                (0.2..=125.0).contains(&ratio),
-                "seed {seed_byte} produced ratio {ratio} outside [0.2, 125.0]"
-            );
+            let w = resolve_borda_weights(None, None, None, None, &mut rng);
+            for (label, value) in [
+                ("chaos", w.chaos_weight),
+                ("equil", w.equil_weight),
+                ("curvature", w.curvature_weight),
+                ("permutation", w.permutation_weight),
+            ] {
+                assert!(
+                    (0.2..=125.0).contains(&value),
+                    "seed {seed_byte}: {label} = {value} outside [0.2, 125.0]",
+                );
+            }
         }
+    }
+
+    #[test]
+    fn resolved_borda_weights_converts_to_sim_struct() {
+        let resolved = ResolvedBordaWeights {
+            chaos_weight: 1.0,
+            equil_weight: 2.0,
+            curvature_weight: 3.0,
+            permutation_weight: 4.0,
+            was_randomized: false,
+        };
+        let bw = resolved.to_borda_weights();
+        assert_eq!(bw.chaos, 1.0);
+        assert_eq!(bw.equil, 2.0);
+        assert_eq!(bw.curvature, 3.0);
+        assert_eq!(bw.permutation, 4.0);
     }
 
     #[test]

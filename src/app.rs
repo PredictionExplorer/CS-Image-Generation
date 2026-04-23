@@ -17,7 +17,7 @@ use crate::render::{
     generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
     save_image_as_png_16bit,
 };
-use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
+use crate::sim::{self, Body, BordaWeights, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
 use nalgebra::Vector3;
 use std::fs;
@@ -105,7 +105,11 @@ pub struct GenerationLogConfig {
     pub chaos_weight: f64,
     /// Weight for equilibrium metric in Borda scoring.
     pub equil_weight: f64,
-    /// Whether Borda weights were randomized.
+    /// Weight for curvature-entropy metric in Borda scoring.
+    pub curvature_weight: f64,
+    /// Weight for permutation-entropy metric in Borda scoring.
+    pub permutation_weight: f64,
+    /// Whether any Borda weight was randomized (rather than CLI-provided).
     pub weights_randomized: bool,
 }
 
@@ -155,25 +159,20 @@ pub fn derive_noise_seed(seed_bytes: &[u8]) -> i32 {
     i32::from_le_bytes([get_or_zero(0), get_or_zero(1), get_or_zero(2), get_or_zero(3)])
 }
 
-/// Run Borda selection to find the best orbit
+/// Run Borda selection to find the best orbit.
+///
+/// `weights` controls how the four metric rank points are combined into the
+/// final weighted score — see [`BordaWeights`] for semantics.
 pub fn run_borda_selection(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
     num_steps_sim: usize,
-    chaos_weight: f64,
-    equil_weight: f64,
+    weights: BordaWeights,
     escape_threshold: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
     info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
 
-    sim::select_best_trajectory(
-        rng,
-        num_sims,
-        num_steps_sim,
-        chaos_weight,
-        equil_weight,
-        escape_threshold,
-    )
+    sim::select_best_trajectory(rng, num_sims, num_steps_sim, weights, escape_threshold)
 }
 
 /// Re-run the best orbit to get full trajectory
@@ -444,6 +443,8 @@ pub fn log_generation(
         max_mass: config.max_mass,
         chaos_weight: config.chaos_weight,
         equil_weight: config.equil_weight,
+        curvature_weight: config.curvature_weight,
+        permutation_weight: config.permutation_weight,
         escape_threshold: config.escape_threshold,
         weights_randomized: config.weights_randomized,
     };
@@ -453,6 +454,10 @@ pub fn log_generation(
         weighted_score: best_info.total_score_weighted,
         total_candidates: num_sims,
         discarded_count: best_info.discarded_count,
+        chaos: best_info.chaos,
+        equilateralness: best_info.equilateralness,
+        curvature_entropy: best_info.curvature_entropy,
+        permutation_entropy: best_info.permutation_entropy,
     };
 
     // Include randomization log if provided
@@ -610,8 +615,9 @@ mod tests {
         };
         let (resolved, _) = config.resolve(&mut rng, width, height);
 
+        let test_weights = BordaWeights::new(0.75, 11.0, 2.5, 1.5);
         let (best_bodies, _) =
-            crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, 0.75, 11.0, -0.3)
+            crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, test_weights, -0.3)
                 .expect("Borda search should find at least one valid orbit");
 
         let mut positions = simulate_best_orbit(best_bodies, num_steps);

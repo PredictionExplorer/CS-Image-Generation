@@ -115,6 +115,17 @@ pub struct SimulationConfig {
     pub chaos_weight: f64,
     /// Borda weight favouring equilibrium-like orbits.
     pub equil_weight: f64,
+    /// Borda weight favouring orbits with varied turning-angle distributions.
+    ///
+    /// Missing in historical log files written before this field was
+    /// introduced; `#[serde(default)]` keeps old logs readable.
+    #[serde(default)]
+    pub curvature_weight: f64,
+    /// Borda weight favouring orbits with rich ordinal (Bandt-Pompe) complexity.
+    ///
+    /// Missing in historical log files; see `curvature_weight` note above.
+    #[serde(default)]
+    pub permutation_weight: f64,
     /// Score threshold below which an orbit is treated as escaping.
     pub escape_threshold: f64,
     /// Indicates if Borda weights were randomly generated
@@ -132,6 +143,18 @@ pub struct OrbitInfo {
     pub total_candidates: usize,
     /// Candidates removed before ranking (e.g. failed filters).
     pub discarded_count: usize,
+    /// Non-chaoticness score of the winning orbit (smaller = more chaotic).
+    #[serde(default)]
+    pub chaos: f64,
+    /// Equilateralness score of the winning orbit.
+    #[serde(default)]
+    pub equilateralness: f64,
+    /// Curvature-entropy score of the winning orbit.
+    #[serde(default)]
+    pub curvature_entropy: f64,
+    /// Permutation-entropy score of the winning orbit (in `[0, 1]`).
+    #[serde(default)]
+    pub permutation_entropy: f64,
 }
 
 impl GenerationRecord {
@@ -197,8 +220,10 @@ impl Default for SimulationConfig {
             velocity: 1.0,
             min_mass: 100.0,
             max_mass: 300.0,
-            chaos_weight: 0.75,
-            equil_weight: 11.0,
+            chaos_weight: 1.0,
+            equil_weight: 1.0,
+            curvature_weight: 1.0,
+            permutation_weight: 1.0,
             escape_threshold: -0.3,
             weights_randomized: false,
         }
@@ -207,7 +232,16 @@ impl Default for SimulationConfig {
 
 impl Default for OrbitInfo {
     fn default() -> Self {
-        Self { selected_index: 0, weighted_score: 0.0, total_candidates: 0, discarded_count: 0 }
+        Self {
+            selected_index: 0,
+            weighted_score: 0.0,
+            total_candidates: 0,
+            discarded_count: 0,
+            chaos: 0.0,
+            equilateralness: 0.0,
+            curvature_entropy: 0.0,
+            permutation_entropy: 0.0,
+        }
     }
 }
 

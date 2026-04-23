@@ -1,8 +1,7 @@
 //! Simulation module: 3-body orbits, RNG, integrator, and Borda search
 
 use crate::analysis::{
-    calculate_total_angular_momentum, calculate_total_energy, equilateralness_score,
-    non_chaoticness,
+    calculate_total_angular_momentum, calculate_total_energy, compute_orbit_quality,
 };
 use crate::error::{Result, SimulationError};
 use nalgebra::Vector3;
@@ -333,18 +332,52 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
     false
 }
 
+/// Log-uniform weights applied to each of the four Borda rank-point axes.
+///
+/// Borda is scale-invariant (rank points live in `[1, N]`), so only the
+/// *ratios* between these weights matter — the resolver in `src/main.rs`
+/// samples each weight log-uniformly from a wide range so that, on any given
+/// run, one or two axes end up dominating the selection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BordaWeights {
+    /// Weight on the non-chaoticness (FFT regularity) rank points.
+    pub chaos: f64,
+    /// Weight on the equilateralness rank points.
+    pub equil: f64,
+    /// Weight on the curvature-entropy rank points.
+    pub curvature: f64,
+    /// Weight on the permutation-entropy rank points.
+    pub permutation: f64,
+}
+
+impl BordaWeights {
+    /// Construct a [`BordaWeights`] directly from four float values.
+    #[must_use]
+    pub const fn new(chaos: f64, equil: f64, curvature: f64, permutation: f64) -> Self {
+        Self { chaos, equil, curvature, permutation }
+    }
+}
+
 /// Outcome of a Borda-count trajectory search over many random orbits.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrajectoryResult {
     /// Non-chaoticness score (higher = more regular orbit).
     pub chaos: f64,
     /// Equilateralness score (higher = more triangular).
     pub equilateralness: f64,
-    /// Borda points awarded for non-chaoticness rank.
+    /// Curvature distribution entropy (higher = more varied turning angles).
+    pub curvature_entropy: f64,
+    /// Permutation entropy (higher = richer temporal complexity).
+    pub permutation_entropy: f64,
+    /// Borda points awarded for non-chaoticness rank (low chaos score → high points).
     pub chaos_pts: usize,
     /// Borda points awarded for equilateralness rank.
     pub equil_pts: usize,
-    /// Sum of `chaos_pts` and `equil_pts`.
+    /// Borda points awarded for curvature-entropy rank.
+    pub curvature_pts: usize,
+    /// Borda points awarded for permutation-entropy rank.
+    pub permutation_pts: usize,
+    /// Sum of the four rank-point fields.
     pub total_score: usize,
     /// Weighted combination of Borda points used for final ranking.
     pub total_score_weighted: f64,
@@ -364,15 +397,24 @@ fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
 
 /// Assign Borda-count points and sort trajectories by weighted score.
 ///
-/// Flattens `results` (discarding `None`s), ranks by non-chaoticness and equilateralness,
-/// assigns Borda points, and returns the list sorted by descending weighted score.
+/// Flattens `results` (discarding `None`s), ranks each of the four quality
+/// metrics, assigns Borda points, and returns the list sorted by descending
+/// weighted score.
+///
+/// Ranking direction per metric (see [`BordaWeights`] doc comments):
+/// - `chaos` — ascending (lower `non_chaoticness` → more chaotic → more points).
+/// - `equilateralness`, `curvature_entropy`, `permutation_entropy` — descending
+///   (higher raw value → more points).
 fn rank_trajectories(
     results: Vec<Option<(TrajectoryResult, usize)>>,
-    cw: f64,
-    ew: f64,
+    weights: BordaWeights,
 ) -> Vec<(TrajectoryResult, usize)> {
-    fn assign(vals: &mut [(f64, usize)], hb: bool) -> Vec<usize> {
-        if hb {
+    /// Internal rank-points helper.
+    ///
+    /// `high_is_best = true` awards the highest count to the largest value;
+    /// `false` awards the highest count to the smallest value.
+    fn assign(vals: &mut [(f64, usize)], high_is_best: bool) -> Vec<usize> {
+        if high_is_best {
             vals.sort_by(|a, b| b.0.total_cmp(&a.0));
         } else {
             vals.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -390,20 +432,33 @@ fn rank_trajectories(
         return iv;
     }
 
-    let mut cv = Vec::with_capacity(iv.len());
-    let mut ev = Vec::with_capacity(iv.len());
+    let n = iv.len();
+    let mut chaos_v = Vec::with_capacity(n);
+    let mut equil_v = Vec::with_capacity(n);
+    let mut curve_v = Vec::with_capacity(n);
+    let mut perm_v = Vec::with_capacity(n);
     for (i, (t, _)) in iv.iter().enumerate() {
-        cv.push((t.chaos, i));
-        ev.push((t.equilateralness, i));
+        chaos_v.push((t.chaos, i));
+        equil_v.push((t.equilateralness, i));
+        curve_v.push((t.curvature_entropy, i));
+        perm_v.push((t.permutation_entropy, i));
     }
-    let cps = assign(&mut cv, false);
-    let eps = assign(&mut ev, true);
+    let chaos_pts = assign(&mut chaos_v, false);
+    let equil_pts = assign(&mut equil_v, true);
+    let curve_pts = assign(&mut curve_v, true);
+    let perm_pts = assign(&mut perm_v, true);
+
     for (i, (t, _)) in iv.iter_mut().enumerate() {
-        t.chaos_pts = cps[i];
-        t.equil_pts = eps[i];
-        t.total_score = t.chaos_pts + t.equil_pts;
-        // usize→f64: chaos_pts/equil_pts are bounded by the number of valid trajectories
-        t.total_score_weighted = cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64);
+        t.chaos_pts = chaos_pts[i];
+        t.equil_pts = equil_pts[i];
+        t.curvature_pts = curve_pts[i];
+        t.permutation_pts = perm_pts[i];
+        t.total_score = t.chaos_pts + t.equil_pts + t.curvature_pts + t.permutation_pts;
+        // usize→f64: rank points are bounded by the number of valid trajectories (≤ num_sims).
+        t.total_score_weighted = weights.chaos * (t.chaos_pts as f64)
+            + weights.equil * (t.equil_pts as f64)
+            + weights.curvature * (t.curvature_pts as f64)
+            + weights.permutation * (t.permutation_pts as f64);
     }
     iv.sort_by(|a, b| b.0.total_score_weighted.total_cmp(&a.0.total_score_weighted));
     iv
@@ -416,8 +471,7 @@ pub fn select_best_trajectory(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
     steps: usize,
-    cw: f64,
-    ew: f64,
+    weights: BordaWeights,
     th: f64,
 ) -> Result<(Vec<Body>, TrajectoryResult)> {
     // Generate random triples and immediately transform them to the COM frame so
@@ -463,26 +517,34 @@ pub fn select_best_trajectory(
             let m2 = b[1].mass;
             let m3 = b[2].mass;
 
-            // Compute quality metrics
-            let c = non_chaoticness(m1, m2, m3, &pos);
-            let eq = equilateralness_score(&pos);
+            // Compute quality metrics in a single pass (shares the distance
+            // series between non_chaoticness and permutation_entropy).
+            let metrics = compute_orbit_quality(m1, m2, m3, &pos);
 
-            // Early rejection: if both metrics are terrible, skip
-            // This saves time on Borda ranking for clearly unsuitable candidates
+            // Early rejection: if the two original viability metrics are
+            // both terrible, skip ranking work. The new entropy axes are
+            // allowed to add signal but do not gatekeep — they're here to
+            // enrich the winner selection, not further restrict candidates.
             const MIN_VIABLE_CHAOS: f64 = 0.1; // Below this, too chaotic
             const MIN_VIABLE_EQUILATERAL: f64 = 0.01; // Below this, too linear
 
-            if c < MIN_VIABLE_CHAOS && eq < MIN_VIABLE_EQUILATERAL {
+            if metrics.non_chaoticness < MIN_VIABLE_CHAOS
+                && metrics.equilateralness < MIN_VIABLE_EQUILATERAL
+            {
                 dc.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
 
             Some((
                 TrajectoryResult {
-                    chaos: c,
-                    equilateralness: eq,
+                    chaos: metrics.non_chaoticness,
+                    equilateralness: metrics.equilateralness,
+                    curvature_entropy: metrics.curvature_entropy,
+                    permutation_entropy: metrics.permutation_entropy,
                     chaos_pts: 0,
                     equil_pts: 0,
+                    curvature_pts: 0,
+                    permutation_pts: 0,
                     total_score: 0,
                     total_score_weighted: 0.0,
                     selected_index: 0,
@@ -498,7 +560,7 @@ pub fn select_best_trajectory(
         "   => Discarded {dtot}/{num_sims} ({:.1}%) orbits due to filters or escapes.",
         crate::render::constants::PERCENT_FACTOR * dtot as f64 / num_sims as f64
     );
-    let iv = rank_trajectories(results, cw, ew);
+    let iv = rank_trajectories(results, weights);
     if iv.is_empty() {
         return Err(SimulationError::NoValidOrbits {
             total_attempted: num_sims,
