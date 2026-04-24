@@ -238,12 +238,13 @@ pub struct GenerationOutputs {
 
 impl GenerationOutputs {
     fn for_seed_dir(seed_dir: &str) -> Self {
+        let seed_path = std::path::Path::new(seed_dir);
         Self {
             seed_dir: seed_dir.to_string(),
-            image_png: format!("{seed_dir}/image.png"),
-            video_mp4: format!("{seed_dir}/video.mp4"),
-            spectral_dir: format!("{seed_dir}/spectral"),
-            spectral_sweep_mp4: format!("{seed_dir}/spectral_sweep.mp4"),
+            image_png: app::path_to_string(&seed_path.join("image.png")),
+            video_mp4: app::path_to_string(&seed_path.join("video.mp4")),
+            spectral_dir: app::path_to_string(&seed_path.join(app::SPECTRAL_DIR_NAME)),
+            spectral_sweep_mp4: app::path_to_string(&seed_path.join("spectral_sweep.mp4")),
         }
     }
 }
@@ -778,6 +779,34 @@ mod tests {
         assert_eq!(bw.permutation, 4.0);
     }
 
+    #[test]
+    fn generation_outputs_are_derived_from_seed_directory() {
+        let seed_dir = app::path_to_string(&std::path::Path::new("output").join("example"));
+        let outputs = GenerationOutputs::for_seed_dir(&seed_dir);
+
+        assert_eq!(outputs.seed_dir, seed_dir);
+        assert_eq!(
+            outputs.image_png,
+            app::path_to_string(&std::path::Path::new(&outputs.seed_dir).join("image.png"))
+        );
+        assert_eq!(
+            outputs.video_mp4,
+            app::path_to_string(&std::path::Path::new(&outputs.seed_dir).join("video.mp4"))
+        );
+        assert_eq!(
+            outputs.spectral_dir,
+            app::path_to_string(
+                &std::path::Path::new(&outputs.seed_dir).join(app::SPECTRAL_DIR_NAME)
+            )
+        );
+        assert_eq!(
+            outputs.spectral_sweep_mp4,
+            app::path_to_string(
+                &std::path::Path::new(&outputs.seed_dir).join("spectral_sweep.mp4")
+            )
+        );
+    }
+
     #[derive(Default)]
     struct FakeVideoEncoder {
         calls: RefCell<Vec<(u32, u32, u32, String, usize)>>,
@@ -845,7 +874,10 @@ mod tests {
         let summary = result.expect("tiny generation should complete with fake encoder");
 
         assert!(summary.best_score.is_finite());
-        assert_eq!(summary.outputs.seed_dir, format!("output/{output_name}"));
+        assert_eq!(
+            summary.outputs.seed_dir,
+            app::path_to_string(&std::path::Path::new("output").join(output_name))
+        );
         assert_eq!(encoder.calls.borrow().len(), 2, "main and spectral sweep videos are encoded");
         assert!(
             encoder.calls.borrow().iter().all(|(_, _, _, _, bytes)| *bytes > 0),

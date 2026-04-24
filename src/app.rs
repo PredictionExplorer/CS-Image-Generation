@@ -21,7 +21,15 @@ use crate::sim::{self, Body, BordaWeights, Sha3RandomByteStream, TrajectoryResul
 use image::{ImageBuffer, Rgb};
 use nalgebra::Vector3;
 use std::fs;
+use std::path::Path;
 use tracing::{info, warn};
+
+const OUTPUT_ROOT: &str = "output";
+pub(crate) const SPECTRAL_DIR_NAME: &str = "spectral";
+
+pub(crate) fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
 
 /// Museum-quality enhancement flags (all default to true / enabled).
 #[derive(Clone, Debug)]
@@ -132,22 +140,22 @@ pub struct GenerationLogConfig {
 pub fn setup_seed_directory(seed: &str) -> Result<String> {
     validate_output_name(seed)?;
 
-    let seed_dir = format!("output/{seed}");
-    let spectral_dir = format!("{seed_dir}/spectral");
+    let seed_dir = Path::new(OUTPUT_ROOT).join(seed);
+    let spectral_dir = seed_dir.join(SPECTRAL_DIR_NAME);
 
     fs::create_dir_all(&seed_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
-        path: seed_dir.clone(),
+        path: path_to_string(&seed_dir),
         error: e,
     })?;
 
     fs::create_dir_all(&spectral_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
-        path: spectral_dir,
+        path: path_to_string(&spectral_dir),
         error: e,
     })?;
 
-    Ok(seed_dir)
+    Ok(path_to_string(&seed_dir))
 }
 
 /// Validate an output directory name without creating it.
@@ -970,10 +978,11 @@ mod tests {
         let result = setup_seed_directory("test_seed_42");
         assert!(result.is_ok());
         let seed_dir = result.expect("seed directory setup should succeed");
-        assert_eq!(seed_dir, "output/test_seed_42");
-        assert!(std::path::Path::new("output/test_seed_42").is_dir());
-        assert!(std::path::Path::new("output/test_seed_42/spectral").is_dir());
-        let _ = fs::remove_dir_all("output/test_seed_42");
+        let expected_dir = Path::new(OUTPUT_ROOT).join("test_seed_42");
+        assert_eq!(seed_dir, path_to_string(&expected_dir));
+        assert!(expected_dir.is_dir());
+        assert!(expected_dir.join(SPECTRAL_DIR_NAME).is_dir());
+        let _ = fs::remove_dir_all(expected_dir);
     }
 
     #[test]
@@ -982,7 +991,7 @@ mod tests {
         let r2 = setup_seed_directory("seed_idem");
         assert!(r1.is_ok());
         assert!(r2.is_ok());
-        let _ = fs::remove_dir_all("output/seed_idem");
+        let _ = fs::remove_dir_all(Path::new(OUTPUT_ROOT).join("seed_idem"));
     }
 
     #[test]
