@@ -75,6 +75,8 @@ CLI reference:
 | `--drift` | `elliptical` | Camera drift mode: `none`, `linear`, `brownian`, `elliptical` |
 | `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
 | `--equil-weight` | random | Borda weight for equilateralness; omit to sample from a curated range |
+| `--curvature-weight` | random | Borda weight for curvature entropy (turning-angle diversity); omit to sample from a curated range |
+| `--permutation-weight` | random | Borda weight for permutation entropy (Bandt-Pompe complexity); omit to sample from a curated range |
 | `--fast-encode` | off | Use faster (lower quality) video encoding |
 | `--log-level` | `info` | Tracing log level (`error`, `warn`, `info`, `debug`, `trace`) |
 
@@ -285,7 +287,7 @@ Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo test --release
 cargo llvm-cov --release --fail-under-lines 95
 ```
 
