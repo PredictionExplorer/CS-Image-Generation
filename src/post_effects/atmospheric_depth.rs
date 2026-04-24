@@ -4,7 +4,7 @@
 //! pixels based on perceived depth (derived from local density and luminance).
 //! Creates the impression of depth fog, aerial perspective, and volumetric atmosphere.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for atmospheric depth effect
@@ -153,6 +153,7 @@ impl PostEffect for AtmosphericDepth {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -277,5 +278,17 @@ mod tests {
 
         let density_far = AtmosphericDepth::calculate_density(&buffer, 10, 10, 7, 7, 1);
         assert!(density_far < 0.5); // Should be low in empty area
+    }
+
+    #[test]
+    fn test_atmospheric_depth_rejects_invalid_buffer_shape() {
+        let atmos = AtmosphericDepth::new(AtmosphericDepthConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = atmos.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("AtmosphericDepth"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

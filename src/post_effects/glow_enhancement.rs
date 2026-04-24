@@ -4,7 +4,7 @@
 //! glow creates tight, sharp highlights on the very brightest points, adding
 //! sparkle, stars, and a sense of luminous energy. Think "lens star filter" effect.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for glow enhancement
@@ -175,6 +175,7 @@ impl PostEffect for GlowEnhancement {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -276,6 +277,18 @@ mod tests {
 
         let result = glow.process(&buffer, 100, 100).expect("glow process should succeed");
         assert_eq!(result.len(), buffer.len());
+    }
+
+    #[test]
+    fn test_glow_rejects_invalid_buffer_shape() {
+        let glow = GlowEnhancement::new(GlowEnhancementConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = glow.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("GlowEnhancement"));
+        assert!(err.to_string().contains("buffer length"));
     }
 
     #[test]

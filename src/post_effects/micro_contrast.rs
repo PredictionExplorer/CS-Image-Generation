@@ -4,7 +4,7 @@
 //! without over-sharpening or creating halos. Uses an edge-aware approach
 //! to boost detail perception while preserving smooth gradients.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for micro-contrast enhancement
@@ -140,6 +140,7 @@ impl PostEffect for MicroContrast {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -285,5 +286,17 @@ mod tests {
 
         let result = mc.process(&buffer, 100, 100).expect("micro contrast process should succeed");
         assert_eq!(result.len(), buffer.len());
+    }
+
+    #[test]
+    fn test_micro_contrast_rejects_invalid_buffer_shape() {
+        let mc = MicroContrast::new(MicroContrastConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = mc.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("MicroContrast"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

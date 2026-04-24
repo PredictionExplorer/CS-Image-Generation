@@ -4,7 +4,7 @@
 //! creating a subtle highlighting that enhances the definition of forms
 //! without introducing harsh outlines. Creates a refined, gallery-quality look.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for edge luminance enhancement
@@ -168,6 +168,7 @@ impl PostEffect for EdgeLuminance {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -278,5 +279,17 @@ mod tests {
         let result =
             edge.process(&buffer, 100, 100).expect("edge luminance process should succeed");
         assert_eq!(result.len(), buffer.len());
+    }
+
+    #[test]
+    fn test_edge_luminance_rejects_invalid_buffer_shape() {
+        let edge = EdgeLuminance::new(EdgeLuminanceConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = edge.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("EdgeLuminance"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }
