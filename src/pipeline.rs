@@ -634,6 +634,25 @@ mod tests {
     use std::cell::RefCell;
     use std::error::Error;
     use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    struct CurrentDirGuard {
+        original: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn enter(path: &Path) -> Self {
+            let original = std::env::current_dir().expect("current dir should be readable");
+            std::env::set_current_dir(path).expect("test cwd should be set");
+            Self { original }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
 
     fn fresh_rng() -> Sha3RandomByteStream {
         Sha3RandomByteStream::new(&[0x42; 32], 100.0, 300.0, 300.0, 1.0)
@@ -848,8 +867,7 @@ mod tests {
             .to_string();
         let output_parent =
             tmp.path().parent().expect("tempdir should have a parent").to_path_buf();
-        let original_dir = std::env::current_dir().expect("current dir should be readable");
-        std::env::set_current_dir(&output_parent).expect("test cwd should be set");
+        let _cwd = CurrentDirGuard::enter(&output_parent);
 
         let encoder = FakeVideoEncoder::default();
         let request = GenerationRequest {
@@ -870,7 +888,6 @@ mod tests {
         };
 
         let result = run_generation_with_video_encoder(&request, &encoder);
-        std::env::set_current_dir(original_dir).expect("test cwd should be restored");
         let summary = result.expect("tiny generation should complete with fake encoder");
 
         assert!(summary.best_score.is_finite());
