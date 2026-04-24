@@ -95,7 +95,8 @@ mod tests {
     #[test]
     fn test_bin_buffers_correct_dimensions() {
         let spd = make_test_spd();
-        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let bb = BinBuffers::try_new(&spd, TEST_W as u32, TEST_H as u32)
+            .expect("valid image shape should build bin buffers");
         assert_eq!(bb.buffers.len(), NUM_BINS);
         for buf in &bb.buffers {
             assert_eq!(buf.len(), TEST_W * TEST_H);
@@ -106,11 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn test_bin_buffers_validate_image_shape_rejects_length_mismatch() {
+    fn test_bin_buffers_try_new_rejects_length_mismatch() {
         let mut spd = make_test_spd();
         spd.pop();
 
-        let err = BinBuffers::validate_image_shape(&spd, TEST_W as u32, TEST_H as u32)
+        let err = BinBuffers::try_new(&spd, TEST_W as u32, TEST_H as u32)
             .expect_err("mismatched SPD length should fail validation");
 
         assert!(matches!(err, crate::render::error::RenderError::InvalidScene { .. }));
@@ -118,8 +119,8 @@ mod tests {
     }
 
     #[test]
-    fn test_bin_buffers_validate_image_shape_rejects_zero_dimensions() {
-        let err = BinBuffers::validate_image_shape(&[], 0, TEST_H as u32)
+    fn test_bin_buffers_try_new_rejects_zero_dimensions() {
+        let err = BinBuffers::try_new(&[], 0, TEST_H as u32)
             .expect_err("zero width should fail validation");
 
         assert!(matches!(

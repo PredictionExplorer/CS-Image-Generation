@@ -15,7 +15,7 @@ pub struct BinBuffers {
 }
 
 impl BinBuffers {
-    pub(super) fn validate_image_shape(
+    fn validate_image_shape(
         accum_spd: &[[f64; NUM_BINS]],
         width: u32,
         height: u32,
@@ -38,16 +38,18 @@ impl BinBuffers {
         Ok((width_usize, height_usize, pixel_count))
     }
 
-    pub(super) fn from_validated(
-        accum_spd: &[[f64; NUM_BINS]],
-        width: usize,
-        height: usize,
-        pixel_count: usize,
-    ) -> Self {
-        debug_assert_eq!(accum_spd.len(), pixel_count);
-        debug_assert_eq!(width.checked_mul(height), Some(pixel_count));
-
-        Self::build(accum_spd, width, height, pixel_count)
+    /// Try to build 64 bin images from an accumulated SPD buffer.
+    ///
+    /// Each bin image normalizes that bin's energy across all pixels, tints by the
+    /// bin's wavelength color, and applies display gamma.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when dimensions are zero, dimensions overflow the host
+    /// address space, or `accum_spd.len()` does not equal `width * height`.
+    pub fn try_new(accum_spd: &[[f64; NUM_BINS]], width: u32, height: u32) -> Result<Self> {
+        let (width, height, pixel_count) = Self::validate_image_shape(accum_spd, width, height)?;
+        Ok(Self::build(accum_spd, width, height, pixel_count))
     }
 
     /// Build 64 bin images from the accumulated SPD buffer.
@@ -55,9 +57,13 @@ impl BinBuffers {
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
     /// bin's wavelength color, and applies display gamma.
     ///
+    /// Prefer [`Self::try_new`] when dimensions or buffer shape come from a
+    /// caller or other untrusted boundary.
+    ///
     /// # Panics
     ///
-    /// Panics when `accum_spd.len()` does not equal `width * height`.
+    /// Panics when `width * height` overflows `usize` or `accum_spd.len()` does
+    /// not equal `width * height`.
     #[must_use]
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
         let pixel_count = width.checked_mul(height).expect("image dimensions overflow usize");

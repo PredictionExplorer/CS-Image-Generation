@@ -122,11 +122,12 @@ pub(crate) fn generate_spectral_sweep_video_with_encoder(
     let output_path = output_path.as_ref();
 
     info!("Building BinBuffers for spectral sweep ({NUM_BINS} bins)...");
-    let (w, h, pixel_count) = BinBuffers::validate_image_shape(accum_spd, width, height)?;
-    let bin_buffers = BinBuffers::from_validated(accum_spd, w, h, pixel_count);
+    let bin_buffers = BinBuffers::try_new(accum_spd, width, height)?;
 
     let (active_start, active_end) = bin_buffers.active_bin_range();
     info!("   Active bin range: {active_start}..={active_end}");
+    let w = bin_buffers.width;
+    let h = bin_buffers.height;
 
     info!("Preparing sweep post-effects (bloom + colour grade)...");
     let bloom = GaussianBloom::new(

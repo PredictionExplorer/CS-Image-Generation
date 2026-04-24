@@ -21,8 +21,8 @@ pub fn generate_spectral_gallery(
     height: u32,
     output_dir: impl AsRef<Path>,
 ) -> Result<()> {
-    let (width_usize, height_usize, pixel_count) =
-        BinBuffers::validate_image_shape(accum_spd, width, height)?;
+    info!("Building BinBuffers ({NUM_BINS} bins)...");
+    let bin_buffers = BinBuffers::try_new(accum_spd, width, height)?;
     let output_dir = output_dir.as_ref();
     std::fs::create_dir_all(output_dir).map_err(|e| RenderError::ImageEncoding {
         reason: format!(
@@ -30,9 +30,6 @@ pub fn generate_spectral_gallery(
             output_dir.display()
         ),
     })?;
-
-    info!("Building BinBuffers ({NUM_BINS} bins)...");
-    let bin_buffers = BinBuffers::from_validated(accum_spd, width_usize, height_usize, pixel_count);
 
     info!("Generating spectral gallery ({NUM_BINS} bin images)...");
     (0..NUM_BINS).into_par_iter().try_for_each(|bin| {
