@@ -17,6 +17,7 @@ use crate::sim::{BordaWeights, Sha3RandomByteStream, TrajectoryResult};
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 use rayon::ThreadPoolBuilder;
+use std::path::Path;
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
@@ -237,10 +238,10 @@ pub struct GenerationOutputs {
 }
 
 impl GenerationOutputs {
-    fn for_seed_dir(seed_dir: &str) -> Self {
-        let seed_path = std::path::Path::new(seed_dir);
+    fn for_seed_dir(seed_dir: impl AsRef<Path>) -> Self {
+        let seed_path = seed_dir.as_ref();
         Self {
-            seed_dir: seed_dir.to_string(),
+            seed_dir: app::path_to_string(seed_path),
             image_png: app::path_to_string(&seed_path.join("image.png")),
             video_mp4: app::path_to_string(&seed_path.join("video.mp4")),
             spectral_dir: app::path_to_string(&seed_path.join(app::SPECTRAL_DIR_NAME)),
@@ -285,7 +286,7 @@ pub(crate) fn run_generation_with_video_encoder(
 
     let seed_bytes = app::parse_seed(&request.seed)?;
     let hex_seed = seed_hex(&request.seed);
-    let seed_dir = app::setup_seed_directory(&request.output)?;
+    let seed_dir = app::setup_seed_directory_path(&request.output)?;
     let outputs = GenerationOutputs::for_seed_dir(&seed_dir);
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
@@ -800,29 +801,25 @@ mod tests {
 
     #[test]
     fn generation_outputs_are_derived_from_seed_directory() {
-        let seed_dir = app::path_to_string(&std::path::Path::new("output").join("example"));
+        let seed_dir = Path::new("output").join("example");
         let outputs = GenerationOutputs::for_seed_dir(&seed_dir);
 
-        assert_eq!(outputs.seed_dir, seed_dir);
+        assert_eq!(outputs.seed_dir, app::path_to_string(&seed_dir));
         assert_eq!(
             outputs.image_png,
-            app::path_to_string(&std::path::Path::new(&outputs.seed_dir).join("image.png"))
+            app::path_to_string(&Path::new(&outputs.seed_dir).join("image.png"))
         );
         assert_eq!(
             outputs.video_mp4,
-            app::path_to_string(&std::path::Path::new(&outputs.seed_dir).join("video.mp4"))
+            app::path_to_string(&Path::new(&outputs.seed_dir).join("video.mp4"))
         );
         assert_eq!(
             outputs.spectral_dir,
-            app::path_to_string(
-                &std::path::Path::new(&outputs.seed_dir).join(app::SPECTRAL_DIR_NAME)
-            )
+            app::path_to_string(&Path::new(&outputs.seed_dir).join(app::SPECTRAL_DIR_NAME))
         );
         assert_eq!(
             outputs.spectral_sweep_mp4,
-            app::path_to_string(
-                &std::path::Path::new(&outputs.seed_dir).join("spectral_sweep.mp4")
-            )
+            app::path_to_string(&Path::new(&outputs.seed_dir).join("spectral_sweep.mp4"))
         );
     }
 
