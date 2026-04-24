@@ -1,7 +1,7 @@
 //! Difference of Gaussians (`DoG`) bloom effect implementation.
 
 use super::{PixelBuffer, PostEffect, PostEffectError, utils};
-use crate::render::{DogBloomConfig, apply_dog_bloom};
+use crate::render::{DogBloomConfig, try_apply_dog_bloom};
 use rayon::prelude::*;
 
 /// Difference of Gaussians bloom post-processing effect.
@@ -63,7 +63,13 @@ impl PostEffect for DogBloom {
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
         let highlights = Self::extract_highlights(input);
-        let dog_bloom = apply_dog_bloom(&highlights, width, height, &self.config);
+        let dog_bloom =
+            try_apply_dog_bloom(&highlights, width, height, &self.config).map_err(|err| {
+                PostEffectError::EffectFailed {
+                    effect_name: "dog_bloom".into(),
+                    message: err.to_string(),
+                }
+            })?;
         let core_gain = self.core_gain();
 
         // Composite the residual over the untouched base image.
@@ -131,5 +137,18 @@ mod tests {
         for (i, pixel) in output.iter().enumerate() {
             assert_eq!(pixel.3, 0.75, "Alpha changed at pixel {i}");
         }
+    }
+
+    #[test]
+    fn test_dog_bloom_invalid_buffer_reports_effect_error() {
+        let bloom = DogBloom::new(DogBloomConfig::default(), 12.0);
+        let input: PixelBuffer = vec![(1.0, 1.0, 1.0, 1.0); 3];
+        let err = bloom.process(&input, 2, 2).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(
+            err,
+            PostEffectError::EffectFailed { ref effect_name, ref message }
+                if effect_name == "dog_bloom" && message.contains("buffer length")
+        ));
     }
 }

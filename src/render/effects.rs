@@ -314,7 +314,38 @@ impl Default for DogBloomConfig {
     }
 }
 
+fn checked_effect_pixel_count(context: &str, width: usize, height: usize) -> Result<usize> {
+    if width == 0 || height == 0 {
+        return Err(RenderError::InvalidScene {
+            reason: format!("{context} dimensions must be non-zero, got {width}x{height}"),
+        });
+    }
+
+    width.checked_mul(height).ok_or_else(|| RenderError::InvalidScene {
+        reason: format!("{context} dimensions overflow usize: {width}x{height}"),
+    })
+}
+
+fn validate_effect_buffer_shape(
+    context: &str,
+    input_len: usize,
+    width: usize,
+    height: usize,
+) -> Result<usize> {
+    let pixel_count = checked_effect_pixel_count(context, width, height)?;
+    if input_len != pixel_count {
+        return Err(RenderError::InvalidScene {
+            reason: format!(
+                "{context} buffer length ({input_len}) does not match dimensions {width}x{height} ({pixel_count} pixels)"
+            ),
+        });
+    }
+
+    Ok(pixel_count)
+}
+
 /// Mipmap pyramid for efficient multi-scale filtering
+#[derive(Debug)]
 pub struct MipPyramid {
     levels: Vec<Vec<(f64, f64, f64, f64)>>,
     widths: Vec<usize>,
@@ -322,9 +353,20 @@ pub struct MipPyramid {
 }
 
 impl MipPyramid {
-    /// Build a mipmap pyramid with the given number of downsampled levels
-    #[must_use]
-    pub fn new(base: &[(f64, f64, f64, f64)], width: usize, height: usize, levels: usize) -> Self {
+    /// Try to build a mipmap pyramid with the given number of downsampled levels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when dimensions are zero, dimensions overflow `usize`,
+    /// or the base buffer length does not match the dimensions.
+    pub fn try_new(
+        base: &[(f64, f64, f64, f64)],
+        width: usize,
+        height: usize,
+        levels: usize,
+    ) -> Result<Self> {
+        validate_effect_buffer_shape("mip pyramid base", base.len(), width, height)?;
+
         let mut pyramid =
             MipPyramid { levels: vec![base.to_vec()], widths: vec![width], heights: vec![height] };
 
@@ -333,8 +375,10 @@ impl MipPyramid {
             let prev_h = pyramid.heights[level - 1];
             let new_w = prev_w.div_ceil(2);
             let new_h = prev_h.div_ceil(2);
+            let level_pixel_count = checked_effect_pixel_count("mip pyramid level", new_w, new_h)?;
 
-            let mut downsampled = vec![(0.0, 0.0, 0.0, 0.0); new_w * new_h];
+            let previous = &pyramid.levels[level - 1];
+            let mut downsampled = vec![(0.0, 0.0, 0.0, 0.0); level_pixel_count];
 
             // Box filter downsample (parallel)
             downsampled.par_iter_mut().enumerate().for_each(|(idx, pixel)| {
@@ -347,10 +391,10 @@ impl MipPyramid {
                 let y0 = (y * 2).min(prev_h - 1);
                 let y1 = ((y * 2) + 1).min(prev_h - 1);
 
-                let p00 = pyramid.levels[level - 1][y0 * prev_w + x0];
-                let p01 = pyramid.levels[level - 1][y0 * prev_w + x1];
-                let p10 = pyramid.levels[level - 1][y1 * prev_w + x0];
-                let p11 = pyramid.levels[level - 1][y1 * prev_w + x1];
+                let p00 = previous[y0 * prev_w + x0];
+                let p01 = previous[y0 * prev_w + x1];
+                let p10 = previous[y1 * prev_w + x0];
+                let p11 = previous[y1 * prev_w + x1];
 
                 *pixel = (
                     (p00.0 + p01.0 + p10.0 + p11.0) * constants::BILINEAR_AVG_FACTOR,
@@ -365,7 +409,22 @@ impl MipPyramid {
             pyramid.heights.push(new_h);
         }
 
-        pyramid
+        Ok(pyramid)
+    }
+
+    /// Build a mipmap pyramid with the given number of downsampled levels.
+    ///
+    /// Prefer [`Self::try_new`] when dimensions or buffer lengths come from a
+    /// caller boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics when dimensions are zero, dimensions overflow `usize`, or the
+    /// base buffer length does not match the dimensions.
+    #[must_use]
+    pub fn new(base: &[(f64, f64, f64, f64)], width: usize, height: usize, levels: usize) -> Self {
+        Self::try_new(base, width, height, levels)
+            .expect("mip pyramid buffer shape should be valid")
     }
 }
 
@@ -444,16 +503,22 @@ pub fn upsample_bilinear(
     result
 }
 
-/// Apply Difference-of-Gaussians bloom effect
-#[must_use]
-pub fn apply_dog_bloom(
+/// Try to apply Difference-of-Gaussians bloom effect.
+///
+/// # Errors
+///
+/// Returns an error when dimensions are zero, dimensions overflow `usize`, or
+/// the input buffer length does not match the supplied dimensions.
+pub fn try_apply_dog_bloom(
     input: &[(f64, f64, f64, f64)],
     width: usize,
     height: usize,
     config: &DogBloomConfig,
-) -> Vec<(f64, f64, f64, f64)> {
+) -> Result<Vec<(f64, f64, f64, f64)>> {
+    let pixel_count = validate_effect_buffer_shape("DoG bloom input", input.len(), width, height)?;
+
     // Create mip pyramid (3 levels)
-    let pyramid = MipPyramid::new(input, width, height, 3);
+    let pyramid = MipPyramid::try_new(input, width, height, 3)?;
 
     // Blur at different mip levels for efficiency
     let inner_radius = config.inner_sigma.round() as usize;
@@ -484,7 +549,7 @@ pub fn apply_dog_bloom(
         upsample_bilinear(&blur_outer, pyramid.widths[2], pyramid.heights[2], width, height);
 
     // Compute DoG and apply threshold
-    let mut dog_result = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+    let mut dog_result = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
     dog_result
         .par_iter_mut()
@@ -507,7 +572,27 @@ pub fn apply_dog_bloom(
             // Negative values are left as zero (clamped)
         });
 
-    dog_result
+    Ok(dog_result)
+}
+
+/// Apply Difference-of-Gaussians bloom effect.
+///
+/// Prefer [`try_apply_dog_bloom`] when dimensions or buffer lengths come from a
+/// caller boundary.
+///
+/// # Panics
+///
+/// Panics when dimensions are zero, dimensions overflow `usize`, or the input
+/// buffer length does not match the supplied dimensions.
+#[must_use]
+pub fn apply_dog_bloom(
+    input: &[(f64, f64, f64, f64)],
+    width: usize,
+    height: usize,
+    config: &DogBloomConfig,
+) -> Vec<(f64, f64, f64, f64)> {
+    try_apply_dog_bloom(input, width, height, config)
+        .expect("DoG bloom buffer shape should be valid")
 }
 
 /// Convert SPD buffer to RGBA, with post-process radial dispersion (chromatic aberration)
@@ -722,6 +807,23 @@ mod tests {
     }
 
     #[test]
+    fn test_mip_pyramid_try_new_rejects_zero_dimensions() {
+        let err = MipPyramid::try_new(&[], 0, 16, 3).expect_err("zero width should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_mip_pyramid_try_new_rejects_shape_mismatch() {
+        let input: Vec<(f64, f64, f64, f64)> = vec![(1.0, 0.5, 0.25, 1.0); 3];
+        let err = MipPyramid::try_new(&input, 2, 2, 3).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("buffer length"));
+    }
+
+    #[test]
     fn test_upsample_bilinear_identity() {
         let w = 4;
         let h = 4;
@@ -766,5 +868,15 @@ mod tests {
         for pixel in &result {
             assert!(pixel.0.abs() < 0.1, "Dark input should produce near-zero bloom");
         }
+    }
+
+    #[test]
+    fn test_try_apply_dog_bloom_rejects_shape_mismatch() {
+        let input: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.5, 0.5, 1.0); 3];
+        let err = try_apply_dog_bloom(&input, 2, 2, &DogBloomConfig::default())
+            .expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("DoG bloom input buffer length"));
     }
 }

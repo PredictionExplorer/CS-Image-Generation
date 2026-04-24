@@ -38,7 +38,7 @@ pub use drawing::{
     LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral, parallel_blur_2d_rgba,
 };
 pub use effect_config::{build_effect_config_from_resolved, compute_softness_radius};
-pub use effects::{DogBloomConfig, apply_dog_bloom};
+pub use effects::{DogBloomConfig, apply_dog_bloom, try_apply_dog_bloom};
 #[cfg(test)]
 pub(crate) use spectral_passes::{
     AccumulationBackend, AccumulationParams, accumulate_spectral_steps,
