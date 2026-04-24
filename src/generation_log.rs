@@ -345,7 +345,7 @@ impl GenerationLogger {
 
     /// Perform the actual read-modify-write while the caller holds the lock.
     fn locked_append(&self, record: &GenerationRecord) -> std::io::Result<()> {
-        let mut records = self.load_records();
+        let mut records = self.load_records()?;
         records.push(record.clone());
 
         self.write_records_atomically(&records)
@@ -379,54 +379,62 @@ impl GenerationLogger {
         sync_parent_directory(&self.log_file_path)
     }
 
-    fn load_records(&self) -> Vec<GenerationRecord> {
+    fn load_records(&self) -> std::io::Result<Vec<GenerationRecord>> {
         if !self.log_file_path.exists() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let mut file = match File::open(&self.log_file_path) {
             Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => {
                 error!("Failed to open generation log {}: {}", self.log_file_path.display(), e);
-                return Vec::new();
+                return Err(e);
             }
         };
 
         let mut contents = String::new();
         if let Err(e) = file.read_to_string(&mut contents) {
             error!("Failed to read generation log {}: {}", self.log_file_path.display(), e);
-            return Vec::new();
+            return Err(e);
         }
 
         let contents = contents.trim();
         if contents.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         match serde_json::from_str(contents) {
-            Ok(records) => records,
+            Ok(records) => Ok(records),
             Err(e) => {
                 warn!("Failed to parse generation log, starting fresh: {}", e);
-                match self.backup_corrupt_log(contents) {
-                    Ok(backup_path) => warn!("Corrupt log backed up to {}", backup_path.display()),
-                    Err(backup_err) => warn!(
+                let backup_path = self.backup_corrupt_log(contents).map_err(|backup_err| {
+                    warn!(
                         "Failed to back up corrupt generation log {}: {}",
                         self.log_file_path.display(),
                         backup_err
-                    ),
-                }
-                Vec::new()
+                    );
+                    backup_err
+                })?;
+                warn!("Corrupt log backed up to {}", backup_path.display());
+                Ok(Vec::new())
             }
         }
     }
 
     /// If the log file is corrupt, save a backup so data isn't silently lost.
     fn backup_corrupt_log(&self, contents: &str) -> std::io::Result<PathBuf> {
+        let now = chrono::Utc::now();
+        let timestamp = now
+            .timestamp_nanos_opt()
+            .map_or_else(|| now.timestamp().to_string(), |nanos| nanos.to_string());
         let mut backup_path = self.log_file_path.as_os_str().to_os_string();
-        backup_path.push(format!(".corrupt.{}", chrono::Utc::now().timestamp()));
+        backup_path.push(format!(".corrupt.{timestamp}.{}", std::process::id()));
         let backup_path = PathBuf::from(backup_path);
         let mut file = File::create(&backup_path)?;
         file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        sync_parent_directory(&backup_path)?;
 
         Ok(backup_path)
     }
@@ -477,7 +485,7 @@ mod tests {
         logger.log_generation(&make_record("second")).expect("log second");
         logger.log_generation(&make_record("third")).expect("log third");
 
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].file_name, "first");
         assert_eq!(records[1].file_name, "second");
@@ -493,7 +501,7 @@ mod tests {
 
         logger.log_generation(&make_record("atomic")).expect("log generation");
 
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].file_name, "atomic");
 
@@ -546,7 +554,7 @@ mod tests {
         }
 
         let logger = GenerationLogger::with_paths(log_path, lock_path);
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
 
         assert_eq!(
             records.len(),
@@ -565,11 +573,11 @@ mod tests {
         File::create(&paths.0).expect("failed to create temp file");
 
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert!(records.is_empty());
 
         logger.log_generation(&make_record("after_empty")).expect("log after empty");
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert_eq!(records.len(), 1);
 
         cleanup(&paths);
@@ -626,17 +634,26 @@ mod tests {
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
         logger.log_generation(&make_record("fresh_start")).expect("log fresh start");
 
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert_eq!(records.len(), 1, "should recover with a fresh log");
         assert_eq!(records[0].file_name, "fresh_start");
 
+        let log_file_name =
+            paths.0.file_name().expect("log path should have file name").to_string_lossy();
         let backups: Vec<_> = std::fs::read_dir(std::env::temp_dir())
             .expect("failed to read temp directory")
             .filter_map(std::result::Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().contains("test_gen_log_corrupt"))
+            .filter(|e| e.file_name().to_string_lossy().starts_with(log_file_name.as_ref()))
             .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
             .collect();
         assert!(!backups.is_empty(), "corrupt file should be backed up");
+        assert!(
+            backups.iter().any(|backup| {
+                std::fs::read_to_string(backup.path())
+                    .is_ok_and(|contents| contents == "this is not json")
+            }),
+            "backup should preserve the original corrupt contents"
+        );
 
         for b in &backups {
             let _ = std::fs::remove_file(b.path());
@@ -652,10 +669,27 @@ mod tests {
         let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
         logger.log_generation(&make_record("brand_new")).expect("log brand new");
 
-        let records = logger.load_records();
+        let records = logger.load_records().expect("load records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].file_name, "brand_new");
 
         cleanup(&paths);
+    }
+
+    #[test]
+    fn test_existing_unreadable_log_is_not_overwritten() {
+        let paths = temp_paths("unreadable");
+        std::fs::create_dir(&paths.0).expect("failed to create directory at log path");
+
+        let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
+        let err = logger
+            .log_generation(&make_record("should_not_write"))
+            .expect_err("unreadable existing log should fail");
+
+        assert!(err.to_string().contains("I/O error"));
+        assert!(paths.0.is_dir(), "directory should not be replaced by a fresh log file");
+
+        let _ = std::fs::remove_dir(&paths.0);
+        let _ = std::fs::remove_file(&paths.1);
     }
 }
