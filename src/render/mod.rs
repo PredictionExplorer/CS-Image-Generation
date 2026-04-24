@@ -4,6 +4,7 @@
 //! including coordinate transformations, line drawing, post-processing effects, and video output.
 
 use nalgebra::Vector3;
+use std::path::Path;
 use tracing::info;
 
 // Module declarations
@@ -277,11 +278,14 @@ impl<'a> SpectralRenderSettings<'a> {
 /// Returns an error if the image cannot be encoded or written to `path`.
 pub fn save_image_as_png_16bit(
     rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
-    path: &str,
+    path: impl AsRef<Path>,
 ) -> Result<()> {
+    let path = path.as_ref();
     let dyn_img = DynamicImage::ImageRgb16(rgb_img.clone());
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    info!("   Saved 16-bit PNG (sRGB assumed) => {path}");
+    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding {
+        reason: format!("Failed to save {}: {e}", path.display()),
+    })?;
+    info!("   Saved 16-bit PNG (sRGB assumed) => {}", path.display());
     Ok(())
 }
 

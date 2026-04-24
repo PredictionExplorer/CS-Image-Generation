@@ -451,7 +451,7 @@ pub fn generate_spectral_gallery(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
-    spectral_dir: &str,
+    spectral_dir: impl AsRef<Path>,
 ) -> Result<()> {
     Ok(render::spectral_output::generate_spectral_gallery(accum_spd, width, height, spectral_dir)?)
 }

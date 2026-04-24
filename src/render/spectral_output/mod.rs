@@ -418,6 +418,22 @@ mod tests {
     }
 
     #[test]
+    fn test_gallery_creates_missing_output_dir() {
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().join("nested").join("gallery");
+
+        let spd = make_single_bin_spd(20, 1.0);
+        generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, &dir)
+            .expect("gallery should create missing output directory");
+
+        assert!(dir.is_dir());
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("gallery directory should be readable").count(),
+            NUM_BINS
+        );
+    }
+
+    #[test]
     fn test_gallery_extreme_energy_does_not_crash() {
         let tmp = tempfile::tempdir().expect("failed to create temp directory");
         let dir = tmp.path().to_str().expect("temp directory path must be valid UTF-8");
