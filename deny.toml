@@ -1,11 +1,13 @@
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "all"
+unsound = "all"
 yanked = "warn"
-notice = "warn"
+unused-ignored-advisory = "warn"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "Transitive via nalgebra/simba; no patched release is available. Track with cargo audit and dependency updates." },
+]
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
@@ -19,6 +21,9 @@ allow = [
     "CC0-1.0",
 ]
 confidence-threshold = 0.8
+unused-allowed-license = "allow"
+include-dev = true
+include-build = true
 
 [bans]
 multiple-versions = "warn"

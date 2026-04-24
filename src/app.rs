@@ -118,6 +118,11 @@ pub struct GenerationLogConfig {
 ///   output/{seed}/spectral/
 ///
 /// Rejects output names containing path separators or `..` to prevent directory traversal.
+///
+/// # Errors
+///
+/// Returns an error when the output name is unsafe or the output directories
+/// cannot be created.
 pub fn setup_seed_directory(seed: &str) -> Result<String> {
     if seed.contains("..") || seed.contains('/') || seed.contains('\\') {
         return Err(ConfigError::InvalidResolution {
@@ -144,7 +149,11 @@ pub fn setup_seed_directory(seed: &str) -> Result<String> {
     Ok(seed_dir)
 }
 
-/// Parse and validate hex seed
+/// Parse and validate hex seed.
+///
+/// # Errors
+///
+/// Returns an error when `seed` is not valid even-length hexadecimal.
 pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
     let hex_seed = seed.strip_prefix("0x").unwrap_or(seed);
 
@@ -156,6 +165,10 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
 ///
 /// `weights` controls how the four metric rank points are combined into the
 /// final weighted score — see [`BordaWeights`] for semantics.
+///
+/// # Errors
+///
+/// Returns an error when no valid orbit can be selected.
 pub fn run_borda_selection(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
@@ -176,7 +189,11 @@ pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<
     sim_result.positions
 }
 
-/// Apply drift transformation to positions
+/// Apply drift transformation to positions.
+///
+/// # Errors
+///
+/// Returns an error when the drift configuration or drift mode is invalid.
 pub fn apply_drift_transformation(
     positions: &mut [Vec<Vector3<f64>>],
     drift_mode: &str,
@@ -224,7 +241,11 @@ pub fn generate_colors(
     )
 }
 
-/// Build histogram and determine color levels
+/// Build histogram and determine color levels.
+///
+/// # Errors
+///
+/// Returns an error if the spectral histogram render pass fails.
 pub fn build_histogram_and_levels(
     positions: &[Vec<Vector3<f64>>],
     colors: &[Vec<render::OklabColor>],
@@ -242,7 +263,7 @@ pub fn build_histogram_and_levels(
         SpectralScene::new(positions, colors, body_alphas),
         frame_interval,
         SpectralRenderSettings::new(resolved_config, render_config, aspect_correction),
-    );
+    )?;
 
     info!("STAGE 6/7: Determine global black/white/gamma...");
     let analysis = render::histogram::analyze_tonemapping(
@@ -279,6 +300,10 @@ pub fn build_histogram_and_levels(
 }
 
 /// Render full video, returning the fully accumulated SPD buffer for spectral outputs.
+///
+/// # Errors
+///
+/// Returns an error if frame rendering, image encoding, or video encoding fails.
 pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -345,6 +370,11 @@ pub fn render_video(
 }
 
 /// Generate the spectral gallery: 64 per-bin 16-bit PNGs in `spectral_dir`.
+///
+/// # Errors
+///
+/// Returns an error if the gallery directory cannot be created or a bin PNG
+/// cannot be encoded.
 pub fn generate_spectral_gallery(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
@@ -355,6 +385,10 @@ pub fn generate_spectral_gallery(
 }
 
 /// Generate the spectral sweep video (violet-to-red cycle) at `output_path`.
+///
+/// # Errors
+///
+/// Returns an error if sweep frame generation or video encoding fails.
 pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
@@ -373,7 +407,9 @@ pub fn generate_spectral_sweep_video(
 
 /// Log generation parameters for reproducibility.
 ///
-/// Returns `Ok(())` on success, or an `Err` describing the I/O or serialisation failure.
+/// # Errors
+///
+/// Returns an error if the generation log cannot be written.
 pub fn log_generation(
     config: &GenerationLogConfig,
     file_name: &str,
@@ -455,7 +491,7 @@ pub fn log_generation(
     // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
 
-    logger.log_generation(record)
+    logger.log_generation(&record)
 }
 
 #[cfg(test)]
@@ -628,6 +664,7 @@ mod tests {
         let histogram = match mode {
             PipelineRenderMode::DefaultParallel => {
                 render::pass_1_build_histogram_spectral(scene, frame_interval, settings)
+                    .expect("parallel histogram pass should succeed")
             }
             PipelineRenderMode::SerialReference => {
                 render::pass_1_build_histogram_spectral_serial_reference(
@@ -635,6 +672,7 @@ mod tests {
                     frame_interval,
                     settings,
                 )
+                .expect("serial histogram pass should succeed")
             }
         };
         let analysis = render::histogram::analyze_tonemapping(

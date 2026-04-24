@@ -136,11 +136,10 @@ pub fn compute_com_distance_series(
 /// [`non_chaoticness_from_series`].  Prefer [`compute_orbit_quality`] in the
 /// selection hot path so the series is shared with [`permutation_entropy`].
 ///
-/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper
-/// is kept as a stable convenience entry point for external consumers and
-/// tests.
+/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper is
+/// kept as an internal convenience entry point for tests and diagnostics.
 #[must_use]
-#[allow(dead_code)] // Public API — called from tests and external consumers.
+#[allow(dead_code)] // Internal compatibility wrapper; not called by the binary pipeline.
 pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
     if positions.is_empty() || positions[0].is_empty() {
         return 0.0;
@@ -321,11 +320,10 @@ fn shannon_entropy<const N: usize>(counts: &[u32; N], total: u32) -> f64 {
 /// Returns `0.0` if the series is shorter than [`PERM_EMBEDDING_DIM`] or
 /// `positions` is empty.
 ///
-/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper
-/// is kept as a stable convenience entry point for external consumers and
-/// tests.
+/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper is
+/// kept as an internal convenience entry point for tests and diagnostics.
 #[must_use]
-#[allow(dead_code)] // Public API — called from tests and external consumers.
+#[allow(dead_code)] // Internal compatibility wrapper; not called by the binary pipeline.
 pub fn permutation_entropy(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
     if positions.is_empty() || positions[0].is_empty() {
         return 0.0;

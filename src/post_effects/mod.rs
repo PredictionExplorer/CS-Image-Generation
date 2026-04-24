@@ -38,6 +38,10 @@ pub trait PostEffect: Send + Sync {
     ///
     /// # Returns
     /// Processed pixel buffer or error
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the effect cannot process the supplied buffer.
     fn process(
         &self,
         input: &PixelBuffer,
@@ -78,6 +82,10 @@ impl PostEffectChain {
     ///
     /// # Returns
     /// Final processed buffer or first error encountered
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error produced by an enabled effect in the chain.
     pub fn process(
         &self,
         mut buffer: PixelBuffer,

@@ -125,6 +125,11 @@ impl std::fmt::Debug for BinBuffers {
 // ---------------------------------------------------------------------------
 
 /// Generate 64 per-bin 16-bit PNGs into `output_dir`.
+///
+/// # Errors
+///
+/// Returns an error if `output_dir` cannot be created or any PNG cannot be
+/// encoded.
 pub fn generate_spectral_gallery(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,
@@ -251,6 +256,10 @@ fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
 /// subtle colour grading (vignette + vibrance) per frame.  The bin range is
 /// determined dynamically from actual scene energy so that only bins with
 /// visible content are swept.
+///
+/// # Errors
+///
+/// Returns an error if sweep frame generation or video encoding fails.
 pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,

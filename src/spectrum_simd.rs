@@ -274,7 +274,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
 #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
 #[inline]
 unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
-    use std::arch::aarch64::*;
+    use std::arch::aarch64::{vaddq_f64, vdupq_n_f64, vfmaq_f64, vgetq_lane_f64, vld1q_f64};
 
     // SAFETY: all intrinsics below require neon, which is guaranteed by #[cfg]
     unsafe {

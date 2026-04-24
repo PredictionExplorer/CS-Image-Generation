@@ -115,9 +115,14 @@ pub enum ConfigError {
 
 /// Helper functions for common validation patterns
 pub mod validation {
-    use super::*;
+    use super::{AppRenderError, Result};
 
-    /// Validate that dimensions are non-zero and reasonable
+    /// Validate that dimensions are non-zero and reasonable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either dimension is zero or exceeds the maximum
+    /// supported size.
     pub fn validate_dimensions(width: u32, height: u32) -> Result<()> {
         if width == 0 || height == 0 {
             return Err(AppRenderError::InvalidDimensions {

@@ -315,6 +315,10 @@ fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) 
 /// TODO: Add explicit sRGB ICC profile chunk via the `png` crate for strict
 /// color-managed viewers. The `image` crate's encoder omits the sRGB chunk,
 /// but most viewers assume sRGB for untagged PNGs, so this is cosmetic.
+///
+/// # Errors
+///
+/// Returns an error if the image cannot be encoded or written to `path`.
 pub fn save_image_as_png_16bit(
     rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
     path: &str,
@@ -777,7 +781,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     frame_interval: usize,
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
-) -> HistogramData {
+) -> Result<HistogramData> {
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
@@ -786,7 +790,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
-    let finish_pipeline = FinishEffectPipeline::new(effect_config);
+    let finish_pipeline = FinishEffectPipeline::new(&effect_config);
     let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
 
     let total_steps = scene.step_count();
@@ -821,9 +825,12 @@ fn pass_1_build_histogram_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
-        let trajectory_proxy = finish_pipeline
-            .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
-            .expect("effect chain invariant: histogram-pass trajectory processing must not fail");
+        let trajectory_proxy = finish_pipeline.process_trajectory(
+            rgba_buffer,
+            width as usize,
+            height as usize,
+            &frame_params,
+        )?;
         accum_rgba.clear();
         accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
@@ -836,16 +843,21 @@ fn pass_1_build_histogram_spectral_with_backend(
     }
 
     info!("   pass 1 (spectral histogram): 100% done");
-    histogram
+    Ok(histogram)
 }
 
 // ====================== PASS 1 (SPECTRAL) ===========================
 /// Pass 1: gather global histogram for final color leveling (spectral)
+///
+/// # Errors
+///
+/// Returns an error if trajectory-stage effects fail while preparing histogram
+/// samples.
 pub fn pass_1_build_histogram_spectral(
     scene: SpectralScene<'_>,
     frame_interval: usize,
     settings: SpectralRenderSettings<'_>,
-) -> HistogramData {
+) -> Result<HistogramData> {
     pass_1_build_histogram_spectral_with_backend(
         scene,
         frame_interval,
@@ -859,7 +871,7 @@ pub(crate) fn pass_1_build_histogram_spectral_serial_reference(
     scene: SpectralScene<'_>,
     frame_interval: usize,
     settings: SpectralRenderSettings<'_>,
-) -> HistogramData {
+) -> Result<HistogramData> {
     pass_1_build_histogram_spectral_with_backend(
         scene,
         frame_interval,
@@ -932,7 +944,7 @@ fn pass_2_write_frames_spectral_with_backend(
 
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
-    let finish_pipeline = FinishEffectPipeline::new(effect_config);
+    let finish_pipeline = FinishEffectPipeline::new(&effect_config);
 
     let total_steps = scene.step_count();
     let checkpoints = checkpoint_steps(total_steps, frame_interval);
@@ -1017,6 +1029,10 @@ fn pass_2_write_frames_spectral_with_backend(
 }
 
 /// Pass 2: render frames with spectral accumulation and feed 16-bit bytes to `frame_sink`.
+///
+/// # Errors
+///
+/// Returns an error if frame rendering, post-processing, or `frame_sink` fails.
 pub fn pass_2_write_frames_spectral(
     params: Pass2Params<'_>,
     frame_sink: impl FnMut(&[u8]) -> Result<()>,
@@ -1028,6 +1044,10 @@ pub fn pass_2_write_frames_spectral(
 ///
 /// This is the correct preview path for still-image QA because it matches the final
 /// accumulated composition instead of an early timeline slice.
+///
+/// # Errors
+///
+/// Returns an error if accumulation, post-processing, or image construction fails.
 pub fn render_final_frame_spectral(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -1072,7 +1092,7 @@ fn render_final_frame_spectral_with_backend(
 
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
-    let finish_pipeline = FinishEffectPipeline::new(effect_config);
+    let finish_pipeline = FinishEffectPipeline::new(&effect_config);
 
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
@@ -1168,7 +1188,7 @@ fn render_single_frame_spectral_with_backend(
     // Build effect configuration from resolved config
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
-    let finish_pipeline = FinishEffectPipeline::new(effect_config);
+    let finish_pipeline = FinishEffectPipeline::new(&effect_config);
 
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
@@ -1445,7 +1465,8 @@ mod tests {
         settings: SpectralRenderSettings<'_>,
     ) -> ChannelLevels {
         let histogram =
-            pass_1_build_histogram_spectral_serial_reference(scene, frame_interval, settings);
+            pass_1_build_histogram_spectral_serial_reference(scene, frame_interval, settings)
+                .expect("serial histogram pass should succeed");
         let analysis = histogram::analyze_tonemapping(
             histogram.data(),
             settings.resolved_config.clip_black,
@@ -1789,13 +1810,15 @@ mod tests {
             SpectralScene::new(&positions, &colors, &body_alphas),
             1,
             SpectralRenderSettings::new(&clean, &render_config, false),
-        );
+        )
+        .expect("clean histogram pass should succeed");
 
         let styled_hist = pass_1_build_histogram_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             1,
             SpectralRenderSettings::new(&stylized, &render_config, false),
-        );
+        )
+        .expect("stylized histogram pass should succeed");
 
         assert_ne!(clean_hist.data(), styled_hist.data());
     }
@@ -1807,14 +1830,18 @@ mod tests {
         let resolved = baseline_resolved_config(64, 40);
         let render_config = RenderConfig { hdr_scale: 2.8, bloom_mode: BloomMode::Dog };
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
-        let serial = pass_1_build_histogram_spectral_serial_reference(scene, 2, settings);
+        let serial = pass_1_build_histogram_spectral_serial_reference(scene, 2, settings)
+            .expect("serial histogram pass should succeed");
 
         for thread_count in [1usize, 2, 3, resolved.height as usize] {
             let parallel = ThreadPoolBuilder::new()
                 .num_threads(thread_count)
                 .build()
                 .expect("thread pool should build")
-                .install(|| pass_1_build_histogram_spectral(scene, 2, settings));
+                .install(|| {
+                    pass_1_build_histogram_spectral(scene, 2, settings)
+                        .expect("parallel histogram pass should succeed")
+                });
             assert_histogram_bits_eq(
                 &parallel,
                 &serial,

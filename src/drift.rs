@@ -229,6 +229,10 @@ impl DriftTransform for EllipticalDrift {
 }
 
 /// Parse drift mode from string, returning an error for unrecognised values.
+///
+/// # Errors
+///
+/// Returns an error when `mode` is not one of the supported drift modes.
 pub fn parse_drift_mode(
     mode: &str,
     rng: &mut Sha3RandomByteStream,

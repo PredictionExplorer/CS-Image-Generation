@@ -177,7 +177,7 @@ fn symplectic_step(bodies: &mut [Body], dt: f64) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn compute_accelerations(bodies: &mut [Body], mass: &[f64; 3]) {
     let mut pos = [Vector3::zeros(); 3];
     for (i, b) in bodies.iter().enumerate().take(3) {
@@ -467,6 +467,10 @@ fn rank_trajectories(
 /// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
 ///
 /// Returns the winning initial conditions together with their [`TrajectoryResult`] scores.
+///
+/// # Errors
+///
+/// Returns an error when no simulated orbit survives the validity filters.
 pub fn select_best_trajectory(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,

@@ -116,9 +116,9 @@ pub struct FinishEffectPipeline {
 impl FinishEffectPipeline {
     /// Create a new finish pipeline with given configuration
     #[must_use]
-    pub fn new(config: EffectConfig) -> Self {
-        let trajectory_chain = Self::build_trajectory_chain(&config);
-        let image_chain = Self::build_image_chain(&config);
+    pub fn new(config: &EffectConfig) -> Self {
+        let trajectory_chain = Self::build_trajectory_chain(config);
+        let image_chain = Self::build_image_chain(config);
         Self { trajectory_chain, image_chain }
     }
 
@@ -244,6 +244,10 @@ impl FinishEffectPipeline {
     }
 
     /// Process trajectory content through the persistent finish chain.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any trajectory-stage post-effect fails.
     pub fn process_trajectory(
         &self,
         buffer: PixelBuffer,
@@ -258,6 +262,10 @@ impl FinishEffectPipeline {
     }
 
     /// Process the fully composited display image through the final image chain.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any image-stage post-effect fails.
     pub fn process_image(
         &self,
         buffer: PixelBuffer,
@@ -647,7 +655,7 @@ mod tests {
         let mut config = base_effect_config();
         config.fine_texture_enabled = true;
 
-        let pipeline = FinishEffectPipeline::new(config);
+        let pipeline = FinishEffectPipeline::new(&config);
 
         assert_eq!(pipeline.trajectory_len(), 0);
         assert_eq!(pipeline.image_len(), 1);
@@ -659,7 +667,7 @@ mod tests {
         config.color_grade_enabled = true;
         config.fine_texture_enabled = true;
 
-        let pipeline = FinishEffectPipeline::new(config);
+        let pipeline = FinishEffectPipeline::new(&config);
 
         assert!(pipeline.trajectory_len() >= 1);
         assert_eq!(pipeline.image_len(), 1);

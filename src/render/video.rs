@@ -204,6 +204,11 @@ impl VideoEncodingOptions {
 /// * `Ok(())` on success
 /// * `Err(RenderError)` if `FFmpeg` fails or encoding parameters are invalid
 ///
+/// # Errors
+///
+/// Returns an error if dimensions or frame-rate are invalid, `ffmpeg` cannot be
+/// spawned, frame streaming fails, or the encoder exits unsuccessfully.
+///
 /// # Example
 ///
 /// ```no_run

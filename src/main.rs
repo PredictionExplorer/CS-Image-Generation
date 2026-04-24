@@ -285,6 +285,7 @@ fn build_generation_log_config(
     }
 }
 
+#[allow(clippy::too_many_lines)] // CLI orchestration is intentionally kept linear until the larger refactor pass.
 fn main() -> Result<()> {
     ThreadPoolBuilder::new()
         .stack_size(render::constants::THREAD_STACK_SIZE)

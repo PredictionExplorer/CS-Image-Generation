@@ -57,6 +57,10 @@ impl ResolvedDriftConfig {
 /// Helper to resolve drift configuration from optional command-line args.
 ///
 /// Returns an error if only some drift parameters are provided (must be all or none).
+///
+/// # Errors
+///
+/// Returns an error when only some drift parameters are provided.
 pub fn resolve_drift_config(
     scale_opt: Option<f64>,
     arc_fraction_opt: Option<f64>,

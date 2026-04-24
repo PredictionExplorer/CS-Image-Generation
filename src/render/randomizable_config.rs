@@ -158,7 +158,6 @@ pub struct RandomizableEffectConfig {
     pub clip_black: Option<f64>,
     /// White point clipping threshold.
     pub clip_white: Option<f64>,
-
 }
 
 impl RandomizableEffectConfig {
@@ -971,6 +970,7 @@ pub struct ResolvedEffectConfig {
 /// - Keep the generative space broad while blocking combinations that predictably fail QA
 /// - Prefer soft caps over hard disables unless a combination is consistently harmful
 /// - Preserve deterministic resolution and logging for every adjustment
+#[allow(clippy::too_many_lines)] // Constraint rules are kept together so ordering is auditable.
 fn apply_conflict_detection(
     mut config: ResolvedEffectConfig,
     log: &mut RandomizationLog,
@@ -1691,10 +1691,12 @@ mod tests {
         assert!(result.enable_bloom);
         assert!(!result.enable_chromatic_bloom);
         assert!(result.enable_glow);
-        assert!(log.effects.iter().any(|record| record
-            .parameters
-            .iter()
-            .any(|parameter| parameter.value.contains("Disabled chromatic_bloom"))));
+        assert!(log.effects.iter().any(|record| {
+            record
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.contains("Disabled chromatic_bloom"))
+        }));
     }
 
     #[test]

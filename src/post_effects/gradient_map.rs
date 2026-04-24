@@ -102,6 +102,7 @@ impl GradientMap {
     }
 
     /// Get color from palette at normalized position (0.0 to 1.0)
+    #[allow(clippy::too_many_lines)] // Palette table is clearer as one exhaustive match.
     fn sample_palette(&self, t: f64) -> (f64, f64, f64) {
         let t = t.clamp(0.0, 1.0);
 
