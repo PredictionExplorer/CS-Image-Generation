@@ -22,6 +22,49 @@ pub enum PostEffectError {
         /// Human-readable error description.
         message: String,
     },
+
+    /// A post-processing buffer has dimensions or length inconsistent with the
+    /// requested image shape.
+    #[error("PostEffect buffer invalid at {stage}: {message}")]
+    InvalidBuffer {
+        /// Stage or effect that observed the invalid buffer.
+        stage: String,
+        /// Human-readable error description.
+        message: String,
+    },
+}
+
+fn checked_pixel_count(stage: &str, width: usize, height: usize) -> Result<usize, PostEffectError> {
+    if width == 0 || height == 0 {
+        return Err(PostEffectError::InvalidBuffer {
+            stage: stage.into(),
+            message: format!("dimensions must be non-zero, got {width}x{height}"),
+        });
+    }
+
+    width.checked_mul(height).ok_or_else(|| PostEffectError::InvalidBuffer {
+        stage: stage.into(),
+        message: format!("dimensions overflow usize: {width}x{height}"),
+    })
+}
+
+fn validate_buffer_shape(
+    stage: &str,
+    buffer_len: usize,
+    width: usize,
+    height: usize,
+) -> Result<(), PostEffectError> {
+    let pixel_count = checked_pixel_count(stage, width, height)?;
+    if buffer_len != pixel_count {
+        return Err(PostEffectError::InvalidBuffer {
+            stage: stage.into(),
+            message: format!(
+                "buffer length ({buffer_len}) does not match dimensions {width}x{height} ({pixel_count} pixels)"
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 /// Trait for implementing post-processing effects.
@@ -53,6 +96,11 @@ pub trait PostEffect: Send + Sync {
     /// Default implementation returns true.
     fn is_enabled(&self) -> bool {
         true
+    }
+
+    /// Returns a diagnostic name for this effect.
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
     }
 }
 
@@ -92,9 +140,11 @@ impl PostEffectChain {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape("post_effect_chain input", buffer.len(), width, height)?;
         for effect in &self.effects {
             if effect.is_enabled() {
                 buffer = effect.process(&buffer, width, height)?;
+                validate_buffer_shape(effect.name(), buffer.len(), width, height)?;
             }
         }
         Ok(buffer)
@@ -185,6 +235,19 @@ mod tests {
         }
     }
 
+    struct BadShapeEffect;
+
+    impl PostEffect for BadShapeEffect {
+        fn process(
+            &self,
+            _input: &PixelBuffer,
+            _width: usize,
+            _height: usize,
+        ) -> Result<PixelBuffer, PostEffectError> {
+            Ok(vec![(0.0, 0.0, 0.0, 1.0)])
+        }
+    }
+
     #[test]
     fn test_empty_chain() {
         let chain = PostEffectChain::new();
@@ -242,6 +305,42 @@ mod tests {
     }
 
     #[test]
+    fn test_chain_rejects_zero_dimensions_before_effects() {
+        let mut chain = PostEffectChain::new();
+        chain.add(Box::new(AddEffect { value: 0.1, enabled: true }));
+
+        let err = chain.process(Vec::new(), 0, 1).expect_err("zero width should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_chain_rejects_input_shape_mismatch() {
+        let chain = PostEffectChain::new();
+        let input = vec![(0.5, 0.5, 0.5, 1.0); 3];
+
+        let err = chain.process(input, 2, 2).expect_err("mismatched input should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("post_effect_chain input"));
+        assert!(err.to_string().contains("buffer length"));
+    }
+
+    #[test]
+    fn test_chain_rejects_effect_output_shape_mismatch() {
+        let mut chain = PostEffectChain::new();
+        chain.add(Box::new(BadShapeEffect));
+        let input = vec![(0.5, 0.5, 0.5, 1.0); 4];
+
+        let err = chain.process(input, 2, 2).expect_err("mismatched output should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("BadShapeEffect"));
+        assert!(err.to_string().contains("buffer length"));
+    }
+
+    #[test]
     fn test_error_type() {
         let error = PostEffectError::EffectFailed {
             effect_name: "Test Effect".to_string(),
@@ -249,6 +348,16 @@ mod tests {
         };
 
         assert_eq!(format!("{error}"), "PostEffect 'Test Effect' error: Test error");
+    }
+
+    #[test]
+    fn test_invalid_buffer_error_type() {
+        let error = PostEffectError::InvalidBuffer {
+            stage: "chain".to_string(),
+            message: "bad shape".to_string(),
+        };
+
+        assert_eq!(format!("{error}"), "PostEffect buffer invalid at chain: bad shape");
     }
 
     #[test]
