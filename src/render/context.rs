@@ -12,6 +12,39 @@ use nalgebra::Vector3;
 /// Color channels may be linear or display-space depending on the render stage.
 pub type PixelBuffer = Vec<(f64, f64, f64, f64)>;
 
+fn validate_positions(positions: &[Vec<Vector3<f64>>]) -> Result<()> {
+    let mut has_position = false;
+
+    for (body_idx, body_positions) in positions.iter().enumerate() {
+        for (step_idx, point) in body_positions.iter().enumerate() {
+            for (axis, value) in [("x", point[0]), ("y", point[1]), ("z", point[2])] {
+                if !value.is_finite() {
+                    return Err(RenderError::InvalidScene {
+                        reason: format!(
+                            "position body {body_idx}, step {step_idx}, axis {axis} must be finite"
+                        ),
+                    });
+                }
+            }
+
+            has_position = true;
+        }
+    }
+
+    if !has_position {
+        return Err(RenderError::InvalidScene {
+            reason: "position data must contain at least one sample".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn padded_position_bounds(positions: &[Vec<Vector3<f64>>]) -> Result<(f64, f64, f64, f64)> {
+    validate_positions(positions)?;
+    Ok(crate::utils::bounding_box(positions))
+}
+
 /// Encapsulates common rendering operations and coordinate transformations
 #[derive(Debug)]
 pub struct RenderContext {
@@ -49,7 +82,8 @@ impl RenderContext {
     /// # Errors
     ///
     /// Returns an error when either dimension is zero or the pixel count cannot
-    /// fit into the host address space.
+    /// fit into the host address space, or when position data is empty or
+    /// contains non-finite coordinates.
     pub fn try_new(
         width: u32,
         height: u32,
@@ -57,7 +91,7 @@ impl RenderContext {
         aspect_correction: bool,
     ) -> Result<Self> {
         let (width_usize, height_usize, pixel_count) = Self::validate_dimensions(width, height)?;
-        let mut bounds = BoundingBox::from_positions(positions);
+        let mut bounds = BoundingBox::try_from_positions(positions)?;
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
@@ -75,7 +109,8 @@ impl RenderContext {
     /// # Panics
     ///
     /// Panics when either dimension is zero or the pixel count cannot fit into
-    /// the host address space.
+    /// the host address space, or when position data is empty or contains
+    /// non-finite coordinates.
     #[must_use]
     pub fn new(
         width: u32,
@@ -84,7 +119,7 @@ impl RenderContext {
         aspect_correction: bool,
     ) -> Self {
         Self::try_new(width, height, positions, aspect_correction)
-            .expect("render context dimensions should be valid")
+            .expect("render context inputs should be valid")
     }
 
     /// Convert world coordinates to pixel coordinates
@@ -150,18 +185,36 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    /// Create a new bounding box from position data
-    #[must_use]
-    pub fn from_positions(positions: &[Vec<Vector3<f64>>]) -> Self {
-        let (min_x, max_x, min_y, max_y) = crate::utils::bounding_box(positions);
-        Self {
+    /// Try to create a new bounding box from position data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the position data contains no samples or includes
+    /// non-finite coordinates.
+    pub fn try_from_positions(positions: &[Vec<Vector3<f64>>]) -> Result<Self> {
+        let (min_x, max_x, min_y, max_y) = padded_position_bounds(positions)?;
+        Ok(Self {
             min_x,
             max_x,
             min_y,
             max_y,
             width: (max_x - min_x).max(1e-12),
             height: (max_y - min_y).max(1e-12),
-        }
+        })
+    }
+
+    /// Create a new bounding box from already-validated position data.
+    ///
+    /// Prefer [`Self::try_from_positions`] when position data comes from a
+    /// caller or other untrusted boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the position data contains no samples or includes non-finite
+    /// coordinates.
+    #[must_use]
+    pub fn from_positions(positions: &[Vec<Vector3<f64>>]) -> Self {
+        Self::try_from_positions(positions).expect("position data should contain finite samples")
     }
 
     /// Convert world coordinates to normalized coordinates (0..1)
@@ -225,6 +278,26 @@ mod tests {
         assert!(bbox.max_x > 10.0);
         assert!(bbox.width > 10.0);
         assert!(bbox.height > 5.0);
+    }
+
+    #[test]
+    fn test_bounding_box_try_from_positions_rejects_empty_positions() {
+        let positions = vec![Vec::new(), Vec::new(), Vec::new()];
+        let err = BoundingBox::try_from_positions(&positions)
+            .expect_err("empty position data should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("at least one sample"));
+    }
+
+    #[test]
+    fn test_bounding_box_try_from_positions_rejects_non_finite_positions() {
+        let positions = vec![vec![Vector3::new(0.0, f64::NAN, 0.0)]];
+        let err = BoundingBox::try_from_positions(&positions)
+            .expect_err("non-finite position data should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("axis y must be finite"));
     }
 
     #[test]
@@ -357,6 +430,16 @@ mod tests {
             RenderContext::try_new(0, 1080, &positions, true).expect_err("zero width should fail");
 
         assert!(matches!(err, RenderError::InvalidDimensions { width: 0, height: 1080 }));
+    }
+
+    #[test]
+    fn test_render_context_try_new_rejects_empty_positions() {
+        let positions = vec![Vec::new(), Vec::new(), Vec::new()];
+        let err = RenderContext::try_new(1920, 1080, &positions, true)
+            .expect_err("empty positions should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("at least one sample"));
     }
 
     #[test]
