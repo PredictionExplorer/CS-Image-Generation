@@ -526,12 +526,12 @@ fn render_outputs(
     } = inputs;
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new(
+    let render_ctx = render::context::RenderContext::try_new(
         request.width,
         request.height,
         positions,
         enhancements.aspect_correction,
-    );
+    )?;
     let bbox = render_ctx.bounds();
     info!(
         "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",

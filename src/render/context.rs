@@ -3,6 +3,7 @@
 //! This module provides the core rendering context that manages coordinate transformations
 //! and pixel operations, as well as utilities for iterating through animation frames.
 
+use crate::render::error::{RenderError, Result};
 use nalgebra::Vector3;
 
 /// Type alias for pixel buffers used throughout the pipeline.
@@ -26,7 +27,55 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    /// Creates a new render context from position data
+    fn validate_dimensions(width: u32, height: u32) -> Result<(usize, usize, usize)> {
+        if width == 0 || height == 0 {
+            return Err(RenderError::InvalidDimensions { width, height });
+        }
+
+        let pixel_count = u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or(RenderError::InvalidDimensions { width, height })?;
+        let width_usize =
+            usize::try_from(width).map_err(|_| RenderError::InvalidDimensions { width, height })?;
+        let height_usize = usize::try_from(height)
+            .map_err(|_| RenderError::InvalidDimensions { width, height })?;
+
+        Ok((width_usize, height_usize, pixel_count))
+    }
+
+    /// Try to create a new render context from position data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either dimension is zero or the pixel count cannot
+    /// fit into the host address space.
+    pub fn try_new(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+    ) -> Result<Self> {
+        let (width_usize, height_usize, pixel_count) = Self::validate_dimensions(width, height)?;
+        let mut bounds = BoundingBox::from_positions(positions);
+        if aspect_correction {
+            bounds.apply_aspect_correction(width, height);
+        }
+
+        let context = Self { width, height, width_usize, height_usize, bounds };
+        debug_assert_eq!(context.pixel_count(), pixel_count);
+        Ok(context)
+    }
+
+    /// Creates a new render context from already-validated position data.
+    ///
+    /// Prefer [`Self::try_new`] when dimensions come from a caller or other
+    /// untrusted boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics when either dimension is zero or the pixel count cannot fit into
+    /// the host address space.
     #[must_use]
     pub fn new(
         width: u32,
@@ -34,12 +83,8 @@ impl RenderContext {
         positions: &[Vec<Vector3<f64>>],
         aspect_correction: bool,
     ) -> Self {
-        let mut bounds = BoundingBox::from_positions(positions);
-        if aspect_correction {
-            bounds.apply_aspect_correction(width, height);
-        }
-
-        Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
+        Self::try_new(width, height, positions, aspect_correction)
+            .expect("render context dimensions should be valid")
     }
 
     /// Convert world coordinates to pixel coordinates
@@ -49,11 +94,18 @@ impl RenderContext {
         self.bounds.world_to_pixel(x, y, self.width, self.height)
     }
 
-    /// Get total pixel count
+    /// Get total pixel count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the public `width_usize` or `height_usize` fields have been
+    /// mutated so their product no longer fits in `usize`.
     #[must_use]
     #[inline]
     pub fn pixel_count(&self) -> usize {
-        self.width_usize * self.height_usize
+        self.width_usize
+            .checked_mul(self.height_usize)
+            .expect("render context dimensions should stay valid")
     }
 
     /// Get the bounding box used for coordinate transformations
@@ -272,13 +324,23 @@ mod tests {
     #[test]
     fn test_render_context_with_aspect_correction() {
         let positions = make_positions(&[(0.0, 0.0), (100.0, 50.0)]);
-        let ctx = RenderContext::new(1920, 1080, &positions, true);
+        let ctx = RenderContext::try_new(1920, 1080, &positions, true)
+            .expect("valid dimensions should create render context");
         let ar = ctx.bounds().width / ctx.bounds().height;
         let target_ar = 1920.0 / 1080.0;
         assert!(
             (ar - target_ar).abs() < 0.05,
             "aspect-corrected context AR {ar:.3} should be near {target_ar:.3}"
         );
+    }
+
+    #[test]
+    fn test_render_context_try_new_rejects_zero_dimensions() {
+        let positions = make_positions(&[(0.0, 0.0), (100.0, 50.0)]);
+        let err =
+            RenderContext::try_new(0, 1080, &positions, true).expect_err("zero width should fail");
+
+        assert!(matches!(err, RenderError::InvalidDimensions { width: 0, height: 1080 }));
     }
 
     #[test]

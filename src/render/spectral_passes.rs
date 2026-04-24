@@ -165,7 +165,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
     let effect_config =
@@ -317,7 +317,7 @@ fn pass_2_write_frames_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
     accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
         *s = [0.0; NUM_BINS];
@@ -477,7 +477,7 @@ fn render_final_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -579,7 +579,7 @@ fn render_single_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
