@@ -369,21 +369,28 @@ impl GenerationLogger {
             Ok(records) => records,
             Err(e) => {
                 warn!("Failed to parse generation log, starting fresh: {}", e);
-                self.backup_corrupt_log(contents);
+                match self.backup_corrupt_log(contents) {
+                    Ok(backup_path) => warn!("Corrupt log backed up to {}", backup_path.display()),
+                    Err(backup_err) => warn!(
+                        "Failed to back up corrupt generation log {}: {}",
+                        self.log_file_path.display(),
+                        backup_err
+                    ),
+                }
                 Vec::new()
             }
         }
     }
 
     /// If the log file is corrupt, save a backup so data isn't silently lost.
-    fn backup_corrupt_log(&self, contents: &str) {
+    fn backup_corrupt_log(&self, contents: &str) -> std::io::Result<PathBuf> {
         let mut backup_path = self.log_file_path.as_os_str().to_os_string();
         backup_path.push(format!(".corrupt.{}", chrono::Utc::now().timestamp()));
         let backup_path = PathBuf::from(backup_path);
-        if let Ok(mut f) = File::create(&backup_path) {
-            let _ = f.write_all(contents.as_bytes());
-            warn!("Corrupt log backed up to {}", backup_path.display());
-        }
+        let mut file = File::create(&backup_path)?;
+        file.write_all(contents.as_bytes())?;
+
+        Ok(backup_path)
     }
 }
 
