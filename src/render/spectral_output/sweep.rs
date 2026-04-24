@@ -11,6 +11,7 @@ use crate::render::video::{
 };
 use crate::spectrum::NUM_BINS;
 use rayon::prelude::*;
+use std::path::Path;
 use tracing::info;
 
 /// Pre-computed, normalised Gaussian weights for a bin blend.
@@ -97,7 +98,7 @@ pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     fast_encode: bool,
 ) -> Result<()> {
     generate_spectral_sweep_video_with_encoder(
@@ -114,10 +115,12 @@ pub(crate) fn generate_spectral_sweep_video_with_encoder(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     fast_encode: bool,
     video_encoder: &dyn VideoEncoder,
 ) -> Result<()> {
+    let output_path = output_path.as_ref();
+
     info!("Building BinBuffers for spectral sweep ({NUM_BINS} bins)...");
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
 
@@ -188,7 +191,7 @@ pub(crate) fn generate_spectral_sweep_video_with_encoder(
         video_encoder,
     )?;
 
-    info!("   Spectral sweep video complete => {output_path}");
+    info!("   Spectral sweep video complete => {}", output_path.display());
     Ok(())
 }
 

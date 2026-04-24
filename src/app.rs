@@ -355,8 +355,8 @@ pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
-    output_vid: &str,
-    output_png: &str,
+    output_vid: impl AsRef<Path>,
+    output_png: impl AsRef<Path>,
     fast_encode: bool,
     enable_temporal_smoothing: bool,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
@@ -376,12 +376,15 @@ pub(crate) fn render_video_with_encoder(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
-    output_vid: &str,
-    output_png: &str,
+    output_vid: impl AsRef<Path>,
+    output_png: impl AsRef<Path>,
     fast_encode: bool,
     enable_temporal_smoothing: bool,
     video_encoder: &dyn VideoEncoder,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
+    let output_vid = output_vid.as_ref();
+    let output_png = output_png.as_ref();
+
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
     } else {
@@ -432,7 +435,7 @@ pub(crate) fn render_video_with_encoder(
 
     // Save final frame
     if let Some(last_frame) = last_frame_png {
-        info!("Attempting to save 16-bit PNG to: {}", output_png);
+        info!("Attempting to save 16-bit PNG to: {}", output_png.display());
         save_image_as_png_16bit(&last_frame, output_png)?;
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
@@ -465,7 +468,7 @@ pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     fast_encode: bool,
 ) -> Result<()> {
     generate_spectral_sweep_video_with_encoder(
@@ -482,7 +485,7 @@ pub(crate) fn generate_spectral_sweep_video_with_encoder(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     fast_encode: bool,
     video_encoder: &dyn VideoEncoder,
 ) -> Result<()> {

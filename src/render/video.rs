@@ -5,6 +5,7 @@
 
 use std::error::Error;
 use std::io::{Read as _, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use tracing::info;
 
@@ -190,7 +191,7 @@ fn build_ffmpeg_command(
     width: u32,
     height: u32,
     frame_rate: u32,
-    output_file: &str,
+    output_file: &Path,
     options: &VideoEncodingOptions,
 ) -> Command {
     let mut cmd = Command::new("ffmpeg");
@@ -243,7 +244,7 @@ pub(crate) trait VideoEncoder {
         height: u32,
         frame_rate: u32,
         frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-        output_file: &str,
+        output_file: &Path,
         options: &VideoEncodingOptions,
     ) -> Result<()>;
 }
@@ -258,7 +259,7 @@ impl VideoEncoder for FfmpegVideoEncoder {
         height: u32,
         frame_rate: u32,
         frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-        output_file: &str,
+        output_file: &Path,
         options: &VideoEncodingOptions,
     ) -> Result<()> {
         encode_with_ffmpeg(width, height, frame_rate, frames_iter, output_file, options)
@@ -306,7 +307,7 @@ pub fn create_video_from_frames_singlepass(
     height: u32,
     frame_rate: u32,
     mut frames_iter: impl FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-    output_file: &str,
+    output_file: impl AsRef<Path>,
     options: &VideoEncodingOptions,
 ) -> Result<()> {
     create_video_from_frames_singlepass_with_encoder(
@@ -314,7 +315,7 @@ pub fn create_video_from_frames_singlepass(
         height,
         frame_rate,
         &mut frames_iter,
-        output_file,
+        output_file.as_ref(),
         options,
         &FfmpegVideoEncoder,
     )
@@ -325,7 +326,7 @@ pub(crate) fn create_video_from_frames_singlepass_with_encoder(
     height: u32,
     frame_rate: u32,
     frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-    output_file: &str,
+    output_file: &Path,
     options: &VideoEncodingOptions,
     encoder: &dyn VideoEncoder,
 ) -> Result<()> {
@@ -337,7 +338,7 @@ fn encode_with_ffmpeg(
     height: u32,
     frame_rate: u32,
     frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-    output_file: &str,
+    output_file: &Path,
     options: &VideoEncodingOptions,
 ) -> Result<()> {
     // Validate parameters
@@ -402,7 +403,7 @@ fn encode_with_ffmpeg(
         ))));
     }
 
-    info!("   Saved video => {}", output_file);
+    info!("   Saved video => {}", output_file.display());
     Ok(())
 }
 
@@ -550,7 +551,7 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_command_includes_raw_video_input() {
         let options = VideoEncodingOptions::default();
-        let command = build_ffmpeg_command(1920, 1080, 60, "out.mp4", &options);
+        let command = build_ffmpeg_command(1920, 1080, 60, Path::new("out.mp4"), &options);
         let args = command_args(&command);
 
         assert_eq!(command.get_program(), OsStr::new("ffmpeg"));
@@ -563,7 +564,7 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_command_uses_software_quality_flags() {
         let options = VideoEncodingOptions::default();
-        let command = build_ffmpeg_command(320, 180, 24, "out.mp4", &options);
+        let command = build_ffmpeg_command(320, 180, 24, Path::new("out.mp4"), &options);
         let args = command_args(&command);
 
         assert_eq!(arg_after(&args, "-c:v"), "libx265");
@@ -584,7 +585,7 @@ mod tests {
             input_pixel_format: "rgb48le".to_string(),
             extra_args: vec!["-tag:v".to_string(), "hvc1".to_string()],
         };
-        let command = build_ffmpeg_command(320, 180, 24, "out.mp4", &options);
+        let command = build_ffmpeg_command(320, 180, 24, Path::new("out.mp4"), &options);
         let args = command_args(&command);
 
         assert!(!args.contains(&"-preset".to_string()));

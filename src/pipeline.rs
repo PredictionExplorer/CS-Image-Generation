@@ -838,7 +838,7 @@ mod tests {
             height: u32,
             frame_rate: u32,
             frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-            output_file: &str,
+            output_file: &Path,
             _options: &VideoEncodingOptions,
         ) -> render::error::Result<()> {
             let mut sink = Vec::new();
@@ -849,7 +849,7 @@ mod tests {
                 width,
                 height,
                 frame_rate,
-                output_file.to_string(),
+                app::path_to_string(output_file),
                 sink.len(),
             ));
             Ok(())
