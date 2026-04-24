@@ -19,6 +19,12 @@ missing_docs = "deny"
 
 [lints.clippy]
 pedantic                     = { level = "warn", priority = -1 }
+# These repository-level allowances are intentional for numeric rendering code:
+# the remaining warnings are dominated by precision casts, matrix constants,
+# short math variable names, and domain structs whose clarity is better served
+# by local terminology than by satisfying pedantic naming heuristics. New code
+# should still avoid broad local suppressions and remove an allowance when a
+# category becomes low-noise.
 cast_possible_truncation     = "allow"
 cast_precision_loss          = "allow"
 cast_sign_loss               = "allow"

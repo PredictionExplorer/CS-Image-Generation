@@ -335,7 +335,7 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
 /// Log-uniform weights applied to each of the four Borda rank-point axes.
 ///
 /// Borda is scale-invariant (rank points live in `[1, N]`), so only the
-/// *ratios* between these weights matter — the resolver in `src/main.rs`
+/// *ratios* between these weights matter — the resolver in `crate::pipeline`
 /// samples each weight log-uniformly from a wide range so that, on any given
 /// run, one or two axes end up dominating the selection.
 #[derive(Clone, Copy, Debug, PartialEq)]

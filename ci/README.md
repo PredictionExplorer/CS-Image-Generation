@@ -31,12 +31,13 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 4. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
 5. **Benchmarks** — compile-check with `cargo bench --no-run`
 6. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
-7. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
-8. **Coverage** — `cargo-llvm-cov` with LCOV output uploaded as artifact
+7. **Dependency Policy** — `cargo deny check` for advisories, licenses, bans, and sources
+8. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
+9. **Coverage** — `cargo-llvm-cov --release --fail-under-lines 95` with LCOV output uploaded as artifact
 
 Additional automation:
 - **Dependabot** (`.github/dependabot.yml`) — weekly Cargo and GitHub Actions dependency updates
-- **cargo-deny** (`deny.toml`) — license allowlist, advisory checks, and source restrictions
+- **cargo-deny** (`deny.toml`) — license allowlist, advisory checks, and source restrictions. The tracked `paste` advisory is ignored only because it is transitive through `nalgebra`/`simba` with no clean patched upgrade path yet.
 
 ## Local Development
 
@@ -46,6 +47,7 @@ Install [just](https://github.com/casey/just) and run:
 just check    # fmt + clippy
 just py-check # ruff + mypy (after `pip install -e ".[dev]"` in a venv)
 just test     # full test suite
+just coverage # release line coverage, fails below 95%
 just all      # check + test
 ```
 

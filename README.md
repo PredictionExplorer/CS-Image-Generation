@@ -284,13 +284,20 @@ Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+cargo llvm-cov --release --fail-under-lines 95
 ```
 
 Formatting rules live in [`rustfmt.toml`](rustfmt.toml) (100-character lines, 4-space indentation). The crate denies Rust warnings and missing public docs (`[lints.rust]` in [`Cargo.toml`](Cargo.toml): `warnings = "deny"`, `missing_docs = "deny"`).
 
-If you use [just](https://github.com/casey/just): `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just all` runs `check` then `test`.
+The remaining repository-level Clippy allowances are documented in [`Cargo.toml`](Cargo.toml). They are limited to noisy numeric-rendering categories such as precision casts, short math names, and matrix literals; new code should not add local suppressions unless the reason is specific and reviewable.
+
+Coverage is a hard quality gate: CI and `just coverage` require release line coverage of at least **95%**.
+
+Dependency policy is checked with [`cargo-deny`](deny.toml). The only ignored advisory is `RUSTSEC-2024-0436` for `paste`, which is currently pulled transitively through `nalgebra`/`simba`; it stays tracked until that dependency chain offers a clean upgrade path.
+
+If you use [just](https://github.com/casey/just): `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just coverage` runs the 95% coverage gate; `just all` runs `check` then `test`.
 
 ### Python scripts (runtime)
 
@@ -343,15 +350,17 @@ For a detailed description of the spectral pipeline (SPD buffer, accumulation, g
 
 ## License
 
-This repository does not ship an SPDX `LICENSE` file. Before redistributing or pinning a build to IPFS for others to reuse, add a license you are comfortable with (for example MIT or Apache-2.0) so terms are explicit.
+This project is dedicated to the public domain under **CC0-1.0**. The package metadata declares `license = "CC0-1.0"` and the full text is in [`LICENSE`](LICENSE).
 
 ## Project Layout
 
 ```text
-src/main.rs              CLI entry point
-src/app.rs               Pipeline orchestration
+src/main.rs              Thin binary entry point
+src/cli.rs               CLI parsing and default conversion
+src/pipeline.rs          Generation request and orchestration boundary
+src/app.rs               Workflow helpers used by the pipeline
 src/sim.rs               Physics simulation and selection
-src/render/              Rendering, tonemapping, video
+src/render/              Rendering, tonemapping, spectral output, video
 src/post_effects/        Post-processing effects
 src/spectrum.rs          Spectral conversion
 src/spectrum_simd.rs     SIMD spectral fast paths

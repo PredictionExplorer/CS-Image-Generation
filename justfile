@@ -4,7 +4,7 @@
 # Run all quality checks
 check:
     cargo fmt --all -- --check
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
 
 # Python: ruff + mypy (requires dev tools on PATH, e.g. `pip install -e ".[dev]"` in a venv)
 py-check:
@@ -18,6 +18,10 @@ py-fmt:
 # Run the full test suite in release mode
 test:
     cargo test --release
+
+# Run release coverage and fail below the repository threshold
+coverage:
+    cargo llvm-cov --release --fail-under-lines 95
 
 # Run benchmarks
 bench:

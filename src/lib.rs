@@ -12,6 +12,7 @@
 //! - [`error`] -- error types and the crate-wide [`Result`] alias.
 //! - [`generation_log`] -- persistent JSON generation log.
 //! - [`post_effects`] -- composable image post-processing effects.
+//! - [`pipeline`] -- top-level generation request and orchestration boundary.
 //! - [`render`] -- rendering pipeline (histogram, tonemapping, effects, video).
 //! - [`sim`] -- N-body gravitational simulation with RNG.
 //! - [`spectral_constants`] -- wavelength/bin conversion constants.
@@ -36,6 +37,8 @@ pub mod error;
 /// Persistent JSON generation log for tracking produced seeds.
 pub mod generation_log;
 pub(crate) mod oklab;
+/// Top-level generation request and orchestration boundary.
+pub mod pipeline;
 /// Composable image post-processing effect pipeline.
 pub mod post_effects;
 /// Rendering pipeline: histogram passes, tonemapping, effects, and video output.

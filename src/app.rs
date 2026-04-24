@@ -13,9 +13,9 @@ use crate::generation_log::{
 };
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
-    VideoEncodingOptions, constants, create_video_from_frames_singlepass,
-    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    save_image_as_png_16bit,
+    VideoEncodingOptions, constants, generate_body_color_sequences,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
+    video::{VideoEncoder, create_video_from_frames_singlepass_with_encoder},
 };
 use crate::sim::{self, Body, BordaWeights, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
@@ -313,6 +313,28 @@ pub fn render_video(
     fast_encode: bool,
     enable_temporal_smoothing: bool,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
+    render_video_with_encoder(
+        scene,
+        levels,
+        settings,
+        output_vid,
+        output_png,
+        fast_encode,
+        enable_temporal_smoothing,
+        &render::video::FfmpegVideoEncoder,
+    )
+}
+
+pub(crate) fn render_video_with_encoder(
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
+    output_vid: &str,
+    output_png: &str,
+    fast_encode: bool,
+    enable_temporal_smoothing: bool,
+    video_encoder: &dyn VideoEncoder,
+) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
     } else {
@@ -332,30 +354,33 @@ pub fn render_video(
 
     let mut accum_spd = Vec::new();
 
-    create_video_from_frames_singlepass(
+    let mut write_frames = |out: &mut dyn std::io::Write| {
+        pass_2_write_frames_spectral(
+            render::Pass2Params {
+                scene,
+                frame_interval,
+                levels,
+                settings,
+                last_frame_out: &mut last_frame_png,
+                enable_temporal_smoothing,
+                accum_spd: &mut accum_spd,
+            },
+            |buf_8bit| {
+                out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
+                Ok(())
+            },
+        )?;
+        Ok(())
+    };
+
+    create_video_from_frames_singlepass_with_encoder(
         settings.resolved_config.width,
         settings.resolved_config.height,
         frame_rate,
-        |out| {
-            pass_2_write_frames_spectral(
-                render::Pass2Params {
-                    scene,
-                    frame_interval,
-                    levels,
-                    settings,
-                    last_frame_out: &mut last_frame_png,
-                    enable_temporal_smoothing,
-                    accum_spd: &mut accum_spd,
-                },
-                |buf_8bit| {
-                    out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
-                    Ok(())
-                },
-            )?;
-            Ok(())
-        },
+        &mut write_frames,
         output_vid,
         &video_options,
+        video_encoder,
     )?;
 
     // Save final frame
@@ -396,21 +421,37 @@ pub fn generate_spectral_sweep_video(
     output_path: &str,
     fast_encode: bool,
 ) -> Result<()> {
-    Ok(render::spectral_output::generate_spectral_sweep_video(
+    generate_spectral_sweep_video_with_encoder(
         accum_spd,
         width,
         height,
         output_path,
         fast_encode,
+        &render::video::FfmpegVideoEncoder,
+    )
+}
+
+pub(crate) fn generate_spectral_sweep_video_with_encoder(
+    accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
+    width: u32,
+    height: u32,
+    output_path: &str,
+    fast_encode: bool,
+    video_encoder: &dyn VideoEncoder,
+) -> Result<()> {
+    Ok(render::spectral_output::generate_spectral_sweep_video_with_encoder(
+        accum_spd,
+        width,
+        height,
+        output_path,
+        fast_encode,
+        video_encoder,
     )?)
 }
 
 /// Log generation parameters for reproducibility.
-///
-/// # Errors
-///
-/// Returns an error if the generation log cannot be written.
-pub fn log_generation(
+#[must_use]
+pub fn build_generation_record(
     config: &GenerationLogConfig,
     file_name: &str,
     seed: &str,
@@ -418,9 +459,7 @@ pub fn log_generation(
     num_sims: usize,
     best_info: &TrajectoryResult,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
-) -> Result<()> {
-    let logger = GenerationLogger::new();
-
+) -> GenerationRecord {
     let mut record = GenerationRecord::new(file_name.to_string(), format!("0x{seed}"));
 
     record.render_config = LoggedRenderConfig {
@@ -488,9 +527,35 @@ pub fn log_generation(
         permutation_entropy: best_info.permutation_entropy,
     };
 
-    // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
 
+    record
+}
+
+/// Log generation parameters for reproducibility.
+///
+/// # Errors
+///
+/// Returns an error if the generation log cannot be written.
+pub fn log_generation(
+    config: &GenerationLogConfig,
+    file_name: &str,
+    seed: &str,
+    drift_config: Option<&ResolvedDriftConfig>,
+    num_sims: usize,
+    best_info: &TrajectoryResult,
+    randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
+) -> Result<()> {
+    let logger = GenerationLogger::new();
+    let record = build_generation_record(
+        config,
+        file_name,
+        seed,
+        drift_config,
+        num_sims,
+        best_info,
+        randomization_log,
+    );
     logger.log_generation(&record)
 }
 
@@ -575,6 +640,130 @@ mod tests {
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas[0], alphas[1]);
         assert_eq!(alphas[1], alphas[2]);
+    }
+
+    fn sample_generation_log_config() -> GenerationLogConfig {
+        GenerationLogConfig {
+            num_steps_sim: 1234,
+            width: 320,
+            height: 180,
+            clip_black: 0.02,
+            clip_white: 0.98,
+            alpha_denom: 42_000,
+            alpha_compress: 5.5,
+            escape_threshold: -0.25,
+            drift_mode: "elliptical".to_string(),
+            bloom_mode: "dog".to_string(),
+            dog_strength: 0.31,
+            dog_sigma: Some(1.25),
+            dog_ratio: 2.7,
+            hdr_mode: "auto".to_string(),
+            hdr_scale: 0.12,
+            perceptual_blur: "on".to_string(),
+            perceptual_blur_radius: Some(3),
+            perceptual_blur_strength: 0.44,
+            perceptual_gamut_mode: "preserve-hue".to_string(),
+            min_mass: 100.0,
+            max_mass: 300.0,
+            location: 300.0,
+            velocity: 1.0,
+            chaos_weight: 1.0,
+            equil_weight: 2.0,
+            curvature_weight: 3.0,
+            permutation_weight: 4.0,
+            weights_randomized: true,
+        }
+    }
+
+    fn sample_trajectory_result() -> TrajectoryResult {
+        TrajectoryResult {
+            chaos: 0.11,
+            equilateralness: 0.22,
+            curvature_entropy: 0.33,
+            permutation_entropy: 0.44,
+            chaos_pts: 9,
+            equil_pts: 8,
+            curvature_pts: 7,
+            permutation_pts: 6,
+            total_score: 30,
+            total_score_weighted: 12.5,
+            selected_index: 5,
+            discarded_count: 2,
+        }
+    }
+
+    #[test]
+    fn build_generation_record_maps_drift_and_simulation_fields() {
+        let config = sample_generation_log_config();
+        let drift = ResolvedDriftConfig::from_values(1.5, 0.25, 0.45);
+        let record = build_generation_record(
+            &config,
+            "gallery",
+            "cafe",
+            Some(&drift),
+            99,
+            &sample_trajectory_result(),
+            None,
+        );
+
+        assert_eq!(record.file_name, "gallery");
+        assert_eq!(record.seed, "0xcafe");
+        assert_eq!(record.render_config.width, 320);
+        assert_eq!(record.render_config.dog_sigma, Some(1.25));
+        assert!(record.drift_config.enabled);
+        assert_eq!(record.drift_config.mode, "elliptical");
+        assert_eq!(record.drift_config.scale, 1.5);
+        assert_eq!(record.simulation_config.num_sims, 99);
+        assert_eq!(record.simulation_config.num_steps_sim, 1234);
+        assert_eq!(record.simulation_config.chaos_weight, 1.0);
+        assert!(record.simulation_config.weights_randomized);
+        assert_eq!(record.orbit_info.selected_index, 5);
+        assert_eq!(record.orbit_info.weighted_score, 12.5);
+        assert!(record.randomization_log.is_none());
+    }
+
+    #[test]
+    fn build_generation_record_uses_disabled_drift_defaults_without_drift() {
+        let config = sample_generation_log_config();
+        let record = build_generation_record(
+            &config,
+            "still",
+            "deadbeef",
+            None,
+            7,
+            &sample_trajectory_result(),
+            None,
+        );
+
+        assert!(!record.drift_config.enabled);
+        assert_eq!(record.drift_config.mode, "none");
+        assert_eq!(record.drift_config.scale, 0.0);
+        assert!(!record.drift_config.randomized);
+    }
+
+    #[test]
+    fn build_generation_record_clones_randomization_log() {
+        let mut randomization_log = render::effect_randomizer::RandomizationLog::new();
+        let mut record = render::effect_randomizer::RandomizationRecord::new("glow", true, true);
+        record.add_float("strength", 0.5, true, (0.1, 0.9));
+        randomization_log.add_record(record);
+
+        let generation_record = build_generation_record(
+            &sample_generation_log_config(),
+            "randomized",
+            "abcd",
+            None,
+            3,
+            &sample_trajectory_result(),
+            Some(&randomization_log),
+        );
+
+        let logged = generation_record
+            .randomization_log
+            .expect("record should include cloned randomization log");
+        assert_eq!(logged.effects.len(), 1);
+        assert_eq!(logged.effects[0].effect_name, "glow");
+        assert_eq!(logged.effects[0].parameters[0].name, "strength");
     }
 
     /// Run the full seed-to-pixels pipeline at minimal scale and return the

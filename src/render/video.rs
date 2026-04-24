@@ -229,6 +229,42 @@ fn build_ffmpeg_command(
     cmd
 }
 
+/// Crate-private video encoder seam used by orchestration tests.
+pub(crate) trait VideoEncoder {
+    /// Encode raw frames produced by `frames_iter`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if validation, frame streaming, or the underlying
+    /// encoder fails.
+    fn encode(
+        &self,
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+        frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+        output_file: &str,
+        options: &VideoEncodingOptions,
+    ) -> Result<()>;
+}
+
+/// Production `FFmpeg`-backed encoder.
+pub(crate) struct FfmpegVideoEncoder;
+
+impl VideoEncoder for FfmpegVideoEncoder {
+    fn encode(
+        &self,
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+        frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+        output_file: &str,
+        options: &VideoEncodingOptions,
+    ) -> Result<()> {
+        encode_with_ffmpeg(width, height, frame_rate, frames_iter, output_file, options)
+    }
+}
+
 /// Create video in a single pass using `FFmpeg` with configurable options
 ///
 /// This function pipes raw RGB frames directly to `FFmpeg`'s stdin, avoiding the need
@@ -270,6 +306,37 @@ pub fn create_video_from_frames_singlepass(
     height: u32,
     frame_rate: u32,
     mut frames_iter: impl FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+    output_file: &str,
+    options: &VideoEncodingOptions,
+) -> Result<()> {
+    create_video_from_frames_singlepass_with_encoder(
+        width,
+        height,
+        frame_rate,
+        &mut frames_iter,
+        output_file,
+        options,
+        &FfmpegVideoEncoder,
+    )
+}
+
+pub(crate) fn create_video_from_frames_singlepass_with_encoder(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+    output_file: &str,
+    options: &VideoEncodingOptions,
+    encoder: &dyn VideoEncoder,
+) -> Result<()> {
+    encoder.encode(width, height, frame_rate, frames_iter, output_file, options)
+}
+
+fn encode_with_ffmpeg(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
     output_file: &str,
     options: &VideoEncodingOptions,
 ) -> Result<()> {
