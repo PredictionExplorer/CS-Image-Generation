@@ -248,6 +248,36 @@ impl GenerationOutputs {
             spectral_sweep_mp4: app::path_to_string(&seed_path.join("spectral_sweep.mp4")),
         }
     }
+
+    /// Per-seed output directory as a typed path.
+    #[must_use]
+    pub fn seed_dir_path(&self) -> &Path {
+        Path::new(&self.seed_dir)
+    }
+
+    /// Final 16-bit PNG output path.
+    #[must_use]
+    pub fn image_png_path(&self) -> &Path {
+        Path::new(&self.image_png)
+    }
+
+    /// Main video output path.
+    #[must_use]
+    pub fn video_mp4_path(&self) -> &Path {
+        Path::new(&self.video_mp4)
+    }
+
+    /// Directory containing per-bin spectral PNGs.
+    #[must_use]
+    pub fn spectral_dir_path(&self) -> &Path {
+        Path::new(&self.spectral_dir)
+    }
+
+    /// Spectral sweep video output path.
+    #[must_use]
+    pub fn spectral_sweep_mp4_path(&self) -> &Path {
+        Path::new(&self.spectral_sweep_mp4)
+    }
 }
 
 /// Human-scale summary of a completed generation.
@@ -525,8 +555,8 @@ fn render_outputs(
             render_config,
             enhancements.aspect_correction,
         ),
-        &outputs.video_mp4,
-        &outputs.image_png,
+        outputs.video_mp4_path(),
+        outputs.image_png_path(),
         request.fast_encode,
         true,
         video_encoder,
@@ -536,13 +566,13 @@ fn render_outputs(
         &accum_spd,
         request.width,
         request.height,
-        &outputs.spectral_dir,
+        outputs.spectral_dir_path(),
     )?;
     app::generate_spectral_sweep_video_with_encoder(
         &accum_spd,
         request.width,
         request.height,
-        &outputs.spectral_sweep_mp4,
+        outputs.spectral_sweep_mp4_path(),
         request.fast_encode,
         video_encoder,
     )?;
@@ -805,21 +835,13 @@ mod tests {
         let outputs = GenerationOutputs::for_seed_dir(&seed_dir);
 
         assert_eq!(outputs.seed_dir, app::path_to_string(&seed_dir));
+        assert_eq!(outputs.seed_dir_path(), seed_dir.as_path());
+        assert_eq!(outputs.image_png_path(), seed_dir.join("image.png").as_path());
+        assert_eq!(outputs.video_mp4_path(), seed_dir.join("video.mp4").as_path());
+        assert_eq!(outputs.spectral_dir_path(), seed_dir.join(app::SPECTRAL_DIR_NAME).as_path());
         assert_eq!(
-            outputs.image_png,
-            app::path_to_string(&Path::new(&outputs.seed_dir).join("image.png"))
-        );
-        assert_eq!(
-            outputs.video_mp4,
-            app::path_to_string(&Path::new(&outputs.seed_dir).join("video.mp4"))
-        );
-        assert_eq!(
-            outputs.spectral_dir,
-            app::path_to_string(&Path::new(&outputs.seed_dir).join(app::SPECTRAL_DIR_NAME))
-        );
-        assert_eq!(
-            outputs.spectral_sweep_mp4,
-            app::path_to_string(&Path::new(&outputs.seed_dir).join("spectral_sweep.mp4"))
+            outputs.spectral_sweep_mp4_path(),
+            seed_dir.join("spectral_sweep.mp4").as_path()
         );
     }
 
