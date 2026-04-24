@@ -45,6 +45,14 @@ fn zero_resolution_is_rejected() {
 }
 
 #[test]
+fn invalid_log_level_is_rejected() {
+    let output = run_binary(&["--log-level", "three_body_problem=not-a-level"]);
+    assert!(!output.status.success(), "invalid log level should cause non-zero exit");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("log_level"), "stderr should mention log_level: {stderr}");
+}
+
+#[test]
 fn unknown_flags_are_rejected() {
     let output = run_binary(&["--nonexistent-flag"]);
     assert!(!output.status.success(), "unknown flags should cause non-zero exit");

@@ -1,10 +1,13 @@
 //! Command-line parsing and conversion into pipeline requests.
 
 use clap::{Parser, ValueEnum};
-use three_body_problem::pipeline::{
-    BordaWeightOptions, DEFAULT_LOG_LEVEL, DEFAULT_NUM_SIMS, DEFAULT_NUM_STEPS,
-    DEFAULT_OUTPUT_NAME, DEFAULT_RESOLUTION, GenerationDriftMode, GenerationRequest, MAX_NUM_SIMS,
-    MAX_NUM_STEPS,
+use three_body_problem::{
+    ConfigError, Result,
+    pipeline::{
+        BordaWeightOptions, DEFAULT_LOG_LEVEL, DEFAULT_NUM_SIMS, DEFAULT_NUM_STEPS,
+        DEFAULT_OUTPUT_NAME, DEFAULT_RESOLUTION, GenerationDriftMode, GenerationRequest,
+        MAX_NUM_SIMS, MAX_NUM_STEPS,
+    },
 };
 use tracing_subscriber::EnvFilter;
 
@@ -149,15 +152,20 @@ fn parse_borda_weight(value: &str) -> std::result::Result<f64, String> {
     Ok(n)
 }
 
-pub(crate) fn setup_logging(level: &str) {
-    let env_filter =
-        EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_LEVEL));
+pub(crate) fn setup_logging(level: &str) -> Result<()> {
+    let env_filter = EnvFilter::try_new(level).map_err(|e| ConfigError::InvalidParameter {
+        parameter: "log_level".to_string(),
+        reason: e.to_string(),
+    })?;
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_target(false)
         .with_thread_ids(false)
-        .init();
+        .try_init()
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -236,6 +244,14 @@ mod tests {
             let result = Args::try_parse_from(["three_body_problem", flag, value]);
             assert!(result.is_err(), "{flag}={value} should be rejected");
         }
+    }
+
+    #[test]
+    fn test_reject_invalid_log_filter() {
+        let err = setup_logging("three_body_problem=not-a-level")
+            .expect_err("invalid log filter should be rejected");
+
+        assert!(err.to_string().contains("log_level"));
     }
 
     #[test]
