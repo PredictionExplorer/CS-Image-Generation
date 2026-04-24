@@ -1,8 +1,8 @@
 //! Per-bin spectral gallery PNG generation.
 
 use super::bin_buffers::{BinBuffers, checked_pixel_count};
-use crate::render::constants;
 use crate::render::error::{RenderError, Result};
+use crate::render::{constants, save_image_as_png_16bit};
 use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin};
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
@@ -74,9 +74,5 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &Path) -> Res
             reason: "Failed to create bin image buffer".into(),
         })?;
 
-    let dyn_img = image::DynamicImage::ImageRgb16(img);
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding {
-        reason: format!("Failed to save {}: {e}", path.display()),
-    })?;
-    Ok(())
+    save_image_as_png_16bit(&img, path)
 }

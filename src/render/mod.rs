@@ -4,6 +4,8 @@
 //! including coordinate transformations, line drawing, post-processing effects, and video output.
 
 use nalgebra::Vector3;
+use std::io::BufWriter;
+use std::mem::size_of;
 use std::path::Path;
 use tracing::info;
 
@@ -267,11 +269,16 @@ impl<'a> SpectralRenderSettings<'a> {
     }
 }
 
-/// Save 16-bit image as PNG
-///
-/// TODO: Add explicit sRGB ICC profile chunk via the `png` crate for strict
-/// color-managed viewers. The `image` crate's encoder omits the sRGB chunk,
-/// but most viewers assume sRGB for untagged PNGs, so this is cosmetic.
+fn rgb16_to_png_bytes(rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>) -> Vec<u8> {
+    let samples = rgb_img.as_raw();
+    let mut data = Vec::with_capacity(samples.len() * size_of::<u16>());
+    for &sample in samples {
+        data.extend_from_slice(&sample.to_be_bytes());
+    }
+    data
+}
+
+/// Save a 16-bit RGB image as a color-managed sRGB PNG.
 ///
 /// # Errors
 ///
@@ -281,11 +288,29 @@ pub fn save_image_as_png_16bit(
     path: impl AsRef<Path>,
 ) -> Result<()> {
     let path = path.as_ref();
-    let dyn_img = DynamicImage::ImageRgb16(rgb_img.clone());
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding {
-        reason: format!("Failed to save {}: {e}", path.display()),
+
+    let file = std::fs::File::create(path).map_err(|e| RenderError::ImageEncoding {
+        reason: format!("Failed to create {}: {e}", path.display()),
     })?;
-    info!("   Saved 16-bit PNG (sRGB assumed) => {}", path.display());
+    let writer = BufWriter::new(file);
+    let mut encoder = png::Encoder::new(writer, rgb_img.width(), rgb_img.height());
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Sixteen);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+
+    let mut png_writer = encoder.write_header().map_err(|e| RenderError::ImageEncoding {
+        reason: format!("Failed to write PNG header for {}: {e}", path.display()),
+    })?;
+    png_writer.write_image_data(&rgb16_to_png_bytes(rgb_img)).map_err(|e| {
+        RenderError::ImageEncoding {
+            reason: format!("Failed to write PNG data for {}: {e}", path.display()),
+        }
+    })?;
+    png_writer.finish().map_err(|e| RenderError::ImageEncoding {
+        reason: format!("Failed to finish PNG {}: {e}", path.display()),
+    })?;
+
+    info!("   Saved 16-bit PNG (sRGB tagged) => {}", path.display());
     Ok(())
 }
 
@@ -301,6 +326,20 @@ mod tests {
 
     fn default_levels() -> ChannelLevels {
         ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+    }
+
+    #[test]
+    fn test_save_image_as_png_16bit_writes_srgb_chunk() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let path = tmp.path().join("tagged.png");
+        let img = ImageBuffer::from_raw(1, 1, vec![u16::MAX, 0, 0])
+            .expect("test image buffer should be valid");
+
+        save_image_as_png_16bit(&img, &path).expect("PNG save should succeed");
+
+        let bytes = std::fs::read(&path).expect("PNG should be readable");
+        assert!(bytes.windows(4).any(|chunk| chunk == b"sRGB"));
+        image::open(&path).expect("tagged PNG should still decode");
     }
 
     #[test]

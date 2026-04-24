@@ -1391,6 +1391,7 @@ dependencies = [
  "hex",
  "image",
  "nalgebra",
+ "png",
  "proptest",
  "rayon",
  "rustfft",
