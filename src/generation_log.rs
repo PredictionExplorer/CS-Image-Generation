@@ -7,7 +7,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read as _, Write as _};
-use std::path::Path;
+use std::path::PathBuf;
 use tracing::{error, info, warn};
 
 const LOG_FILE_PATH: &str = "generation_log.json";
@@ -273,8 +273,8 @@ impl Default for OrbitInfo {
 /// Uses file locking (`File::lock`) to ensure safe concurrent writes
 /// from parallel simulation processes.
 pub struct GenerationLogger {
-    log_file_path: String,
-    lock_file_path: String,
+    log_file_path: PathBuf,
+    lock_file_path: PathBuf,
 }
 
 impl GenerationLogger {
@@ -282,15 +282,15 @@ impl GenerationLogger {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            log_file_path: LOG_FILE_PATH.to_string(),
-            lock_file_path: LOCK_FILE_PATH.to_string(),
+            log_file_path: PathBuf::from(LOG_FILE_PATH),
+            lock_file_path: PathBuf::from(LOCK_FILE_PATH),
         }
     }
 
     /// Test helper: logger using custom log and lock file paths.
     #[cfg(test)]
     #[must_use]
-    pub fn with_paths(log_path: impl Into<String>, lock_path: impl Into<String>) -> Self {
+    pub fn with_paths(log_path: impl Into<PathBuf>, lock_path: impl Into<PathBuf>) -> Self {
         Self { log_file_path: log_path.into(), lock_file_path: lock_path.into() }
     }
 
@@ -303,17 +303,18 @@ impl GenerationLogger {
     /// cannot be acquired, or the log cannot be written.
     pub fn log_generation(&self, record: &GenerationRecord) -> crate::error::Result<()> {
         let lock_file = OpenOptions::new()
+            .read(true)
             .write(true)
             .create(true)
-            .truncate(true)
+            .truncate(false)
             .open(&self.lock_file_path)
             .map_err(|e| {
-                error!("Failed to create lock file {}: {}", self.lock_file_path, e);
+                error!("Failed to create lock file {}: {}", self.lock_file_path.display(), e);
                 e
             })?;
 
         lock_file.lock().map_err(|e| {
-            error!("Failed to acquire lock on {}: {}", self.lock_file_path, e);
+            error!("Failed to acquire lock on {}: {}", self.lock_file_path.display(), e);
             e
         })?;
 
@@ -341,23 +342,21 @@ impl GenerationLogger {
     }
 
     fn load_records(&self) -> Vec<GenerationRecord> {
-        let path = Path::new(&self.log_file_path);
-
-        if !path.exists() {
+        if !self.log_file_path.exists() {
             return Vec::new();
         }
 
-        let mut file = match File::open(path) {
+        let mut file = match File::open(&self.log_file_path) {
             Ok(f) => f,
             Err(e) => {
-                error!("Failed to open generation log: {}", e);
+                error!("Failed to open generation log {}: {}", self.log_file_path.display(), e);
                 return Vec::new();
             }
         };
 
         let mut contents = String::new();
         if let Err(e) = file.read_to_string(&mut contents) {
-            error!("Failed to read generation log: {}", e);
+            error!("Failed to read generation log {}: {}", self.log_file_path.display(), e);
             return Vec::new();
         }
 
@@ -378,11 +377,12 @@ impl GenerationLogger {
 
     /// If the log file is corrupt, save a backup so data isn't silently lost.
     fn backup_corrupt_log(&self, contents: &str) {
-        let backup_path =
-            format!("{}.corrupt.{}", self.log_file_path, chrono::Utc::now().timestamp());
+        let mut backup_path = self.log_file_path.as_os_str().to_os_string();
+        backup_path.push(format!(".corrupt.{}", chrono::Utc::now().timestamp()));
+        let backup_path = PathBuf::from(backup_path);
         if let Ok(mut f) = File::create(&backup_path) {
             let _ = f.write_all(contents.as_bytes());
-            warn!("Corrupt log backed up to {}", backup_path);
+            warn!("Corrupt log backed up to {}", backup_path.display());
         }
     }
 }
@@ -399,14 +399,16 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    fn temp_paths(tag: &str) -> (String, String) {
+    fn temp_paths(tag: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir();
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        let log = dir.join(format!("test_gen_log_{tag}_{ts}.json")).to_string_lossy().to_string();
-        let lock = format!("{log}.lock");
+        let log = dir.join(format!("test_gen_log_{tag}_{ts}.json"));
+        let mut lock = log.as_os_str().to_os_string();
+        lock.push(".lock");
+        let lock = PathBuf::from(lock);
         (log, lock)
     }
 
@@ -416,7 +418,7 @@ mod tests {
         r
     }
 
-    fn cleanup(paths: &(String, String)) {
+    fn cleanup(paths: &(PathBuf, PathBuf)) {
         let _ = std::fs::remove_file(&paths.0);
         let _ = std::fs::remove_file(&paths.1);
     }
@@ -495,6 +497,20 @@ mod tests {
         logger.log_generation(&make_record("after_empty")).expect("log after empty");
         let records = logger.load_records();
         assert_eq!(records.len(), 1);
+
+        cleanup(&paths);
+    }
+
+    #[test]
+    fn test_lock_file_is_not_truncated() {
+        let paths = temp_paths("lock_contents");
+        std::fs::write(&paths.1, "sentinel").expect("failed to seed lock file");
+        let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
+
+        logger.log_generation(&make_record("preserve_lock")).expect("log generation");
+
+        let lock_contents = std::fs::read_to_string(&paths.1).expect("lock file should exist");
+        assert_eq!(lock_contents, "sentinel");
 
         cleanup(&paths);
     }
