@@ -166,12 +166,17 @@ fn pass_1_build_histogram_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
-    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
+    let pixel_count = ctx.try_pixel_count()?;
+    let histogram_capacity =
+        pixel_count.checked_mul(10).ok_or_else(|| RenderError::InvalidScene {
+            reason: format!("histogram capacity overflows usize for {width}x{height}"),
+        })?;
+    let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
+    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
     let finish_pipeline = FinishEffectPipeline::new(&effect_config);
-    let mut histogram = HistogramData::with_capacity(ctx.pixel_count() * 10);
+    let mut histogram = HistogramData::with_capacity(histogram_capacity);
 
     let total_steps = scene.step_count();
     let checkpoints = checkpoint_steps(total_steps, frame_interval);
@@ -219,9 +224,9 @@ fn pass_1_build_histogram_spectral_with_backend(
             &frame_params,
         )?;
         accum_rgba.clear();
-        accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
+        accum_rgba.resize(pixel_count, (0.0, 0.0, 0.0, 0.0));
 
-        histogram.reserve(ctx.pixel_count());
+        histogram.reserve(pixel_count);
         for &(r, g, b, a) in &trajectory_proxy {
             histogram.push(r * a, g * a, b * a);
         }
@@ -318,11 +323,12 @@ fn pass_2_write_frames_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
-    accum_spd.resize(ctx.pixel_count(), [0.0f64; NUM_BINS]);
+    let pixel_count = ctx.try_pixel_count()?;
+    accum_spd.resize(pixel_count, [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
         *s = [0.0; NUM_BINS];
     }
-    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
+    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
@@ -390,7 +396,7 @@ fn pass_2_write_frames_spectral_with_backend(
         // Reclaim the trajectory buffer's allocation back into accum_rgba.
         // It will be fully overwritten by SPD conversion next iteration,
         // so we just need the capacity -- no need to clear or resize.
-        trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
+        trajectory_pixels.resize(pixel_count, (0.0, 0.0, 0.0, 0.0));
         accum_rgba = trajectory_pixels;
         let smoothed_display = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(display_buffer),
@@ -478,8 +484,9 @@ fn render_final_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
-    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
+    let pixel_count = ctx.try_pixel_count()?;
+    let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
+    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
@@ -580,8 +587,9 @@ fn render_single_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
-    let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
-    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
+    let pixel_count = ctx.try_pixel_count()?;
+    let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
+    let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
 
     let effect_config =
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);

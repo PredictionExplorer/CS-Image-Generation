@@ -63,7 +63,7 @@ impl RenderContext {
         }
 
         let context = Self { width, height, width_usize, height_usize, bounds };
-        debug_assert_eq!(context.pixel_count(), pixel_count);
+        debug_assert_eq!(context.width_usize * context.height_usize, pixel_count);
         Ok(context)
     }
 
@@ -94,7 +94,25 @@ impl RenderContext {
         self.bounds.world_to_pixel(x, y, self.width, self.height)
     }
 
+    /// Try to get the total pixel count.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the public `width_usize` or `height_usize` fields
+    /// have been mutated so their product no longer fits in `usize`.
+    pub fn try_pixel_count(&self) -> Result<usize> {
+        self.width_usize.checked_mul(self.height_usize).ok_or_else(|| RenderError::InvalidScene {
+            reason: format!(
+                "render context dimensions overflow usize: {}x{}",
+                self.width_usize, self.height_usize
+            ),
+        })
+    }
+
     /// Get total pixel count.
+    ///
+    /// Prefer [`Self::try_pixel_count`] when the context may have crossed a
+    /// public API boundary.
     ///
     /// # Panics
     ///
@@ -103,9 +121,7 @@ impl RenderContext {
     #[must_use]
     #[inline]
     pub fn pixel_count(&self) -> usize {
-        self.width_usize
-            .checked_mul(self.height_usize)
-            .expect("render context dimensions should stay valid")
+        self.try_pixel_count().expect("render context dimensions should stay valid")
     }
 
     /// Get the bounding box used for coordinate transformations
@@ -356,5 +372,19 @@ mod tests {
         let positions = make_positions(&[(0.0, 0.0), (10.0, 10.0)]);
         let ctx = RenderContext::new(1920, 1080, &positions, false);
         assert_eq!(ctx.pixel_count(), 1920 * 1080);
+        assert_eq!(ctx.try_pixel_count().expect("pixel count should fit"), 1920 * 1080);
+    }
+
+    #[test]
+    fn test_try_pixel_count_reports_mutated_overflow() {
+        let positions = make_positions(&[(0.0, 0.0), (10.0, 10.0)]);
+        let mut ctx = RenderContext::new(1920, 1080, &positions, false);
+        ctx.width_usize = usize::MAX;
+        ctx.height_usize = 2;
+
+        let err = ctx.try_pixel_count().expect_err("overflow should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("render context dimensions overflow"));
     }
 }
