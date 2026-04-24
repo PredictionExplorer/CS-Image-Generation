@@ -7,7 +7,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read as _, Write as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{error, info, warn};
 
 const LOG_FILE_PATH: &str = "generation_log.json";
@@ -15,6 +15,20 @@ const LOCK_FILE_PATH: &str = "generation_log.json.lock";
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
+        File::open(parent)?.sync_all()?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Complete record of a generation run with all parameters
@@ -334,11 +348,35 @@ impl GenerationLogger {
         let mut records = self.load_records();
         records.push(record.clone());
 
-        let file =
-            OpenOptions::new().write(true).create(true).truncate(true).open(&self.log_file_path)?;
+        self.write_records_atomically(&records)
+    }
 
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &records).map_err(std::io::Error::other)
+    fn write_records_atomically(&self, records: &[GenerationRecord]) -> std::io::Result<()> {
+        let parent = self
+            .log_file_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let log_file_name = self
+            .log_file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("generation_log");
+        let temp_prefix = format!(".{log_file_name}.");
+        let mut temp_file =
+            tempfile::Builder::new().prefix(&temp_prefix).suffix(".tmp").tempfile_in(parent)?;
+
+        {
+            let mut writer = BufWriter::new(temp_file.as_file_mut());
+            serde_json::to_writer_pretty(&mut writer, records).map_err(std::io::Error::other)?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+        }
+
+        temp_file.as_file_mut().sync_all()?;
+        let persisted_file = temp_file.persist(&self.log_file_path).map_err(|err| err.error)?;
+        persisted_file.sync_all()?;
+        sync_parent_directory(&self.log_file_path)
     }
 
     fn load_records(&self) -> Vec<GenerationRecord> {
@@ -444,6 +482,35 @@ mod tests {
         assert_eq!(records[0].file_name, "first");
         assert_eq!(records[1].file_name, "second");
         assert_eq!(records[2].file_name, "third");
+
+        cleanup(&paths);
+    }
+
+    #[test]
+    fn test_atomic_append_removes_temp_file() {
+        let paths = temp_paths("atomic");
+        let logger = GenerationLogger::with_paths(paths.0.clone(), paths.1.clone());
+
+        logger.log_generation(&make_record("atomic")).expect("log generation");
+
+        let records = logger.load_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].file_name, "atomic");
+
+        let parent = paths.0.parent().expect("log path should have parent");
+        let log_file_name =
+            paths.0.file_name().expect("log path should have file name").to_string_lossy();
+        let temp_files: Vec<_> = std::fs::read_dir(parent)
+            .expect("temp directory should be readable")
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.contains(log_file_name.as_ref()) && name.ends_with(".tmp")
+            })
+            .collect();
+
+        assert!(temp_files.is_empty(), "atomic log write should not leave temp files");
 
         cleanup(&paths);
     }
