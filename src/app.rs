@@ -124,12 +124,7 @@ pub struct GenerationLogConfig {
 /// Returns an error when the output name is unsafe or the output directories
 /// cannot be created.
 pub fn setup_seed_directory(seed: &str) -> Result<String> {
-    if seed.contains("..") || seed.contains('/') || seed.contains('\\') {
-        return Err(ConfigError::InvalidResolution {
-            reason: format!("Output name '{seed}' must not contain path separators or '..'"),
-        }
-        .into());
-    }
+    validate_output_name(seed)?;
 
     let seed_dir = format!("output/{seed}");
     let spectral_dir = format!("{seed_dir}/spectral");
@@ -149,13 +144,51 @@ pub fn setup_seed_directory(seed: &str) -> Result<String> {
     Ok(seed_dir)
 }
 
+/// Validate an output directory name without creating it.
+///
+/// # Errors
+///
+/// Returns an error when the name is empty, all whitespace, contains path
+/// separators, contains `..`, or includes control characters.
+pub fn validate_output_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(ConfigError::InvalidOutputName {
+            name: name.to_string(),
+            reason: "must not be empty".to_string(),
+        }
+        .into());
+    }
+
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err(ConfigError::InvalidOutputName {
+            name: name.to_string(),
+            reason: "must not contain path separators or '..'".to_string(),
+        }
+        .into());
+    }
+
+    if name.chars().any(char::is_control) {
+        return Err(ConfigError::InvalidOutputName {
+            name: name.to_string(),
+            reason: "must not contain control characters".to_string(),
+        }
+        .into());
+    }
+
+    Ok(())
+}
+
 /// Parse and validate hex seed.
 ///
 /// # Errors
 ///
 /// Returns an error when `seed` is not valid even-length hexadecimal.
 pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
-    let hex_seed = seed.strip_prefix("0x").unwrap_or(seed);
+    let hex_seed = seed.strip_prefix("0x").or_else(|| seed.strip_prefix("0X")).unwrap_or(seed);
+
+    if hex_seed.is_empty() {
+        return Err(ConfigError::EmptySeed { seed: seed.to_string() }.into());
+    }
 
     hex::decode(hex_seed)
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
@@ -579,6 +612,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_seed_uppercase_prefix() {
+        let result = parse_seed("0X100033");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_seed_empty_rejected() {
+        let result = parse_seed("0x");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_parse_seed_invalid() {
         let result = parse_seed("0xZZZ");
         assert!(result.is_err());
@@ -923,6 +968,14 @@ mod tests {
         assert!(r1.is_ok());
         assert!(r2.is_ok());
         let _ = fs::remove_dir_all("output/seed_idem");
+    }
+
+    #[test]
+    fn test_validate_output_name_rejects_traversal_and_empty_names() {
+        assert!(validate_output_name("../escape").is_err());
+        assert!(validate_output_name("nested/path").is_err());
+        assert!(validate_output_name("   ").is_err());
+        assert!(validate_output_name("safe-name_01").is_ok());
     }
 
     proptest::proptest! {

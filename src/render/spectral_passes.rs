@@ -161,6 +161,7 @@ fn pass_1_build_histogram_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<HistogramData> {
+    scene.validate()?;
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
@@ -305,6 +306,7 @@ fn pass_2_write_frames_spectral_with_backend(
         enable_temporal_smoothing,
         accum_spd,
     } = params;
+    scene.validate()?;
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
@@ -454,6 +456,7 @@ fn render_final_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
+    scene.validate()?;
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     info!("   Rendering final accumulated frame (preview mode)...");
 
@@ -547,6 +550,7 @@ fn render_single_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
+    scene.validate()?;
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     info!("   Rendering first timeline slice only (legacy test mode)...");
 

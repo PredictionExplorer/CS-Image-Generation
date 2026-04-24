@@ -15,7 +15,7 @@ pub enum RenderError {
     },
 
     /// Video encoder encountered an I/O failure.
-    #[error("Video encoding failed")]
+    #[error("Video encoding failed: {0}")]
     VideoEncoding(#[from] std::io::Error),
 
     /// Render configuration is invalid or inconsistent.
@@ -34,6 +34,13 @@ pub enum RenderError {
         width: u32,
         /// Requested output height.
         height: u32,
+    },
+
+    /// Render scene buffers are empty or inconsistent.
+    #[error("Invalid render scene: {reason}")]
+    InvalidScene {
+        /// Why the scene is invalid.
+        reason: String,
     },
 
     /// Image file encoding (e.g. PNG write) failed.
@@ -63,7 +70,7 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
         let err: RenderError = io_err.into();
         assert!(matches!(err, RenderError::VideoEncoding(_)));
-        assert_eq!(err.to_string(), "Video encoding failed");
+        assert_eq!(err.to_string(), "Video encoding failed: pipe broke");
     }
 
     #[test]
@@ -79,6 +86,12 @@ mod tests {
     fn test_invalid_dimensions_display() {
         let err = RenderError::InvalidDimensions { width: 0, height: 100 };
         assert_eq!(err.to_string(), "Invalid dimensions: width=0, height=100");
+    }
+
+    #[test]
+    fn test_invalid_scene_display() {
+        let err = RenderError::InvalidScene { reason: "missing body".into() };
+        assert_eq!(err.to_string(), "Invalid render scene: missing body");
     }
 
     #[test]

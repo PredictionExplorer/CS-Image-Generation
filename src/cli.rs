@@ -81,22 +81,22 @@ pub(crate) struct Args {
 
     /// Borda weight for chaos (FFT regularity) rank points.
     /// Omit to randomize from a curated range.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_borda_weight)]
     chaos_weight: Option<f64>,
 
     /// Borda weight for equilateralness (triangle balance) rank points.
     /// Omit to randomize from a curated range.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_borda_weight)]
     equil_weight: Option<f64>,
 
     /// Borda weight for curvature-entropy (turning-angle diversity) rank points.
     /// Omit to randomize from a curated range.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_borda_weight)]
     curvature_weight: Option<f64>,
 
     /// Borda weight for permutation-entropy (Bandt-Pompe complexity) rank points.
     /// Omit to randomize from a curated range.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_borda_weight)]
     permutation_weight: Option<f64>,
 }
 
@@ -137,6 +137,14 @@ fn parse_bounded_steps(value: &str) -> std::result::Result<usize, String> {
     let n: usize = value.parse().map_err(|_| "steps must be a positive integer".to_string())?;
     if n == 0 || n > MAX_NUM_STEPS {
         return Err(format!("steps must be between 1 and {MAX_NUM_STEPS}"));
+    }
+    Ok(n)
+}
+
+fn parse_borda_weight(value: &str) -> std::result::Result<f64, String> {
+    let n: f64 = value.parse().map_err(|_| "weight must be a finite number".to_string())?;
+    if !n.is_finite() || n <= 0.0 {
+        return Err("weight must be finite and greater than zero".to_string());
     }
     Ok(n)
 }
@@ -215,6 +223,19 @@ mod tests {
         assert_eq!(args.equil_weight, Some(8.0));
         assert_eq!(args.curvature_weight, Some(3.3));
         assert_eq!(args.permutation_weight, Some(0.4));
+    }
+
+    #[test]
+    fn test_reject_invalid_borda_weights() {
+        for (flag, value) in [
+            ("--chaos-weight", "0"),
+            ("--equil-weight", "-1"),
+            ("--curvature-weight", "NaN"),
+            ("--permutation-weight", "inf"),
+        ] {
+            let result = Args::try_parse_from(["three_body_problem", flag, value]);
+            assert!(result.is_err(), "{flag}={value} should be rejected");
+        }
     }
 
     #[test]

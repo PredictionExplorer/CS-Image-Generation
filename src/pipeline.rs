@@ -96,6 +96,35 @@ pub struct BordaWeightOptions {
     pub permutation: Option<f64>,
 }
 
+impl BordaWeightOptions {
+    /// Validate explicit weights supplied by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any explicit weight is not finite or is less than
+    /// or equal to zero.
+    pub fn validate(self) -> Result<()> {
+        for (name, value) in [
+            ("chaos_weight", self.chaos),
+            ("equil_weight", self.equil),
+            ("curvature_weight", self.curvature),
+            ("permutation_weight", self.permutation),
+        ] {
+            if let Some(weight) = value
+                && (!weight.is_finite() || weight <= 0.0)
+            {
+                return Err(error::ConfigError::InvalidParameter {
+                    parameter: name.to_string(),
+                    reason: "must be finite and greater than zero".to_string(),
+                }
+                .into());
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Resolved Borda weights used for the current generation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedBordaWeights {
@@ -161,6 +190,38 @@ impl Default for GenerationRequest {
     }
 }
 
+impl GenerationRequest {
+    /// Validate all caller-provided request fields before generation starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when seed, output name, simulation counts, dimensions,
+    /// or explicit Borda weights are invalid.
+    pub fn validate(&self) -> Result<()> {
+        app::parse_seed(&self.seed)?;
+        app::validate_output_name(&self.output)?;
+        error::validation::validate_dimensions(self.width, self.height)?;
+
+        if self.sims == 0 || self.sims > MAX_NUM_SIMS {
+            return Err(error::ConfigError::InvalidParameter {
+                parameter: "sims".to_string(),
+                reason: format!("must be between 1 and {MAX_NUM_SIMS}"),
+            }
+            .into());
+        }
+
+        if self.steps == 0 || self.steps > MAX_NUM_STEPS {
+            return Err(error::ConfigError::InvalidParameter {
+                parameter: "steps".to_string(),
+                reason: format!("must be between 1 and {MAX_NUM_STEPS}"),
+            }
+            .into());
+        }
+
+        self.borda_weights.validate()
+    }
+}
+
 /// Paths produced by a generation run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenerationOutputs {
@@ -217,11 +278,11 @@ pub(crate) fn run_generation_with_video_encoder(
     request: &GenerationRequest,
     video_encoder: &dyn VideoEncoder,
 ) -> Result<GenerationSummary> {
+    request.validate()?;
     install_global_thread_pool()?;
 
     let enhancements = Enhancements::default();
     configure_global_enhancements(&enhancements);
-    error::validation::validate_dimensions(request.width, request.height)?;
 
     let seed_bytes = app::parse_seed(&request.seed)?;
     let hex_seed = seed_hex(&request.seed);
@@ -318,7 +379,7 @@ fn configure_global_enhancements(enhancements: &Enhancements) {
 }
 
 fn seed_hex(seed: &str) -> &str {
-    seed.strip_prefix("0x").unwrap_or(seed)
+    seed.strip_prefix("0x").or_else(|| seed.strip_prefix("0X")).unwrap_or(seed)
 }
 
 /// Log-uniform sample of a single Borda weight.
@@ -593,6 +654,45 @@ mod tests {
         assert_in_range("equil", w.equil_weight);
         assert_in_range("curvature", w.curvature_weight);
         assert_in_range("permutation", w.permutation_weight);
+    }
+
+    #[test]
+    fn borda_weight_options_rejects_non_finite_or_non_positive_values() {
+        for options in [
+            BordaWeightOptions { chaos: Some(0.0), ..Default::default() },
+            BordaWeightOptions { equil: Some(-1.0), ..Default::default() },
+            BordaWeightOptions { curvature: Some(f64::NAN), ..Default::default() },
+            BordaWeightOptions { permutation: Some(f64::INFINITY), ..Default::default() },
+        ] {
+            assert!(options.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn generation_request_validate_rejects_invalid_boundary_values() {
+        let invalid_requests = [
+            GenerationRequest { seed: "0x".to_string(), ..Default::default() },
+            GenerationRequest { output: "../escape".to_string(), ..Default::default() },
+            GenerationRequest { sims: 0, ..Default::default() },
+            GenerationRequest { sims: MAX_NUM_SIMS + 1, ..Default::default() },
+            GenerationRequest { steps: 0, ..Default::default() },
+            GenerationRequest { steps: MAX_NUM_STEPS + 1, ..Default::default() },
+            GenerationRequest { width: 0, ..Default::default() },
+            GenerationRequest {
+                borda_weights: BordaWeightOptions { chaos: Some(f64::NAN), ..Default::default() },
+                ..Default::default()
+            },
+        ];
+
+        for request in invalid_requests {
+            assert!(request.validate().is_err(), "request should be rejected: {request:?}");
+        }
+    }
+
+    #[test]
+    fn generation_request_validate_accepts_uppercase_seed_prefix() {
+        let request = GenerationRequest { seed: "0X100033".to_string(), ..Default::default() };
+        assert!(request.validate().is_ok());
     }
 
     #[test]

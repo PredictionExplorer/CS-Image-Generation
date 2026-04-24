@@ -150,6 +150,67 @@ impl<'a> SpectralScene<'a> {
         Self { positions, colors, body_alphas }
     }
 
+    /// Validate the scene's buffer shapes before render passes index into them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the scene does not contain exactly three bodies,
+    /// contains no steps, or has mismatched color/position/alpha lengths.
+    pub fn validate(self) -> Result<()> {
+        if self.positions.len() != 3 {
+            return Err(RenderError::InvalidScene {
+                reason: format!("expected 3 position tracks, got {}", self.positions.len()),
+            });
+        }
+        if self.colors.len() != 3 {
+            return Err(RenderError::InvalidScene {
+                reason: format!("expected 3 color tracks, got {}", self.colors.len()),
+            });
+        }
+        if self.body_alphas.len() != 3 {
+            return Err(RenderError::InvalidScene {
+                reason: format!("expected 3 body alphas, got {}", self.body_alphas.len()),
+            });
+        }
+
+        let step_count = self.positions[0].len();
+        if step_count == 0 {
+            return Err(RenderError::InvalidScene {
+                reason: "position tracks must contain at least one step".to_string(),
+            });
+        }
+
+        for (body_idx, positions) in self.positions.iter().enumerate() {
+            if positions.len() != step_count {
+                return Err(RenderError::InvalidScene {
+                    reason: format!(
+                        "position track {body_idx} has {} steps, expected {step_count}",
+                        positions.len()
+                    ),
+                });
+            }
+        }
+        for (body_idx, colors) in self.colors.iter().enumerate() {
+            if colors.len() != step_count {
+                return Err(RenderError::InvalidScene {
+                    reason: format!(
+                        "color track {body_idx} has {} steps, expected {step_count}",
+                        colors.len()
+                    ),
+                });
+            }
+        }
+        for (body_idx, alpha) in self.body_alphas.iter().enumerate() {
+            if !alpha.is_finite() {
+                return Err(RenderError::InvalidScene {
+                    reason: format!("body alpha {body_idx} must be finite"),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Number of simulation timesteps recorded for each body.
     #[must_use]
     #[inline]
@@ -229,6 +290,27 @@ mod tests {
 
     fn default_levels() -> ChannelLevels {
         ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+    }
+
+    #[test]
+    fn test_spectral_scene_validation_rejects_shape_mismatch() {
+        let positions = vec![vec![Vector3::new(0.0, 0.0, 0.0)]; 2];
+        let colors = vec![vec![(0.5, 0.0, 0.0)]; 3];
+        let body_alphas = vec![1.0, 1.0, 1.0];
+
+        let err = SpectralScene::new(&positions, &colors, &body_alphas)
+            .validate()
+            .expect_err("two position tracks should be invalid");
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+    }
+
+    #[test]
+    fn test_spectral_scene_validation_rejects_empty_steps() {
+        let positions = vec![Vec::new(), Vec::new(), Vec::new()];
+        let colors = vec![Vec::new(), Vec::new(), Vec::new()];
+        let body_alphas = vec![1.0, 1.0, 1.0];
+
+        assert!(SpectralScene::new(&positions, &colors, &body_alphas).validate().is_err());
     }
 
     fn baseline_resolved_config(width: u32, height: u32) -> ResolvedEffectConfig {

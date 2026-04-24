@@ -80,6 +80,13 @@ pub enum ConfigError {
         error: hex::FromHexError,
     },
 
+    /// Empty seed value.
+    #[error("Invalid hex seed '{seed}': seed must contain at least one byte of hex")]
+    EmptySeed {
+        /// The seed string that failed validation.
+        seed: String,
+    },
+
     /// File system error
     #[error("Failed to {operation} '{path}': {error}")]
     FileSystem {
@@ -95,6 +102,24 @@ pub enum ConfigError {
     #[error("Invalid resolution: {reason}")]
     InvalidResolution {
         /// Why the resolution is invalid.
+        reason: String,
+    },
+
+    /// Invalid output directory name.
+    #[error("Invalid output name '{name}': {reason}")]
+    InvalidOutputName {
+        /// Output name that failed validation.
+        name: String,
+        /// Why the output name is invalid.
+        reason: String,
+    },
+
+    /// Invalid generation parameter.
+    #[error("Invalid parameter '{parameter}': {reason}")]
+    InvalidParameter {
+        /// Parameter that failed validation.
+        parameter: String,
+        /// Why the value is invalid.
         reason: String,
     },
 

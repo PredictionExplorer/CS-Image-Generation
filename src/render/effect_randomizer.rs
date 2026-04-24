@@ -62,7 +62,8 @@ impl<'a> EffectRandomizer<'a> {
     fn random_range_int(&mut self, min: usize, max: usize) -> usize {
         let range = max - min + 1;
         let t = self.random_f64();
-        min + (t * range as f64).floor() as usize
+        let offset = (t * range as f64).floor() as usize;
+        min + offset.min(range - 1)
     }
 
     /// Get a random f64 in [0.0, 1.0) from the RNG.
@@ -72,7 +73,7 @@ impl<'a> EffectRandomizer<'a> {
         let b2 = u32::from(self.rng.next_byte());
         let b3 = u32::from(self.rng.next_byte());
         let bits = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-        f64::from(bits) / f64::from(u32::MAX)
+        f64::from(bits) / (f64::from(u32::MAX) + 1.0)
     }
 }
 
@@ -236,6 +237,17 @@ mod tests {
 
         for _ in 0..100 {
             assert!(randomizer.randomize_enable(1.0), "100% should always enable");
+        }
+    }
+
+    #[test]
+    fn test_random_f64_is_strictly_less_than_one() {
+        let mut rng = make_test_rng();
+        let mut randomizer = EffectRandomizer::new(&mut rng);
+
+        for _ in 0..10_000 {
+            let value = randomizer.random_f64();
+            assert!((0.0..1.0).contains(&value), "random value {value} outside [0, 1)");
         }
     }
 

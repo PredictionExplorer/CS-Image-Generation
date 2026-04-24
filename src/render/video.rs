@@ -4,7 +4,7 @@
 //! plus a fast encoding mode using hardware acceleration.
 
 use std::error::Error;
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::process::{Command, Stdio};
 use tracing::info;
 
@@ -360,15 +360,27 @@ fn encode_with_ffmpeg(
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(RenderError::VideoEncoding)?;
+
+    let stderr_handle = child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf);
+            buf
+        })
+    });
 
     // Write frames to FFmpeg's stdin
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(e) = frames_iter(&mut stdin) {
             let _ = stdin.flush();
             let _ = child.kill();
+            let _ = child.wait();
+            if let Some(handle) = stderr_handle {
+                let _ = handle.join();
+            }
             return Err(RenderError::VideoEncoding(std::io::Error::other(e.to_string())));
         }
         // Ensure stdin is closed so ffmpeg sees EOF
@@ -377,13 +389,16 @@ fn encode_with_ffmpeg(
     }
 
     // Wait for FFmpeg to complete
-    let output = child.wait_with_output().map_err(RenderError::VideoEncoding)?;
+    let status = child.wait().map_err(RenderError::VideoEncoding)?;
+    let stderr = stderr_handle
+        .and_then(|handle| handle.join().ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
         return Err(RenderError::VideoEncoding(std::io::Error::other(format!(
-            "FFmpeg failed with status {:?}. stderr: {}",
-            output.status, stderr
+            "FFmpeg failed with status {status:?}. stderr: {}",
+            stderr.trim()
         ))));
     }
 
