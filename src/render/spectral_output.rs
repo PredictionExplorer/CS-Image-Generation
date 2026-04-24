@@ -26,6 +26,10 @@ impl BinBuffers {
     ///
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
     /// bin's wavelength color, and applies display gamma.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `accum_spd.len()` does not equal `width * height`.
     #[must_use]
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
         let pixel_count = width * height;

@@ -194,81 +194,86 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.enable_bloom =
-            self.resolve_enable("bloom", self.enable_bloom, pd::ENABLE_PROB_BLOOM, randomizer, log);
+        resolved.enable_bloom = Self::resolve_enable(
+            "bloom",
+            self.enable_bloom,
+            pd::ENABLE_PROB_BLOOM,
+            randomizer,
+            log,
+        );
         resolved.enable_glow =
-            self.resolve_enable("glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log);
-        resolved.enable_chromatic_bloom = self.resolve_enable(
+            Self::resolve_enable("glow", self.enable_glow, pd::ENABLE_PROB_GLOW, randomizer, log);
+        resolved.enable_chromatic_bloom = Self::resolve_enable(
             "chromatic_bloom",
             self.enable_chromatic_bloom,
             pd::ENABLE_PROB_CHROMATIC_BLOOM,
             randomizer,
             log,
         );
-        resolved.enable_perceptual_blur = self.resolve_enable(
+        resolved.enable_perceptual_blur = Self::resolve_enable(
             "perceptual_blur",
             self.enable_perceptual_blur,
             pd::ENABLE_PROB_PERCEPTUAL_BLUR,
             randomizer,
             log,
         );
-        resolved.enable_micro_contrast = self.resolve_enable(
+        resolved.enable_micro_contrast = Self::resolve_enable(
             "micro_contrast",
             self.enable_micro_contrast,
             pd::ENABLE_PROB_MICRO_CONTRAST,
             randomizer,
             log,
         );
-        resolved.enable_gradient_map = self.resolve_enable(
+        resolved.enable_gradient_map = Self::resolve_enable(
             "gradient_map",
             self.enable_gradient_map,
             pd::ENABLE_PROB_GRADIENT_MAP,
             randomizer,
             log,
         );
-        resolved.enable_color_grade = self.resolve_enable(
+        resolved.enable_color_grade = Self::resolve_enable(
             "color_grade",
             self.enable_color_grade,
             pd::ENABLE_PROB_COLOR_GRADE,
             randomizer,
             log,
         );
-        resolved.enable_champleve = self.resolve_enable(
+        resolved.enable_champleve = Self::resolve_enable(
             "champleve",
             self.enable_champleve,
             pd::ENABLE_PROB_CHAMPLEVE,
             randomizer,
             log,
         );
-        resolved.enable_aether = self.resolve_enable(
+        resolved.enable_aether = Self::resolve_enable(
             "aether",
             self.enable_aether,
             pd::ENABLE_PROB_AETHER,
             randomizer,
             log,
         );
-        resolved.enable_opalescence = self.resolve_enable(
+        resolved.enable_opalescence = Self::resolve_enable(
             "opalescence",
             self.enable_opalescence,
             pd::ENABLE_PROB_OPALESCENCE,
             randomizer,
             log,
         );
-        resolved.enable_edge_luminance = self.resolve_enable(
+        resolved.enable_edge_luminance = Self::resolve_enable(
             "edge_luminance",
             self.enable_edge_luminance,
             pd::ENABLE_PROB_EDGE_LUMINANCE,
             randomizer,
             log,
         );
-        resolved.enable_atmospheric_depth = self.resolve_enable(
+        resolved.enable_atmospheric_depth = Self::resolve_enable(
             "atmospheric_depth",
             self.enable_atmospheric_depth,
             pd::ENABLE_PROB_ATMOSPHERIC_DEPTH,
             randomizer,
             log,
         );
-        resolved.enable_fine_texture = self.resolve_enable(
+        resolved.enable_fine_texture = Self::resolve_enable(
             "fine_texture",
             self.enable_fine_texture,
             pd::ENABLE_PROB_FINE_TEXTURE,
@@ -283,35 +288,35 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.blur_strength = self.resolve_float(
+        resolved.blur_strength = Self::resolve_float(
             "blur_strength",
             self.blur_strength,
             &pd::BLUR_STRENGTH,
             randomizer,
             log,
         );
-        resolved.blur_radius_scale = self.resolve_float(
+        resolved.blur_radius_scale = Self::resolve_float(
             "blur_radius_scale",
             self.blur_radius_scale,
             &pd::BLUR_RADIUS_SCALE,
             randomizer,
             log,
         );
-        resolved.blur_core_brightness = self.resolve_float(
+        resolved.blur_core_brightness = Self::resolve_float(
             "blur_core_brightness",
             self.blur_core_brightness,
             &pd::BLUR_CORE_BRIGHTNESS,
             randomizer,
             log,
         );
-        resolved.dog_strength = self.resolve_float(
+        resolved.dog_strength = Self::resolve_float(
             "dog_strength",
             self.dog_strength,
             &pd::DOG_STRENGTH,
             randomizer,
             log,
         );
-        resolved.dog_sigma_scale = self.resolve_float(
+        resolved.dog_sigma_scale = Self::resolve_float(
             "dog_sigma_scale",
             self.dog_sigma_scale,
             &pd::DOG_SIGMA_SCALE,
@@ -319,36 +324,36 @@ impl RandomizableEffectConfig {
             log,
         );
         resolved.dog_ratio =
-            self.resolve_float("dog_ratio", self.dog_ratio, &pd::DOG_RATIO, randomizer, log);
-        resolved.glow_strength = self.resolve_float(
+            Self::resolve_float("dog_ratio", self.dog_ratio, &pd::DOG_RATIO, randomizer, log);
+        resolved.glow_strength = Self::resolve_float(
             "glow_strength",
             self.glow_strength,
             &pd::GLOW_STRENGTH,
             randomizer,
             log,
         );
-        resolved.glow_threshold = self.resolve_float(
+        resolved.glow_threshold = Self::resolve_float(
             "glow_threshold",
             self.glow_threshold,
             &pd::GLOW_THRESHOLD,
             randomizer,
             log,
         );
-        resolved.glow_radius_scale = self.resolve_float(
+        resolved.glow_radius_scale = Self::resolve_float(
             "glow_radius_scale",
             self.glow_radius_scale,
             &pd::GLOW_RADIUS_SCALE,
             randomizer,
             log,
         );
-        resolved.glow_sharpness = self.resolve_float(
+        resolved.glow_sharpness = Self::resolve_float(
             "glow_sharpness",
             self.glow_sharpness,
             &pd::GLOW_SHARPNESS,
             randomizer,
             log,
         );
-        resolved.glow_saturation_boost = self.resolve_float(
+        resolved.glow_saturation_boost = Self::resolve_float(
             "glow_saturation_boost",
             self.glow_saturation_boost,
             &pd::GLOW_SATURATION_BOOST,
@@ -363,28 +368,28 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.chromatic_bloom_strength = self.resolve_float(
+        resolved.chromatic_bloom_strength = Self::resolve_float(
             "chromatic_bloom_strength",
             self.chromatic_bloom_strength,
             &pd::CHROMATIC_BLOOM_STRENGTH,
             randomizer,
             log,
         );
-        resolved.chromatic_bloom_radius_scale = self.resolve_float(
+        resolved.chromatic_bloom_radius_scale = Self::resolve_float(
             "chromatic_bloom_radius_scale",
             self.chromatic_bloom_radius_scale,
             &pd::CHROMATIC_BLOOM_RADIUS_SCALE,
             randomizer,
             log,
         );
-        resolved.chromatic_bloom_separation_scale = self.resolve_float(
+        resolved.chromatic_bloom_separation_scale = Self::resolve_float(
             "chromatic_bloom_separation_scale",
             self.chromatic_bloom_separation_scale,
             &pd::CHROMATIC_BLOOM_SEPARATION_SCALE,
             randomizer,
             log,
         );
-        resolved.chromatic_bloom_threshold = self.resolve_float(
+        resolved.chromatic_bloom_threshold = Self::resolve_float(
             "chromatic_bloom_threshold",
             self.chromatic_bloom_threshold,
             &pd::CHROMATIC_BLOOM_THRESHOLD,
@@ -399,28 +404,28 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.perceptual_blur_strength = self.resolve_float(
+        resolved.perceptual_blur_strength = Self::resolve_float(
             "perceptual_blur_strength",
             self.perceptual_blur_strength,
             &pd::PERCEPTUAL_BLUR_STRENGTH,
             randomizer,
             log,
         );
-        resolved.color_grade_strength = self.resolve_float(
+        resolved.color_grade_strength = Self::resolve_float(
             "color_grade_strength",
             self.color_grade_strength,
             &pd::COLOR_GRADE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.vignette_strength = self.resolve_float(
+        resolved.vignette_strength = Self::resolve_float(
             "vignette_strength",
             self.vignette_strength,
             &pd::VIGNETTE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.vignette_softness = self.resolve_float(
+        resolved.vignette_softness = Self::resolve_float(
             "vignette_softness",
             self.vignette_softness,
             &pd::VIGNETTE_SOFTNESS,
@@ -428,36 +433,36 @@ impl RandomizableEffectConfig {
             log,
         );
         resolved.vibrance =
-            self.resolve_float("vibrance", self.vibrance, &pd::VIBRANCE, randomizer, log);
-        resolved.clarity_strength = self.resolve_float(
+            Self::resolve_float("vibrance", self.vibrance, &pd::VIBRANCE, randomizer, log);
+        resolved.clarity_strength = Self::resolve_float(
             "clarity_strength",
             self.clarity_strength,
             &pd::CLARITY_STRENGTH,
             randomizer,
             log,
         );
-        resolved.tone_curve_strength = self.resolve_float(
+        resolved.tone_curve_strength = Self::resolve_float(
             "tone_curve_strength",
             self.tone_curve_strength,
             &pd::TONE_CURVE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.gradient_map_strength = self.resolve_float(
+        resolved.gradient_map_strength = Self::resolve_float(
             "gradient_map_strength",
             self.gradient_map_strength,
             &pd::GRADIENT_MAP_STRENGTH,
             randomizer,
             log,
         );
-        resolved.gradient_map_hue_preservation = self.resolve_float(
+        resolved.gradient_map_hue_preservation = Self::resolve_float(
             "gradient_map_hue_preservation",
             self.gradient_map_hue_preservation,
             &pd::GRADIENT_MAP_HUE_PRESERVATION,
             randomizer,
             log,
         );
-        resolved.gradient_map_palette = self.resolve_int(
+        resolved.gradient_map_palette = Self::resolve_int(
             "gradient_map_palette",
             self.gradient_map_palette,
             &pd::GRADIENT_MAP_PALETTE,
@@ -472,84 +477,84 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.opalescence_strength = self.resolve_float(
+        resolved.opalescence_strength = Self::resolve_float(
             "opalescence_strength",
             self.opalescence_strength,
             &pd::OPALESCENCE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.opalescence_scale = self.resolve_float(
+        resolved.opalescence_scale = Self::resolve_float(
             "opalescence_scale",
             self.opalescence_scale,
             &pd::OPALESCENCE_SCALE,
             randomizer,
             log,
         );
-        resolved.opalescence_layers = self.resolve_int(
+        resolved.opalescence_layers = Self::resolve_int(
             "opalescence_layers",
             self.opalescence_layers,
             &pd::OPALESCENCE_LAYERS,
             randomizer,
             log,
         );
-        resolved.champleve_flow_alignment = self.resolve_float(
+        resolved.champleve_flow_alignment = Self::resolve_float(
             "champleve_flow_alignment",
             self.champleve_flow_alignment,
             &pd::CHAMPLEVE_FLOW_ALIGNMENT,
             randomizer,
             log,
         );
-        resolved.champleve_interference_amplitude = self.resolve_float(
+        resolved.champleve_interference_amplitude = Self::resolve_float(
             "champleve_interference_amplitude",
             self.champleve_interference_amplitude,
             &pd::CHAMPLEVE_INTERFERENCE_AMPLITUDE,
             randomizer,
             log,
         );
-        resolved.champleve_rim_intensity = self.resolve_float(
+        resolved.champleve_rim_intensity = Self::resolve_float(
             "champleve_rim_intensity",
             self.champleve_rim_intensity,
             &pd::CHAMPLEVE_RIM_INTENSITY,
             randomizer,
             log,
         );
-        resolved.champleve_rim_warmth = self.resolve_float(
+        resolved.champleve_rim_warmth = Self::resolve_float(
             "champleve_rim_warmth",
             self.champleve_rim_warmth,
             &pd::CHAMPLEVE_RIM_WARMTH,
             randomizer,
             log,
         );
-        resolved.champleve_interior_lift = self.resolve_float(
+        resolved.champleve_interior_lift = Self::resolve_float(
             "champleve_interior_lift",
             self.champleve_interior_lift,
             &pd::CHAMPLEVE_INTERIOR_LIFT,
             randomizer,
             log,
         );
-        resolved.aether_flow_alignment = self.resolve_float(
+        resolved.aether_flow_alignment = Self::resolve_float(
             "aether_flow_alignment",
             self.aether_flow_alignment,
             &pd::AETHER_FLOW_ALIGNMENT,
             randomizer,
             log,
         );
-        resolved.aether_scattering_strength = self.resolve_float(
+        resolved.aether_scattering_strength = Self::resolve_float(
             "aether_scattering_strength",
             self.aether_scattering_strength,
             &pd::AETHER_SCATTERING_STRENGTH,
             randomizer,
             log,
         );
-        resolved.aether_iridescence_amplitude = self.resolve_float(
+        resolved.aether_iridescence_amplitude = Self::resolve_float(
             "aether_iridescence_amplitude",
             self.aether_iridescence_amplitude,
             &pd::AETHER_IRIDESCENCE_AMPLITUDE,
             randomizer,
             log,
         );
-        resolved.aether_caustic_strength = self.resolve_float(
+        resolved.aether_caustic_strength = Self::resolve_float(
             "aether_caustic_strength",
             self.aether_caustic_strength,
             &pd::AETHER_CAUSTIC_STRENGTH,
@@ -564,35 +569,35 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.micro_contrast_strength = self.resolve_float(
+        resolved.micro_contrast_strength = Self::resolve_float(
             "micro_contrast_strength",
             self.micro_contrast_strength,
             &pd::MICRO_CONTRAST_STRENGTH,
             randomizer,
             log,
         );
-        resolved.micro_contrast_radius = self.resolve_int(
+        resolved.micro_contrast_radius = Self::resolve_int(
             "micro_contrast_radius",
             self.micro_contrast_radius,
             &pd::MICRO_CONTRAST_RADIUS,
             randomizer,
             log,
         );
-        resolved.edge_luminance_strength = self.resolve_float(
+        resolved.edge_luminance_strength = Self::resolve_float(
             "edge_luminance_strength",
             self.edge_luminance_strength,
             &pd::EDGE_LUMINANCE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.edge_luminance_threshold = self.resolve_float(
+        resolved.edge_luminance_threshold = Self::resolve_float(
             "edge_luminance_threshold",
             self.edge_luminance_threshold,
             &pd::EDGE_LUMINANCE_THRESHOLD,
             randomizer,
             log,
         );
-        resolved.edge_luminance_brightness_boost = self.resolve_float(
+        resolved.edge_luminance_brightness_boost = Self::resolve_float(
             "edge_luminance_brightness_boost",
             self.edge_luminance_brightness_boost,
             &pd::EDGE_LUMINANCE_BRIGHTNESS_BOOST,
@@ -607,63 +612,63 @@ impl RandomizableEffectConfig {
         randomizer: &mut EffectRandomizer,
         log: &mut RandomizationLog,
     ) {
-        resolved.atmospheric_depth_strength = self.resolve_float(
+        resolved.atmospheric_depth_strength = Self::resolve_float(
             "atmospheric_depth_strength",
             self.atmospheric_depth_strength,
             &pd::ATMOSPHERIC_DEPTH_STRENGTH,
             randomizer,
             log,
         );
-        resolved.atmospheric_desaturation = self.resolve_float(
+        resolved.atmospheric_desaturation = Self::resolve_float(
             "atmospheric_desaturation",
             self.atmospheric_desaturation,
             &pd::ATMOSPHERIC_DESATURATION,
             randomizer,
             log,
         );
-        resolved.atmospheric_darkening = self.resolve_float(
+        resolved.atmospheric_darkening = Self::resolve_float(
             "atmospheric_darkening",
             self.atmospheric_darkening,
             &pd::ATMOSPHERIC_DARKENING,
             randomizer,
             log,
         );
-        resolved.atmospheric_fog_color_r = self.resolve_float(
+        resolved.atmospheric_fog_color_r = Self::resolve_float(
             "atmospheric_fog_color_r",
             self.atmospheric_fog_color_r,
             &pd::ATMOSPHERIC_FOG_COLOR_R,
             randomizer,
             log,
         );
-        resolved.atmospheric_fog_color_g = self.resolve_float(
+        resolved.atmospheric_fog_color_g = Self::resolve_float(
             "atmospheric_fog_color_g",
             self.atmospheric_fog_color_g,
             &pd::ATMOSPHERIC_FOG_COLOR_G,
             randomizer,
             log,
         );
-        resolved.atmospheric_fog_color_b = self.resolve_float(
+        resolved.atmospheric_fog_color_b = Self::resolve_float(
             "atmospheric_fog_color_b",
             self.atmospheric_fog_color_b,
             &pd::ATMOSPHERIC_FOG_COLOR_B,
             randomizer,
             log,
         );
-        resolved.fine_texture_strength = self.resolve_float(
+        resolved.fine_texture_strength = Self::resolve_float(
             "fine_texture_strength",
             self.fine_texture_strength,
             &pd::FINE_TEXTURE_STRENGTH,
             randomizer,
             log,
         );
-        resolved.fine_texture_scale = self.resolve_float(
+        resolved.fine_texture_scale = Self::resolve_float(
             "fine_texture_scale",
             self.fine_texture_scale,
             &pd::FINE_TEXTURE_SCALE,
             randomizer,
             log,
         );
-        resolved.fine_texture_contrast = self.resolve_float(
+        resolved.fine_texture_contrast = Self::resolve_float(
             "fine_texture_contrast",
             self.fine_texture_contrast,
             &pd::FINE_TEXTURE_CONTRAST,
@@ -679,7 +684,7 @@ impl RandomizableEffectConfig {
         log: &mut RandomizationLog,
     ) {
         resolved.hdr_scale =
-            self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
+            Self::resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
     }
 
     fn resolve_clip_params(
@@ -721,7 +726,6 @@ impl RandomizableEffectConfig {
     }
 
     fn resolve_enable(
-        &self,
         name: &str,
         value: Option<bool>,
         probability: f64,
@@ -739,7 +743,6 @@ impl RandomizableEffectConfig {
     }
 
     fn resolve_float(
-        &self,
         name: &str,
         value: Option<f64>,
         descriptor: &pd::FloatParamDescriptor,
@@ -768,7 +771,6 @@ impl RandomizableEffectConfig {
     }
 
     fn resolve_int(
-        &self,
         name: &str,
         value: Option<usize>,
         descriptor: &pd::IntParamDescriptor,
@@ -820,7 +822,7 @@ impl RandomizableEffectConfig {
 }
 
 /// Fully resolved effect configuration with all parameters determined.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResolvedEffectConfig {
     /// Output image width in pixels.
     pub width: u32,
@@ -964,65 +966,50 @@ pub struct ResolvedEffectConfig {
     pub clip_white: f64,
 }
 
-/// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
-///
-/// Philosophy: Maximum exploration with minimum intervention.
-/// - Keep the generative space broad while blocking combinations that predictably fail QA
-/// - Prefer soft caps over hard disables unless a combination is consistently harmful
-/// - Preserve deterministic resolution and logging for every adjustment
-#[allow(clippy::too_many_lines)] // Constraint rules are kept together so ordering is auditable.
-fn apply_conflict_detection(
-    mut config: ResolvedEffectConfig,
-    log: &mut RandomizationLog,
-) -> ResolvedEffectConfig {
-    fn softness_stack_score(config: &ResolvedEffectConfig) -> f64 {
-        let mut score = 0.0;
-        if config.enable_bloom {
-            score += 1.0;
-        }
-        if config.enable_chromatic_bloom {
-            score += 0.95;
-        }
-        if config.enable_perceptual_blur {
-            score += 0.85;
-        }
-        if config.enable_glow {
-            score += 0.55;
-        }
-        if config.enable_atmospheric_depth {
-            score += 0.35;
-        }
-        score
+fn softness_stack_score(config: &ResolvedEffectConfig) -> f64 {
+    let mut score = 0.0;
+    if config.enable_bloom {
+        score += 1.0;
     }
+    if config.enable_chromatic_bloom {
+        score += 0.95;
+    }
+    if config.enable_perceptual_blur {
+        score += 0.85;
+    }
+    if config.enable_glow {
+        score += 0.55;
+    }
+    if config.enable_atmospheric_depth {
+        score += 0.35;
+    }
+    score
+}
 
-    let mut adjustments = Vec::new();
+fn heavy_softness_count(config: &ResolvedEffectConfig) -> usize {
+    usize::from(config.enable_bloom)
+        + usize::from(config.enable_chromatic_bloom)
+        + usize::from(config.enable_perceptual_blur)
+}
 
-    // ============================================================================
-    // ESSENTIAL CONSTRAINT 1: Exponential Cost Guard - Opalescence Layers
-    // ============================================================================
-    // Prevents: Exponential performance degradation
-    // Threshold: Only restricts most extreme combination (6+ layers at high strength)
-    //
-    // Each opalescence layer multiplies rendering cost. 6+ layers at high strength
-    // can cause minutes per frame due to nested interference calculations.
+fn cap_expensive_opalescence(config: &mut ResolvedEffectConfig, adjustments: &mut Vec<String>) {
     if config.enable_opalescence
         && config.opalescence_layers > 5
         && config.opalescence_strength > 0.30
     {
         let original_layers = config.opalescence_layers;
-
         config.opalescence_layers = 5;
-
         adjustments.push(format!(
             "Performance guard: Capped opalescence_layers ({} -> 5) at high strength ({:.2}) to prevent exponential cost",
             original_layers, config.opalescence_strength
         ));
     }
+}
 
-    // ============================================================================
-    // QUALITY GUARD 1: Prevent isolated chromatic haze
-    // ============================================================================
-    // Chromatic bloom without a base bloom pass often reads as soft, smeared RGB fringing.
+fn disable_isolated_chromatic_bloom(
+    config: &mut ResolvedEffectConfig,
+    adjustments: &mut Vec<String>,
+) {
     if config.enable_chromatic_bloom && !config.enable_bloom {
         config.enable_chromatic_bloom = false;
         adjustments.push(
@@ -1030,73 +1017,65 @@ fn apply_conflict_detection(
                 .to_string(),
         );
     }
+}
 
-    // ============================================================================
-    // QUALITY GUARD 2: Preserve color when atmospheric depth has no counterbalance
-    // ============================================================================
-    // Atmospheric perspective is useful, but when both color grade and aether are absent
-    // it can flatten the palette too aggressively.
-    if config.enable_atmospheric_depth && !config.enable_color_grade && !config.enable_aether {
-        let original_strength = config.atmospheric_depth_strength;
-        let original_desaturation = config.atmospheric_desaturation;
-
-        config.atmospheric_depth_strength = config.atmospheric_depth_strength.min(0.12);
-        config.atmospheric_desaturation = config.atmospheric_desaturation.min(0.16);
-
-        if (config.atmospheric_depth_strength - original_strength).abs() > f64::EPSILON
-            || (config.atmospheric_desaturation - original_desaturation).abs() > f64::EPSILON
-        {
-            adjustments.push(format!(
-                "Quality guard: Softened atmospheric depth without color support (strength: {:.3} -> {:.3}, desaturation: {:.3} -> {:.3})",
-                original_strength,
-                config.atmospheric_depth_strength,
-                original_desaturation,
-                config.atmospheric_desaturation
-            ));
-        }
+fn soften_unsupported_atmospheric_depth(
+    config: &mut ResolvedEffectConfig,
+    adjustments: &mut Vec<String>,
+) {
+    if !config.enable_atmospheric_depth || config.enable_color_grade || config.enable_aether {
+        return;
     }
 
-    // ============================================================================
-    // QUALITY GUARD 3: Keep gradient mapping from overpowering the source palette
-    // ============================================================================
-    if config.enable_gradient_map && !config.enable_color_grade {
-        let original_strength = config.gradient_map_strength;
-        let original_hue_preservation = config.gradient_map_hue_preservation;
+    let original_strength = config.atmospheric_depth_strength;
+    let original_desaturation = config.atmospheric_desaturation;
 
-        config.gradient_map_strength = config.gradient_map_strength.min(0.35);
-        config.gradient_map_hue_preservation = config.gradient_map_hue_preservation.max(0.50);
+    config.atmospheric_depth_strength = config.atmospheric_depth_strength.min(0.12);
+    config.atmospheric_desaturation = config.atmospheric_desaturation.min(0.16);
 
-        if (config.gradient_map_strength - original_strength).abs() > f64::EPSILON
-            || (config.gradient_map_hue_preservation - original_hue_preservation).abs()
-                > f64::EPSILON
-        {
-            adjustments.push(format!(
-                "Quality guard: Rebalanced gradient map toward source hues (strength: {:.3} -> {:.3}, hue preservation: {:.3} -> {:.3})",
-                original_strength,
-                config.gradient_map_strength,
-                original_hue_preservation,
-                config.gradient_map_hue_preservation
-            ));
-        }
+    if (config.atmospheric_depth_strength - original_strength).abs() > f64::EPSILON
+        || (config.atmospheric_desaturation - original_desaturation).abs() > f64::EPSILON
+    {
+        adjustments.push(format!(
+            "Quality guard: Softened atmospheric depth without color support (strength: {:.3} -> {:.3}, desaturation: {:.3} -> {:.3})",
+            original_strength,
+            config.atmospheric_depth_strength,
+            original_desaturation,
+            config.atmospheric_desaturation
+        ));
+    }
+}
+
+fn rebalance_gradient_map_without_color_grade(
+    config: &mut ResolvedEffectConfig,
+    adjustments: &mut Vec<String>,
+) {
+    if !config.enable_gradient_map || config.enable_color_grade {
+        return;
     }
 
-    // ============================================================================
-    // QUALITY GUARD 4: Break heavy softness stacks (disable weakest blurs)
-    // ============================================================================
-    // When two or more of {bloom, chromatic_bloom, perceptual_blur} are on AND
-    // the cumulative softness score clears 2.0 (i.e. at least one *additional*
-    // softener is stacked on top of the heavy pair), disable the weakest
-    // contributor(s) in priority order (perceptual_blur -> chromatic_bloom).
-    // `bloom` is never disabled: a total absence of the base bloom tends to
-    // read as flat rather than crisp. The 2.0 threshold preserves pure
-    // bloom+chromatic (score 1.95) as a rare variety case.
-    let heavy_count = |c: &ResolvedEffectConfig| -> usize {
-        usize::from(c.enable_bloom)
-            + usize::from(c.enable_chromatic_bloom)
-            + usize::from(c.enable_perceptual_blur)
-    };
-    while heavy_count(&config) >= 2 && softness_stack_score(&config) >= 2.0 {
-        let score_before = softness_stack_score(&config);
+    let original_strength = config.gradient_map_strength;
+    let original_hue_preservation = config.gradient_map_hue_preservation;
+
+    config.gradient_map_strength = config.gradient_map_strength.min(0.35);
+    config.gradient_map_hue_preservation = config.gradient_map_hue_preservation.max(0.50);
+
+    if (config.gradient_map_strength - original_strength).abs() > f64::EPSILON
+        || (config.gradient_map_hue_preservation - original_hue_preservation).abs() > f64::EPSILON
+    {
+        adjustments.push(format!(
+            "Quality guard: Rebalanced gradient map toward source hues (strength: {:.3} -> {:.3}, hue preservation: {:.3} -> {:.3})",
+            original_strength,
+            config.gradient_map_strength,
+            original_hue_preservation,
+            config.gradient_map_hue_preservation
+        ));
+    }
+}
+
+fn break_heavy_softness_stack(config: &mut ResolvedEffectConfig, adjustments: &mut Vec<String>) {
+    while heavy_softness_count(config) >= 2 && softness_stack_score(config) >= 2.0 {
+        let score_before = softness_stack_score(config);
         if config.enable_perceptual_blur {
             config.enable_perceptual_blur = false;
             adjustments.push(format!(
@@ -1111,100 +1090,100 @@ fn apply_conflict_detection(
             break;
         }
     }
+}
 
-    // ============================================================================
-    // QUALITY GUARD 5: Limit softness stacks and turn on detail rescue
-    // ============================================================================
-    let softness_score = softness_stack_score(&config);
-    if softness_score >= 2.0 {
-        let original_micro_enabled = config.enable_micro_contrast;
-        let original_edge_enabled = config.enable_edge_luminance;
-        let original_dog_strength = config.dog_strength;
-        let original_dog_sigma_scale = config.dog_sigma_scale;
-        let original_glow_strength = config.glow_strength;
-        let original_glow_radius_scale = config.glow_radius_scale;
-        let original_chromatic_strength = config.chromatic_bloom_strength;
-        let original_chromatic_radius_scale = config.chromatic_bloom_radius_scale;
-        let original_chromatic_separation_scale = config.chromatic_bloom_separation_scale;
-        let original_perceptual_strength = config.perceptual_blur_strength;
-        let original_micro_strength = config.micro_contrast_strength;
-        let original_edge_strength = config.edge_luminance_strength;
-        let original_edge_threshold = config.edge_luminance_threshold;
-        let original_edge_brightness_boost = config.edge_luminance_brightness_boost;
-
-        config.enable_micro_contrast = true;
-        config.enable_edge_luminance = true;
-        config.dog_strength = config.dog_strength.min(0.28);
-        config.dog_sigma_scale = config.dog_sigma_scale.min(0.0054);
-        config.glow_strength = config.glow_strength.min(0.28);
-        config.glow_radius_scale = config.glow_radius_scale.min(0.0034);
-        config.chromatic_bloom_strength = config.chromatic_bloom_strength.min(0.36);
-        config.chromatic_bloom_radius_scale = config.chromatic_bloom_radius_scale.min(0.0046);
-        config.chromatic_bloom_separation_scale =
-            config.chromatic_bloom_separation_scale.min(0.0010);
-        config.perceptual_blur_strength = config.perceptual_blur_strength.min(0.44);
-        config.micro_contrast_strength = config.micro_contrast_strength.max(0.24);
-        config.edge_luminance_strength = config.edge_luminance_strength.max(0.18);
-        config.edge_luminance_threshold = config.edge_luminance_threshold.min(0.20);
-        config.edge_luminance_brightness_boost = config.edge_luminance_brightness_boost.max(0.28);
-
-        if config.enable_micro_contrast != original_micro_enabled
-            || config.enable_edge_luminance != original_edge_enabled
-            || (config.dog_strength - original_dog_strength).abs() > f64::EPSILON
-            || (config.dog_sigma_scale - original_dog_sigma_scale).abs() > f64::EPSILON
-            || (config.glow_strength - original_glow_strength).abs() > f64::EPSILON
-            || (config.glow_radius_scale - original_glow_radius_scale).abs() > f64::EPSILON
-            || (config.chromatic_bloom_strength - original_chromatic_strength).abs() > f64::EPSILON
-            || (config.chromatic_bloom_radius_scale - original_chromatic_radius_scale).abs()
-                > f64::EPSILON
-            || (config.chromatic_bloom_separation_scale - original_chromatic_separation_scale).abs()
-                > f64::EPSILON
-            || (config.perceptual_blur_strength - original_perceptual_strength).abs() > f64::EPSILON
-            || (config.micro_contrast_strength - original_micro_strength).abs() > f64::EPSILON
-            || (config.edge_luminance_strength - original_edge_strength).abs() > f64::EPSILON
-            || (config.edge_luminance_threshold - original_edge_threshold).abs() > f64::EPSILON
-            || (config.edge_luminance_brightness_boost - original_edge_brightness_boost).abs()
-                > f64::EPSILON
-        {
-            adjustments.push(format!(
-                "Quality guard: Tightened softness stack and enabled detail rescue (score: {:.2}, micro_contrast: {} -> {}, edge_luminance: {} -> {})",
-                softness_score,
-                original_micro_enabled,
-                config.enable_micro_contrast,
-                original_edge_enabled,
-                config.enable_edge_luminance
-            ));
-        }
+fn rescue_detail_for_softness_stack(
+    config: &mut ResolvedEffectConfig,
+    softness_score: f64,
+    adjustments: &mut Vec<String>,
+) {
+    if softness_score < 2.0 {
+        return;
     }
 
-    // ============================================================================
-    // QUALITY GUARD 6: Remove redundant perceptual blur from extreme softness stacks
-    // ============================================================================
+    let original = config.clone();
+
+    config.enable_micro_contrast = true;
+    config.enable_edge_luminance = true;
+    config.dog_strength = config.dog_strength.min(0.28);
+    config.dog_sigma_scale = config.dog_sigma_scale.min(0.0054);
+    config.glow_strength = config.glow_strength.min(0.28);
+    config.glow_radius_scale = config.glow_radius_scale.min(0.0034);
+    config.chromatic_bloom_strength = config.chromatic_bloom_strength.min(0.36);
+    config.chromatic_bloom_radius_scale = config.chromatic_bloom_radius_scale.min(0.0046);
+    config.chromatic_bloom_separation_scale = config.chromatic_bloom_separation_scale.min(0.0010);
+    config.perceptual_blur_strength = config.perceptual_blur_strength.min(0.44);
+    config.micro_contrast_strength = config.micro_contrast_strength.max(0.24);
+    config.edge_luminance_strength = config.edge_luminance_strength.max(0.18);
+    config.edge_luminance_threshold = config.edge_luminance_threshold.min(0.20);
+    config.edge_luminance_brightness_boost = config.edge_luminance_brightness_boost.max(0.28);
+
+    if *config != original {
+        adjustments.push(format!(
+            "Quality guard: Tightened softness stack and enabled detail rescue (score: {:.2}, micro_contrast: {} -> {}, edge_luminance: {} -> {})",
+            softness_score,
+            original.enable_micro_contrast,
+            config.enable_micro_contrast,
+            original.enable_edge_luminance,
+            config.enable_edge_luminance
+        ));
+    }
+}
+
+fn remove_extreme_softness_blur(
+    config: &mut ResolvedEffectConfig,
+    softness_score: f64,
+    adjustments: &mut Vec<String>,
+) {
     if softness_score >= 2.6 && config.enable_chromatic_bloom && config.enable_perceptual_blur {
         config.enable_perceptual_blur = false;
         adjustments.push(format!(
             "Quality guard: Disabled perceptual_blur inside an extreme softness stack (score: {softness_score:.2})"
         ));
     }
+}
 
-    // Log adjustments if any were made
-    if !adjustments.is_empty() {
-        let mut adjustment_record =
-            RandomizationRecord::new("render_constraints".to_string(), true, false);
-
-        for adjustment in adjustments {
-            adjustment_record.parameters.push(
-                crate::render::effect_randomizer::RandomizedParameter {
-                    name: "constraint".to_string(),
-                    value: adjustment,
-                    was_randomized: false,
-                    range_used: "N/A".to_string(),
-                },
-            );
-        }
-
-        log.add_record(adjustment_record);
+fn log_constraint_adjustments(log: &mut RandomizationLog, adjustments: Vec<String>) {
+    if adjustments.is_empty() {
+        return;
     }
+
+    let mut adjustment_record =
+        RandomizationRecord::new("render_constraints".to_string(), true, false);
+
+    for adjustment in adjustments {
+        adjustment_record.parameters.push(crate::render::effect_randomizer::RandomizedParameter {
+            name: "constraint".to_string(),
+            value: adjustment,
+            was_randomized: false,
+            range_used: "N/A".to_string(),
+        });
+    }
+
+    log.add_record(adjustment_record);
+}
+
+/// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
+///
+/// Philosophy: Maximum exploration with minimum intervention.
+/// - Keep the generative space broad while blocking combinations that predictably fail QA
+/// - Prefer soft caps over hard disables unless a combination is consistently harmful
+/// - Preserve deterministic resolution and logging for every adjustment
+fn apply_conflict_detection(
+    mut config: ResolvedEffectConfig,
+    log: &mut RandomizationLog,
+) -> ResolvedEffectConfig {
+    let mut adjustments = Vec::new();
+    cap_expensive_opalescence(&mut config, &mut adjustments);
+    disable_isolated_chromatic_bloom(&mut config, &mut adjustments);
+    soften_unsupported_atmospheric_depth(&mut config, &mut adjustments);
+    rebalance_gradient_map_without_color_grade(&mut config, &mut adjustments);
+    break_heavy_softness_stack(&mut config, &mut adjustments);
+
+    let softness_score = softness_stack_score(&config);
+    rescue_detail_for_softness_stack(&mut config, softness_score, &mut adjustments);
+    remove_extreme_softness_blur(&mut config, softness_score, &mut adjustments);
+    log_constraint_adjustments(log, adjustments);
 
     config
 }

@@ -30,10 +30,6 @@ similar_names                = "allow"
 struct_excessive_bools       = "allow"
 unreadable_literal           = "allow"
 items_after_statements       = "allow"
-missing_panics_doc           = "allow"
-must_use_candidate           = "allow"
-trivially_copy_pass_by_ref   = "allow"
-unused_self                  = "allow"
 
 [dependencies]
 bytemuck = "1.25.0"

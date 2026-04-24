@@ -30,7 +30,7 @@ impl GaussianBloom {
         Self { radius, strength, core_brightness, enabled: true }
     }
 
-    fn extract_highlights(&self, input: &PixelBuffer) -> PixelBuffer {
+    fn extract_highlights(input: &PixelBuffer) -> PixelBuffer {
         input
             .par_iter()
             .map(|&(r, g, b, a)| {
@@ -65,7 +65,7 @@ impl PostEffect for GaussianBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
-        let highlights = self.extract_highlights(input);
+        let highlights = Self::extract_highlights(input);
         let core_gain = self.core_gain();
 
         if self.radius == 0 {
@@ -125,5 +125,19 @@ mod tests {
         assert!(output[0].0 > input[0].0);
         assert!(output[0].1 > input[0].1);
         assert!(output[0].2 > input[0].2);
+    }
+
+    #[test]
+    fn test_gaussian_bloom_spreads_highlight_with_radius() {
+        let bloom = GaussianBloom::new(1, 0.8, 12.0);
+        let mut input = vec![(0.0, 0.0, 0.0, 1.0); 9];
+        input[4] = (1.0, 1.0, 1.0, 1.0);
+
+        let output = bloom.process(&input, 3, 3).expect("bloom process should succeed");
+
+        assert_eq!(output.len(), input.len());
+        assert!(output[4].0 > input[4].0, "center highlight should be lifted");
+        assert!(output[1].0 > input[1].0, "neighbor should receive blurred bloom");
+        assert_eq!(output[4].3, 1.0, "alpha should be preserved");
     }
 }

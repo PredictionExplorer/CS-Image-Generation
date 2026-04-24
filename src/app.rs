@@ -414,7 +414,7 @@ pub fn log_generation(
     config: &GenerationLogConfig,
     file_name: &str,
     seed: &str,
-    drift_config: &Option<ResolvedDriftConfig>,
+    drift_config: Option<&ResolvedDriftConfig>,
     num_sims: usize,
     best_info: &TrajectoryResult,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,

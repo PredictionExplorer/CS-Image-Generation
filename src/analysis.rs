@@ -5,19 +5,19 @@
 //!   condition, filtered in [`crate::sim::select_best_trajectory`].
 //! - [`calculate_total_angular_momentum`] — magnitude used as a pre-rank filter.
 //!
-//! Borda-ranked signals (all "higher raw value = more desirable" except
-//! [`non_chaoticness`], which is ranked ascending so that *chaotic* orbits win):
-//! - [`non_chaoticness`] — peakedness of each body's distance-to-opposite-pair-COM
-//!   FFT spectrum (std-dev of magnitudes).
+//! Borda-ranked signals (all "higher raw value = more desirable" except the
+//! non-chaoticness score, which is ranked ascending so that *chaotic* orbits win):
+//! - [`non_chaoticness_from_series`] — peakedness of each body's
+//!   distance-to-opposite-pair-COM FFT spectrum (std-dev of magnitudes).
 //! - [`equilateralness_score`] — time-averaged triangle balance.
 //! - [`curvature_entropy`] — Shannon entropy of binned turning angles,
 //!   rewarding trajectories with a varied mix of curvature regimes.
-//! - [`permutation_entropy`] — Bandt-Pompe ordinal entropy of the
+//! - [`permutation_entropy_from_series`] — Bandt-Pompe ordinal entropy of the
 //!   distance-to-opposite-pair-COM series, rewarding orbits with rich
 //!   temporal complexity.
 //!
-//! For the two FFT-based signals ([`non_chaoticness`]) and Bandt-Pompe
-//! ([`permutation_entropy`]) we share the same distance series via
+//! For the FFT-based non-chaoticness and Bandt-Pompe permutation signals, we
+//! share the same distance series via
 //! [`compute_com_distance_series`] and the [`compute_orbit_quality`] combined
 //! entry point — the selection hot loop calls the latter to avoid recomputing
 //! the series three times per candidate.
@@ -32,7 +32,7 @@ use nalgebra::Vector3;
 /// range without oversampling `n`-small trajectories.
 const CURVATURE_BIN_COUNT: usize = 32;
 
-/// Embedding dimension `m` for [`permutation_entropy`] (Bandt-Pompe 2002).
+/// Embedding dimension `m` for [`permutation_entropy_from_series`] (Bandt-Pompe 2002).
 ///
 /// `m = 4` yields `m! = 24` ordinal patterns — enough resolution to separate
 /// periodic, quasi-periodic, and chaotic regimes while keeping per-candidate
@@ -96,9 +96,9 @@ pub fn calculate_total_angular_momentum(bodies: &[Body]) -> Vector3<f64> {
 /// Distance from each body to the center-of-mass of the *other two* bodies,
 /// evaluated at every step of the recorded trajectory.
 ///
-/// Shared input for [`non_chaoticness`] and [`permutation_entropy`] so that
-/// the Borda hot loop can compute both metrics from a single pass (via
-/// [`compute_orbit_quality`]).
+/// Shared input for [`non_chaoticness_from_series`] and
+/// [`permutation_entropy_from_series`] so that the Borda hot loop can compute
+/// both metrics from a single pass (via [`compute_orbit_quality`]).
 ///
 /// # Panics
 ///
@@ -130,25 +130,10 @@ pub fn compute_com_distance_series(
     [r1, r2, r3]
 }
 
-/// A measure of "regularity" vs "chaos", smaller => more chaotic.
+/// Non-chaoticness computed from pre-extracted distance series.
 ///
-/// Wrapper that computes the distance series and delegates to
-/// [`non_chaoticness_from_series`].  Prefer [`compute_orbit_quality`] in the
-/// selection hot path so the series is shared with [`permutation_entropy`].
-///
-/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper is
-/// kept as an internal convenience entry point for tests and diagnostics.
-#[must_use]
-#[allow(dead_code)] // Internal compatibility wrapper; not called by the binary pipeline.
-pub fn non_chaoticness(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
-    if positions.is_empty() || positions[0].is_empty() {
-        return 0.0;
-    }
-    let series = compute_com_distance_series(m1, m2, m3, positions);
-    non_chaoticness_from_series(&series)
-}
-
-/// [`non_chaoticness`] computed from pre-extracted distance series.
+/// Smaller values indicate richer chaotic motion; the Borda selection ranks
+/// this score ascending.
 #[must_use]
 pub fn non_chaoticness_from_series(series: &[Vec<f64>; 3]) -> f64 {
     if series[0].is_empty() {
@@ -317,22 +302,10 @@ fn shannon_entropy<const N: usize>(counts: &[u32; N], total: u32) -> f64 {
 /// approaches `1`).  Periodic series visit a small subset of patterns and sit
 /// somewhere in between.
 ///
-/// Returns `0.0` if the series is shorter than [`PERM_EMBEDDING_DIM`] or
-/// `positions` is empty.
+/// Returns `0.0` if a series is shorter than [`PERM_EMBEDDING_DIM`].
 ///
-/// The binary pipeline uses [`compute_orbit_quality`] directly; this wrapper is
-/// kept as an internal convenience entry point for tests and diagnostics.
-#[must_use]
-#[allow(dead_code)] // Internal compatibility wrapper; not called by the binary pipeline.
-pub fn permutation_entropy(m1: f64, m2: f64, m3: f64, positions: &[Vec<Vector3<f64>>]) -> f64 {
-    if positions.is_empty() || positions[0].is_empty() {
-        return 0.0;
-    }
-    let series = compute_com_distance_series(m1, m2, m3, positions);
-    permutation_entropy_from_series(&series)
-}
-
-/// [`permutation_entropy`] computed from pre-extracted distance series.
+/// Computed from pre-extracted distance series so the selection hot loop can
+/// share [`compute_com_distance_series`] with the FFT-based score.
 #[must_use]
 pub fn permutation_entropy_from_series(series: &[Vec<f64>; 3]) -> f64 {
     let h1 = permutation_entropy_of_series(&series[0]);
@@ -389,19 +362,19 @@ fn ordinal_pattern_m4(window: &[f64; PERM_EMBEDDING_DIM]) -> usize {
 
 /// All four Borda-ranked orbit-quality metrics, computed in a single pass.
 ///
-/// Reuses the shared COM-distance series across [`non_chaoticness`] and
-/// [`permutation_entropy`] to avoid recomputing it per candidate inside the
-/// Borda hot loop.  For isolated metric lookups in tests or diagnostics,
-/// prefer the individual `pub` functions.
+/// Reuses the shared COM-distance series across [`non_chaoticness_from_series`] and
+/// [`permutation_entropy_from_series`] to avoid recomputing it per candidate inside
+/// the Borda hot loop. For isolated metric lookups in tests or diagnostics, prefer
+/// the individual `pub` functions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OrbitQualityMetrics {
-    /// [`non_chaoticness`] score — FFT-magnitude std-dev, higher = more regular.
+    /// [`non_chaoticness_from_series`] score — FFT-magnitude std-dev, higher = more regular.
     pub non_chaoticness: f64,
     /// [`equilateralness_score`] — time-averaged triangle balance, higher = better.
     pub equilateralness: f64,
     /// [`curvature_entropy`] — turning-angle diversity, higher = more varied.
     pub curvature_entropy: f64,
-    /// [`permutation_entropy`] — Bandt-Pompe ordinal entropy, higher = more complex.
+    /// [`permutation_entropy_from_series`] — Bandt-Pompe ordinal entropy, higher = more complex.
     pub permutation_entropy: f64,
 }
 
@@ -487,7 +460,8 @@ mod tests {
     #[test]
     fn test_non_chaoticness_empty_returns_zero() {
         let positions = vec![vec![], vec![], vec![]];
-        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
+        let series = compute_com_distance_series(1.0, 1.0, 1.0, &positions);
+        let result = non_chaoticness_from_series(&series);
         assert_eq!(result, 0.0);
     }
 
@@ -505,7 +479,8 @@ mod tests {
                     .collect()
             })
             .collect();
-        let result = non_chaoticness(1.0, 1.0, 1.0, &positions);
+        let series = compute_com_distance_series(1.0, 1.0, 1.0, &positions);
+        let result = non_chaoticness_from_series(&series);
         assert!(result.is_finite(), "non_chaoticness should return a finite value");
         assert!(result >= 0.0);
     }
@@ -663,7 +638,8 @@ mod tests {
     #[test]
     fn permutation_entropy_empty_public_api_returns_zero() {
         let positions: Vec<Vec<Vector3<f64>>> = vec![vec![], vec![], vec![]];
-        assert_eq!(permutation_entropy(1.0, 1.0, 1.0, &positions), 0.0);
+        let series = compute_com_distance_series(1.0, 1.0, 1.0, &positions);
+        assert_eq!(permutation_entropy_from_series(&series), 0.0);
     }
 
     #[test]
@@ -727,7 +703,8 @@ mod tests {
                     .collect()
             })
             .collect();
-        let h = permutation_entropy(1.0, 2.0, 3.0, &positions);
+        let series = compute_com_distance_series(1.0, 2.0, 3.0, &positions);
+        let h = permutation_entropy_from_series(&series);
         assert!(h.is_finite(), "permutation_entropy should be finite");
         assert!(
             (0.0..=1.0 + 1e-12).contains(&h),
@@ -802,10 +779,11 @@ mod tests {
             .collect();
 
         let metrics = compute_orbit_quality(1.0, 2.0, 3.0, &positions);
-        let nc = non_chaoticness(1.0, 2.0, 3.0, &positions);
+        let series = compute_com_distance_series(1.0, 2.0, 3.0, &positions);
+        let nc = non_chaoticness_from_series(&series);
         let eq = equilateralness_score(&positions);
         let ce = curvature_entropy(&positions);
-        let pe = permutation_entropy(1.0, 2.0, 3.0, &positions);
+        let pe = permutation_entropy_from_series(&series);
 
         assert_eq!(metrics.non_chaoticness.to_bits(), nc.to_bits());
         assert_eq!(metrics.equilateralness.to_bits(), eq.to_bits());

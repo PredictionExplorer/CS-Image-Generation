@@ -102,12 +102,14 @@ impl PostEffectChain {
 
     /// Returns the number of effects in the chain.
     #[cfg(test)]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.effects.len()
     }
 
     /// Returns true if the chain has no effects.
     #[cfg(test)]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }

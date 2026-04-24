@@ -27,7 +27,7 @@ impl DogBloom {
         Self { config, core_brightness, enabled: true }
     }
 
-    fn extract_highlights(&self, input: &PixelBuffer) -> PixelBuffer {
+    fn extract_highlights(input: &PixelBuffer) -> PixelBuffer {
         input
             .par_iter()
             .map(|&(r, g, b, a)| {
@@ -62,7 +62,7 @@ impl PostEffect for DogBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
-        let highlights = self.extract_highlights(input);
+        let highlights = Self::extract_highlights(input);
         let dog_bloom = apply_dog_bloom(&highlights, width, height, &self.config);
         let core_gain = self.core_gain();
 

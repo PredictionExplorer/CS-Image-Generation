@@ -49,6 +49,7 @@ impl ResolvedDriftConfig {
     }
 
     /// Convert to `DriftParameters` for use in the drift system
+    #[must_use]
     pub fn to_drift_parameters(&self) -> DriftParameters {
         DriftParameters::new(self.scale, self.arc_fraction, self.orbit_eccentricity)
     }

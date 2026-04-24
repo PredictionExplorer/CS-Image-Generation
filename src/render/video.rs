@@ -186,6 +186,49 @@ impl VideoEncodingOptions {
     }
 }
 
+fn build_ffmpeg_command(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    output_file: &str,
+    options: &VideoEncodingOptions,
+) -> Command {
+    let mut cmd = Command::new("ffmpeg");
+
+    cmd.args([
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        &options.input_pixel_format,
+        "-s",
+        &format!("{width}x{height}"),
+        "-r",
+        &frame_rate.to_string(),
+        "-i",
+        "-",
+        "-c:v",
+        &options.codec,
+    ]);
+
+    if !options.preset.is_empty() && options.codec.starts_with("lib") {
+        cmd.args(["-preset", &options.preset]);
+    }
+
+    if options.codec.starts_with("lib") && options.crf > 0 {
+        cmd.args(["-crf", &options.crf.to_string()]);
+    }
+
+    if !options.bitrate.is_empty() {
+        cmd.args(["-b:v", &options.bitrate]);
+    }
+
+    cmd.args(["-pix_fmt", &options.pixel_format]);
+    cmd.args(&options.extra_args);
+    cmd.arg(output_file);
+    cmd
+}
+
 /// Create video in a single pass using `FFmpeg` with configurable options
 ///
 /// This function pipes raw RGB frames directly to `FFmpeg`'s stdin, avoiding the need
@@ -244,52 +287,7 @@ pub fn create_video_from_frames_singlepass(
 
     info!("Encoding video with codec: {}, pixel format: {}", options.codec, options.pixel_format);
 
-    // Build FFmpeg command
-    let mut cmd = Command::new("ffmpeg");
-
-    // Input parameters
-    cmd.args([
-        "-y", // Overwrite output file
-        "-f",
-        "rawvideo", // Input format
-        "-pix_fmt",
-        &options.input_pixel_format, // rgb24 (8-bit) or rgb48le (16-bit)
-        "-s",
-        &format!("{width}x{height}"),
-        "-r",
-        &frame_rate.to_string(),
-        "-i",
-        "-", // Read from stdin
-    ]);
-
-    // Codec selection
-    cmd.args(["-c:v", &options.codec]);
-
-    // Preset (only for software encoders like libx264/libx265)
-    if !options.preset.is_empty() && options.codec.starts_with("lib") {
-        cmd.args(["-preset", &options.preset]);
-    }
-
-    // CRF mode (only for software encoders using CRF)
-    if options.codec.starts_with("lib") && options.crf > 0 {
-        cmd.args(["-crf", &options.crf.to_string()]);
-    }
-
-    // Bitrate (only if specified, typically for hardware encoders)
-    if !options.bitrate.is_empty() {
-        cmd.args(["-b:v", &options.bitrate]);
-    }
-
-    // Output pixel format
-    cmd.args(["-pix_fmt", &options.pixel_format]);
-
-    // Add any extra arguments
-    for arg in &options.extra_args {
-        cmd.arg(arg);
-    }
-
-    // Output file
-    cmd.arg(output_file);
+    let mut cmd = build_ffmpeg_command(width, height, frame_rate, output_file, options);
 
     // Spawn FFmpeg process
     let mut child = cmd
@@ -329,6 +327,16 @@ pub fn create_video_from_frames_singlepass(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+
+    fn command_args(command: &Command) -> Vec<String> {
+        command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
+    }
+
+    fn arg_after<'a>(args: &'a [String], flag: &str) -> &'a str {
+        let index = args.iter().position(|arg| arg == flag).expect("flag should be present");
+        &args[index + 1]
+    }
 
     #[test]
     fn test_default_options() {
@@ -455,5 +463,85 @@ mod tests {
                 "4:2:2 pixel format requires main422-10 profile"
             );
         }
+    }
+
+    #[test]
+    fn test_build_ffmpeg_command_includes_raw_video_input() {
+        let options = VideoEncodingOptions::default();
+        let command = build_ffmpeg_command(1920, 1080, 60, "out.mp4", &options);
+        let args = command_args(&command);
+
+        assert_eq!(command.get_program(), OsStr::new("ffmpeg"));
+        assert_eq!(arg_after(&args, "-f"), "rawvideo");
+        assert_eq!(arg_after(&args, "-s"), "1920x1080");
+        assert_eq!(arg_after(&args, "-r"), "60");
+        assert_eq!(args.last().expect("command should include output path"), "out.mp4");
+    }
+
+    #[test]
+    fn test_build_ffmpeg_command_uses_software_quality_flags() {
+        let options = VideoEncodingOptions::default();
+        let command = build_ffmpeg_command(320, 180, 24, "out.mp4", &options);
+        let args = command_args(&command);
+
+        assert_eq!(arg_after(&args, "-c:v"), "libx265");
+        assert_eq!(arg_after(&args, "-preset"), "slower");
+        assert_eq!(arg_after(&args, "-crf"), "17");
+        assert_eq!(arg_after(&args, "-pix_fmt"), "rgb48le");
+        assert!(args.contains(&"yuv422p10le".to_string()));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_command_skips_software_flags_for_hardware_codec() {
+        let options = VideoEncodingOptions {
+            codec: "hevc_videotoolbox".to_string(),
+            preset: "slow".to_string(),
+            crf: 17,
+            bitrate: "12M".to_string(),
+            pixel_format: "yuv420p10le".to_string(),
+            input_pixel_format: "rgb48le".to_string(),
+            extra_args: vec!["-tag:v".to_string(), "hvc1".to_string()],
+        };
+        let command = build_ffmpeg_command(320, 180, 24, "out.mp4", &options);
+        let args = command_args(&command);
+
+        assert!(!args.contains(&"-preset".to_string()));
+        assert!(!args.contains(&"-crf".to_string()));
+        assert_eq!(arg_after(&args, "-b:v"), "12M");
+        assert_eq!(arg_after(&args, "-tag:v"), "hvc1");
+    }
+
+    #[test]
+    fn test_create_video_rejects_invalid_dimensions_before_spawning() {
+        let options = VideoEncodingOptions::default();
+        let err = create_video_from_frames_singlepass(
+            0,
+            1080,
+            60,
+            |_| panic!("frame writer should not run for invalid dimensions"),
+            "out.mp4",
+            &options,
+        )
+        .expect_err("zero width should fail validation");
+
+        assert!(matches!(err, RenderError::InvalidDimensions { width: 0, height: 1080 }));
+    }
+
+    #[test]
+    fn test_create_video_rejects_zero_frame_rate_before_spawning() {
+        let options = VideoEncodingOptions::default();
+        let err = create_video_from_frames_singlepass(
+            1920,
+            1080,
+            0,
+            |_| panic!("frame writer should not run for invalid frame rate"),
+            "out.mp4",
+            &options,
+        )
+        .expect_err("zero frame rate should fail validation");
+
+        assert!(
+            matches!(err, RenderError::InvalidConfig { parameter, .. } if parameter == "frame_rate")
+        );
     }
 }

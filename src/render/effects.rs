@@ -281,12 +281,14 @@ impl FinishEffectPipeline {
 
     /// Number of effects in the trajectory processing chain
     #[cfg(test)]
+    #[must_use]
     pub fn trajectory_len(&self) -> usize {
         self.trajectory_chain.len()
     }
 
     /// Number of effects in the image processing chain
     #[cfg(test)]
+    #[must_use]
     pub fn image_len(&self) -> usize {
         self.image_chain.len()
     }

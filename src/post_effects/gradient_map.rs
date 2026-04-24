@@ -44,6 +44,143 @@ pub enum LuxuryPalette {
     RoyalAmethyst,
 }
 
+type PaletteStops = [(f64, f64, f64); 5];
+
+// Deep purple -> rich gold.
+const GOLD_PURPLE_STOPS: PaletteStops = [
+    (0.15, 0.05, 0.25),
+    (0.35, 0.15, 0.45),
+    (0.55, 0.25, 0.50),
+    (0.75, 0.45, 0.35),
+    (0.95, 0.75, 0.35),
+];
+
+// Deep teal -> vibrant pink.
+const COSMIC_TEAL_PINK_STOPS: PaletteStops = [
+    (0.05, 0.20, 0.25),
+    (0.10, 0.35, 0.45),
+    (0.35, 0.50, 0.65),
+    (0.75, 0.35, 0.60),
+    (0.95, 0.55, 0.75),
+];
+
+// Warm amber -> cool cyan.
+const AMBER_CYAN_STOPS: PaletteStops = [
+    (0.25, 0.10, 0.05),
+    (0.65, 0.35, 0.15),
+    (0.85, 0.75, 0.45),
+    (0.45, 0.75, 0.75),
+    (0.15, 0.55, 0.70),
+];
+
+// Deep indigo -> bright gold.
+const INDIGO_GOLD_STOPS: PaletteStops = [
+    (0.05, 0.05, 0.20),
+    (0.15, 0.20, 0.50),
+    (0.35, 0.45, 0.65),
+    (0.75, 0.60, 0.40),
+    (1.00, 0.85, 0.40),
+];
+
+// Ethereal blue -> warm orange.
+const BLUE_ORANGE_STOPS: PaletteStops = [
+    (0.10, 0.15, 0.35),
+    (0.20, 0.35, 0.65),
+    (0.50, 0.55, 0.75),
+    (0.85, 0.55, 0.35),
+    (0.95, 0.65, 0.25),
+];
+
+// Inspired by Titian and Tintoretto: rich, warm, luxurious.
+const VENETIAN_RENAISSANCE_STOPS: PaletteStops = [
+    (0.12, 0.05, 0.08),
+    (0.45, 0.12, 0.15),
+    (0.55, 0.28, 0.18),
+    (0.85, 0.65, 0.25),
+    (0.25, 0.35, 0.65),
+];
+
+// Inspired by Hokusai and Hiroshige: bold, graphic, elegant.
+const JAPANESE_UKIYOE_STOPS: PaletteStops = [
+    (0.05, 0.08, 0.15),
+    (0.08, 0.15, 0.38),
+    (0.12, 0.35, 0.55),
+    (0.75, 0.20, 0.18),
+    (0.95, 0.75, 0.35),
+];
+
+// Inspired by Mucha and Klimt: organic, flowing, metallic.
+const ART_NOUVEAU_STOPS: PaletteStops = [
+    (0.15, 0.28, 0.22),
+    (0.25, 0.45, 0.35),
+    (0.18, 0.42, 0.52),
+    (0.58, 0.35, 0.22),
+    (0.92, 0.88, 0.75),
+];
+
+// Cool, ethereal, mystical, with opalescent shimmer.
+const LUNAR_OPAL_STOPS: PaletteStops = [
+    (0.25, 0.28, 0.35),
+    (0.45, 0.52, 0.62),
+    (0.65, 0.62, 0.72),
+    (0.85, 0.88, 0.92),
+    (0.95, 0.95, 0.98),
+];
+
+// Warm, intense, gem-like, with internal fire.
+const FIRE_OPAL_STOPS: PaletteStops = [
+    (0.22, 0.05, 0.08),
+    (0.65, 0.08, 0.12),
+    (0.88, 0.35, 0.15),
+    (0.95, 0.75, 0.25),
+    (0.92, 0.72, 0.52),
+];
+
+// Mysterious, bioluminescent, deep-water aesthetics.
+const DEEP_OCEAN_STOPS: PaletteStops = [
+    (0.02, 0.05, 0.15),
+    (0.05, 0.12, 0.28),
+    (0.08, 0.35, 0.45),
+    (0.12, 0.55, 0.52),
+    (0.25, 0.72, 0.45),
+];
+
+// Electric, dancing celestial phenomenon.
+const AURORA_BOREALIS_STOPS: PaletteStops = [
+    (0.08, 0.15, 0.25),
+    (0.15, 0.52, 0.38),
+    (0.22, 0.65, 0.72),
+    (0.65, 0.28, 0.75),
+    (0.85, 0.35, 0.72),
+];
+
+// Industrial, powerful forge aesthetics.
+const MOLTEN_METAL_STOPS: PaletteStops = [
+    (0.08, 0.08, 0.10),
+    (0.25, 0.12, 0.10),
+    (0.72, 0.18, 0.12),
+    (0.95, 0.82, 0.35),
+    (0.88, 0.90, 0.92),
+];
+
+// Serene, precious, Chinese imperial aesthetics.
+const ANCIENT_JADE_STOPS: PaletteStops = [
+    (0.08, 0.18, 0.15),
+    (0.25, 0.42, 0.35),
+    (0.45, 0.62, 0.52),
+    (0.68, 0.82, 0.75),
+    (0.88, 0.95, 0.92),
+];
+
+// Regal, mystical, crystalline gem.
+const ROYAL_AMETHYST_STOPS: PaletteStops = [
+    (0.15, 0.08, 0.22),
+    (0.35, 0.15, 0.48),
+    (0.55, 0.28, 0.65),
+    (0.75, 0.52, 0.82),
+    (0.85, 0.82, 0.88),
+];
+
 impl LuxuryPalette {
     /// Convert an integer index (0-14) to a palette variant.
     /// Useful for randomized palette selection.
@@ -67,6 +204,26 @@ impl LuxuryPalette {
             13 => LuxuryPalette::AncientJade,
             14 => LuxuryPalette::RoyalAmethyst,
             _ => unreachable!("Modulo 15 ensures index is 0-14"),
+        }
+    }
+
+    fn stops(&self) -> &'static PaletteStops {
+        match self {
+            LuxuryPalette::GoldPurple => &GOLD_PURPLE_STOPS,
+            LuxuryPalette::CosmicTealPink => &COSMIC_TEAL_PINK_STOPS,
+            LuxuryPalette::AmberCyan => &AMBER_CYAN_STOPS,
+            LuxuryPalette::IndigoGold => &INDIGO_GOLD_STOPS,
+            LuxuryPalette::BlueOrange => &BLUE_ORANGE_STOPS,
+            LuxuryPalette::VenetianRenaissance => &VENETIAN_RENAISSANCE_STOPS,
+            LuxuryPalette::JapaneseUkiyoe => &JAPANESE_UKIYOE_STOPS,
+            LuxuryPalette::ArtNouveau => &ART_NOUVEAU_STOPS,
+            LuxuryPalette::LunarOpal => &LUNAR_OPAL_STOPS,
+            LuxuryPalette::FireOpal => &FIRE_OPAL_STOPS,
+            LuxuryPalette::DeepOcean => &DEEP_OCEAN_STOPS,
+            LuxuryPalette::AuroraBorealis => &AURORA_BOREALIS_STOPS,
+            LuxuryPalette::MoltenMetal => &MOLTEN_METAL_STOPS,
+            LuxuryPalette::AncientJade => &ANCIENT_JADE_STOPS,
+            LuxuryPalette::RoyalAmethyst => &ROYAL_AMETHYST_STOPS,
         }
     }
 }
@@ -102,179 +259,8 @@ impl GradientMap {
     }
 
     /// Get color from palette at normalized position (0.0 to 1.0)
-    #[allow(clippy::too_many_lines)] // Palette table is clearer as one exhaustive match.
     fn sample_palette(&self, t: f64) -> (f64, f64, f64) {
-        let t = t.clamp(0.0, 1.0);
-
-        match self.config.palette {
-            LuxuryPalette::GoldPurple => {
-                // Deep purple -> Rich gold
-                let colors = [
-                    (0.15, 0.05, 0.25), // Dark purple
-                    (0.35, 0.15, 0.45), // Medium purple
-                    (0.55, 0.25, 0.50), // Magenta
-                    (0.75, 0.45, 0.35), // Rose gold
-                    (0.95, 0.75, 0.35), // Bright gold
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::CosmicTealPink => {
-                // Deep teal -> Vibrant pink
-                let colors = [
-                    (0.05, 0.20, 0.25), // Deep teal
-                    (0.10, 0.35, 0.45), // Cyan
-                    (0.35, 0.50, 0.65), // Sky blue
-                    (0.75, 0.35, 0.60), // Magenta
-                    (0.95, 0.55, 0.75), // Bright pink
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::AmberCyan => {
-                // Warm amber -> Cool cyan
-                let colors = [
-                    (0.25, 0.10, 0.05), // Dark amber
-                    (0.65, 0.35, 0.15), // Orange
-                    (0.85, 0.75, 0.45), // Yellow
-                    (0.45, 0.75, 0.75), // Aqua
-                    (0.15, 0.55, 0.70), // Cyan
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::IndigoGold => {
-                // Deep indigo -> Bright gold
-                let colors = [
-                    (0.05, 0.05, 0.20), // Indigo
-                    (0.15, 0.20, 0.50), // Blue
-                    (0.35, 0.45, 0.65), // Periwinkle
-                    (0.75, 0.60, 0.40), // Warm beige
-                    (1.00, 0.85, 0.40), // Bright gold
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::BlueOrange => {
-                // Ethereal blue -> Warm orange
-                let colors = [
-                    (0.10, 0.15, 0.35), // Deep blue
-                    (0.20, 0.35, 0.65), // Blue
-                    (0.50, 0.55, 0.75), // Light blue
-                    (0.85, 0.55, 0.35), // Orange
-                    (0.95, 0.65, 0.25), // Bright orange
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-
-            // === MUSEUM-QUALITY PALETTE DEFINITIONS ===
-            LuxuryPalette::VenetianRenaissance => {
-                // Inspired by Titian, Tintoretto: rich, warm, luxurious
-                let colors = [
-                    (0.12, 0.05, 0.08), // Deep crimson shadow
-                    (0.45, 0.12, 0.15), // Rich crimson
-                    (0.55, 0.28, 0.18), // Burnt sienna
-                    (0.85, 0.65, 0.25), // Gold leaf
-                    (0.25, 0.35, 0.65), // Ultramarine blue
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::JapaneseUkiyoe => {
-                // Inspired by Hokusai, Hiroshige: bold, graphic, elegant
-                let colors = [
-                    (0.05, 0.08, 0.15), // Ink black
-                    (0.08, 0.15, 0.38), // Deep Prussian blue
-                    (0.12, 0.35, 0.55), // Prussian blue
-                    (0.75, 0.20, 0.18), // Vermillion red
-                    (0.95, 0.75, 0.35), // Gold accent
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::ArtNouveau => {
-                // Inspired by Mucha, Klimt: organic, flowing, metallic
-                let colors = [
-                    (0.15, 0.28, 0.22), // Deep jade green
-                    (0.25, 0.45, 0.35), // Jade
-                    (0.18, 0.42, 0.52), // Peacock blue
-                    (0.58, 0.35, 0.22), // Burnished copper
-                    (0.92, 0.88, 0.75), // Cream
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::LunarOpal => {
-                // Cool, ethereal, mystical with opalescent shimmer
-                let colors = [
-                    (0.25, 0.28, 0.35), // Deep moonstone
-                    (0.45, 0.52, 0.62), // Moonstone blue
-                    (0.65, 0.62, 0.72), // Pale lavender
-                    (0.85, 0.88, 0.92), // Pearl white
-                    (0.95, 0.95, 0.98), // Diamond shimmer
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::FireOpal => {
-                // Warm, intense, gem-like with internal fire
-                let colors = [
-                    (0.22, 0.05, 0.08), // Deep ruby
-                    (0.65, 0.08, 0.12), // Ruby red
-                    (0.88, 0.35, 0.15), // Flame orange
-                    (0.95, 0.75, 0.25), // Citrine yellow
-                    (0.92, 0.72, 0.52), // Rose gold
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::DeepOcean => {
-                // Mysterious, bioluminescent, deep water aesthetics
-                let colors = [
-                    (0.02, 0.05, 0.15), // Midnight indigo
-                    (0.05, 0.12, 0.28), // Abyssal blue
-                    (0.08, 0.35, 0.45), // Deep ocean blue
-                    (0.12, 0.55, 0.52), // Bioluminescent teal
-                    (0.25, 0.72, 0.45), // Phosphorescent green
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::AuroraBorealis => {
-                // Electric, dancing, celestial phenomenon
-                let colors = [
-                    (0.08, 0.15, 0.25), // Night sky
-                    (0.15, 0.52, 0.38), // Emerald green
-                    (0.22, 0.65, 0.72), // Ice blue
-                    (0.65, 0.28, 0.75), // Electric violet
-                    (0.85, 0.35, 0.72), // Magenta
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::MoltenMetal => {
-                // Industrial, powerful, forge aesthetics
-                let colors = [
-                    (0.08, 0.08, 0.10), // Dark iron
-                    (0.25, 0.12, 0.10), // Heated metal
-                    (0.72, 0.18, 0.12), // Cherry red heat
-                    (0.95, 0.82, 0.35), // Yellow-white hot
-                    (0.88, 0.90, 0.92), // Platinum
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::AncientJade => {
-                // Serene, precious, Chinese imperial aesthetics
-                let colors = [
-                    (0.08, 0.18, 0.15), // Deep jade
-                    (0.25, 0.42, 0.35), // Jade green
-                    (0.45, 0.62, 0.52), // Celadon
-                    (0.68, 0.82, 0.75), // Seafoam
-                    (0.88, 0.95, 0.92), // White jade
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-            LuxuryPalette::RoyalAmethyst => {
-                // Regal, mystical, crystalline gem
-                let colors = [
-                    (0.15, 0.08, 0.22), // Deep purple
-                    (0.35, 0.15, 0.48), // Royal purple
-                    (0.55, 0.28, 0.65), // Amethyst violet
-                    (0.75, 0.52, 0.82), // Light lavender
-                    (0.85, 0.82, 0.88), // Silver
-                ];
-                Self::interpolate_gradient(&colors, t)
-            }
-        }
+        Self::interpolate_gradient(self.config.palette.stops(), t.clamp(0.0, 1.0))
     }
 
     /// Interpolate between gradient stop colors

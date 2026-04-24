@@ -1,12 +1,19 @@
 //! CLI front-end for the three-body problem visualization generator.
 
 use clap::{Parser, ValueEnum};
+use nalgebra::Vector3;
 use rayon::ThreadPoolBuilder;
 use three_body_problem::{
     app,
+    drift_config::ResolvedDriftConfig,
     error::{self, Result},
-    render::{self, RenderConfig},
-    sim::Sha3RandomByteStream,
+    render::{
+        self, RenderConfig,
+        effect_randomizer::RandomizationLog,
+        randomizable_config::{RandomizableEffectConfig, ResolvedEffectConfig},
+    },
+    sim::{Sha3RandomByteStream, TrajectoryResult},
+    spectrum::NUM_BINS,
     spectrum_simd,
 };
 use tracing::{info, warn};
@@ -238,7 +245,7 @@ fn resolve_borda_weights(
 
 fn build_generation_log_config(
     args: &Args,
-    resolved: &render::randomizable_config::ResolvedEffectConfig,
+    resolved: &ResolvedEffectConfig,
     render_config: &RenderConfig,
     borda_weights: &ResolvedBordaWeights,
 ) -> app::GenerationLogConfig {
@@ -285,31 +292,171 @@ fn build_generation_log_config(
     }
 }
 
-#[allow(clippy::too_many_lines)] // CLI orchestration is intentionally kept linear until the larger refactor pass.
-fn main() -> Result<()> {
+fn install_global_thread_pool() -> Result<()> {
     ThreadPoolBuilder::new()
         .stack_size(render::constants::THREAD_STACK_SIZE)
         .build_global()
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()).into())
+}
 
-    let args = Args::parse();
-
-    setup_logging(&args.log_level);
-
-    let enhancements = app::Enhancements::default();
+fn configure_global_enhancements(enhancements: &app::Enhancements) {
     spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
     render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, std::sync::atomic::Ordering::Relaxed);
     render::drawing::DISPERSION_BOOST_ENABLED
         .store(enhancements.dispersion_boost, std::sync::atomic::Ordering::Relaxed);
+}
 
+fn seed_hex(seed: &str) -> &str {
+    seed.strip_prefix("0x").unwrap_or(seed)
+}
+
+fn resolve_randomized_effects(
+    rng: &mut Sha3RandomByteStream,
+    resolution: OutputResolution,
+) -> (ResolvedEffectConfig, RandomizationLog) {
+    info!("Resolving effect configuration...");
+    let randomizable_config = RandomizableEffectConfig::default();
+    let (resolved_effect_config, randomization_log) =
+        randomizable_config.resolve(rng, resolution.width, resolution.height);
+
+    let num_randomized = randomization_log
+        .effects
+        .iter()
+        .map(|effect| effect.parameters.iter().filter(|param| param.was_randomized).count())
+        .sum::<usize>();
+    let num_parameters =
+        randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>();
+
+    info!(
+        "   => Resolved {} effects ({} parameters randomized, {} explicit)",
+        randomization_log.effects.len(),
+        num_randomized,
+        num_parameters - num_randomized
+    );
+
+    (resolved_effect_config, randomization_log)
+}
+
+fn apply_optional_drift(
+    args: &Args,
+    positions: &mut [Vec<Vector3<f64>>],
+    rng: &mut Sha3RandomByteStream,
+) -> Result<Option<ResolvedDriftConfig>> {
+    if args.drift == DriftModeArg::None {
+        info!("STAGE 2.5/7: Drift disabled");
+        return Ok(None);
+    }
+
+    app::apply_drift_transformation(positions, args.drift.as_str(), None, None, None, rng)
+}
+
+fn render_outputs(
+    args: &Args,
+    seed_dir: &str,
+    positions: &[Vec<Vector3<f64>>],
+    colors: &[Vec<render::OklabColor>],
+    body_alphas: &[f64],
+    resolved_effect_config: &ResolvedEffectConfig,
+    render_config: &RenderConfig,
+    enhancements: &app::Enhancements,
+) -> Result<Vec<[f64; NUM_BINS]>> {
+    info!("   => Using OKLab color space for accumulation");
+    info!("STAGE 4/7: Determining bounding box...");
+    let render_ctx = render::context::RenderContext::new(
+        args.resolution.width,
+        args.resolution.height,
+        positions,
+        enhancements.aspect_correction,
+    );
+    let bbox = render_ctx.bounds();
+    info!(
+        "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",
+        bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y
+    );
+
+    let levels = app::build_histogram_and_levels(
+        positions,
+        colors,
+        body_alphas,
+        resolved_effect_config,
+        render_config,
+        enhancements.aspect_correction,
+    )?;
+
+    let output_png = format!("{seed_dir}/image.png");
+    let output_vid = format!("{seed_dir}/video.mp4");
+    let accum_spd = app::render_video(
+        render::SpectralScene::new(positions, colors, body_alphas),
+        &levels,
+        render::SpectralRenderSettings::new(
+            resolved_effect_config,
+            render_config,
+            enhancements.aspect_correction,
+        ),
+        &output_vid,
+        &output_png,
+        args.fast_encode,
+        true,
+    )?;
+
+    let spectral_dir = format!("{seed_dir}/spectral");
+    let spectral_sweep_path = format!("{seed_dir}/spectral_sweep.mp4");
+    app::generate_spectral_gallery(
+        &accum_spd,
+        args.resolution.width,
+        args.resolution.height,
+        &spectral_dir,
+    )?;
+    app::generate_spectral_sweep_video(
+        &accum_spd,
+        args.resolution.width,
+        args.resolution.height,
+        &spectral_sweep_path,
+        args.fast_encode,
+    )?;
+
+    Ok(accum_spd)
+}
+
+fn log_generation_result(
+    args: &Args,
+    hex_seed: &str,
+    drift_config: Option<&ResolvedDriftConfig>,
+    best_info: &TrajectoryResult,
+    randomization_log: &RandomizationLog,
+    resolved_effect_config: &ResolvedEffectConfig,
+    render_config: &RenderConfig,
+    borda_weights: &ResolvedBordaWeights,
+) {
+    let generation_log_config =
+        build_generation_log_config(args, resolved_effect_config, render_config, borda_weights);
+    if let Err(e) = app::log_generation(
+        &generation_log_config,
+        &args.output,
+        hex_seed,
+        drift_config,
+        args.sims,
+        best_info,
+        Some(randomization_log),
+    ) {
+        warn!("Generation logging failed (non-fatal): {e}");
+    }
+}
+
+fn main() -> Result<()> {
+    install_global_thread_pool()?;
+    let args = Args::parse();
+
+    setup_logging(&args.log_level);
+
+    let enhancements = app::Enhancements::default();
+    configure_global_enhancements(&enhancements);
     error::validation::validate_dimensions(args.resolution.width, args.resolution.height)?;
 
     let seed_bytes = app::parse_seed(&args.seed)?;
-    let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
-
+    let hex_seed = seed_hex(&args.seed);
     let seed_dir = app::setup_seed_directory(&args.output)?;
-
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
         DEFAULT_MIN_MASS,
@@ -318,25 +465,8 @@ fn main() -> Result<()> {
         DEFAULT_VELOCITY,
     );
 
-    info!("Resolving effect configuration...");
-    let randomizable_config = render::randomizable_config::RandomizableEffectConfig::default();
     let (resolved_effect_config, randomization_log) =
-        randomizable_config.resolve(&mut rng, args.resolution.width, args.resolution.height);
-
-    let num_randomized = randomization_log
-        .effects
-        .iter()
-        .map(|effect| effect.parameters.iter().filter(|param| param.was_randomized).count())
-        .sum::<usize>();
-
-    info!(
-        "   => Resolved {} effects ({} parameters randomized, {} explicit)",
-        randomization_log.effects.len(),
-        num_randomized,
-        randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
-            - num_randomized
-    );
-
+        resolve_randomized_effects(&mut rng, args.resolution);
     let borda_weights = resolve_borda_weights(
         args.chaos_weight,
         args.equil_weight,
@@ -354,85 +484,23 @@ fn main() -> Result<()> {
     )?;
 
     let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
-
-    let drift_config = if args.drift == DriftModeArg::None {
-        info!("STAGE 2.5/7: Drift disabled");
-        None
-    } else {
-        app::apply_drift_transformation(
-            &mut positions,
-            args.drift.as_str(),
-            None,
-            None,
-            None,
-            &mut rng,
-        )?
-    };
-
+    let drift_config = apply_optional_drift(&args, &mut positions, &mut rng)?;
     let (colors, body_alphas) =
         app::generate_colors(&mut rng, args.steps, DEFAULT_ALPHA_DENOM, &enhancements);
-
-    info!("   => Using OKLab color space for accumulation");
-    info!("STAGE 4/7: Determining bounding box...");
-    let render_ctx = render::context::RenderContext::new(
-        args.resolution.width,
-        args.resolution.height,
-        &positions,
-        enhancements.aspect_correction,
-    );
-    let bbox = render_ctx.bounds();
-    info!(
-        "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",
-        bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y
-    );
 
     let render_config = RenderConfig {
         hdr_scale: resolved_effect_config.hdr_scale,
         bloom_mode: render::BloomMode::Dog,
     };
-
-    let levels = app::build_histogram_and_levels(
+    render_outputs(
+        &args,
+        &seed_dir,
         &positions,
         &colors,
         &body_alphas,
         &resolved_effect_config,
         &render_config,
-        enhancements.aspect_correction,
-    )?;
-
-    let output_png = format!("{seed_dir}/image.png");
-    let output_vid = format!("{seed_dir}/video.mp4");
-
-    let accum_spd = app::render_video(
-        render::SpectralScene::new(&positions, &colors, &body_alphas),
-        &levels,
-        render::SpectralRenderSettings::new(
-            &resolved_effect_config,
-            &render_config,
-            enhancements.aspect_correction,
-        ),
-        &output_vid,
-        &output_png,
-        args.fast_encode,
-        true,
-    )?;
-
-    let spectral_dir = format!("{seed_dir}/spectral");
-    let spectral_sweep_path = format!("{seed_dir}/spectral_sweep.mp4");
-
-    app::generate_spectral_gallery(
-        &accum_spd,
-        args.resolution.width,
-        args.resolution.height,
-        &spectral_dir,
-    )?;
-
-    app::generate_spectral_sweep_video(
-        &accum_spd,
-        args.resolution.width,
-        args.resolution.height,
-        &spectral_sweep_path,
-        args.fast_encode,
+        &enhancements,
     )?;
 
     info!(
@@ -440,19 +508,16 @@ fn main() -> Result<()> {
         best_info.total_score_weighted
     );
 
-    let generation_log_config =
-        build_generation_log_config(&args, &resolved_effect_config, &render_config, &borda_weights);
-    if let Err(e) = app::log_generation(
-        &generation_log_config,
-        &args.output,
+    log_generation_result(
+        &args,
         hex_seed,
-        &drift_config,
-        args.sims,
+        drift_config.as_ref(),
         &best_info,
-        Some(&randomization_log),
-    ) {
-        warn!("Generation logging failed (non-fatal): {e}");
-    }
+        &randomization_log,
+        &resolved_effect_config,
+        &render_config,
+        &borda_weights,
+    );
 
     Ok(())
 }

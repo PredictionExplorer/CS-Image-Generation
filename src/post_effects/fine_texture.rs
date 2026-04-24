@@ -61,7 +61,7 @@ impl FineTexture {
     }
 
     /// Value noise (smooth interpolated noise)
-    fn value_noise(&self, x: f64, y: f64) -> f64 {
+    fn value_noise(x: f64, y: f64) -> f64 {
         let ix = x.floor();
         let iy = y.floor();
         let fx = x - ix;
@@ -89,19 +89,19 @@ impl FineTexture {
 
         // Horizontal threads
         let h_wave = (y * scale * 8.0).sin();
-        let h_noise = self.value_noise(x * scale * 0.5, y * scale * 8.0);
+        let h_noise = Self::value_noise(x * scale * 0.5, y * scale * 8.0);
         let h_thread = (h_wave + h_noise * 0.3) * 0.5;
 
         // Vertical threads
         let v_wave = (x * scale * 8.0).sin();
-        let v_noise = self.value_noise(x * scale * 8.0, y * scale * 0.5);
+        let v_noise = Self::value_noise(x * scale * 8.0, y * scale * 0.5);
         let v_thread = (v_wave + v_noise * 0.3) * 0.5;
 
         // Combine with slight offset for weave pattern
         let weave = (h_thread + v_thread) * 0.5 + h_thread * v_thread * 0.3;
 
         // Add fine grain
-        let grain = self.value_noise(x * scale * 20.0, y * scale * 20.0) * 0.2;
+        let grain = Self::value_noise(x * scale * 20.0, y * scale * 20.0) * 0.2;
 
         weave + grain
     }

@@ -8,7 +8,7 @@
 //! instead of going through the stateless `PostEffect` trait.
 
 use super::PixelBuffer;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 /// Configuration for temporal smoothing effect
 #[derive(Clone, Debug)]
@@ -65,7 +65,7 @@ impl TemporalSmoothing {
             return current;
         }
 
-        let mut prev_guard = self.previous_frame.lock().expect("temporal smoothing mutex poisoned");
+        let mut prev_guard = self.previous_frame_guard();
 
         let result = if let Some(prev) = prev_guard.as_ref() {
             // Ensure frame sizes match
@@ -111,13 +111,18 @@ impl TemporalSmoothing {
 
     /// Reset temporal buffer (call when starting new video or after seeking)
     pub fn reset(&self) {
-        let mut prev_guard = self.previous_frame.lock().expect("temporal smoothing mutex poisoned");
+        let mut prev_guard = self.previous_frame_guard();
         *prev_guard = None;
     }
 
     /// Check if effect is enabled
+    #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    fn previous_frame_guard(&self) -> MutexGuard<'_, Option<PixelBuffer>> {
+        self.previous_frame.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

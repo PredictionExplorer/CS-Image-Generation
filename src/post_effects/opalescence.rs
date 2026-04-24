@@ -61,7 +61,7 @@ impl Opalescence {
 
     /// Smooth noise using bilinear interpolation
     #[inline]
-    fn smooth_noise(&self, x: f64, y: f64, seed: f64) -> f64 {
+    fn smooth_noise(x: f64, y: f64, seed: f64) -> f64 {
         let ix = x.floor();
         let iy = y.floor();
         let fx = x - ix;
@@ -94,7 +94,7 @@ impl Opalescence {
 
         for i in 0..self.config.layers {
             let layer_seed = (i + 1) as f64 * 91.234;
-            let noise = self.smooth_noise(
+            let noise = Self::smooth_noise(
                 x * frequency / self.config.scale,
                 y * frequency / self.config.scale,
                 layer_seed,

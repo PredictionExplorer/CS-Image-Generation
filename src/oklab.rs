@@ -117,7 +117,7 @@ impl GamutMapMode {
     /// Different strategies provide different tradeoffs between color accuracy
     /// and perceptual quality.
     #[must_use]
-    pub fn map_to_gamut(&self, r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    pub fn map_to_gamut(self, r: f64, g: f64, b: f64) -> (f64, f64, f64) {
         match self {
             GamutMapMode::Clamp => {
                 // Simple clamping - fast but can cause color shifts
