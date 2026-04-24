@@ -3,6 +3,7 @@
 //! This module manages the visual effects chain including bloom, blur, and tone mapping.
 //! It provides a configurable pipeline for post-processing rendered frames.
 
+use super::BloomMode;
 use super::constants;
 use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
@@ -34,8 +35,8 @@ const LUMA_B: f64 = 0.114;
 /// 6. Atmospheric effects (depth, texture)
 #[derive(Clone, Debug)]
 pub struct EffectConfig {
-    /// Bloom mode selector (e.g., "gaussian", "dog", "none")
-    pub bloom_mode: String,
+    /// Bloom algorithm selection.
+    pub bloom_mode: BloomMode,
     /// Gaussian blur radius in pixels
     pub blur_radius_px: usize,
     /// Bloom blur blend strength
@@ -148,7 +149,7 @@ impl FinishEffectPipeline {
         }
 
         // 1b. DoG bloom (edge-detected glow, mutually exclusive with Gaussian)
-        if config.bloom_mode == "dog" {
+        if config.bloom_mode == BloomMode::Dog {
             chain.add(Box::new(DogBloom::new(
                 config.dog_config.clone(),
                 config.blur_core_brightness,
@@ -620,7 +621,7 @@ mod tests {
 
     fn base_effect_config() -> EffectConfig {
         EffectConfig {
-            bloom_mode: "none".to_string(),
+            bloom_mode: BloomMode::None,
             blur_radius_px: 0,
             blur_strength: 0.0,
             blur_core_brightness: 1.0,

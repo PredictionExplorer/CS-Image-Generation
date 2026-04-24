@@ -220,9 +220,8 @@ pub fn build_effect_config_from_resolved(
     let height = resolved.height as usize;
     let min_dim = width.min(height);
 
-    let use_gaussian_bloom =
-        resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Gaussian);
-    let use_dog_bloom = resolved.enable_bloom && matches!(render_config.bloom_mode, BloomMode::Dog);
+    let bloom_mode = if resolved.enable_bloom { render_config.bloom_mode } else { BloomMode::None };
+    let use_gaussian_bloom = bloom_mode == BloomMode::Gaussian;
 
     let blur_radius_px = if use_gaussian_bloom {
         (resolved.blur_radius_scale * min_dim as f64).round() as usize
@@ -233,19 +232,13 @@ pub fn build_effect_config_from_resolved(
         build_fine_texture_config(resolved, output_mode);
 
     EffectConfig {
-        bloom_mode: if use_dog_bloom {
-            BloomMode::Dog.as_str().to_string()
-        } else if use_gaussian_bloom {
-            BloomMode::Gaussian.as_str().to_string()
-        } else {
-            BloomMode::None.as_str().to_string()
-        },
+        bloom_mode,
         blur_radius_px,
         blur_strength: resolved.blur_strength,
         blur_core_brightness: resolved.blur_core_brightness,
         dog_config: build_dog_config(resolved, min_dim),
         perceptual_blur_enabled: resolved.enable_perceptual_blur,
-        perceptual_blur_config: build_perceptual_blur_config(resolved, render_config.bloom_mode),
+        perceptual_blur_config: build_perceptual_blur_config(resolved, bloom_mode),
 
         color_grade_enabled: resolved.enable_color_grade,
         color_grade_params: build_color_grade_params(resolved, min_dim),

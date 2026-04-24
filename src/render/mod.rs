@@ -708,7 +708,7 @@ mod tests {
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
 
-        assert_eq!(effect_config.bloom_mode, "dog");
+        assert_eq!(effect_config.bloom_mode, BloomMode::Dog);
         assert_eq!(effect_config.blur_radius_px, 0);
         assert!(effect_config.dog_config.inner_sigma > 0.0);
     }
@@ -726,8 +726,25 @@ mod tests {
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
 
-        assert_eq!(effect_config.bloom_mode, "gaussian");
+        assert_eq!(effect_config.bloom_mode, BloomMode::Gaussian);
         assert!(effect_config.blur_radius_px > 0);
+    }
+
+    #[test]
+    fn test_build_effect_config_disables_bloom_mode_when_bloom_is_off() {
+        let resolved =
+            ResolvedEffectConfig { enable_bloom: false, ..baseline_resolved_config(640, 360) };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+
+        assert_eq!(effect_config.bloom_mode, BloomMode::None);
+        assert_eq!(effect_config.blur_radius_px, 0);
     }
 
     #[test]
