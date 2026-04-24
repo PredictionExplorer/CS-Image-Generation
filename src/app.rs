@@ -271,11 +271,56 @@ pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<
     sim_result.positions
 }
 
+fn validate_drift_positions(positions: &[Vec<Vector3<f64>>]) -> Result<usize> {
+    let Some(first_body) = positions.first() else {
+        return Err(render::error::RenderError::InvalidScene {
+            reason: "drift positions must contain at least one body".to_string(),
+        }
+        .into());
+    };
+
+    let num_steps = first_body.len();
+    if num_steps == 0 {
+        return Err(render::error::RenderError::InvalidScene {
+            reason: "drift positions must contain at least one step".to_string(),
+        }
+        .into());
+    }
+
+    for (body_idx, body_positions) in positions.iter().enumerate() {
+        if body_positions.len() != num_steps {
+            return Err(render::error::RenderError::InvalidScene {
+                reason: format!(
+                    "drift position track {body_idx} has {} steps, expected {num_steps}",
+                    body_positions.len()
+                ),
+            }
+            .into());
+        }
+
+        for (step_idx, point) in body_positions.iter().enumerate() {
+            for (axis, value) in [("x", point[0]), ("y", point[1]), ("z", point[2])] {
+                if !value.is_finite() {
+                    return Err(render::error::RenderError::InvalidScene {
+                        reason: format!(
+                            "drift position body {body_idx}, step {step_idx}, axis {axis} must be finite"
+                        ),
+                    }
+                    .into());
+                }
+            }
+        }
+    }
+
+    Ok(num_steps)
+}
+
 /// Apply drift transformation to positions.
 ///
 /// # Errors
 ///
-/// Returns an error when the drift configuration or drift mode is invalid.
+/// Returns an error when the drift configuration, drift mode, or position data
+/// is invalid.
 pub fn apply_drift_transformation(
     positions: &mut [Vec<Vector3<f64>>],
     drift_mode: &str,
@@ -290,7 +335,7 @@ pub fn apply_drift_transformation(
         resolve_drift_config(drift_scale, drift_arc_fraction, drift_orbit_eccentricity, rng)?;
 
     info!("Applying {} drift...", drift_mode);
-    let num_steps = positions[0].len();
+    let num_steps = validate_drift_positions(positions)?;
     let drift_params = resolved.to_drift_parameters();
 
     if crate::utils::is_zero(drift_params.arc_fraction)
@@ -740,6 +785,42 @@ mod tests {
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas[0], alphas[1]);
         assert_eq!(alphas[1], alphas[2]);
+    }
+
+    #[test]
+    fn test_apply_drift_rejects_empty_positions() {
+        let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
+        let mut positions: Vec<Vec<Vector3<f64>>> = Vec::new();
+
+        let err = apply_drift_transformation(&mut positions, "linear", None, None, None, &mut rng)
+            .expect_err("empty positions should fail drift validation");
+
+        assert!(err.to_string().contains("at least one body"));
+    }
+
+    #[test]
+    fn test_apply_drift_rejects_mismatched_position_lengths() {
+        let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
+        let mut positions = vec![
+            vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)],
+            vec![Vector3::new(0.0, 1.0, 0.0)],
+        ];
+
+        let err = apply_drift_transformation(&mut positions, "linear", None, None, None, &mut rng)
+            .expect_err("mismatched positions should fail drift validation");
+
+        assert!(err.to_string().contains("expected 2"));
+    }
+
+    #[test]
+    fn test_apply_drift_rejects_non_finite_positions() {
+        let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
+        let mut positions = vec![vec![Vector3::new(0.0, f64::INFINITY, 0.0)]];
+
+        let err = apply_drift_transformation(&mut positions, "linear", None, None, None, &mut rng)
+            .expect_err("non-finite positions should fail drift validation");
+
+        assert!(err.to_string().contains("axis y must be finite"));
     }
 
     fn sample_generation_log_config() -> GenerationLogConfig {
