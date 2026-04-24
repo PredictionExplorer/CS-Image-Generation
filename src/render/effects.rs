@@ -428,17 +428,22 @@ impl MipPyramid {
     }
 }
 
-/// Standalone bilinear upsampling function for arbitrary data
-/// Handles premultiplied alpha values correctly
-#[must_use]
-pub fn upsample_bilinear(
+/// Try to upsample arbitrary premultiplied RGBA data with bilinear filtering.
+///
+/// # Errors
+///
+/// Returns an error when source or target dimensions are zero, dimensions
+/// overflow `usize`, or the source buffer length does not match its dimensions.
+pub fn try_upsample_bilinear(
     src: &[(f64, f64, f64, f64)],
     src_w: usize,
     src_h: usize,
     target_w: usize,
     target_h: usize,
-) -> Vec<(f64, f64, f64, f64)> {
-    let mut result = vec![(0.0, 0.0, 0.0, 0.0); target_w * target_h];
+) -> Result<Vec<(f64, f64, f64, f64)>> {
+    validate_effect_buffer_shape("upsample source", src.len(), src_w, src_h)?;
+    let target_pixel_count = checked_effect_pixel_count("upsample target", target_w, target_h)?;
+    let mut result = vec![(0.0, 0.0, 0.0, 0.0); target_pixel_count];
 
     result.par_iter_mut().enumerate().for_each(|(idx, pixel)| {
         let x = idx % target_w;
@@ -500,7 +505,29 @@ pub fn upsample_bilinear(
         }
     });
 
-    result
+    Ok(result)
+}
+
+/// Standalone bilinear upsampling function for arbitrary data.
+///
+/// Handles premultiplied alpha values correctly.
+/// Prefer [`try_upsample_bilinear`] when dimensions or buffer lengths come
+/// from a caller boundary.
+///
+/// # Panics
+///
+/// Panics when source or target dimensions are zero, dimensions overflow
+/// `usize`, or the source buffer length does not match its dimensions.
+#[must_use]
+pub fn upsample_bilinear(
+    src: &[(f64, f64, f64, f64)],
+    src_w: usize,
+    src_h: usize,
+    target_w: usize,
+    target_h: usize,
+) -> Vec<(f64, f64, f64, f64)> {
+    try_upsample_bilinear(src, src_w, src_h, target_w, target_h)
+        .expect("upsample buffer shape should be valid")
 }
 
 /// Try to apply Difference-of-Gaussians bloom effect.
@@ -544,9 +571,9 @@ pub fn try_apply_dog_bloom(
 
     // Upsample both BLURRED data to original resolution
     let inner_upsampled =
-        upsample_bilinear(&blur_inner, pyramid.widths[1], pyramid.heights[1], width, height);
+        try_upsample_bilinear(&blur_inner, pyramid.widths[1], pyramid.heights[1], width, height)?;
     let outer_upsampled =
-        upsample_bilinear(&blur_outer, pyramid.widths[2], pyramid.heights[2], width, height);
+        try_upsample_bilinear(&blur_outer, pyramid.widths[2], pyramid.heights[2], width, height)?;
 
     // Compute DoG and apply threshold
     let mut dog_result = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
@@ -887,6 +914,35 @@ mod tests {
                 "Upsampled uniform data should stay near original"
             );
         }
+    }
+
+    #[test]
+    fn test_try_upsample_bilinear_rejects_zero_source_dimensions() {
+        let err =
+            try_upsample_bilinear(&[], 0, 4, 8, 8).expect_err("zero source width should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("upsample source dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_try_upsample_bilinear_rejects_zero_target_dimensions() {
+        let input: Vec<(f64, f64, f64, f64)> = vec![(1.0, 0.5, 0.25, 1.0); 16];
+        let err =
+            try_upsample_bilinear(&input, 4, 4, 0, 8).expect_err("zero target width should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("upsample target dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_try_upsample_bilinear_rejects_source_shape_mismatch() {
+        let input: Vec<(f64, f64, f64, f64)> = vec![(1.0, 0.5, 0.25, 1.0); 15];
+        let err = try_upsample_bilinear(&input, 4, 4, 8, 8)
+            .expect_err("mismatched source buffer should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("upsample source buffer length"));
     }
 
     #[test]
