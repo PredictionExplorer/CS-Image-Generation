@@ -106,6 +106,30 @@ mod tests {
     }
 
     #[test]
+    fn test_bin_buffers_validate_image_shape_rejects_length_mismatch() {
+        let mut spd = make_test_spd();
+        spd.pop();
+
+        let err = BinBuffers::validate_image_shape(&spd, TEST_W as u32, TEST_H as u32)
+            .expect_err("mismatched SPD length should fail validation");
+
+        assert!(matches!(err, crate::render::error::RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("accumulated SPD length"));
+    }
+
+    #[test]
+    fn test_bin_buffers_validate_image_shape_rejects_zero_dimensions() {
+        let err = BinBuffers::validate_image_shape(&[], 0, TEST_H as u32)
+            .expect_err("zero width should fail validation");
+
+        assert!(matches!(
+            err,
+            crate::render::error::RenderError::InvalidDimensions { width: 0, height }
+                if height == TEST_H as u32
+        ));
+    }
+
+    #[test]
     fn test_bin_buffers_all_values_in_unit_range() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
@@ -431,6 +455,20 @@ mod tests {
             std::fs::read_dir(&dir).expect("gallery directory should be readable").count(),
             NUM_BINS
         );
+    }
+
+    #[test]
+    fn test_gallery_rejects_spd_shape_before_creating_output_dir() {
+        let tmp = tempfile::tempdir().expect("failed to create temp directory");
+        let dir = tmp.path().join("nested").join("gallery");
+
+        let mut spd = make_single_bin_spd(20, 1.0);
+        spd.pop();
+        let err = generate_spectral_gallery(&spd, TEST_W as u32, TEST_H as u32, &dir)
+            .expect_err("mismatched SPD length should fail");
+
+        assert!(matches!(err, crate::render::error::RenderError::InvalidScene { .. }));
+        assert!(!dir.exists(), "invalid input should not create output directories");
     }
 
     #[test]

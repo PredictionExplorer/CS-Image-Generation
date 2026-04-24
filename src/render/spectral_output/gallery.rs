@@ -1,6 +1,6 @@
 //! Per-bin spectral gallery PNG generation.
 
-use super::BinBuffers;
+use super::bin_buffers::{BinBuffers, checked_pixel_count};
 use crate::render::constants;
 use crate::render::error::{RenderError, Result};
 use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin};
@@ -21,6 +21,8 @@ pub fn generate_spectral_gallery(
     height: u32,
     output_dir: impl AsRef<Path>,
 ) -> Result<()> {
+    let (width_usize, height_usize, pixel_count) =
+        BinBuffers::validate_image_shape(accum_spd, width, height)?;
     let output_dir = output_dir.as_ref();
     std::fs::create_dir_all(output_dir).map_err(|e| RenderError::ImageEncoding {
         reason: format!(
@@ -30,7 +32,7 @@ pub fn generate_spectral_gallery(
     })?;
 
     info!("Building BinBuffers ({NUM_BINS} bins)...");
-    let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+    let bin_buffers = BinBuffers::from_validated(accum_spd, width_usize, height_usize, pixel_count);
 
     info!("Generating spectral gallery ({NUM_BINS} bin images)...");
     (0..NUM_BINS).into_par_iter().try_for_each(|bin| {
@@ -45,8 +47,19 @@ pub fn generate_spectral_gallery(
 
 fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &Path) -> Result<()> {
     use crate::utils::f64_to_u16_saturating;
-    let pixel_count = (width * height) as usize;
-    let mut raw = Vec::with_capacity(pixel_count * 3);
+    let pixel_count = checked_pixel_count(width, height)?;
+    if buf.len() != pixel_count {
+        return Err(RenderError::InvalidScene {
+            reason: format!(
+                "bin buffer length ({}) does not match dimensions {width}x{height} ({pixel_count} pixels)",
+                buf.len()
+            ),
+        });
+    }
+
+    let raw_capacity =
+        pixel_count.checked_mul(3).ok_or(RenderError::InvalidDimensions { width, height })?;
+    let mut raw = Vec::with_capacity(raw_capacity);
     for pixel in buf {
         raw.push(f64_to_u16_saturating(
             f64::from(pixel[0].clamp(0.0, 1.0)) * constants::U16_MAX_F64,

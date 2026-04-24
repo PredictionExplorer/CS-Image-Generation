@@ -3,6 +3,7 @@
 use crate::render::constants;
 #[cfg(test)]
 use crate::render::context::PixelBuffer;
+use crate::render::error::{RenderError, Result};
 use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin, wavelength_to_rgb};
 use rayon::prelude::*;
 
@@ -14,6 +15,41 @@ pub struct BinBuffers {
 }
 
 impl BinBuffers {
+    pub(super) fn validate_image_shape(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: u32,
+        height: u32,
+    ) -> Result<(usize, usize, usize)> {
+        let pixel_count = checked_pixel_count(width, height)?;
+        if accum_spd.len() != pixel_count {
+            return Err(RenderError::InvalidScene {
+                reason: format!(
+                    "accumulated SPD length ({}) does not match dimensions {width}x{height} ({pixel_count} pixels)",
+                    accum_spd.len()
+                ),
+            });
+        }
+
+        let width_usize =
+            usize::try_from(width).map_err(|_| RenderError::InvalidDimensions { width, height })?;
+        let height_usize = usize::try_from(height)
+            .map_err(|_| RenderError::InvalidDimensions { width, height })?;
+
+        Ok((width_usize, height_usize, pixel_count))
+    }
+
+    pub(super) fn from_validated(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: usize,
+        height: usize,
+        pixel_count: usize,
+    ) -> Self {
+        debug_assert_eq!(accum_spd.len(), pixel_count);
+        debug_assert_eq!(width.checked_mul(height), Some(pixel_count));
+
+        Self::build(accum_spd, width, height, pixel_count)
+    }
+
     /// Build 64 bin images from the accumulated SPD buffer.
     ///
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
@@ -24,9 +60,18 @@ impl BinBuffers {
     /// Panics when `accum_spd.len()` does not equal `width * height`.
     #[must_use]
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
-        let pixel_count = width * height;
+        let pixel_count = width.checked_mul(height).expect("image dimensions overflow usize");
         assert_eq!(accum_spd.len(), pixel_count);
 
+        Self::build(accum_spd, width, height, pixel_count)
+    }
+
+    fn build(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: usize,
+        height: usize,
+        pixel_count: usize,
+    ) -> Self {
         let inv_gamma = 1.0 / constants::DISPLAY_GAMMA;
 
         let buffers: Vec<Vec<[f32; 3]>> = (0..NUM_BINS)
@@ -104,6 +149,17 @@ impl BinBuffers {
             })
             .collect()
     }
+}
+
+pub(super) fn checked_pixel_count(width: u32, height: u32) -> Result<usize> {
+    if width == 0 || height == 0 {
+        return Err(RenderError::InvalidDimensions { width, height });
+    }
+
+    u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|count| usize::try_from(count).ok())
+        .ok_or(RenderError::InvalidDimensions { width, height })
 }
 
 impl std::fmt::Debug for BinBuffers {
