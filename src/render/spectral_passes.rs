@@ -377,18 +377,18 @@ fn pass_2_write_frames_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
-        let mut trajectory_pixels = finish_pipeline
-            .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
-            .map_err(|e| RenderError::EffectChain {
-                effect_name: "trajectory_chain".into(),
-                reason: e.to_string(),
-            })?;
+        let mut trajectory_pixels = finish_pipeline.process_trajectory(
+            rgba_buffer,
+            width as usize,
+            height as usize,
+            &frame_params,
+        )?;
 
         let display_buffer =
             tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
 
         // Reclaim the trajectory buffer's allocation back into accum_rgba.
-        // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
+        // It will be fully overwritten by SPD conversion next iteration,
         // so we just need the capacity -- no need to clear or resize.
         trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
         accum_rgba = trajectory_pixels;
@@ -397,12 +397,12 @@ fn pass_2_write_frames_spectral_with_backend(
             None => display_buffer,
         };
 
-        let final_display = finish_pipeline
-            .process_image(smoothed_display, width as usize, height as usize, &frame_params)
-            .map_err(|e| RenderError::EffectChain {
-                effect_name: "image_chain".into(),
-                reason: e.to_string(),
-            })?;
+        let final_display = finish_pipeline.process_image(
+            smoothed_display,
+            width as usize,
+            height as usize,
+            &frame_params,
+        )?;
         let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
         let buf_bytes: &[u8] = bytemuck::cast_slice(&buf_16bit);
 
@@ -515,21 +515,21 @@ fn render_final_frame_spectral_with_backend(
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
-    let trajectory_pixels = finish_pipeline
-        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain {
-            effect_name: "trajectory_chain".into(),
-            reason: e.to_string(),
-        })?;
+    let trajectory_pixels = finish_pipeline.process_trajectory(
+        accum_rgba,
+        width as usize,
+        height as usize,
+        &frame_params,
+    )?;
 
     let display_buffer =
         tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
-    let final_display = finish_pipeline
-        .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain {
-            effect_name: "image_chain".into(),
-            reason: e.to_string(),
-        })?;
+    let final_display = finish_pipeline.process_image(
+        display_buffer,
+        width as usize,
+        height as usize,
+        &frame_params,
+    )?;
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
@@ -618,21 +618,21 @@ fn render_single_frame_spectral_with_backend(
     )?;
 
     let frame_params = FrameParams { frame_number: 0, density: None };
-    let trajectory_pixels = finish_pipeline
-        .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain {
-            effect_name: "trajectory_chain".into(),
-            reason: e.to_string(),
-        })?;
+    let trajectory_pixels = finish_pipeline.process_trajectory(
+        accum_rgba,
+        width as usize,
+        height as usize,
+        &frame_params,
+    )?;
 
     let display_buffer =
         tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
-    let final_display = finish_pipeline
-        .process_image(display_buffer, width as usize, height as usize, &frame_params)
-        .map_err(|e| RenderError::EffectChain {
-            effect_name: "image_chain".into(),
-            reason: e.to_string(),
-        })?;
+    let final_display = finish_pipeline.process_image(
+        display_buffer,
+        width as usize,
+        height as usize,
+        &frame_params,
+    )?;
     let buf_16bit = quantize_display_buffer_to_16bit(&final_display);
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
