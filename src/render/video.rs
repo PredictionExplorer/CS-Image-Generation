@@ -330,18 +330,11 @@ pub(crate) fn create_video_from_frames_singlepass_with_encoder(
     options: &VideoEncodingOptions,
     encoder: &dyn VideoEncoder,
 ) -> Result<()> {
+    validate_video_request(width, height, frame_rate)?;
     encoder.encode(width, height, frame_rate, frames_iter, output_file, options)
 }
 
-fn encode_with_ffmpeg(
-    width: u32,
-    height: u32,
-    frame_rate: u32,
-    frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
-    output_file: &Path,
-    options: &VideoEncodingOptions,
-) -> Result<()> {
-    // Validate parameters
+fn validate_video_request(width: u32, height: u32, frame_rate: u32) -> Result<()> {
     if width == 0 || height == 0 {
         return Err(RenderError::InvalidDimensions { width, height });
     }
@@ -353,6 +346,17 @@ fn encode_with_ffmpeg(
         });
     }
 
+    Ok(())
+}
+
+fn encode_with_ffmpeg(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+    output_file: &Path,
+    options: &VideoEncodingOptions,
+) -> Result<()> {
     info!("Encoding video with codec: {}, pixel format: {}", options.codec, options.pixel_format);
 
     let mut cmd = build_ffmpeg_command(width, height, frame_rate, output_file, options);
@@ -419,6 +423,22 @@ mod tests {
     fn arg_after<'a>(args: &'a [String], flag: &str) -> &'a str {
         let index = args.iter().position(|arg| arg == flag).expect("flag should be present");
         &args[index + 1]
+    }
+
+    struct PanicVideoEncoder;
+
+    impl VideoEncoder for PanicVideoEncoder {
+        fn encode(
+            &self,
+            _width: u32,
+            _height: u32,
+            _frame_rate: u32,
+            _frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+            _output_file: &Path,
+            _options: &VideoEncodingOptions,
+        ) -> Result<()> {
+            panic!("encoder should not be called for invalid video parameters");
+        }
     }
 
     #[test]
@@ -611,6 +631,27 @@ mod tests {
     }
 
     #[test]
+    fn test_encoder_seam_rejects_invalid_dimensions_before_encoder() {
+        let options = VideoEncodingOptions::default();
+        let mut frames = |_writer: &mut dyn Write| -> std::result::Result<(), Box<dyn Error>> {
+            panic!("frame writer should not run for invalid dimensions");
+        };
+
+        let err = create_video_from_frames_singlepass_with_encoder(
+            0,
+            1080,
+            60,
+            &mut frames,
+            Path::new("out.mp4"),
+            &options,
+            &PanicVideoEncoder,
+        )
+        .expect_err("zero width should fail validation");
+
+        assert!(matches!(err, RenderError::InvalidDimensions { width: 0, height: 1080 }));
+    }
+
+    #[test]
     fn test_create_video_rejects_zero_frame_rate_before_spawning() {
         let options = VideoEncodingOptions::default();
         let err = create_video_from_frames_singlepass(
@@ -620,6 +661,29 @@ mod tests {
             |_| panic!("frame writer should not run for invalid frame rate"),
             "out.mp4",
             &options,
+        )
+        .expect_err("zero frame rate should fail validation");
+
+        assert!(
+            matches!(err, RenderError::InvalidConfig { parameter, .. } if parameter == "frame_rate")
+        );
+    }
+
+    #[test]
+    fn test_encoder_seam_rejects_zero_frame_rate_before_encoder() {
+        let options = VideoEncodingOptions::default();
+        let mut frames = |_writer: &mut dyn Write| -> std::result::Result<(), Box<dyn Error>> {
+            panic!("frame writer should not run for invalid frame rate");
+        };
+
+        let err = create_video_from_frames_singlepass_with_encoder(
+            1920,
+            1080,
+            0,
+            &mut frames,
+            Path::new("out.mp4"),
+            &options,
+            &PanicVideoEncoder,
         )
         .expect_err("zero frame rate should fail validation");
 
