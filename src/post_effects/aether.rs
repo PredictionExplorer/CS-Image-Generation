@@ -5,7 +5,7 @@
 //! organic, woven texture, and then applies volumetric scattering, iridescent
 //! color shifts, and negative space caustics for a deeply textured, ethereal look.
 
-use super::PixelBuffer;
+use super::{PixelBuffer, PostEffectError, validate_buffer_shape};
 use crate::render::constants;
 use rayon::prelude::*;
 
@@ -78,17 +78,12 @@ fn anisotropic_voronoi(p: (f64, f64), flow_dir: f64, flow_strength: f64) -> f64 
     min_dist.sqrt()
 }
 
-/// Applies the Woven Æther effect to a buffer of linear RGBA pixels.
-pub fn apply_aether_weave(
+fn apply_aether_weave_unchecked(
     buffer: &mut PixelBuffer,
     width: usize,
     height: usize,
     config: &AetherConfig,
 ) {
-    if buffer.is_empty() {
-        return;
-    }
-
     let gradients = super::utils::calculate_gradients(buffer, width, height);
 
     let cell_scale = (width as f64 * height as f64).sqrt() / config.filament_density.max(1.0);
@@ -144,6 +139,47 @@ pub fn apply_aether_weave(
     });
 }
 
+/// Try to apply the Woven Æther effect to a buffer of linear RGBA pixels.
+///
+/// # Errors
+///
+/// Returns an error when dimensions are zero, dimensions overflow `usize`, or
+/// the buffer length does not match the supplied dimensions.
+pub fn try_apply_aether_weave(
+    buffer: &mut PixelBuffer,
+    width: usize,
+    height: usize,
+    config: &AetherConfig,
+) -> Result<(), PostEffectError> {
+    validate_buffer_shape("aether weave input", buffer.len(), width, height)?;
+    apply_aether_weave_unchecked(buffer, width, height, config);
+    Ok(())
+}
+
+/// Applies the Woven Æther effect to a buffer of linear RGBA pixels.
+///
+/// Prefer [`try_apply_aether_weave`] when dimensions or buffer lengths come from
+/// a caller boundary.
+///
+/// # Panics
+///
+/// Panics when dimensions are zero, dimensions overflow `usize`, or the buffer
+/// length does not match the supplied dimensions. An empty `0x0` buffer is kept
+/// as a no-op for backwards compatibility.
+pub fn apply_aether_weave(
+    buffer: &mut PixelBuffer,
+    width: usize,
+    height: usize,
+    config: &AetherConfig,
+) {
+    if buffer.is_empty() && width == 0 && height == 0 {
+        return;
+    }
+
+    try_apply_aether_weave(buffer, width, height, config)
+        .expect("aether weave buffer shape should be valid");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +206,28 @@ mod tests {
         let mut buffer: Vec<(f64, f64, f64, f64)> = vec![];
         apply_aether_weave(&mut buffer, 0, 0, &AetherConfig::default());
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_try_apply_rejects_zero_dimensions() {
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![];
+        let err = try_apply_aether_weave(&mut buffer, 0, 0, &AetherConfig::default())
+            .expect_err("zero dimensions should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("aether weave input"));
+        assert!(err.to_string().contains("dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_try_apply_rejects_invalid_buffer_shape() {
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.3, 0.2, 1.0); 99];
+        let err = try_apply_aether_weave(&mut buffer, 10, 10, &AetherConfig::default())
+            .expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("aether weave input"));
+        assert!(err.to_string().contains("buffer length"));
     }
 
     #[test]

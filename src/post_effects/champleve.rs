@@ -5,7 +5,7 @@
 //! create a high-end, crafted aesthetic reminiscent of fine jewelry or
 //! crystalline structures.
 
-use super::PixelBuffer;
+use super::{PixelBuffer, PostEffectError, validate_buffer_shape};
 use crate::render::constants;
 use rayon::prelude::*;
 
@@ -82,17 +82,12 @@ fn voronoi_distances(p: (f64, f64)) -> (f64, f64) {
     (closest, second_closest)
 }
 
-/// Applies the champlevé iridescent effect to a buffer of linear RGBA pixels.
-pub fn apply_champleve_iridescence(
+fn apply_champleve_iridescence_unchecked(
     buffer: &mut PixelBuffer,
     width: usize,
     height: usize,
     config: &ChampleveConfig,
 ) {
-    if buffer.is_empty() {
-        return;
-    }
-
     let gradients = super::utils::calculate_gradients(buffer, width, height);
 
     let cell_scale = (width as f64 * height as f64).sqrt() / config.cell_density.max(1.0);
@@ -149,6 +144,47 @@ pub fn apply_champleve_iridescence(
     });
 }
 
+/// Try to apply the champlevé iridescent effect to a buffer of linear RGBA pixels.
+///
+/// # Errors
+///
+/// Returns an error when dimensions are zero, dimensions overflow `usize`, or
+/// the buffer length does not match the supplied dimensions.
+pub fn try_apply_champleve_iridescence(
+    buffer: &mut PixelBuffer,
+    width: usize,
+    height: usize,
+    config: &ChampleveConfig,
+) -> Result<(), PostEffectError> {
+    validate_buffer_shape("champleve iridescence input", buffer.len(), width, height)?;
+    apply_champleve_iridescence_unchecked(buffer, width, height, config);
+    Ok(())
+}
+
+/// Applies the champlevé iridescent effect to a buffer of linear RGBA pixels.
+///
+/// Prefer [`try_apply_champleve_iridescence`] when dimensions or buffer lengths
+/// come from a caller boundary.
+///
+/// # Panics
+///
+/// Panics when dimensions are zero, dimensions overflow `usize`, or the buffer
+/// length does not match the supplied dimensions. An empty `0x0` buffer is kept
+/// as a no-op for backwards compatibility.
+pub fn apply_champleve_iridescence(
+    buffer: &mut PixelBuffer,
+    width: usize,
+    height: usize,
+    config: &ChampleveConfig,
+) {
+    if buffer.is_empty() && width == 0 && height == 0 {
+        return;
+    }
+
+    try_apply_champleve_iridescence(buffer, width, height, config)
+        .expect("champleve iridescence buffer shape should be valid");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +212,28 @@ mod tests {
         let mut buffer: Vec<(f64, f64, f64, f64)> = vec![];
         apply_champleve_iridescence(&mut buffer, 0, 0, &ChampleveConfig::default());
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_try_apply_rejects_zero_dimensions() {
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![];
+        let err = try_apply_champleve_iridescence(&mut buffer, 0, 0, &ChampleveConfig::default())
+            .expect_err("zero dimensions should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("champleve iridescence input"));
+        assert!(err.to_string().contains("dimensions must be non-zero"));
+    }
+
+    #[test]
+    fn test_try_apply_rejects_invalid_buffer_shape() {
+        let mut buffer: Vec<(f64, f64, f64, f64)> = vec![(0.5, 0.3, 0.2, 1.0); 99];
+        let err = try_apply_champleve_iridescence(&mut buffer, 10, 10, &ChampleveConfig::default())
+            .expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("champleve iridescence input"));
+        assert!(err.to_string().contains("buffer length"));
     }
 
     #[test]

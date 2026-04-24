@@ -188,9 +188,11 @@ pub mod perceptual_blur;
 pub mod temporal_smoothing;
 pub(super) mod utils;
 
-pub use aether::{AetherConfig, apply_aether_weave};
+pub use aether::{AetherConfig, apply_aether_weave, try_apply_aether_weave};
 pub use atmospheric_depth::{AtmosphericDepth, AtmosphericDepthConfig};
-pub use champleve::{ChampleveConfig, apply_champleve_iridescence};
+pub use champleve::{
+    ChampleveConfig, apply_champleve_iridescence, try_apply_champleve_iridescence,
+};
 pub use chromatic_bloom::{ChromaticBloom, ChromaticBloomConfig};
 pub use color_grade::{CinematicColorGrade, ColorGradeParams};
 pub use dog_bloom::DogBloom;

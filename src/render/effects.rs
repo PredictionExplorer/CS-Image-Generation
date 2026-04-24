@@ -14,7 +14,7 @@ use crate::post_effects::{
     EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
     GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
     Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    PostEffectChain, aether::AetherConfig, try_apply_aether_weave, try_apply_champleve_iridescence,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba_with_sat_boost};
 use rayon::prelude::*;
@@ -714,7 +714,7 @@ impl PostEffect for ChampleveFinish {
         height: usize,
     ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
         let mut buffer = input.clone();
-        apply_champleve_iridescence(&mut buffer, width, height, &self.config);
+        try_apply_champleve_iridescence(&mut buffer, width, height, &self.config)?;
         Ok(buffer)
     }
 }
@@ -737,7 +737,7 @@ impl PostEffect for AetherFinish {
         height: usize,
     ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
         let mut buffer = input.clone();
-        apply_aether_weave(&mut buffer, width, height, &self.config);
+        try_apply_aether_weave(&mut buffer, width, height, &self.config)?;
         Ok(buffer)
     }
 }
@@ -973,5 +973,27 @@ mod tests {
 
         assert!(matches!(err, RenderError::InvalidScene { .. }));
         assert!(err.to_string().contains("DoG bloom input buffer length"));
+    }
+
+    #[test]
+    fn test_champleve_finish_rejects_shape_mismatch() {
+        let effect = ChampleveFinish::new(ChampleveConfig::default());
+        let input: PixelBuffer = vec![(0.5, 0.4, 0.3, 1.0); 3];
+
+        let err = effect.process(&input, 2, 2).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, crate::post_effects::PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("champleve iridescence input"));
+    }
+
+    #[test]
+    fn test_aether_finish_rejects_shape_mismatch() {
+        let effect = AetherFinish::new(AetherConfig::default());
+        let input: PixelBuffer = vec![(0.5, 0.4, 0.3, 1.0); 3];
+
+        let err = effect.process(&input, 2, 2).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, crate::post_effects::PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("aether weave input"));
     }
 }
