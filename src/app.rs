@@ -25,7 +25,10 @@ use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
 const OUTPUT_ROOT: &str = "output";
+pub(crate) const IMAGE_FILE_NAME: &str = "image.png";
+pub(crate) const VIDEO_FILE_NAME: &str = "video.mp4";
 pub(crate) const SPECTRAL_DIR_NAME: &str = "spectral";
+pub(crate) const SPECTRAL_SWEEP_FILE_NAME: &str = "spectral_sweep.mp4";
 
 pub(crate) fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
@@ -127,9 +130,9 @@ pub struct GenerationLogConfig {
     pub weights_randomized: bool,
 }
 
-/// Initialize per-seed output directory structure and return the directory path:
-///   output/{seed}/
-///   output/{seed}/spectral/
+/// Initialize an output directory structure and return the directory path:
+/// `output/{output_name}/`
+/// `output/{output_name}/spectral/`
 ///
 /// Rejects output names containing path separators or `..` to prevent directory traversal.
 ///
@@ -137,15 +140,15 @@ pub struct GenerationLogConfig {
 ///
 /// Returns an error when the output name is unsafe or the output directories
 /// cannot be created.
-pub fn setup_seed_directory_path(seed: &str) -> Result<PathBuf> {
-    validate_output_name(seed)?;
+pub fn setup_output_directory_path(output_name: &str) -> Result<PathBuf> {
+    validate_output_name(output_name)?;
 
-    let seed_dir = Path::new(OUTPUT_ROOT).join(seed);
-    let spectral_dir = seed_dir.join(SPECTRAL_DIR_NAME);
+    let output_dir = Path::new(OUTPUT_ROOT).join(output_name);
+    let spectral_dir = output_dir.join(SPECTRAL_DIR_NAME);
 
-    fs::create_dir_all(&seed_dir).map_err(|e| ConfigError::FileSystem {
+    fs::create_dir_all(&output_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
-        path: path_to_string(&seed_dir),
+        path: path_to_string(&output_dir),
         error: e,
     })?;
 
@@ -155,19 +158,39 @@ pub fn setup_seed_directory_path(seed: &str) -> Result<PathBuf> {
         error: e,
     })?;
 
-    Ok(seed_dir)
+    Ok(output_dir)
 }
 
-/// Initialize per-seed output directories and return a displayable path string.
+/// Initialize output directories and return a displayable path string.
 ///
-/// Prefer [`setup_seed_directory_path`] for new filesystem-facing code.
+/// Prefer [`setup_output_directory_path`] for new filesystem-facing code.
 ///
 /// # Errors
 ///
 /// Returns an error when the output name is unsafe or the output directories
 /// cannot be created.
-pub fn setup_seed_directory(seed: &str) -> Result<String> {
-    setup_seed_directory_path(seed).map(|path| path_to_string(&path))
+pub fn setup_output_directory(output_name: &str) -> Result<String> {
+    setup_output_directory_path(output_name).map(|path| path_to_string(&path))
+}
+
+/// Backward-compatible alias for [`setup_output_directory_path`].
+///
+/// # Errors
+///
+/// Returns an error when the output name is unsafe or the output directories
+/// cannot be created.
+pub fn setup_seed_directory_path(output_name: &str) -> Result<PathBuf> {
+    setup_output_directory_path(output_name)
+}
+
+/// Backward-compatible alias for [`setup_output_directory`].
+///
+/// # Errors
+///
+/// Returns an error when the output name is unsafe or the output directories
+/// cannot be created.
+pub fn setup_seed_directory(output_name: &str) -> Result<String> {
+    setup_output_directory(output_name)
 }
 
 /// Validate an output directory name without creating it.
@@ -989,36 +1012,49 @@ mod tests {
     }
 
     #[test]
-    fn test_setup_seed_directory_returns_correct_path() {
-        let result = setup_seed_directory("test_seed_42");
+    fn test_setup_output_directory_returns_correct_path() {
+        let result = setup_output_directory("test_output_42");
         assert!(result.is_ok());
-        let seed_dir = result.expect("seed directory setup should succeed");
-        let expected_dir = Path::new(OUTPUT_ROOT).join("test_seed_42");
-        assert_eq!(seed_dir, path_to_string(&expected_dir));
+        let output_dir = result.expect("output directory setup should succeed");
+        let expected_dir = Path::new(OUTPUT_ROOT).join("test_output_42");
+        assert_eq!(output_dir, path_to_string(&expected_dir));
         assert!(expected_dir.is_dir());
         assert!(expected_dir.join(SPECTRAL_DIR_NAME).is_dir());
         let _ = fs::remove_dir_all(expected_dir);
     }
 
     #[test]
-    fn test_setup_seed_directory_path_returns_path_buf() {
-        let seed_dir = setup_seed_directory_path("test_seed_path")
-            .expect("seed directory setup should succeed");
-        let expected_dir = Path::new(OUTPUT_ROOT).join("test_seed_path");
+    fn test_setup_output_directory_path_returns_path_buf() {
+        let output_dir =
+            setup_output_directory_path("test_output_path").expect("output setup should succeed");
+        let expected_dir = Path::new(OUTPUT_ROOT).join("test_output_path");
 
-        assert_eq!(seed_dir, expected_dir);
-        assert!(seed_dir.is_dir());
-        assert!(seed_dir.join(SPECTRAL_DIR_NAME).is_dir());
-        let _ = fs::remove_dir_all(seed_dir);
+        assert_eq!(output_dir, expected_dir);
+        assert!(output_dir.is_dir());
+        assert!(output_dir.join(SPECTRAL_DIR_NAME).is_dir());
+        let _ = fs::remove_dir_all(output_dir);
     }
 
     #[test]
-    fn test_setup_seed_directory_idempotent() {
-        let r1 = setup_seed_directory("seed_idem");
-        let r2 = setup_seed_directory("seed_idem");
+    fn test_setup_output_directory_idempotent() {
+        let r1 = setup_output_directory("output_idem");
+        let r2 = setup_output_directory("output_idem");
         assert!(r1.is_ok());
         assert!(r2.is_ok());
-        let _ = fs::remove_dir_all(Path::new(OUTPUT_ROOT).join("seed_idem"));
+        let _ = fs::remove_dir_all(Path::new(OUTPUT_ROOT).join("output_idem"));
+    }
+
+    #[test]
+    fn test_seed_directory_helpers_remain_compatible_aliases() {
+        let string_path =
+            setup_seed_directory("seed_alias_string").expect("alias should create directory");
+        let expected_string_dir = Path::new(OUTPUT_ROOT).join("seed_alias_string");
+        assert_eq!(string_path, path_to_string(&expected_string_dir));
+        let _ = fs::remove_dir_all(expected_string_dir);
+
+        let path = setup_seed_directory_path("seed_alias_path").expect("alias should create path");
+        assert_eq!(path, Path::new(OUTPUT_ROOT).join("seed_alias_path"));
+        let _ = fs::remove_dir_all(path);
     }
 
     #[test]

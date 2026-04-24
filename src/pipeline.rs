@@ -242,10 +242,10 @@ impl GenerationOutputs {
         let seed_path = seed_dir.as_ref();
         Self {
             seed_dir: app::path_to_string(seed_path),
-            image_png: app::path_to_string(&seed_path.join("image.png")),
-            video_mp4: app::path_to_string(&seed_path.join("video.mp4")),
+            image_png: app::path_to_string(&seed_path.join(app::IMAGE_FILE_NAME)),
+            video_mp4: app::path_to_string(&seed_path.join(app::VIDEO_FILE_NAME)),
             spectral_dir: app::path_to_string(&seed_path.join(app::SPECTRAL_DIR_NAME)),
-            spectral_sweep_mp4: app::path_to_string(&seed_path.join("spectral_sweep.mp4")),
+            spectral_sweep_mp4: app::path_to_string(&seed_path.join(app::SPECTRAL_SWEEP_FILE_NAME)),
         }
     }
 
@@ -316,7 +316,7 @@ pub(crate) fn run_generation_with_video_encoder(
 
     let seed_bytes = app::parse_seed(&request.seed)?;
     let hex_seed = seed_hex(&request.seed);
-    let seed_dir = app::setup_seed_directory_path(&request.output)?;
+    let seed_dir = app::setup_output_directory_path(&request.output)?;
     let outputs = GenerationOutputs::for_seed_dir(&seed_dir);
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
@@ -836,12 +836,12 @@ mod tests {
 
         assert_eq!(outputs.seed_dir, app::path_to_string(&seed_dir));
         assert_eq!(outputs.seed_dir_path(), seed_dir.as_path());
-        assert_eq!(outputs.image_png_path(), seed_dir.join("image.png").as_path());
-        assert_eq!(outputs.video_mp4_path(), seed_dir.join("video.mp4").as_path());
+        assert_eq!(outputs.image_png_path(), seed_dir.join(app::IMAGE_FILE_NAME).as_path());
+        assert_eq!(outputs.video_mp4_path(), seed_dir.join(app::VIDEO_FILE_NAME).as_path());
         assert_eq!(outputs.spectral_dir_path(), seed_dir.join(app::SPECTRAL_DIR_NAME).as_path());
         assert_eq!(
             outputs.spectral_sweep_mp4_path(),
-            seed_dir.join("spectral_sweep.mp4").as_path()
+            seed_dir.join(app::SPECTRAL_SWEEP_FILE_NAME).as_path()
         );
     }
 
