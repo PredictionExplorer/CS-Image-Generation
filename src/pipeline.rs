@@ -15,10 +15,9 @@ use crate::render::{
 };
 use crate::sim::{BordaWeights, Sha3RandomByteStream, TrajectoryResult};
 use crate::spectrum::NUM_BINS;
-use crate::spectrum_simd;
 use nalgebra::Vector3;
 use rayon::ThreadPoolBuilder;
-use std::sync::{OnceLock, atomic::Ordering};
+use std::sync::OnceLock;
 use tracing::{info, warn};
 
 /// Default output directory stem when the CLI does not provide one.
@@ -282,7 +281,6 @@ pub(crate) fn run_generation_with_video_encoder(
     install_global_thread_pool()?;
 
     let enhancements = Enhancements::default();
-    configure_global_enhancements(&enhancements);
 
     let seed_bytes = app::parse_seed(&request.seed)?;
     let hex_seed = seed_hex(&request.seed);
@@ -316,6 +314,9 @@ pub(crate) fn run_generation_with_video_encoder(
     let render_config = RenderConfig {
         hdr_scale: resolved_effect_config.hdr_scale,
         bloom_mode: render::BloomMode::Dog,
+        sat_boost: enhancements.sat_boost,
+        aces_tweak: enhancements.aces_tweak,
+        dispersion_boost: enhancements.dispersion_boost,
     };
     render_outputs(
         RenderOutputInputs {
@@ -369,13 +370,6 @@ fn install_global_thread_pool() -> Result<()> {
         Err(message) if message.contains("already") && message.contains("initialized") => Ok(()),
         Err(message) => Err(std::io::Error::other(message.clone()).into()),
     }
-}
-
-fn configure_global_enhancements(enhancements: &Enhancements) {
-    spectrum_simd::SAT_BOOST_ENABLED.store(enhancements.sat_boost, Ordering::Relaxed);
-    render::ACES_TWEAK_ENABLED.store(enhancements.aces_tweak, Ordering::Relaxed);
-    render::drawing::DISPERSION_BOOST_ENABLED
-        .store(enhancements.dispersion_boost, Ordering::Relaxed);
 }
 
 fn seed_hex(seed: &str) -> &str {
@@ -583,6 +577,9 @@ fn build_generation_log_config(
         dog_ratio: resolved.dog_ratio,
         hdr_mode: DEFAULT_HDR_MODE.to_string(),
         hdr_scale: render_config.hdr_scale,
+        sat_boost: render_config.sat_boost,
+        aces_tweak: render_config.aces_tweak,
+        dispersion_boost: render_config.dispersion_boost,
         perceptual_blur: if resolved.enable_perceptual_blur {
             "on".to_string()
         } else {

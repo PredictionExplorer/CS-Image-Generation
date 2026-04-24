@@ -15,7 +15,7 @@ use crate::post_effects::{
     Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
     PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
 };
-use crate::spectrum::{NUM_BINS, spd_to_rgba};
+use crate::spectrum::{NUM_BINS, spd_to_rgba_with_sat_boost};
 use rayon::prelude::*;
 
 const LUMA_R: f64 = 0.299;
@@ -515,13 +515,12 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     dest: &mut [(f64, f64, f64, f64)],
     width: usize,
     height: usize,
+    sat_boost: bool,
+    dispersion_boost: bool,
 ) {
     assert_eq!(src.len(), dest.len());
 
-    use crate::render::drawing::DISPERSION_BOOST_ENABLED;
-    use std::sync::atomic::Ordering;
-
-    let dispersion_strength = if DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed) {
+    let dispersion_strength = if dispersion_boost {
         crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0
     } else {
         crate::render::constants::SPECTRAL_DISPERSION_STRENGTH * 3.0
@@ -530,6 +529,7 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     let cx = width as f64 / 2.0;
     let cy = height as f64 / 2.0;
     let max_r = (cx * cx + cy * cy).sqrt();
+    let dispersion_enabled = dispersion_strength > 0.0 && max_r > 0.0;
 
     dest.par_iter_mut().enumerate().for_each(|(idx, dest_pixel)| {
         let x = (idx % width) as f64;
@@ -541,11 +541,11 @@ pub(crate) fn convert_spd_buffer_to_rgba(
         let dir_x = if r > 0.0 { dx / r } else { 0.0 };
         let dir_y = if r > 0.0 { dy / r } else { 0.0 };
 
-        let r_norm = r / max_r;
+        let r_norm = if max_r > 0.0 { r / max_r } else { 0.0 };
 
         let mut local_spd = [0.0f64; NUM_BINS];
 
-        if dispersion_strength > 0.0 {
+        if dispersion_enabled {
             for bin in 0..NUM_BINS {
                 let bin_offset =
                     (bin as f64 - (NUM_BINS as f64 - 1.0) / 2.0) / ((NUM_BINS as f64 - 1.0) / 2.0);
@@ -563,7 +563,7 @@ pub(crate) fn convert_spd_buffer_to_rgba(
             local_spd = src[idx];
         }
 
-        let rgba = spd_to_rgba(&local_spd);
+        let rgba = spd_to_rgba_with_sat_boost(&local_spd, sat_boost);
         *dest_pixel = rgba;
     });
 }
@@ -673,6 +673,26 @@ mod tests {
 
         assert!(pipeline.trajectory_len() >= 1);
         assert_eq!(pipeline.image_len(), 1);
+    }
+
+    #[test]
+    fn test_convert_spd_buffer_uses_explicit_sat_boost() {
+        let mut spd = [0.0; NUM_BINS];
+        for (bin, energy) in [(26, 0.2), (29, 0.5), (31, 0.8), (33, 1.0), (36, 0.6), (39, 0.3)] {
+            spd[bin] = energy;
+        }
+
+        let width = 9;
+        let height = 9;
+        let src = vec![spd; width * height];
+        let mut boosted = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+        let mut unboosted = vec![(0.0, 0.0, 0.0, 0.0); width * height];
+
+        convert_spd_buffer_to_rgba(&src, &mut boosted, width, height, true, false);
+        convert_spd_buffer_to_rgba(&src, &mut unboosted, width, height, false, false);
+
+        assert!(boosted.iter().any(|pixel| pixel.3 > 0.0));
+        assert_ne!(boosted, unboosted);
     }
 
     #[test]

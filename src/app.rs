@@ -85,6 +85,12 @@ pub struct GenerationLogConfig {
     pub hdr_mode: String,
     /// HDR intensity scale factor.
     pub hdr_scale: f64,
+    /// Whether spectral-to-RGBA conversion uses enhanced saturation.
+    pub sat_boost: bool,
+    /// Whether tonemapping uses the punchy `AgX` output matrix.
+    pub aces_tweak: bool,
+    /// Whether radial spectral dispersion uses the boosted profile.
+    pub dispersion_boost: bool,
     /// Perceptual blur mode identifier.
     pub perceptual_blur: String,
     /// Optional explicit radius for perceptual blur.
@@ -508,6 +514,9 @@ pub fn build_generation_record(
         dog_ratio: config.dog_ratio,
         hdr_mode: config.hdr_mode.clone(),
         hdr_scale: config.hdr_scale,
+        sat_boost: config.sat_boost,
+        aces_tweak: config.aces_tweak,
+        dispersion_boost: config.dispersion_boost,
         perceptual_blur: config.perceptual_blur.clone(),
         perceptual_blur_radius: config.perceptual_blur_radius,
         perceptual_blur_strength: config.perceptual_blur_strength,
@@ -704,6 +713,9 @@ mod tests {
             dog_ratio: 2.7,
             hdr_mode: "auto".to_string(),
             hdr_scale: 0.12,
+            sat_boost: true,
+            aces_tweak: true,
+            dispersion_boost: true,
             perceptual_blur: "on".to_string(),
             perceptual_blur_radius: Some(3),
             perceptual_blur_strength: 0.44,
@@ -755,6 +767,9 @@ mod tests {
         assert_eq!(record.seed, "0xcafe");
         assert_eq!(record.render_config.width, 320);
         assert_eq!(record.render_config.dog_sigma, Some(1.25));
+        assert!(record.render_config.sat_boost);
+        assert!(record.render_config.aces_tweak);
+        assert!(record.render_config.dispersion_boost);
         assert!(record.drift_config.enabled);
         assert_eq!(record.drift_config.mode, "elliptical");
         assert_eq!(record.drift_config.scale, 1.5);

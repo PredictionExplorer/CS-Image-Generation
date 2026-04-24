@@ -200,7 +200,14 @@ fn pass_1_build_histogram_spectral_with_backend(
         );
 
         apply_energy_density_shift(&mut accum_spd);
-        convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
+        convert_spd_buffer_to_rgba(
+            &accum_spd,
+            &mut accum_rgba,
+            width as usize,
+            height as usize,
+            render_config.sat_boost,
+            render_config.dispersion_boost,
+        );
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
@@ -358,7 +365,14 @@ fn pass_2_write_frames_spectral_with_backend(
         );
 
         apply_energy_density_shift(accum_spd);
-        convert_spd_buffer_to_rgba(accum_spd, &mut accum_rgba, width as usize, height as usize);
+        convert_spd_buffer_to_rgba(
+            accum_spd,
+            &mut accum_rgba,
+            width as usize,
+            height as usize,
+            render_config.sat_boost,
+            render_config.dispersion_boost,
+        );
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
@@ -370,7 +384,8 @@ fn pass_2_write_frames_spectral_with_backend(
                 reason: e.to_string(),
             })?;
 
-        let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
+        let display_buffer =
+            tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
 
         // Reclaim the trajectory buffer's allocation back into accum_rgba.
         // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
@@ -488,7 +503,14 @@ fn render_final_frame_spectral_with_backend(
     );
 
     apply_energy_density_shift(&mut accum_spd);
-    convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
+    convert_spd_buffer_to_rgba(
+        &accum_spd,
+        &mut accum_rgba,
+        width as usize,
+        height as usize,
+        render_config.sat_boost,
+        render_config.dispersion_boost,
+    );
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
@@ -500,7 +522,8 @@ fn render_final_frame_spectral_with_backend(
             reason: e.to_string(),
         })?;
 
-    let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
+    let display_buffer =
+        tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
@@ -585,7 +608,14 @@ fn render_single_frame_spectral_with_backend(
     );
 
     apply_energy_density_shift(&mut accum_spd);
-    convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
+    convert_spd_buffer_to_rgba(
+        &accum_spd,
+        &mut accum_rgba,
+        width as usize,
+        height as usize,
+        render_config.sat_boost,
+        render_config.dispersion_boost,
+    );
 
     let frame_params = FrameParams { frame_number: 0, density: None };
     let trajectory_pixels = finish_pipeline
@@ -595,7 +625,8 @@ fn render_single_frame_spectral_with_backend(
             reason: e.to_string(),
         })?;
 
-    let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
+    let display_buffer =
+        tonemap_to_display_buffer(&trajectory_pixels, levels, render_config.aces_tweak);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {

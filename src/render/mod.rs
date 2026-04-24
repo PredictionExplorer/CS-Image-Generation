@@ -4,11 +4,7 @@
 //! including coordinate transformations, line drawing, post-processing effects, and video output.
 
 use nalgebra::Vector3;
-use std::sync::atomic::AtomicBool;
 use tracing::info;
-
-/// When true, tonemapping uses the `AgX` punchy output matrix instead of default `AgX`.
-pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
 pub mod batch_drawing;
@@ -100,11 +96,23 @@ pub struct RenderConfig {
     pub hdr_scale: f64,
     /// Bloom algorithm selection.
     pub bloom_mode: BloomMode,
+    /// Whether spectral-to-RGBA conversion uses the enhanced saturation matrix.
+    pub sat_boost: bool,
+    /// Whether tonemapping uses the punchy `AgX` output matrix.
+    pub aces_tweak: bool,
+    /// Whether radial spectral dispersion uses the stronger boosted profile.
+    pub dispersion_boost: bool,
 }
 
 impl Default for RenderConfig {
     fn default() -> Self {
-        Self { hdr_scale: constants::DEFAULT_HDR_SCALE, bloom_mode: BloomMode::Dog }
+        Self {
+            hdr_scale: constants::DEFAULT_HDR_SCALE,
+            bloom_mode: BloomMode::Dog,
+            sat_boost: true,
+            aces_tweak: true,
+            dispersion_boost: true,
+        }
     }
 }
 
@@ -286,7 +294,6 @@ mod tests {
     use crate::spectrum::NUM_BINS;
     use nalgebra::Vector3;
     use rayon::ThreadPoolBuilder;
-    use std::sync::atomic::Ordering;
 
     fn default_levels() -> ChannelLevels {
         ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
@@ -590,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_tonemap_black_produces_black() {
-        let result = tonemap_core(0.0, 0.0, 0.0, 0.0, &default_levels());
+        let result = tonemap_core(0.0, 0.0, 0.0, 0.0, &default_levels(), true);
         assert_eq!(result, [0.0, 0.0, 0.0]);
     }
 
@@ -598,7 +605,7 @@ mod tests {
     fn test_tonemap_produces_valid_range() {
         let levels = default_levels();
         for alpha in [0.1, 0.5, 1.0] {
-            let result = tonemap_core(0.5, 0.3, 0.8, alpha, &levels);
+            let result = tonemap_core(0.5, 0.3, 0.8, alpha, &levels, true);
             for ch in result {
                 assert!(ch >= 0.0, "channel {ch} should be non-negative at alpha {alpha}");
                 assert!(ch < 2.0, "channel {ch} unreasonably large at alpha {alpha}");
@@ -621,7 +628,7 @@ mod tests {
                 highlight_rolloff: 2.5,
             },
         );
-        let result = tonemap_core(8.0, 8.0, 8.0, 1.0, &levels);
+        let result = tonemap_core(8.0, 8.0, 8.0, 1.0, &levels, true);
 
         assert!(result[0] < 1.0);
         assert!(result[1] < 1.0);
@@ -658,8 +665,8 @@ mod tests {
             },
         );
 
-        let unity_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &unity);
-        let reduced_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &reduced);
+        let unity_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &unity, true);
+        let reduced_out = tonemap_core(2.0, 2.0, 2.0, 1.0, &reduced, true);
 
         assert!(reduced_out[0] < unity_out[0]);
         assert!(reduced_out[1] < unity_out[1]);
@@ -670,13 +677,8 @@ mod tests {
     fn test_agx_tweak_changes_output() {
         let levels = default_levels();
 
-        ACES_TWEAK_ENABLED.store(true, Ordering::Relaxed);
-        let tweaked = tonemap_core(0.5, 0.3, 0.7, 0.8, &levels);
-
-        ACES_TWEAK_ENABLED.store(false, Ordering::Relaxed);
-        let original = tonemap_core(0.5, 0.3, 0.7, 0.8, &levels);
-
-        ACES_TWEAK_ENABLED.store(true, Ordering::Relaxed);
+        let tweaked = tonemap_core(0.5, 0.3, 0.7, 0.8, &levels, true);
+        let original = tonemap_core(0.5, 0.3, 0.7, 0.8, &levels, false);
 
         let diff = (tweaked[0] - original[0]).abs()
             + (tweaked[1] - original[1]).abs()
@@ -687,7 +689,7 @@ mod tests {
     #[test]
     fn test_tonemap_16bit_range() {
         let levels = default_levels();
-        let result = tonemap_to_16bit(0.5, 0.4, 0.6, 0.9, &levels);
+        let result = tonemap_to_16bit(0.5, 0.4, 0.6, 0.9, &levels, true);
         for ch in result {
             assert!(u32::from(ch) <= 65535, "16-bit channel {ch} out of range");
         }
@@ -697,8 +699,11 @@ mod tests {
     fn test_build_effect_config_uses_dog_bloom_exclusively() {
         let resolved =
             ResolvedEffectConfig { enable_bloom: true, ..baseline_resolved_config(640, 360) };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
@@ -712,8 +717,11 @@ mod tests {
     fn test_build_effect_config_uses_gaussian_bloom_exclusively() {
         let resolved =
             ResolvedEffectConfig { enable_bloom: true, ..baseline_resolved_config(640, 360) };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Gaussian };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Gaussian,
+            ..Default::default()
+        };
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
@@ -728,8 +736,11 @@ mod tests {
             enable_fine_texture: true,
             ..baseline_resolved_config(640, 360)
         };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
@@ -744,8 +755,11 @@ mod tests {
             fine_texture_strength: 0.2,
             ..baseline_resolved_config(1920, 1080)
         };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
 
         let still_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
@@ -771,8 +785,11 @@ mod tests {
             enable_perceptual_blur: true,
             ..baseline_resolved_config(1920, 1080)
         };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
@@ -793,7 +810,8 @@ mod tests {
     fn test_scanline_accumulation_matches_serial_reference_bits() {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
-        let render_config = RenderConfig { hdr_scale: 3.5, bloom_mode: BloomMode::None };
+        let render_config =
+            RenderConfig { hdr_scale: 3.5, bloom_mode: BloomMode::None, ..Default::default() };
         let ctx = RenderContext::new(9, 7, &positions, false);
         let velocity_calc =
             velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
@@ -844,7 +862,8 @@ mod tests {
             vec![(0.65, 0.04, -0.18), (0.67, 0.05, -0.16)],
         ];
         let body_alphas = vec![0.8, 0.9, 1.0];
-        let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::Dog };
+        let render_config =
+            RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::Dog, ..Default::default() };
 
         let clean = baseline_resolved_config(48, 48);
         let stylized = ResolvedEffectConfig {
@@ -886,7 +905,8 @@ mod tests {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
-        let render_config = RenderConfig { hdr_scale: 2.8, bloom_mode: BloomMode::Dog };
+        let render_config =
+            RenderConfig { hdr_scale: 2.8, bloom_mode: BloomMode::Dog, ..Default::default() };
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let serial = pass_1_build_histogram_spectral_serial_reference(scene, 2, settings)
             .expect("serial histogram pass should succeed");
@@ -911,7 +931,8 @@ mod tests {
     #[test]
     fn test_render_final_frame_accumulates_late_color_steps() {
         let resolved = baseline_resolved_config(48, 48);
-        let render_config = RenderConfig { hdr_scale: 6.0, bloom_mode: BloomMode::None };
+        let render_config =
+            RenderConfig { hdr_scale: 6.0, bloom_mode: BloomMode::None, ..Default::default() };
         let positions = vec![
             vec![
                 Vector3::new(0.1, 0.1, 0.0),
@@ -968,7 +989,8 @@ mod tests {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
-        let render_config = RenderConfig { hdr_scale: 3.2, bloom_mode: BloomMode::None };
+        let render_config =
+            RenderConfig { hdr_scale: 3.2, bloom_mode: BloomMode::None, ..Default::default() };
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let levels = ChannelLevels::new(0.0, 0.12, 0.0, 0.12, 0.0, 0.12);
 
@@ -1008,7 +1030,8 @@ mod tests {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
-        let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None };
+        let render_config =
+            RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None, ..Default::default() };
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let frame_interval = 1usize;
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
@@ -1047,7 +1070,8 @@ mod tests {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = stylized_resolved_config(96, 72);
-        let render_config = RenderConfig { hdr_scale: 4.2, bloom_mode: BloomMode::Dog };
+        let render_config =
+            RenderConfig { hdr_scale: 4.2, bloom_mode: BloomMode::Dog, ..Default::default() };
         let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let frame_interval = 2usize;
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);

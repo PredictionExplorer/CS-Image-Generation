@@ -7,10 +7,6 @@
 //! - Scalar fallback: portable implementation for all other platforms
 
 use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// When true, applies an enhanced saturation boost during spectral-to-RGBA conversion.
-pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Convert SPD to RGBA using SIMD when available
 ///
@@ -29,12 +25,14 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 #[must_use]
 #[inline]
 pub fn spd_to_rgba_simd(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
-    let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
-    spd_to_rgba_simd_with_sat_boost(spd, boosted)
+    spd_to_rgba_simd_with_sat_boost(spd, true)
 }
 
 #[inline]
-fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
+pub(crate) fn spd_to_rgba_simd_with_sat_boost(
+    spd: &[f64; NUM_BINS],
+    boosted: bool,
+) -> (f64, f64, f64, f64) {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
     {
         // SAFETY: `spd_to_rgba_avx2` requires AVX2+FMA, guaranteed by the `#[cfg(target_feature = "avx2")]` gate.
@@ -64,8 +62,7 @@ fn spd_to_rgba_simd_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64
 #[must_use]
 #[inline]
 pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
-    let boosted = SAT_BOOST_ENABLED.load(Ordering::Relaxed);
-    spd_to_rgba_scalar_with_sat_boost(spd, boosted)
+    spd_to_rgba_scalar_with_sat_boost(spd, true)
 }
 
 #[cfg(any(

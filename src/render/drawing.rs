@@ -6,10 +6,6 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use spectral_constants::{LAMBDA_END, LAMBDA_START};
 
-/// Runtime toggle: when true, spectral dispersion boost is applied in the render path.
-pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(true);
-
 /// One endpoint of a line in pixel space with `OkLab` color and coverage.
 #[derive(Clone, Copy, Debug)]
 pub struct LineVertex {
@@ -283,7 +279,6 @@ mod tests {
     use super::*;
     use crate::oklab::linear_srgb_to_oklab;
     use crate::spectrum::BIN_COMBINED_LUT;
-    use std::sync::atomic::Ordering;
 
     fn wavelength_to_oklab(wavelength_nm: f64, intensity: f64) -> (f64, f64, f64) {
         let bin_f = spectral_constants::wavelength_to_bin(wavelength_nm);
@@ -369,14 +364,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_dispersion_boost_default_enabled() {
-        assert!(
-            DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed),
-            "dispersion boost should be enabled by default"
-        );
     }
 
     #[test]

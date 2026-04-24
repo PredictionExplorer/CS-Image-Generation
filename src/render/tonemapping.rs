@@ -1,11 +1,9 @@
 //! Display tonemapping and 16-bit output quantization.
 
-use super::ACES_TWEAK_ENABLED;
 use super::constants;
 use super::context::PixelBuffer;
 use super::types::ChannelLevels;
 use rayon::prelude::*;
-use std::sync::atomic::Ordering;
 
 #[inline]
 fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) -> [f64; 3] {
@@ -25,7 +23,14 @@ fn compress_display_highlights(rgb: [f64; 3], paper_white: f64, rolloff: f64) ->
 
 /// Core tonemapping function shared by preview and final output paths.
 #[inline]
-pub(super) fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) -> [f64; 3] {
+pub(super) fn tonemap_core(
+    fr: f64,
+    fg: f64,
+    fb: f64,
+    fa: f64,
+    levels: &ChannelLevels,
+    aces_tweak: bool,
+) -> [f64; 3] {
     let alpha = fa.clamp(0.0, 1.0);
     if alpha <= 0.0 {
         return [0.0, 0.0, 0.0];
@@ -77,9 +82,7 @@ pub(super) fn tonemap_core(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelL
     let g_spline = spline(g_alloc);
     let b_spline = spline(b_alloc);
 
-    let is_punchy = ACES_TWEAK_ENABLED.load(Ordering::Relaxed);
-
-    let (r_out, g_out, b_out) = if is_punchy {
+    let (r_out, g_out, b_out) = if aces_tweak {
         (
             1.133276 * r_spline - 0.117109 * g_spline - 0.016167 * b_spline,
             -0.097008 * r_spline + 1.148151 * g_spline - 0.051143 * b_spline,
@@ -111,8 +114,9 @@ pub(super) fn tonemap_to_16bit(
     fb: f64,
     fa: f64,
     levels: &ChannelLevels,
+    aces_tweak: bool,
 ) -> [u16; 3] {
-    let channels = tonemap_core(fr, fg, fb, fa, levels);
+    let channels = tonemap_core(fr, fg, fb, fa, levels, aces_tweak);
     [
         crate::utils::f64_to_u16_saturating((channels[0] * constants::U16_MAX_F64).round()),
         crate::utils::f64_to_u16_saturating((channels[1] * constants::U16_MAX_F64).round()),
@@ -123,11 +127,12 @@ pub(super) fn tonemap_to_16bit(
 pub(super) fn tonemap_to_display_buffer(
     pixels: &PixelBuffer,
     levels: &ChannelLevels,
+    aces_tweak: bool,
 ) -> PixelBuffer {
     pixels
         .par_iter()
         .map(|&(fr, fg, fb, fa)| {
-            let mapped = tonemap_core(fr, fg, fb, fa, levels);
+            let mapped = tonemap_core(fr, fg, fb, fa, levels, aces_tweak);
             (mapped[0], mapped[1], mapped[2], fa.clamp(0.0, 1.0))
         })
         .collect()

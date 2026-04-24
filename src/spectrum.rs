@@ -94,7 +94,17 @@ pub static BIN_COMBINED_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS
 #[inline]
 #[must_use]
 pub fn spd_to_rgba(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) {
-    spectrum_simd::spd_to_rgba_simd(spd)
+    spd_to_rgba_with_sat_boost(spd, true)
+}
+
+/// Convert an SPD sample to RGBA with explicit saturation-boost selection.
+#[inline]
+#[must_use]
+pub(crate) fn spd_to_rgba_with_sat_boost(
+    spd: &[f64; NUM_BINS],
+    boosted: bool,
+) -> (f64, f64, f64, f64) {
+    spectrum_simd::spd_to_rgba_simd_with_sat_boost(spd, boosted)
 }
 
 #[cfg(test)]

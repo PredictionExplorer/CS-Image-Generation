@@ -13,6 +13,10 @@ use tracing::{error, info, warn};
 const LOG_FILE_PATH: &str = "generation_log.json";
 const LOCK_FILE_PATH: &str = "generation_log.json.lock";
 
+fn default_true() -> bool {
+    true
+}
+
 /// Complete record of a generation run with all parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationRecord {
@@ -69,6 +73,22 @@ pub struct LoggedRenderConfig {
     pub hdr_mode: String,
     /// Scalar applied to HDR accumulation before tone mapping.
     pub hdr_scale: f64,
+    /// Whether spectral-to-RGBA conversion used enhanced saturation.
+    ///
+    /// Missing in historical log files written before this field was
+    /// introduced; `#[serde(default)]` keeps old logs readable.
+    #[serde(default = "default_true")]
+    pub sat_boost: bool,
+    /// Whether tonemapping used the punchy `AgX` output matrix.
+    ///
+    /// Missing in historical log files; see `sat_boost` note above.
+    #[serde(default = "default_true")]
+    pub aces_tweak: bool,
+    /// Whether radial spectral dispersion used the boosted profile.
+    ///
+    /// Missing in historical log files; see `sat_boost` note above.
+    #[serde(default = "default_true")]
+    pub dispersion_boost: bool,
     /// Perceptual blur on/off flag string.
     pub perceptual_blur: String,
     /// Blur radius in pixels when set.
@@ -190,6 +210,9 @@ impl Default for LoggedRenderConfig {
             dog_ratio: 2.8,
             hdr_mode: "auto".to_string(),
             hdr_scale: 0.12,
+            sat_boost: true,
+            aces_tweak: true,
+            dispersion_boost: true,
             perceptual_blur: "on".to_string(),
             perceptual_blur_radius: None,
             perceptual_blur_strength: 0.65,
@@ -474,6 +497,35 @@ mod tests {
         assert_eq!(records.len(), 1);
 
         cleanup(&paths);
+    }
+
+    #[test]
+    fn test_render_config_defaults_old_toggle_fields() {
+        let json = r#"{
+            "width": 320,
+            "height": 180,
+            "clip_black": 0.02,
+            "clip_white": 0.98,
+            "alpha_denom": 42000,
+            "alpha_compress": 5.5,
+            "bloom_mode": "dog",
+            "dog_strength": 0.31,
+            "dog_sigma": 1.25,
+            "dog_ratio": 2.7,
+            "hdr_mode": "auto",
+            "hdr_scale": 0.12,
+            "perceptual_blur": "on",
+            "perceptual_blur_radius": 3,
+            "perceptual_blur_strength": 0.44,
+            "perceptual_gamut_mode": "preserve-hue"
+        }"#;
+
+        let config: LoggedRenderConfig =
+            serde_json::from_str(json).expect("old render config should deserialize");
+
+        assert!(config.sat_boost);
+        assert!(config.aces_tweak);
+        assert!(config.dispersion_boost);
     }
 
     #[test]
