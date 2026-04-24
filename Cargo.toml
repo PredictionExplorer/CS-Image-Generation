@@ -46,7 +46,6 @@ clap     = { version = "4.6.0", features = ["derive"] }
 hex      = "0.4.3"
 image    = { version = "0.25.10", default-features = false, features = ["png"] }
 nalgebra = { version = "0.34.2", default-features = false, features = ["std"] }
-opensimplex2 = "1.1.0"
 rayon    = "1.12.0"
 rustfft  = "6.4.1"
 serde    = { version = "1.0.228", features = ["derive"] }

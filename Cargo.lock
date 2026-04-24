@@ -909,12 +909,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
-name = "opensimplex2"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c137abadf4cb52f65fed1a249f91674b78377810b069d4f70e6b990f884a2573"
-
-[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1397,7 +1391,6 @@ dependencies = [
  "hex",
  "image",
  "nalgebra",
- "opensimplex2",
  "proptest",
  "rayon",
  "rustfft",

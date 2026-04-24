@@ -548,34 +548,6 @@ pub const CLIP_WHITE: FloatParamDescriptor = FloatParamDescriptor {
     description: "White point percentile clipping",
 };
 
-// ---------------------------------------------------------------------------
-// Nebula
-// ---------------------------------------------------------------------------
-
-/// Nebula cloud background opacity (currently disabled: range is `[0, 0]`).
-pub const NEBULA_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_strength",
-    min: 0.0,
-    max: 0.0,
-    description: "Nebula cloud background opacity (currently disabled)",
-};
-
-/// Nebula noise detail octaves.
-pub const NEBULA_OCTAVES: IntParamDescriptor = IntParamDescriptor {
-    name: "nebula_octaves",
-    min: 3,
-    max: 4,
-    description: "Nebula noise detail octaves",
-};
-
-/// Nebula noise base frequency.
-pub const NEBULA_BASE_FREQUENCY: FloatParamDescriptor = FloatParamDescriptor {
-    name: "nebula_base_frequency",
-    min: 0.0010,
-    max: 0.0020,
-    description: "Nebula noise base frequency",
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,12 +606,10 @@ mod tests {
         &HDR_SCALE,
         &CLIP_BLACK,
         &CLIP_WHITE,
-        &NEBULA_STRENGTH,
-        &NEBULA_BASE_FREQUENCY,
     ];
 
     const ALL_INT_DESCRIPTORS: &[&IntParamDescriptor] =
-        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS, &NEBULA_OCTAVES];
+        &[&GRADIENT_MAP_PALETTE, &OPALESCENCE_LAYERS, &MICRO_CONTRAST_RADIUS];
 
     const ALL_ENABLE_PROBS: &[(&str, f64)] = &[
         ("bloom", ENABLE_PROB_BLOOM),
