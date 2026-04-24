@@ -1,6 +1,6 @@
 //! Gaussian blur-based bloom effect implementation.
 
-use super::{PixelBuffer, PostEffect, PostEffectError, utils};
+use super::{PixelBuffer, PostEffect, PostEffectError, utils, validate_buffer_shape};
 use crate::render::parallel_blur_2d_rgba;
 use rayon::prelude::*;
 
@@ -65,6 +65,7 @@ impl PostEffect for GaussianBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         let highlights = Self::extract_highlights(input);
         let core_gain = self.core_gain();
 
@@ -139,5 +140,17 @@ mod tests {
         assert!(output[4].0 > input[4].0, "center highlight should be lifted");
         assert!(output[1].0 > input[1].0, "neighbor should receive blurred bloom");
         assert_eq!(output[4].3, 1.0, "alpha should be preserved");
+    }
+
+    #[test]
+    fn test_gaussian_bloom_rejects_invalid_buffer_shape() {
+        let bloom = GaussianBloom::new(1, 0.8, 12.0);
+        let input = vec![(0.0, 0.0, 0.0, 1.0); 8];
+
+        let err = bloom.process(&input, 3, 3).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("GaussianBloom"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

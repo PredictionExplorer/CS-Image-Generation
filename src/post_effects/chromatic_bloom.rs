@@ -3,7 +3,7 @@
 //! This effect creates a magical, lens-aberration-like glow by separating RGB channels
 //! spatially and blurring them independently, then compositing back with additive blending.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for chromatic bloom effect
@@ -248,6 +248,7 @@ impl PostEffect for ChromaticBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -336,6 +337,18 @@ mod tests {
         let input = vec![(0.5, 0.3, 0.2, 1.0); 100];
         let output = bloom.process(&input, 10, 10).expect("bloom process should succeed");
         assert_eq!(input, output);
+    }
+
+    #[test]
+    fn test_process_rejects_invalid_buffer_shape() {
+        let bloom = ChromaticBloom::new(ChromaticBloomConfig::default());
+        let input = vec![(0.5, 0.3, 0.2, 1.0); 99];
+
+        let err = bloom.process(&input, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("ChromaticBloom"));
+        assert!(err.to_string().contains("buffer length"));
     }
 
     #[test]

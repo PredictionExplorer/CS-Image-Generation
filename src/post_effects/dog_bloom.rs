@@ -1,6 +1,6 @@
 //! Difference of Gaussians (`DoG`) bloom effect implementation.
 
-use super::{PixelBuffer, PostEffect, PostEffectError, utils};
+use super::{PixelBuffer, PostEffect, PostEffectError, utils, validate_buffer_shape};
 use crate::render::{DogBloomConfig, try_apply_dog_bloom};
 use rayon::prelude::*;
 
@@ -62,6 +62,7 @@ impl PostEffect for DogBloom {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         let highlights = Self::extract_highlights(input);
         let dog_bloom =
             try_apply_dog_bloom(&highlights, width, height, &self.config).map_err(|err| {
@@ -145,10 +146,8 @@ mod tests {
         let input: PixelBuffer = vec![(1.0, 1.0, 1.0, 1.0); 3];
         let err = bloom.process(&input, 2, 2).expect_err("mismatched buffer should fail");
 
-        assert!(matches!(
-            err,
-            PostEffectError::EffectFailed { ref effect_name, ref message }
-                if effect_name == "dog_bloom" && message.contains("buffer length")
-        ));
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("DogBloom"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }
