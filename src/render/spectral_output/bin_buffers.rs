@@ -15,6 +15,33 @@ pub struct BinBuffers {
 }
 
 impl BinBuffers {
+    fn validate_image_shape_usize(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: usize,
+        height: usize,
+    ) -> Result<usize> {
+        if width == 0 || height == 0 {
+            return Err(RenderError::InvalidScene {
+                reason: format!("bin buffer dimensions must be non-zero, got {width}x{height}"),
+            });
+        }
+
+        let pixel_count = width.checked_mul(height).ok_or_else(|| RenderError::InvalidScene {
+            reason: format!("bin buffer dimensions overflow usize: {width}x{height}"),
+        })?;
+
+        if accum_spd.len() != pixel_count {
+            return Err(RenderError::InvalidScene {
+                reason: format!(
+                    "accumulated SPD length ({}) does not match dimensions {width}x{height} ({pixel_count} pixels)",
+                    accum_spd.len()
+                ),
+            });
+        }
+
+        Ok(pixel_count)
+    }
+
     fn validate_image_shape(
         accum_spd: &[[f64; NUM_BINS]],
         width: u32,
@@ -52,6 +79,22 @@ impl BinBuffers {
         Ok(Self::build(accum_spd, width, height, pixel_count))
     }
 
+    /// Try to build 64 bin images from an accumulated SPD buffer using `usize`
+    /// dimensions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when dimensions are zero, dimensions overflow `usize`,
+    /// or `accum_spd.len()` does not equal `width * height`.
+    pub fn try_new_usize(
+        accum_spd: &[[f64; NUM_BINS]],
+        width: usize,
+        height: usize,
+    ) -> Result<Self> {
+        let pixel_count = Self::validate_image_shape_usize(accum_spd, width, height)?;
+        Ok(Self::build(accum_spd, width, height, pixel_count))
+    }
+
     /// Build 64 bin images from the accumulated SPD buffer.
     ///
     /// Each bin image normalizes that bin's energy across all pixels, tints by the
@@ -62,14 +105,12 @@ impl BinBuffers {
     ///
     /// # Panics
     ///
-    /// Panics when `width * height` overflows `usize` or `accum_spd.len()` does
-    /// not equal `width * height`.
+    /// Panics when dimensions are zero, `width * height` overflows `usize`, or
+    /// `accum_spd.len()` does not equal `width * height`.
     #[must_use]
     pub fn new(accum_spd: &[[f64; NUM_BINS]], width: usize, height: usize) -> Self {
-        let pixel_count = width.checked_mul(height).expect("image dimensions overflow usize");
-        assert_eq!(accum_spd.len(), pixel_count);
-
-        Self::build(accum_spd, width, height, pixel_count)
+        Self::try_new_usize(accum_spd, width, height)
+            .expect("bin buffer image shape should be valid")
     }
 
     fn build(

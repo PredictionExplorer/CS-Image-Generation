@@ -131,6 +131,27 @@ mod tests {
     }
 
     #[test]
+    fn test_bin_buffers_try_new_usize_rejects_length_mismatch() {
+        let mut spd = make_test_spd();
+        spd.pop();
+
+        let err = BinBuffers::try_new_usize(&spd, TEST_W, TEST_H)
+            .expect_err("mismatched SPD length should fail validation");
+
+        assert!(matches!(err, crate::render::error::RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("accumulated SPD length"));
+    }
+
+    #[test]
+    fn test_bin_buffers_try_new_usize_rejects_zero_dimensions() {
+        let err = BinBuffers::try_new_usize(&[], 0, TEST_H)
+            .expect_err("zero width should fail validation");
+
+        assert!(matches!(err, crate::render::error::RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("dimensions must be non-zero"));
+    }
+
+    #[test]
     fn test_bin_buffers_all_values_in_unit_range() {
         let spd = make_test_spd();
         let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
