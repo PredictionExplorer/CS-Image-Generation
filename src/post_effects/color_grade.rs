@@ -4,7 +4,7 @@
 //! the renders a more photographic, gallery-ready look while preserving
 //! the existing dynamic range and hue relationships.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use crate::render::{constants, parallel_blur_2d_rgba};
 use rayon::prelude::*;
 use std::f64::consts::TAU;
@@ -211,6 +211,7 @@ impl PostEffect for CinematicColorGrade {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -297,5 +298,17 @@ mod tests {
             colorful_spread > neutral_spread,
             "palette sway should stay more restrained on low-chroma pixels"
         );
+    }
+
+    #[test]
+    fn test_color_grade_rejects_invalid_buffer_shape() {
+        let grade = CinematicColorGrade::new(test_params());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = grade.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("CinematicColorGrade"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

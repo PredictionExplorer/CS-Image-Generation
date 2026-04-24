@@ -8,7 +8,7 @@
 //!
 //! These textures add a sense of physicality and craftsmanship to digital renders.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for fine texture overlay
@@ -133,8 +133,9 @@ impl PostEffect for FineTexture {
         &self,
         input: &PixelBuffer,
         width: usize,
-        _height: usize,
+        height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -224,5 +225,17 @@ mod tests {
         let v1 = texture.get_texture_value(0.0, 0.0);
         let v2 = texture.get_texture_value(10.0, 10.0);
         assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_fine_texture_rejects_invalid_buffer_shape() {
+        let texture = FineTexture::new(FineTextureConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = texture.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("FineTexture"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

@@ -3,7 +3,7 @@
 //! This effect performs blur operations in the perceptually uniform `OKLab` color space,
 //! resulting in more natural and vibrant color mixing compared to RGB blur.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use crate::oklab::{self, GamutMapMode};
 use crate::render::parallel_blur_2d_rgba;
 use rayon::prelude::*;
@@ -74,6 +74,7 @@ impl PostEffect for PerceptualBlur {
         width: usize,
         height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         // Early exit if effect is disabled or has no strength
         if !self.enabled || self.config.strength <= 0.0 || self.config.radius == 0 {
             return Ok(input.clone());
@@ -262,5 +263,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_perceptual_blur_rejects_invalid_buffer_shape() {
+        let blur = PerceptualBlur::new(PerceptualBlurConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = blur.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("PerceptualBlur"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

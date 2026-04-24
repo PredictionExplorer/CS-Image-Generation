@@ -3,7 +3,7 @@
 //! This effect remaps the luminance values of the image through carefully
 //! crafted gradient palettes to create stunning, professional color treatments.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use crate::oklab::{self, GamutMapMode};
 use rayon::prelude::*;
 
@@ -317,9 +317,10 @@ impl PostEffect for GradientMap {
     fn process(
         &self,
         input: &PixelBuffer,
-        _width: usize,
-        _height: usize,
+        width: usize,
+        height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -414,5 +415,17 @@ mod tests {
 
         assert!((r - g).abs() < 0.25);
         assert!((g - b).abs() < 0.25);
+    }
+
+    #[test]
+    fn test_gradient_map_rejects_invalid_buffer_shape() {
+        let gradient = GradientMap::new(GradientMapConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = gradient.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("GradientMap"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }

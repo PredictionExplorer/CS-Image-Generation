@@ -5,7 +5,7 @@
 //! dichroic glass, or butterfly wings. It adds subtle, sophisticated color shifts
 //! that enhance the perception of depth and material quality.
 
-use super::{PixelBuffer, PostEffect, PostEffectError};
+use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use rayon::prelude::*;
 
 /// Configuration for opalescence effect
@@ -144,8 +144,9 @@ impl PostEffect for Opalescence {
         &self,
         input: &PixelBuffer,
         width: usize,
-        _height: usize,
+        height: usize,
     ) -> Result<PixelBuffer, PostEffectError> {
+        validate_buffer_shape(self.name(), input.len(), width, height)?;
         if !self.is_enabled() {
             return Ok(input.clone());
         }
@@ -266,5 +267,17 @@ mod tests {
                 || (orig.2 - proc.2).abs() > 0.001
         });
         assert!(has_shift, "Opalescence should modify colors");
+    }
+
+    #[test]
+    fn test_opalescence_rejects_invalid_buffer_shape() {
+        let opal = Opalescence::new(OpalescenceConfig::default());
+        let buffer: PixelBuffer = vec![(0.5, 0.5, 0.5, 1.0); 99];
+
+        let err = opal.process(&buffer, 10, 10).expect_err("mismatched buffer should fail");
+
+        assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
+        assert!(err.to_string().contains("Opalescence"));
+        assert!(err.to_string().contains("buffer length"));
     }
 }
