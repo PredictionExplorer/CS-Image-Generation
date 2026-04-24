@@ -595,16 +595,29 @@ pub fn apply_dog_bloom(
         .expect("DoG bloom buffer shape should be valid")
 }
 
-/// Convert SPD buffer to RGBA, with post-process radial dispersion (chromatic aberration)
-pub(crate) fn convert_spd_buffer_to_rgba(
+/// Try to convert an SPD buffer to RGBA, with post-process radial dispersion.
+///
+/// # Errors
+///
+/// Returns an error when dimensions are zero, dimensions overflow `usize`, or
+/// either buffer length does not match the supplied dimensions.
+pub(crate) fn try_convert_spd_buffer_to_rgba(
     src: &[[f64; NUM_BINS]],
     dest: &mut [(f64, f64, f64, f64)],
     width: usize,
     height: usize,
     sat_boost: bool,
     dispersion_boost: bool,
-) {
-    assert_eq!(src.len(), dest.len());
+) -> Result<()> {
+    let pixel_count = validate_effect_buffer_shape("SPD source", src.len(), width, height)?;
+    if dest.len() != pixel_count {
+        return Err(RenderError::InvalidScene {
+            reason: format!(
+                "RGBA destination buffer length ({}) does not match dimensions {width}x{height} ({pixel_count} pixels)",
+                dest.len()
+            ),
+        });
+    }
 
     let dispersion_strength = if dispersion_boost {
         crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0
@@ -652,6 +665,8 @@ pub(crate) fn convert_spd_buffer_to_rgba(
         let rgba = spd_to_rgba_with_sat_boost(&local_spd, sat_boost);
         *dest_pixel = rgba;
     });
+
+    Ok(())
 }
 
 struct ChampleveFinish {
@@ -774,11 +789,35 @@ mod tests {
         let mut boosted = vec![(0.0, 0.0, 0.0, 0.0); width * height];
         let mut unboosted = vec![(0.0, 0.0, 0.0, 0.0); width * height];
 
-        convert_spd_buffer_to_rgba(&src, &mut boosted, width, height, true, false);
-        convert_spd_buffer_to_rgba(&src, &mut unboosted, width, height, false, false);
+        try_convert_spd_buffer_to_rgba(&src, &mut boosted, width, height, true, false)
+            .expect("boosted conversion should succeed");
+        try_convert_spd_buffer_to_rgba(&src, &mut unboosted, width, height, false, false)
+            .expect("unboosted conversion should succeed");
 
         assert!(boosted.iter().any(|pixel| pixel.3 > 0.0));
         assert_ne!(boosted, unboosted);
+    }
+
+    #[test]
+    fn test_try_convert_spd_buffer_rejects_source_shape_mismatch() {
+        let src = vec![[0.0; NUM_BINS]; 3];
+        let mut dest = vec![(0.0, 0.0, 0.0, 0.0); 4];
+        let err = try_convert_spd_buffer_to_rgba(&src, &mut dest, 2, 2, true, false)
+            .expect_err("mismatched source buffer should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("SPD source buffer length"));
+    }
+
+    #[test]
+    fn test_try_convert_spd_buffer_rejects_destination_shape_mismatch() {
+        let src = vec![[0.0; NUM_BINS]; 4];
+        let mut dest = vec![(0.0, 0.0, 0.0, 0.0); 3];
+        let err = try_convert_spd_buffer_to_rgba(&src, &mut dest, 2, 2, true, false)
+            .expect_err("mismatched destination buffer should fail");
+
+        assert!(matches!(err, RenderError::InvalidScene { .. }));
+        assert!(err.to_string().contains("RGBA destination buffer length"));
     }
 
     #[test]

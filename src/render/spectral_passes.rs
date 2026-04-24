@@ -5,7 +5,7 @@ use super::batch_drawing::{
 };
 use super::context::RenderContext;
 use super::effect_config::build_effect_config_from_resolved;
-use super::effects::{FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
+use super::effects::{FinishEffectPipeline, FrameParams, try_convert_spd_buffer_to_rgba};
 use super::error::{RenderError, Result};
 use super::histogram::HistogramData;
 use super::tonemapping::{quantize_display_buffer_to_16bit, tonemap_to_display_buffer};
@@ -200,14 +200,14 @@ fn pass_1_build_histogram_spectral_with_backend(
         );
 
         apply_energy_density_shift(&mut accum_spd);
-        convert_spd_buffer_to_rgba(
+        try_convert_spd_buffer_to_rgba(
             &accum_spd,
             &mut accum_rgba,
             width as usize,
             height as usize,
             render_config.sat_boost,
             render_config.dispersion_boost,
-        );
+        )?;
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
@@ -365,14 +365,14 @@ fn pass_2_write_frames_spectral_with_backend(
         );
 
         apply_energy_density_shift(accum_spd);
-        convert_spd_buffer_to_rgba(
+        try_convert_spd_buffer_to_rgba(
             accum_spd,
             &mut accum_rgba,
             width as usize,
             height as usize,
             render_config.sat_boost,
             render_config.dispersion_boost,
-        );
+        )?;
 
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
@@ -503,14 +503,14 @@ fn render_final_frame_spectral_with_backend(
     );
 
     apply_energy_density_shift(&mut accum_spd);
-    convert_spd_buffer_to_rgba(
+    try_convert_spd_buffer_to_rgba(
         &accum_spd,
         &mut accum_rgba,
         width as usize,
         height as usize,
         render_config.sat_boost,
         render_config.dispersion_boost,
-    );
+    )?;
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
@@ -608,14 +608,14 @@ fn render_single_frame_spectral_with_backend(
     );
 
     apply_energy_density_shift(&mut accum_spd);
-    convert_spd_buffer_to_rgba(
+    try_convert_spd_buffer_to_rgba(
         &accum_spd,
         &mut accum_rgba,
         width as usize,
         height as usize,
         render_config.sat_boost,
         render_config.dispersion_boost,
-    );
+    )?;
 
     let frame_params = FrameParams { frame_number: 0, density: None };
     let trajectory_pixels = finish_pipeline
