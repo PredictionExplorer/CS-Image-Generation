@@ -6,6 +6,15 @@ check:
     cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
 
+# Run the full Rust quality gate used before commits
+gate:
+    cargo fmt --all -- --check
+    cargo check --all-targets --all-features
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo test --release
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
+    git diff --check
+
 # Python: ruff + mypy (requires dev tools on PATH, e.g. `pip install -e ".[dev]"` in a venv)
 py-check:
     ruff format --check .

@@ -286,8 +286,11 @@ Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --release
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
+git diff --check
 cargo llvm-cov --release --fail-under-lines 95
 ```
 
@@ -299,7 +302,7 @@ Coverage is a hard quality gate: CI and `just coverage` require release line cov
 
 Dependency policy is checked with [`cargo-deny`](deny.toml). The only ignored advisory is `RUSTSEC-2024-0436` for `paste`, which is currently pulled transitively through `nalgebra`/`simba`; it stays tracked until that dependency chain offers a clean upgrade path.
 
-If you use [just](https://github.com/casey/just): `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just coverage` runs the 95% coverage gate; `just all` runs `check` then `test`.
+If you use [just](https://github.com/casey/just): `just gate` runs the full Rust pre-commit gate above except coverage; `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just coverage` runs the 95% coverage gate; `just all` runs `check` then `test`.
 
 ### Python scripts (runtime)
 
@@ -371,7 +374,7 @@ _utils.py                Shared helpers imported by `run.py` / `run-test-images.
 run.py                   Automated generation and upload
 run-test-images.py       Batch random-seed test runner
 pyproject.toml           Python dev tooling (Ruff, Mypy) and optional `[dev]` deps
-justfile                 `just` recipes (`check`, `test`, `py-check`, …)
+justfile                 `just` recipes (`gate`, `check`, `test`, `py-check`, …)
 ci/                      Reference-image verification tooling
 docs/                    Long-form algorithm documentation
 .cargo/config.toml       Native CPU flags and SIMD features

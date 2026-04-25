@@ -45,6 +45,7 @@ Install [just](https://github.com/casey/just) and run:
 
 ```bash
 just check    # fmt + clippy
+just gate     # full Rust pre-commit gate: fmt, check, clippy, release tests, docs, diff check
 just py-check # ruff + mypy (after `pip install -e ".[dev]"` in a venv)
 just test     # full test suite
 just coverage # release line coverage, fails below 95%
