@@ -383,11 +383,13 @@ pub fn build_histogram_and_levels(
 ) -> Result<ChannelLevels> {
     info!("STAGE 5/7: PASS 1 => building global histogram...");
 
+    let scene = SpectralScene::new(positions, colors, body_alphas);
+    scene.validate()?;
     let target_frames = constants::DEFAULT_HISTOGRAM_SAMPLE_FRAMES;
-    let frame_interval = (positions[0].len() / target_frames as usize).max(1);
+    let frame_interval = (scene.step_count() / target_frames as usize).max(1);
 
     let histogram = pass_1_build_histogram_spectral(
-        SpectralScene::new(positions, colors, body_alphas),
+        scene,
         frame_interval,
         SpectralRenderSettings::new(resolved_config, render_config, aspect_correction),
     )?;
@@ -464,6 +466,7 @@ pub(crate) fn render_video_with_encoder(
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     let output_vid = output_vid.as_ref();
     let output_png = output_png.as_ref();
+    scene.validate()?;
 
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -695,6 +698,24 @@ pub fn log_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
+    use std::io::Write;
+
+    struct PanicVideoEncoder;
+
+    impl render::video::VideoEncoder for PanicVideoEncoder {
+        fn encode(
+            &self,
+            _width: u32,
+            _height: u32,
+            _frame_rate: u32,
+            _frames_iter: &mut dyn FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+            _output_file: &Path,
+            _options: &VideoEncodingOptions,
+        ) -> render::error::Result<()> {
+            panic!("video encoder should not run for invalid scenes");
+        }
+    }
 
     #[test]
     fn test_parse_seed_valid() {
@@ -821,6 +842,47 @@ mod tests {
             .expect_err("non-finite positions should fail drift validation");
 
         assert!(err.to_string().contains("axis y must be finite"));
+    }
+
+    #[test]
+    fn test_build_histogram_rejects_invalid_scene_before_indexing() {
+        let resolved = render::randomizable_config::ResolvedEffectConfig {
+            width: 16,
+            height: 16,
+            ..Default::default()
+        };
+        let render_config = RenderConfig::default();
+        let err = build_histogram_and_levels(&[], &[], &[], &resolved, &render_config, false)
+            .expect_err("invalid scene should fail before frame interval calculation");
+
+        assert!(err.to_string().contains("expected 3 position tracks"));
+    }
+
+    #[test]
+    fn test_render_video_rejects_invalid_scene_before_encoder() {
+        let resolved = render::randomizable_config::ResolvedEffectConfig {
+            width: 16,
+            height: 16,
+            ..Default::default()
+        };
+        let render_config = RenderConfig::default();
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let levels = ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+        let scene = SpectralScene::new(&[], &[], &[]);
+
+        let err = render_video_with_encoder(
+            scene,
+            &levels,
+            settings,
+            "unused.mp4",
+            "unused.png",
+            false,
+            true,
+            &PanicVideoEncoder,
+        )
+        .expect_err("invalid scene should fail before encoder");
+
+        assert!(err.to_string().contains("expected 3 position tracks"));
     }
 
     fn sample_generation_log_config() -> GenerationLogConfig {
