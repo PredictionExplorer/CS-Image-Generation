@@ -1,5 +1,5 @@
 # Three Body Problem — development task runner
-# Install: cargo install just
+# Install: brew install just  # or: cargo install just
 
 # Run all quality checks
 check:
@@ -17,12 +17,15 @@ gate:
 
 # Python: ruff + mypy (requires dev tools on PATH, e.g. `pip install -e ".[dev]"` in a venv)
 py-check:
-    ruff format --check .
-    ruff check .
-    mypy
+    @if [ -x .venv/bin/ruff ]; then RUFF=.venv/bin/ruff; else RUFF=ruff; fi; \
+      if [ -x .venv/bin/mypy ]; then MYPY=.venv/bin/mypy; else MYPY=mypy; fi; \
+      "$RUFF" format --check .; \
+      "$RUFF" check .; \
+      "$MYPY"
 
 py-fmt:
-    ruff format .
+    @if [ -x .venv/bin/ruff ]; then RUFF=.venv/bin/ruff; else RUFF=ruff; fi; \
+      "$RUFF" format .
 
 # Run the full test suite in release mode
 test:
