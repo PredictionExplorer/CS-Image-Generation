@@ -25,9 +25,9 @@ This will create:
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 
-1. **Python** — `ruff format --check`, `ruff check`, and `mypy` on the repository scripts (`pyproject.toml`)
+1. **Python** — `ruff format --check`, `ruff check`, `mypy`, and `pytest` on Python 3.10 and 3.12 (`pyproject.toml`)
 2. **Formatting** — `cargo fmt --all -- --check`
-3. **Linting** — `cargo clippy --all-targets -- -D warnings`
+3. **Linting** — `cargo clippy --all-targets --all-features -- -D warnings`
 4. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
 5. **Benchmarks** — compile-check with `cargo bench --no-run`
 6. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
@@ -37,7 +37,10 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 
 Additional automation:
 - **Dependabot** (`.github/dependabot.yml`) — weekly Cargo and GitHub Actions dependency updates
+- **Python dependency updates** — weekly Dependabot checks for pinned `[dev]` tooling in `pyproject.toml`
 - **cargo-deny** (`deny.toml`) — license allowlist, advisory checks, and source restrictions. The tracked `paste` advisory is ignored only because it is transitive through `nalgebra`/`simba` with no clean patched upgrade path yet.
+
+Reference image verification is available for deterministic regression checks, but it is manual by default because full fixed-seed image generation is significantly heavier than the normal CI test suite.
 
 ## Local Development
 
@@ -45,10 +48,11 @@ Install [just](https://github.com/casey/just) and run:
 
 ```bash
 just check    # fmt + clippy
-just gate     # full Rust pre-commit gate: fmt, check, clippy, release tests, docs, diff check
-just py-check # ruff + mypy (after `pip install -e ".[dev]"` in a venv)
+just gate     # Rust gate: fmt, check, clippy, release tests, docs, bench compile, deny, diff check
+just py-check # ruff + mypy + pytest (after `pip install -e ".[dev]"` in a venv)
 just test     # full test suite
 just coverage # release line coverage, fails below 95%
+just full-gate # Rust gate + Python gate + audit + coverage
 just all      # check + test
 ```
 

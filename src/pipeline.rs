@@ -666,6 +666,9 @@ mod tests {
     use std::error::Error;
     use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     struct CurrentDirGuard {
         original: PathBuf,
@@ -875,8 +878,31 @@ mod tests {
         }
     }
 
+    fn tiny_generation_request(
+        output: String,
+        drift_mode: GenerationDriftMode,
+    ) -> GenerationRequest {
+        GenerationRequest {
+            seed: "0xcafe".to_string(),
+            output,
+            sims: 6,
+            steps: 64,
+            width: 8,
+            height: 6,
+            drift_mode,
+            fast_encode: true,
+            borda_weights: BordaWeightOptions {
+                chaos: Some(1.0),
+                equil: Some(2.0),
+                curvature: Some(3.0),
+                permutation: Some(4.0),
+            },
+        }
+    }
+
     #[test]
     fn pipeline_smoke_test_uses_video_encoder_seam() {
+        let _lock = CWD_LOCK.lock().expect("cwd test lock should not be poisoned");
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let output_name = tmp
             .path()
@@ -889,22 +915,7 @@ mod tests {
         let _cwd = CurrentDirGuard::enter(&output_parent);
 
         let encoder = FakeVideoEncoder::default();
-        let request = GenerationRequest {
-            seed: "0xcafe".to_string(),
-            output: output_name.clone(),
-            sims: 6,
-            steps: 64,
-            width: 8,
-            height: 6,
-            drift_mode: GenerationDriftMode::None,
-            fast_encode: true,
-            borda_weights: BordaWeightOptions {
-                chaos: Some(1.0),
-                equil: Some(2.0),
-                curvature: Some(3.0),
-                permutation: Some(4.0),
-            },
-        };
+        let request = tiny_generation_request(output_name.clone(), GenerationDriftMode::None);
 
         let result = run_generation_with_video_encoder(&request, &encoder);
         let summary = result.expect("tiny generation should complete with fake encoder");
@@ -919,5 +930,41 @@ mod tests {
             encoder.calls.borrow().iter().all(|(_, _, _, _, bytes)| *bytes > 0),
             "fake encoder should receive non-empty frame streams"
         );
+    }
+
+    #[test]
+    fn pipeline_smoke_test_covers_all_drift_modes() {
+        let _lock = CWD_LOCK.lock().expect("cwd test lock should not be poisoned");
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let output_parent =
+            tmp.path().parent().expect("tempdir should have a parent").to_path_buf();
+        let _cwd = CurrentDirGuard::enter(&output_parent);
+
+        for drift_mode in [
+            GenerationDriftMode::Linear,
+            GenerationDriftMode::Brownian,
+            GenerationDriftMode::Elliptical,
+        ] {
+            let output_name = format!(
+                "{}-{}",
+                tmp.path()
+                    .file_name()
+                    .expect("tempdir should have a final component")
+                    .to_string_lossy(),
+                drift_mode.as_str()
+            );
+            let encoder = FakeVideoEncoder::default();
+            let request = tiny_generation_request(output_name, drift_mode);
+
+            let summary = run_generation_with_video_encoder(&request, &encoder)
+                .expect("tiny drift generation should complete with fake encoder");
+
+            assert!(summary.best_score.is_finite());
+            assert_eq!(
+                encoder.calls.borrow().len(),
+                2,
+                "{drift_mode:?} should encode main and spectral sweep videos"
+            );
+        }
     }
 }

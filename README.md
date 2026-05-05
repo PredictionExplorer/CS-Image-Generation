@@ -14,7 +14,7 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
 
 ## Requirements
 
-- Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
+- Rust 1.95.0 (pinned by `rust-version` in `Cargo.toml` and `rust-toolchain.toml`)
 - FFmpeg (for video encoding)
 - Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. Separate optional dev packages (Ruff, Mypy) apply when you run Python quality checks or CI; see [Development](#development).
 - Git
@@ -288,8 +288,10 @@ Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/
 cargo fmt --all -- --check
 cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --release
+cargo nextest run --release    # falls back to cargo test --release if nextest is unavailable
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
+cargo bench --no-run
+cargo deny check
 git diff --check
 cargo llvm-cov --release --fail-under-lines 95
 ```
@@ -302,7 +304,7 @@ Coverage is a hard quality gate: CI and `just coverage` require release line cov
 
 Dependency policy is checked with [`cargo-deny`](deny.toml). The only ignored advisory is `RUSTSEC-2024-0436` for `paste`, which is currently pulled transitively through `nalgebra`/`simba`; it stays tracked until that dependency chain offers a clean upgrade path.
 
-If you use [just](https://github.com/casey/just): `just gate` runs the full Rust pre-commit gate above except coverage; `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just coverage` runs the 95% coverage gate; `just all` runs `check` then `test`.
+If you use [just](https://github.com/casey/just): `just gate` runs the Rust pre-commit gate (`fmt`, `check`, Clippy, release tests, docs, benchmark compile, dependency policy, and whitespace checks); `just py-check` runs Python formatting, linting, typing, and unit tests; `just full-gate` adds audit and the 95% coverage gate.
 
 ### Python scripts (runtime)
 
@@ -316,16 +318,17 @@ These files are **stdlib-only**; you do not install anything from PyPI to execut
 
 Use `python3 …` from the repository root (or `cd` as shown in each section). Deployment configuration for `run.py` is described under [Automation](#automation).
 
-### Python quality (Ruff + Mypy)
+### Python quality (Ruff + Mypy + Pytest)
 
 Separate from *running* the scripts, the repo pins **developer** tools so formatting, lint, and static typing stay consistent:
 
 | Tool | Role |
 |------|------|
-| [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the four Python files (replaces a pile of flake8/isort/black-style checks in one fast binary). |
+| [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the Python scripts and tests (replaces a pile of flake8/isort/black-style checks in one fast binary). |
 | [Mypy](https://mypy.readthedocs.io/) | Strict type-checking for the same files. |
+| [Pytest](https://docs.pytest.org/) | Fast unit tests for the stdlib-only helper scripts. |
 
-Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `run.py`, `run-test-images.py`, and `ci/verify_reference.py`.
+Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `run.py`, `run-test-images.py`, and `ci/verify_reference.py`; Pytest discovers fast helper tests in `tests_py/`.
 
 **Install the dev tools** (recommended: virtual environment so you do not fight [PEP 668](https://peps.python.org/pep-0668/) on Homebrew or Debian `externally-managed-environment`):
 
@@ -335,19 +338,21 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-The `[dev]` extra installs pinned **Ruff** and **Mypy** versions declared in `pyproject.toml`. The editable install also exposes the small `_utils` module the same way `run.py` expects when run from the repo root.
+The `[dev]` extra installs pinned **Ruff**, **Mypy**, and **Pytest** versions declared in `pyproject.toml`. The editable install also exposes the small `_utils` module the same way `run.py` expects when run from the repo root.
 
-**Run checks** (same three steps as CI):
+**Run checks** (same steps as CI):
 
 ```bash
 just py-check
 ```
 
-That runs, in order: `ruff format --check .`, `ruff check .`, and `mypy`. To apply Ruff’s formatter without checking: `just py-fmt` (equivalent to `ruff format .`).
+That runs, in order: `ruff format --check .`, `ruff check .`, `mypy`, and `pytest`. To apply Ruff’s formatter without checking: `just py-fmt` (equivalent to `ruff format .`).
 
-**Git hook:** If you use [`.githooks/pre-commit`](.githooks/pre-commit) (`git config core.hooksPath .githooks`), each commit runs **Rust** fmt + Clippy, then **Python** Ruff + Mypy. The hook calls `ruff` and `mypy` on your `PATH`, so activate the venv (above) in terminals where you commit, or install the tools into an environment that is always on your `PATH`.
+**Git hook:** If you use [`.githooks/pre-commit`](.githooks/pre-commit) (`git config core.hooksPath .githooks`), each commit runs **Rust** fmt + all-features Clippy, then **Python** Ruff + Mypy + Pytest. The hook prefers `.venv/bin` tools when present and otherwise uses tools on your `PATH`.
 
-**CI:** The workflow job **Python (ruff + mypy)** uses Ubuntu, **Python 3.12**, `pip install ".[dev]"`, then the same three commands as `just py-check`. Mypy is configured with `python_version = "3.10"` in `pyproject.toml`, so types stay compatible with the stated minimum interpreter.
+**CI:** The workflow job **Python** runs on Ubuntu with **Python 3.10 and 3.12**, installs `".[dev]"`, then runs the same four commands as `just py-check`. Mypy is configured with `python_version = "3.10"` in `pyproject.toml`, so types stay compatible with the stated minimum interpreter.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the short contributor checklist.
 
 ## Algorithm
 
@@ -373,10 +378,13 @@ src/oklab.rs             OKLab utilities
 _utils.py                Shared helpers imported by `run.py` / `run-test-images.py`
 run.py                   Automated generation and upload
 run-test-images.py       Batch random-seed test runner
-pyproject.toml           Python dev tooling (Ruff, Mypy) and optional `[dev]` deps
+tests/                   Rust integration tests
+tests_py/                Python unit tests for helper scripts
+pyproject.toml           Python dev tooling (Ruff, Mypy, Pytest) and optional `[dev]` deps
 justfile                 `just` recipes (`gate`, `check`, `test`, `py-check`, …)
 ci/                      Reference-image verification tooling
 docs/                    Long-form algorithm documentation
+CONTRIBUTING.md          Contributor checklist and quality expectations
 .cargo/config.toml       Native CPU flags and SIMD features
 cosmicsig-sync.service   Systemd service unit for run.py
 cosmicsig-sync.timer     Systemd timer (every 5 minutes)

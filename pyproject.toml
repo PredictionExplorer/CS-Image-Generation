@@ -12,8 +12,9 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
-    "mypy==1.20.1",
-    "ruff==0.15.10",
+    "mypy==1.20.2",
+    "pytest==9.0.3",
+    "ruff==0.15.12",
 ]
 
 [tool.setuptools]
@@ -47,6 +48,17 @@ ignore = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["_utils"]
+
+# ---------------------------------------------------------------------------
+# Pytest — fast unit tests for repository helper scripts
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests_py"]
+python_files = ["test_*.py"]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+]
 
 # ---------------------------------------------------------------------------
 # Mypy — strict typing for repository Python files

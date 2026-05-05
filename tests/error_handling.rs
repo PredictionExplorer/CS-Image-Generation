@@ -35,6 +35,17 @@ fn parse_seed_rejects_odd_length_hex() {
 }
 
 #[test]
+fn parse_seed_rejects_empty_seed_with_specific_error() {
+    for seed in ["", "0x", "0X"] {
+        let result = app::parse_seed(seed);
+        assert!(
+            matches!(result, Err(AppError::Config(ConfigError::EmptySeed { .. }))),
+            "expected EmptySeed for {seed:?}, got: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn error_types_implement_display() {
     let err =
         AppError::Config(ConfigError::InvalidResolution { reason: "test reason".to_string() });

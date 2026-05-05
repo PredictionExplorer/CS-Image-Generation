@@ -25,6 +25,16 @@ fn help_flag_exits_successfully() {
 }
 
 #[test]
+fn help_lists_core_generation_flags() {
+    let output = run_binary(&["--help"]);
+    assert!(output.status.success(), "--help should exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for flag in ["--seed", "--output", "--resolution", "--drift", "--fast-encode"] {
+        assert!(stdout.contains(flag), "help output should document {flag}: {stdout}");
+    }
+}
+
+#[test]
 fn version_flag_exits_successfully() {
     let output = run_binary(&["--version"]);
     assert!(output.status.success(), "--version should exit 0");
@@ -42,6 +52,14 @@ fn invalid_resolution_is_rejected() {
 fn zero_resolution_is_rejected() {
     let output = run_binary(&["--resolution", "0x0", "--seed", "0xdeadbeef"]);
     assert!(!output.status.success(), "zero resolution should cause non-zero exit");
+}
+
+#[test]
+fn empty_seed_is_rejected_before_generation() {
+    let output = run_binary(&["--seed", "0x"]);
+    assert!(!output.status.success(), "empty seed should cause non-zero exit");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("seed"), "stderr should mention seed validation: {stderr}");
 }
 
 #[test]

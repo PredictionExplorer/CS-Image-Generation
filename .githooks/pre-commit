@@ -8,15 +8,22 @@ echo "Running cargo fmt --check..."
 cargo fmt --all -- --check
 
 echo "Running cargo clippy..."
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
-echo "Running ruff format --check..."
-ruff format --check .
+if [ -x .venv/bin/ruff ]; then RUFF=.venv/bin/ruff; else RUFF=ruff; fi
+if [ -x .venv/bin/mypy ]; then MYPY=.venv/bin/mypy; else MYPY=mypy; fi
+if [ -x .venv/bin/pytest ]; then PYTEST=.venv/bin/pytest; else PYTEST=pytest; fi
 
-echo "Running ruff check..."
-ruff check .
+echo "Running Ruff format --check..."
+"$RUFF" format --check .
 
-echo "Running mypy..."
-mypy
+echo "Running Ruff lint..."
+"$RUFF" check .
+
+echo "Running Mypy..."
+"$MYPY"
+
+echo "Running Pytest..."
+"$PYTEST"
 
 echo "Pre-commit checks passed."
