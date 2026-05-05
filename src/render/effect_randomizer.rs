@@ -301,7 +301,7 @@ mod tests {
 
         for _ in 0..200 {
             let value = randomizer.randomize_int(&descriptor);
-            assert!((3..=8).contains(&value), "randomize_int returned {value}, expected [3, 8]",);
+            assert!((3..=8).contains(&value), "randomize_int returned {value}, expected [3, 8]");
         }
     }
 }
