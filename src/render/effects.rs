@@ -836,6 +836,24 @@ mod tests {
     }
 
     #[test]
+    fn test_finish_pipeline_routes_crisp_luxury_effects_to_image_stage() {
+        let mut config = base_effect_config();
+        config.crystal_facets_enabled = true;
+        config.ink_cut_edges_enabled = true;
+        config.prismatic_sparkle_enabled = true;
+        config.fine_texture_enabled = true;
+
+        let pipeline = FinishEffectPipeline::new(&config);
+
+        assert_eq!(pipeline.trajectory_len(), 0);
+        assert_eq!(
+            pipeline.image_len(),
+            4,
+            "crisp luxury effects should run in the image stage for both still and video renders",
+        );
+    }
+
+    #[test]
     fn test_convert_spd_buffer_uses_explicit_sat_boost() {
         let mut spd = [0.0; NUM_BINS];
         for (bin, energy) in [(26, 0.2), (29, 0.5), (31, 0.8), (33, 1.0), (36, 0.6), (39, 0.3)] {

@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_effect_config_routes_sparkle_to_image_stage_for_crisp_finishes() {
+    fn test_build_effect_config_routes_crisp_finishes_to_still_and_video() {
         let resolved = ResolvedEffectConfig {
             enable_micro_contrast: true,
             enable_edge_luminance: true,
@@ -850,16 +850,29 @@ mod tests {
             ..Default::default()
         };
 
-        let effect_config =
+        let still_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let video_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video);
 
-        assert!(effect_config.prismatic_sparkle_enabled);
-        assert!(effect_config.prismatic_sparkle_config.radius <= 3);
-        assert!(effect_config.prismatic_sparkle_config.strength > 0.0);
-        assert!(effect_config.crystal_facets_enabled);
-        assert!(effect_config.crystal_facet_config.cell_size >= 10);
-        assert!(effect_config.ink_cut_edges_enabled);
-        assert!(effect_config.ink_cut_config.strength > 0.0);
+        for effect_config in [&still_config, &video_config] {
+            assert!(effect_config.prismatic_sparkle_enabled);
+            assert!(effect_config.prismatic_sparkle_config.radius <= 3);
+            assert!(effect_config.prismatic_sparkle_config.strength > 0.0);
+            assert!(effect_config.crystal_facets_enabled);
+            assert!(effect_config.crystal_facet_config.cell_size >= 10);
+            assert!(effect_config.ink_cut_edges_enabled);
+            assert!(effect_config.ink_cut_config.strength > 0.0);
+        }
+        assert_eq!(
+            still_config.prismatic_sparkle_config.radius,
+            video_config.prismatic_sparkle_config.radius,
+        );
+        assert_eq!(
+            still_config.crystal_facet_config.cell_size,
+            video_config.crystal_facet_config.cell_size,
+        );
+        assert_eq!(still_config.ink_cut_config.threshold, video_config.ink_cut_config.threshold);
     }
 
     #[test]
@@ -878,10 +891,14 @@ mod tests {
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let video_effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video);
 
-        assert!(!effect_config.crystal_facets_enabled);
-        assert!(!effect_config.ink_cut_edges_enabled);
-        assert!(!effect_config.prismatic_sparkle_enabled);
+        for effect_config in [&effect_config, &video_effect_config] {
+            assert!(!effect_config.crystal_facets_enabled);
+            assert!(!effect_config.ink_cut_edges_enabled);
+            assert!(!effect_config.prismatic_sparkle_enabled);
+        }
     }
 
     #[test]
