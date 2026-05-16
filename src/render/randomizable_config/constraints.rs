@@ -11,16 +11,16 @@ fn softness_stack_score(config: &ResolvedEffectConfig) -> f64 {
         score += 1.0;
     }
     if config.enable_chromatic_bloom {
-        score += 0.95;
+        score += 1.05;
     }
     if config.enable_perceptual_blur {
-        score += 0.85;
+        score += 1.0;
     }
     if config.enable_glow {
-        score += 0.55;
+        score += 0.65;
     }
     if config.enable_atmospheric_depth {
-        score += 0.35;
+        score += 0.45;
     }
     score
 }
@@ -113,7 +113,7 @@ fn rebalance_gradient_map_without_color_grade(
 }
 
 fn break_heavy_softness_stack(config: &mut ResolvedEffectConfig, adjustments: &mut Vec<String>) {
-    while heavy_softness_count(config) >= 2 && softness_stack_score(config) >= 2.0 {
+    while heavy_softness_count(config) >= 2 && softness_stack_score(config) >= 1.85 {
         let score_before = softness_stack_score(config);
         if config.enable_perceptual_blur {
             config.enable_perceptual_blur = false;
@@ -136,7 +136,7 @@ fn rescue_detail_for_softness_stack(
     softness_score: f64,
     adjustments: &mut Vec<String>,
 ) {
-    if softness_score < 2.0 {
+    if softness_score < 1.75 {
         return;
     }
 
@@ -144,18 +144,19 @@ fn rescue_detail_for_softness_stack(
 
     config.enable_micro_contrast = true;
     config.enable_edge_luminance = true;
-    config.dog_strength = config.dog_strength.min(0.28);
-    config.dog_sigma_scale = config.dog_sigma_scale.min(0.0054);
-    config.glow_strength = config.glow_strength.min(0.28);
-    config.glow_radius_scale = config.glow_radius_scale.min(0.0034);
-    config.chromatic_bloom_strength = config.chromatic_bloom_strength.min(0.36);
-    config.chromatic_bloom_radius_scale = config.chromatic_bloom_radius_scale.min(0.0046);
-    config.chromatic_bloom_separation_scale = config.chromatic_bloom_separation_scale.min(0.0010);
-    config.perceptual_blur_strength = config.perceptual_blur_strength.min(0.44);
-    config.micro_contrast_strength = config.micro_contrast_strength.max(0.24);
-    config.edge_luminance_strength = config.edge_luminance_strength.max(0.18);
-    config.edge_luminance_threshold = config.edge_luminance_threshold.min(0.20);
-    config.edge_luminance_brightness_boost = config.edge_luminance_brightness_boost.max(0.28);
+    config.dog_strength = config.dog_strength.min(0.25);
+    config.dog_sigma_scale = config.dog_sigma_scale.min(0.0048);
+    config.glow_strength = config.glow_strength.min(0.24);
+    config.glow_radius_scale = config.glow_radius_scale.min(0.0028);
+    config.chromatic_bloom_strength = config.chromatic_bloom_strength.min(0.28);
+    config.chromatic_bloom_radius_scale = config.chromatic_bloom_radius_scale.min(0.0032);
+    config.chromatic_bloom_separation_scale = config.chromatic_bloom_separation_scale.min(0.0008);
+    config.perceptual_blur_strength = config.perceptual_blur_strength.min(0.30);
+    config.micro_contrast_strength = config.micro_contrast_strength.max(0.34);
+    config.micro_contrast_radius = config.micro_contrast_radius.min(4);
+    config.edge_luminance_strength = config.edge_luminance_strength.max(0.26);
+    config.edge_luminance_threshold = config.edge_luminance_threshold.min(0.18);
+    config.edge_luminance_brightness_boost = config.edge_luminance_brightness_boost.max(0.34);
 
     if *config != original {
         adjustments.push(format!(
@@ -217,6 +218,8 @@ pub(super) fn apply_conflict_detection(
     disable_isolated_chromatic_bloom(&mut config, &mut adjustments);
     soften_unsupported_atmospheric_depth(&mut config, &mut adjustments);
     rebalance_gradient_map_without_color_grade(&mut config, &mut adjustments);
+    let initial_softness_score = softness_stack_score(&config);
+    rescue_detail_for_softness_stack(&mut config, initial_softness_score, &mut adjustments);
     break_heavy_softness_stack(&mut config, &mut adjustments);
 
     let softness_score = softness_stack_score(&config);

@@ -14,7 +14,8 @@ use crate::post_effects::{
     EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
     GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
     Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, try_apply_aether_weave, try_apply_champleve_iridescence,
+    PostEffectChain, PrismaticSparkle, PrismaticSparkleConfig, aether::AetherConfig,
+    try_apply_aether_weave, try_apply_champleve_iridescence,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba_with_sat_boost};
 use rayon::prelude::*;
@@ -97,6 +98,10 @@ pub struct EffectConfig {
     pub fine_texture_enabled: bool,
     /// Fine texture configuration
     pub fine_texture_config: FineTextureConfig,
+    /// Whether sparse prismatic sparkle glints are enabled
+    pub prismatic_sparkle_enabled: bool,
+    /// Prismatic sparkle configuration
+    pub prismatic_sparkle_config: PrismaticSparkleConfig,
 }
 
 /// Per-frame parameters that may vary
@@ -236,6 +241,10 @@ impl FinishEffectPipeline {
 
     fn build_image_chain(config: &EffectConfig) -> PostEffectChain {
         let mut chain = PostEffectChain::new();
+
+        if config.prismatic_sparkle_enabled {
+            chain.add(Box::new(PrismaticSparkle::new(config.prismatic_sparkle_config.clone())));
+        }
 
         if config.fine_texture_enabled {
             chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
@@ -777,6 +786,8 @@ mod tests {
             atmospheric_depth_config: AtmosphericDepthConfig::default(),
             fine_texture_enabled: false,
             fine_texture_config: FineTextureConfig::default(),
+            prismatic_sparkle_enabled: false,
+            prismatic_sparkle_config: PrismaticSparkleConfig::default(),
         }
     }
 

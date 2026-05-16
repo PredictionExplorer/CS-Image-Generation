@@ -50,15 +50,15 @@ pub const EQUIL_CHAOS_RATIO: FloatParamDescriptor = FloatParamDescriptor {
 // ---------------------------------------------------------------------------
 
 /// Probability that the Gaussian bloom effect is enabled during randomization.
-pub const ENABLE_PROB_BLOOM: f64 = 0.28;
+pub const ENABLE_PROB_BLOOM: f64 = 0.24;
 /// Probability that the tight glow enhancement is enabled during randomization.
-pub const ENABLE_PROB_GLOW: f64 = 0.55;
+pub const ENABLE_PROB_GLOW: f64 = 0.48;
 /// Probability that prismatic chromatic bloom is enabled during randomization.
-pub const ENABLE_PROB_CHROMATIC_BLOOM: f64 = 0.10;
+pub const ENABLE_PROB_CHROMATIC_BLOOM: f64 = 0.07;
 /// Probability that `OKLab` perceptual blur is enabled during randomization.
-pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.03;
+pub const ENABLE_PROB_PERCEPTUAL_BLUR: f64 = 0.01;
 /// Probability that micro-contrast enhancement is enabled during randomization.
-pub const ENABLE_PROB_MICRO_CONTRAST: f64 = 0.95;
+pub const ENABLE_PROB_MICRO_CONTRAST: f64 = 0.98;
 /// Probability that luxury gradient mapping is enabled during randomization.
 pub const ENABLE_PROB_GRADIENT_MAP: f64 = 0.18;
 /// Probability that cinematic color grading is enabled during randomization.
@@ -70,11 +70,11 @@ pub const ENABLE_PROB_AETHER: f64 = 0.22;
 /// Probability that opalescence shimmer is enabled during randomization.
 pub const ENABLE_PROB_OPALESCENCE: f64 = 0.25;
 /// Probability that edge luminance brightening is enabled during randomization.
-pub const ENABLE_PROB_EDGE_LUMINANCE: f64 = 0.75;
+pub const ENABLE_PROB_EDGE_LUMINANCE: f64 = 0.90;
 /// Probability that atmospheric depth perspective is enabled during randomization.
 pub const ENABLE_PROB_ATMOSPHERIC_DEPTH: f64 = 0.10;
 /// Probability that fine canvas texture is enabled during randomization.
-pub const ENABLE_PROB_FINE_TEXTURE: f64 = 0.45;
+pub const ENABLE_PROB_FINE_TEXTURE: f64 = 0.55;
 
 // ---------------------------------------------------------------------------
 // Bloom & glow parameters
@@ -83,16 +83,16 @@ pub const ENABLE_PROB_FINE_TEXTURE: f64 = 0.45;
 /// Strength of the Gaussian blur bloom effect.
 pub const BLUR_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "blur_strength",
-    min: 3.0,
-    max: 5.5,
+    min: 2.4,
+    max: 4.2,
     description: "Strength of Gaussian blur bloom effect",
 };
 
 /// Blur radius scale, expressed relative to the output resolution.
 pub const BLUR_RADIUS_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "blur_radius_scale",
-    min: 0.004,
-    max: 0.010,
+    min: 0.0028,
+    max: 0.0065,
     description: "Radius scale for blur (relative to resolution)",
 };
 
@@ -107,16 +107,16 @@ pub const BLUR_CORE_BRIGHTNESS: FloatParamDescriptor = FloatParamDescriptor {
 /// Difference-of-Gaussians bloom strength.
 pub const DOG_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "dog_strength",
-    min: 0.22,
-    max: 0.36,
+    min: 0.24,
+    max: 0.34,
     description: "Difference-of-Gaussians bloom strength",
 };
 
 /// `DoG` inner sigma scale, relative to the output resolution.
 pub const DOG_SIGMA_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "dog_sigma_scale",
-    min: 0.0038,
-    max: 0.0070,
+    min: 0.0028,
+    max: 0.0052,
     description: "DoG inner sigma scale (relative to resolution)",
 };
 
@@ -131,24 +131,24 @@ pub const DOG_RATIO: FloatParamDescriptor = FloatParamDescriptor {
 /// Tight glow enhancement strength.
 pub const GLOW_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "glow_strength",
-    min: 0.18,
-    max: 0.40,
+    min: 0.16,
+    max: 0.32,
     description: "Tight glow enhancement strength",
 };
 
 /// Luminance threshold above which glow is activated.
 pub const GLOW_THRESHOLD: FloatParamDescriptor = FloatParamDescriptor {
     name: "glow_threshold",
-    min: 0.62,
-    max: 0.78,
+    min: 0.68,
+    max: 0.82,
     description: "Luminance threshold for glow activation",
 };
 
 /// Glow radius scale, relative to the output resolution.
 pub const GLOW_RADIUS_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "glow_radius_scale",
-    min: 0.0025,
-    max: 0.0045,
+    min: 0.0018,
+    max: 0.0034,
     description: "Glow radius scale (relative to resolution)",
 };
 
@@ -175,32 +175,32 @@ pub const GLOW_SATURATION_BOOST: FloatParamDescriptor = FloatParamDescriptor {
 /// Prismatic color separation strength for chromatic bloom.
 pub const CHROMATIC_BLOOM_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_strength",
-    min: 0.25,
-    max: 0.42,
+    min: 0.16,
+    max: 0.30,
     description: "Prismatic color separation strength",
 };
 
 /// Chromatic bloom blur radius scale.
 pub const CHROMATIC_BLOOM_RADIUS_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_radius_scale",
-    min: 0.0030,
-    max: 0.0048,
+    min: 0.0016,
+    max: 0.0032,
     description: "Chromatic bloom radius scale",
 };
 
 /// RGB channel separation distance scale for chromatic bloom.
 pub const CHROMATIC_BLOOM_SEPARATION_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_separation_scale",
-    min: 0.0008,
-    max: 0.0016,
+    min: 0.00045,
+    max: 0.0011,
     description: "RGB channel separation distance scale",
 };
 
 /// Luminance threshold for chromatic bloom activation.
 pub const CHROMATIC_BLOOM_THRESHOLD: FloatParamDescriptor = FloatParamDescriptor {
     name: "chromatic_bloom_threshold",
-    min: 0.18,
-    max: 0.28,
+    min: 0.28,
+    max: 0.42,
     description: "Luminance threshold for chromatic bloom",
 };
 
@@ -211,8 +211,8 @@ pub const CHROMATIC_BLOOM_THRESHOLD: FloatParamDescriptor = FloatParamDescriptor
 /// `OKLab`-space perceptual blur strength.
 pub const PERCEPTUAL_BLUR_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "perceptual_blur_strength",
-    min: 0.35,
-    max: 0.50,
+    min: 0.18,
+    max: 0.32,
     description: "OKLab perceptual blur strength",
 };
 
@@ -255,8 +255,8 @@ pub const VIBRANCE: FloatParamDescriptor = FloatParamDescriptor {
 /// High-pass contrast clarity boost strength.
 pub const CLARITY_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "clarity_strength",
-    min: 0.25,
-    max: 0.45,
+    min: 0.32,
+    max: 0.55,
     description: "High-pass contrast clarity boost",
 };
 
@@ -403,40 +403,40 @@ pub const AETHER_CAUSTIC_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
 /// Local micro-contrast enhancement strength.
 pub const MICRO_CONTRAST_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "micro_contrast_strength",
-    min: 0.20,
-    max: 0.38,
+    min: 0.28,
+    max: 0.48,
     description: "Local contrast enhancement strength",
 };
 
 /// Micro-contrast neighborhood radius in pixels.
 pub const MICRO_CONTRAST_RADIUS: IntParamDescriptor = IntParamDescriptor {
     name: "micro_contrast_radius",
-    min: 3,
-    max: 6,
+    min: 2,
+    max: 4,
     description: "Micro-contrast neighborhood radius",
 };
 
 /// Edge luminance brightening strength.
 pub const EDGE_LUMINANCE_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "edge_luminance_strength",
-    min: 0.15,
-    max: 0.32,
+    min: 0.22,
+    max: 0.42,
     description: "Edge brightening strength",
 };
 
 /// Edge detection sensitivity threshold for luminance brightening.
 pub const EDGE_LUMINANCE_THRESHOLD: FloatParamDescriptor = FloatParamDescriptor {
     name: "edge_luminance_threshold",
-    min: 0.15,
-    max: 0.25,
+    min: 0.12,
+    max: 0.22,
     description: "Edge detection sensitivity threshold",
 };
 
 /// Edge brightness multiplier.
 pub const EDGE_LUMINANCE_BRIGHTNESS_BOOST: FloatParamDescriptor = FloatParamDescriptor {
     name: "edge_luminance_brightness_boost",
-    min: 0.20,
-    max: 0.40,
+    min: 0.28,
+    max: 0.52,
     description: "Edge brightness multiplier",
 };
 
@@ -447,16 +447,16 @@ pub const EDGE_LUMINANCE_BRIGHTNESS_BOOST: FloatParamDescriptor = FloatParamDesc
 /// Atmospheric perspective strength.
 pub const ATMOSPHERIC_DEPTH_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "atmospheric_depth_strength",
-    min: 0.05,
-    max: 0.12,
+    min: 0.03,
+    max: 0.09,
     description: "Atmospheric perspective strength",
 };
 
 /// Depth-based desaturation amount.
 pub const ATMOSPHERIC_DESATURATION: FloatParamDescriptor = FloatParamDescriptor {
     name: "atmospheric_desaturation",
-    min: 0.06,
-    max: 0.15,
+    min: 0.04,
+    max: 0.12,
     description: "Depth-based desaturation",
 };
 
@@ -495,24 +495,24 @@ pub const ATMOSPHERIC_FOG_COLOR_B: FloatParamDescriptor = FloatParamDescriptor {
 /// Canvas/surface texture strength.
 pub const FINE_TEXTURE_STRENGTH: FloatParamDescriptor = FloatParamDescriptor {
     name: "fine_texture_strength",
-    min: 0.06,
-    max: 0.18,
+    min: 0.04,
+    max: 0.12,
     description: "Canvas/surface texture strength",
 };
 
 /// Texture feature scale.
 pub const FINE_TEXTURE_SCALE: FloatParamDescriptor = FloatParamDescriptor {
     name: "fine_texture_scale",
-    min: 0.0012,
-    max: 0.0022,
+    min: 0.00075,
+    max: 0.0015,
     description: "Texture feature scale",
 };
 
 /// Texture contrast intensity.
 pub const FINE_TEXTURE_CONTRAST: FloatParamDescriptor = FloatParamDescriptor {
     name: "fine_texture_contrast",
-    min: 0.25,
-    max: 0.42,
+    min: 0.32,
+    max: 0.58,
     description: "Texture contrast intensity",
 };
 

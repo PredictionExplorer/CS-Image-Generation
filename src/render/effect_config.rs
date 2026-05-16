@@ -6,7 +6,7 @@ use super::{BloomMode, FinishOutputMode, RenderConfig, constants};
 use crate::post_effects::{
     AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
     EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
-    OpalescenceConfig, PerceptualBlurConfig,
+    OpalescenceConfig, PerceptualBlurConfig, PrismaticSparkleConfig,
 };
 use crate::utils::f64_to_usize_saturating;
 
@@ -209,6 +209,21 @@ fn build_fine_texture_config(
     )
 }
 
+fn build_prismatic_sparkle_config(
+    resolved: &ResolvedEffectConfig,
+    min_dim: usize,
+) -> (bool, PrismaticSparkleConfig) {
+    let enabled =
+        min_dim >= 720 && (resolved.enable_edge_luminance || resolved.enable_micro_contrast);
+    let radius = f64_to_usize_saturating((0.0014 * min_dim as f64).round()).clamp(1, 3);
+    let strength = (resolved.edge_luminance_strength * 0.34
+        + resolved.micro_contrast_strength * 0.18)
+        .clamp(0.10, 0.22);
+    let density = if resolved.enable_glow { 0.024 } else { 0.016 };
+
+    (enabled, PrismaticSparkleConfig { strength, threshold: 0.76, density, radius })
+}
+
 /// Build a fully populated [`EffectConfig`] from resolved parameters and render settings.
 #[must_use]
 pub fn build_effect_config_from_resolved(
@@ -230,6 +245,8 @@ pub fn build_effect_config_from_resolved(
     };
     let (fine_texture_enabled, fine_texture_config) =
         build_fine_texture_config(resolved, output_mode);
+    let (prismatic_sparkle_enabled, prismatic_sparkle_config) =
+        build_prismatic_sparkle_config(resolved, min_dim);
 
     EffectConfig {
         bloom_mode,
@@ -269,5 +286,7 @@ pub fn build_effect_config_from_resolved(
         atmospheric_depth_config: build_atmospheric_depth_config(resolved),
         fine_texture_enabled,
         fine_texture_config,
+        prismatic_sparkle_enabled,
+        prismatic_sparkle_config,
     }
 }

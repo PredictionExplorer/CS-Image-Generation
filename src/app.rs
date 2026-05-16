@@ -14,7 +14,8 @@ use crate::generation_log::{
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     VideoEncodingOptions, constants, generate_body_color_sequences,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, render_final_frame_spectral,
+    save_image_as_png_16bit,
     video::{VideoEncoder, create_video_from_frames_singlepass_with_encoder},
 };
 use crate::sim::{self, Body, BordaWeights, Sha3RandomByteStream, TrajectoryResult};
@@ -516,13 +517,10 @@ pub(crate) fn render_video_with_encoder(
         video_encoder,
     )?;
 
-    // Save final frame
-    if let Some(last_frame) = last_frame_png {
-        info!("Attempting to save 16-bit PNG to: {}", output_png.display());
-        save_image_as_png_16bit(&last_frame, output_png)?;
-    } else {
-        warn!("Warning: No final frame was generated to save as PNG.");
-    }
+    // Save a dedicated still render so the PNG does not inherit video temporal smoothing.
+    info!("Rendering crisp still PNG to: {}", output_png.display());
+    let still_frame = render_final_frame_spectral(scene, levels, settings)?;
+    save_image_as_png_16bit(&still_frame, output_png)?;
 
     Ok(accum_spd)
 }

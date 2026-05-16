@@ -1041,12 +1041,12 @@ mod tests {
         let (resolved, log) = config.resolve(&mut rng, 1920, 1080);
 
         // Verify all parameters are within their curated museum-quality ranges
-        assert!(resolved.blur_strength >= 3.0 && resolved.blur_strength <= 5.5);
-        assert!(resolved.blur_radius_scale >= 0.004 && resolved.blur_radius_scale <= 0.010);
-        assert!(resolved.glow_strength >= 0.18 && resolved.glow_strength <= 0.40);
-        assert!(resolved.dog_strength >= 0.20 && resolved.dog_strength <= 0.36);
+        assert!(resolved.blur_strength >= 2.4 && resolved.blur_strength <= 4.2);
+        assert!(resolved.blur_radius_scale >= 0.0028 && resolved.blur_radius_scale <= 0.0065);
+        assert!(resolved.glow_strength >= 0.16 && resolved.glow_strength <= 0.32);
+        assert!(resolved.dog_strength >= 0.24 && resolved.dog_strength <= 0.34);
         assert!(
-            resolved.chromatic_bloom_strength >= 0.24 && resolved.chromatic_bloom_strength <= 0.55
+            resolved.chromatic_bloom_strength >= 0.16 && resolved.chromatic_bloom_strength <= 0.30
         );
         assert!(
             resolved.vibrance >= 1.10 && resolved.vibrance <= 1.35,
@@ -1317,9 +1317,9 @@ mod tests {
     }
 
     #[test]
-    fn test_stack_cap_preserves_pure_bloom_plus_chromatic() {
-        // bloom + chromatic alone (score 1.95) is preserved — it's only a
-        // mild softening that we treat as a rare variety case, not a stack.
+    fn test_stack_cap_tightens_pure_bloom_plus_chromatic() {
+        // Even bloom + chromatic alone is now treated as a softness stack because
+        // the default look prioritizes crisp edge definition.
         let config = ResolvedEffectConfig {
             enable_bloom: true,
             enable_chromatic_bloom: true,
@@ -1330,14 +1330,40 @@ mod tests {
         let result = apply_conflict_detection(config, &mut log);
 
         assert!(result.enable_bloom);
-        assert!(result.enable_chromatic_bloom);
+        assert!(!result.enable_chromatic_bloom);
         let stack_cap_fired = log.effects.iter().any(|record| {
             record
                 .parameters
                 .iter()
                 .any(|parameter| parameter.value.contains("break softness stack"))
         });
-        assert!(!stack_cap_fired);
+        assert!(stack_cap_fired);
+    }
+
+    #[test]
+    fn test_softness_stack_enables_detail_rescue_before_breaking_blurs() {
+        let config = ResolvedEffectConfig {
+            enable_bloom: true,
+            enable_chromatic_bloom: true,
+            enable_micro_contrast: false,
+            enable_edge_luminance: false,
+            micro_contrast_strength: 0.20,
+            edge_luminance_strength: 0.15,
+            edge_luminance_brightness_boost: 0.20,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_micro_contrast);
+        assert!(result.enable_edge_luminance);
+        assert!(result.micro_contrast_strength >= 0.34);
+        assert!(result.edge_luminance_strength >= 0.26);
+        assert!(result.edge_luminance_brightness_boost >= 0.34);
+        assert!(log.effects.iter().any(|record| {
+            record.parameters.iter().any(|parameter| parameter.value.contains("detail rescue"))
+        }));
     }
 
     #[test]

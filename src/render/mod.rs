@@ -837,6 +837,27 @@ mod tests {
     }
 
     #[test]
+    fn test_build_effect_config_routes_sparkle_to_image_stage_for_crisp_finishes() {
+        let resolved = ResolvedEffectConfig {
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+
+        assert!(effect_config.prismatic_sparkle_enabled);
+        assert!(effect_config.prismatic_sparkle_config.radius <= 3);
+        assert!(effect_config.prismatic_sparkle_config.strength > 0.0);
+    }
+
+    #[test]
     fn test_build_effect_config_tightens_softness_stack_settings() {
         let resolved = ResolvedEffectConfig {
             enable_bloom: true,
@@ -1041,6 +1062,38 @@ mod tests {
         assert!(
             final_energy > single_energy.saturating_mul(20),
             "final preview should retain much more energy than the legacy early-slice preview (single={single_energy}, final={final_energy})"
+        );
+    }
+
+    #[test]
+    fn test_final_still_is_independent_from_temporal_smoothing() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let resolved = baseline_resolved_config(64, 40);
+        let render_config =
+            RenderConfig { hdr_scale: 3.2, bloom_mode: BloomMode::None, ..Default::default() };
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let levels = ChannelLevels::new(0.0, 0.12, 0.0, 0.12, 0.0, 0.12);
+
+        let (_, unsmoothed_last) =
+            capture_frame_bytes_with_pool(scene, 1, &levels, settings, false, false, 2);
+        let (_, smoothed_last) =
+            capture_frame_bytes_with_pool(scene, 1, &levels, settings, true, false, 2);
+        let still = render_final_frame_spectral(scene, &levels, settings)
+            .expect("dedicated still render should succeed");
+
+        let unsmoothed_last = unsmoothed_last.expect("pass 2 should capture final frame");
+        let smoothed_last = smoothed_last.expect("pass 2 should capture final frame");
+
+        assert_ne!(
+            smoothed_last.as_raw(),
+            unsmoothed_last.as_raw(),
+            "fixture should exercise temporal smoothing",
+        );
+        assert_ne!(
+            smoothed_last.as_raw(),
+            still.as_raw(),
+            "dedicated still render should not inherit temporal smoothing",
         );
     }
 

@@ -185,6 +185,7 @@ pub mod gradient_map;
 pub mod micro_contrast;
 pub mod opalescence;
 pub mod perceptual_blur;
+pub mod prismatic_sparkle;
 pub mod temporal_smoothing;
 pub(super) mod utils;
 
@@ -204,6 +205,7 @@ pub use gradient_map::{GradientMap, GradientMapConfig, LuxuryPalette};
 pub use micro_contrast::{MicroContrast, MicroContrastConfig};
 pub use opalescence::{Opalescence, OpalescenceConfig};
 pub use perceptual_blur::{PerceptualBlur, PerceptualBlurConfig};
+pub use prismatic_sparkle::{PrismaticSparkle, PrismaticSparkleConfig};
 pub use temporal_smoothing::{TemporalSmoothing, TemporalSmoothingConfig};
 
 #[cfg(test)]
