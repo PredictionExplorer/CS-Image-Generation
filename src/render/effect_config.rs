@@ -5,8 +5,9 @@ use super::randomizable_config::ResolvedEffectConfig;
 use super::{BloomMode, FinishOutputMode, RenderConfig, constants};
 use crate::post_effects::{
     AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
-    EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
-    OpalescenceConfig, PerceptualBlurConfig, PrismaticSparkleConfig,
+    CrystalFacetConfig, EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, InkCutConfig,
+    LuxuryPalette, MicroContrastConfig, OpalescenceConfig, PerceptualBlurConfig,
+    PrismaticSparkleConfig,
 };
 use crate::utils::f64_to_usize_saturating;
 
@@ -224,6 +225,29 @@ fn build_prismatic_sparkle_config(
     (enabled, PrismaticSparkleConfig { strength, threshold: 0.76, density, radius })
 }
 
+fn build_crystal_facet_config(
+    resolved: &ResolvedEffectConfig,
+    min_dim: usize,
+) -> (bool, CrystalFacetConfig) {
+    let enabled = min_dim >= 720 && (resolved.enable_color_grade || resolved.enable_micro_contrast);
+    let cell_size = f64_to_usize_saturating((0.013 * min_dim as f64).round()).clamp(10, 28);
+    let strength =
+        (0.04 + resolved.clarity_strength * 0.08 + resolved.micro_contrast_strength * 0.10)
+            .clamp(0.06, 0.13);
+
+    (enabled, CrystalFacetConfig { strength, cell_size, threshold: 0.16, highlight_gain: 0.04 })
+}
+
+fn build_ink_cut_config(resolved: &ResolvedEffectConfig, min_dim: usize) -> (bool, InkCutConfig) {
+    let enabled = min_dim >= 720 && resolved.enable_edge_luminance;
+    let strength = (resolved.edge_luminance_strength * 0.42
+        + resolved.micro_contrast_strength * 0.16)
+        .clamp(0.12, 0.26);
+    let threshold = (resolved.edge_luminance_threshold * 0.85).clamp(0.10, 0.20);
+
+    (enabled, InkCutConfig { strength, threshold, darken: 0.18, glint: 0.16 })
+}
+
 /// Build a fully populated [`EffectConfig`] from resolved parameters and render settings.
 #[must_use]
 pub fn build_effect_config_from_resolved(
@@ -247,6 +271,9 @@ pub fn build_effect_config_from_resolved(
         build_fine_texture_config(resolved, output_mode);
     let (prismatic_sparkle_enabled, prismatic_sparkle_config) =
         build_prismatic_sparkle_config(resolved, min_dim);
+    let (crystal_facets_enabled, crystal_facet_config) =
+        build_crystal_facet_config(resolved, min_dim);
+    let (ink_cut_edges_enabled, ink_cut_config) = build_ink_cut_config(resolved, min_dim);
 
     EffectConfig {
         bloom_mode,
@@ -286,6 +313,10 @@ pub fn build_effect_config_from_resolved(
         atmospheric_depth_config: build_atmospheric_depth_config(resolved),
         fine_texture_enabled,
         fine_texture_config,
+        crystal_facets_enabled,
+        crystal_facet_config,
+        ink_cut_edges_enabled,
+        ink_cut_config,
         prismatic_sparkle_enabled,
         prismatic_sparkle_config,
     }

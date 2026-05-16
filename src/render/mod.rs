@@ -841,6 +841,7 @@ mod tests {
         let resolved = ResolvedEffectConfig {
             enable_micro_contrast: true,
             enable_edge_luminance: true,
+            enable_color_grade: true,
             ..baseline_resolved_config(1920, 1080)
         };
         let render_config = RenderConfig {
@@ -855,6 +856,32 @@ mod tests {
         assert!(effect_config.prismatic_sparkle_enabled);
         assert!(effect_config.prismatic_sparkle_config.radius <= 3);
         assert!(effect_config.prismatic_sparkle_config.strength > 0.0);
+        assert!(effect_config.crystal_facets_enabled);
+        assert!(effect_config.crystal_facet_config.cell_size >= 10);
+        assert!(effect_config.ink_cut_edges_enabled);
+        assert!(effect_config.ink_cut_config.strength > 0.0);
+    }
+
+    #[test]
+    fn test_crisp_luxury_image_effects_skip_proxy_resolution() {
+        let resolved = ResolvedEffectConfig {
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            enable_color_grade: true,
+            ..baseline_resolved_config(640, 360)
+        };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+
+        assert!(!effect_config.crystal_facets_enabled);
+        assert!(!effect_config.ink_cut_edges_enabled);
+        assert!(!effect_config.prismatic_sparkle_enabled);
     }
 
     #[test]

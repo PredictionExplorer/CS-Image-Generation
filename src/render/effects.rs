@@ -10,12 +10,13 @@ use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use crate::post_effects::{
     AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
-    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
-    EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
-    GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
-    Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, PrismaticSparkle, PrismaticSparkleConfig, aether::AetherConfig,
-    try_apply_aether_weave, try_apply_champleve_iridescence,
+    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, CrystalFacetConfig,
+    CrystalFacetContrast, DogBloom, EdgeLuminance, EdgeLuminanceConfig, FineTexture,
+    FineTextureConfig, GaussianBloom, GlowEnhancement, GlowEnhancementConfig, GradientMap,
+    GradientMapConfig, InkCutConfig, InkCutEdges, MicroContrast, MicroContrastConfig, Opalescence,
+    OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect, PostEffectChain,
+    PrismaticSparkle, PrismaticSparkleConfig, aether::AetherConfig, try_apply_aether_weave,
+    try_apply_champleve_iridescence,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba_with_sat_boost};
 use rayon::prelude::*;
@@ -98,6 +99,14 @@ pub struct EffectConfig {
     pub fine_texture_enabled: bool,
     /// Fine texture configuration
     pub fine_texture_config: FineTextureConfig,
+    /// Whether angular crystal facet contrast is enabled
+    pub crystal_facets_enabled: bool,
+    /// Crystal facet configuration
+    pub crystal_facet_config: CrystalFacetConfig,
+    /// Whether crisp ink-cut edge definition is enabled
+    pub ink_cut_edges_enabled: bool,
+    /// Ink-cut edge configuration
+    pub ink_cut_config: InkCutConfig,
     /// Whether sparse prismatic sparkle glints are enabled
     pub prismatic_sparkle_enabled: bool,
     /// Prismatic sparkle configuration
@@ -241,6 +250,14 @@ impl FinishEffectPipeline {
 
     fn build_image_chain(config: &EffectConfig) -> PostEffectChain {
         let mut chain = PostEffectChain::new();
+
+        if config.crystal_facets_enabled {
+            chain.add(Box::new(CrystalFacetContrast::new(config.crystal_facet_config.clone())));
+        }
+
+        if config.ink_cut_edges_enabled {
+            chain.add(Box::new(InkCutEdges::new(config.ink_cut_config.clone())));
+        }
 
         if config.prismatic_sparkle_enabled {
             chain.add(Box::new(PrismaticSparkle::new(config.prismatic_sparkle_config.clone())));
@@ -786,6 +803,10 @@ mod tests {
             atmospheric_depth_config: AtmosphericDepthConfig::default(),
             fine_texture_enabled: false,
             fine_texture_config: FineTextureConfig::default(),
+            crystal_facets_enabled: false,
+            crystal_facet_config: CrystalFacetConfig::default(),
+            ink_cut_edges_enabled: false,
+            ink_cut_config: InkCutConfig::default(),
             prismatic_sparkle_enabled: false,
             prismatic_sparkle_config: PrismaticSparkleConfig::default(),
         }
