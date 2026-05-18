@@ -8,6 +8,13 @@
 
 use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
 
+/// Smallest spectral energy that is treated as visible signal.
+///
+/// Production alpha values are intentionally tiny and get accumulated over many
+/// steps. Short QA renders can still contain valid energy around 1e-15, so this
+/// threshold must stay well below that range to avoid all-black previews.
+const SPD_VISIBLE_EPSILON: f64 = 1e-18;
+
 /// Convert SPD to RGBA using SIMD when available
 ///
 /// This is a drop-in replacement for the standard `spd_to_rgba` function that
@@ -81,7 +88,7 @@ fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f
 
     for i in 0..NUM_BINS {
         let e = spd[i];
-        if e <= 1e-10 {
+        if e <= SPD_VISIBLE_EPSILON {
             continue;
         }
         let (lr, lg, lb, k) = BIN_COMBINED_LUT[i];
@@ -116,7 +123,7 @@ fn finalize_rgba(
     total: f64,
     boosted: bool,
 ) -> (f64, f64, f64, f64) {
-    if total < 1e-10 {
+    if total < SPD_VISIBLE_EPSILON {
         return (0.0, 0.0, 0.0, 0.0);
     }
 
@@ -219,7 +226,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
         let mut g_accum = _mm256_setzero_pd();
         let mut b_accum = _mm256_setzero_pd();
         let mut total_accum = _mm256_setzero_pd();
-        let threshold = _mm256_set1_pd(1e-10);
+        let threshold = _mm256_set1_pd(SPD_VISIBLE_EPSILON);
 
         for chunk_start in (0..NUM_BINS).step_by(4) {
             let energy = _mm256_loadu_pd(&spd[chunk_start]);
@@ -286,8 +293,8 @@ unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
 
             let e0 = spd[chunk_start];
             let e1 = spd[chunk_start + 1];
-            let em0 = if e0 > 1e-10 { 1.0 - (-lut0.3 * e0).exp() } else { 0.0 };
-            let em1 = if e1 > 1e-10 { 1.0 - (-lut1.3 * e1).exp() } else { 0.0 };
+            let em0 = if e0 > SPD_VISIBLE_EPSILON { 1.0 - (-lut0.3 * e0).exp() } else { 0.0 };
+            let em1 = if e1 > SPD_VISIBLE_EPSILON { 1.0 - (-lut1.3 * e1).exp() } else { 0.0 };
 
             let e_data = [em0, em1];
             let r_data = [lut0.0, lut1.0];
@@ -609,8 +616,8 @@ mod tests {
 
     #[test]
     fn test_near_zero_threshold() {
-        let below = [9e-11; NUM_BINS];
-        let above = [2e-10; NUM_BINS];
+        let below = [SPD_VISIBLE_EPSILON * 0.5; NUM_BINS];
+        let above = [1e-15; NUM_BINS];
 
         let rb = spd_to_rgba_simd(&below);
         let ra = spd_to_rgba_simd(&above);
@@ -619,6 +626,23 @@ mod tests {
         assert_simd_scalar_match(&above, "above_threshold");
 
         assert!(ra.3 >= rb.3, "above threshold should be >= below threshold in brightness");
+    }
+
+    #[test]
+    fn test_low_density_production_energy_remains_visible() {
+        let mut spd = [0.0; NUM_BINS];
+        spd[28] = 3.5e-16;
+        spd[31] = 8.0e-16;
+        spd[35] = 4.5e-16;
+
+        let result = spd_to_rgba_simd(&spd);
+
+        assert!(result.3 > 0.0, "low-density accumulated SPD should not be discarded");
+        assert!(
+            result.0 > 0.0 || result.1 > 0.0 || result.2 > 0.0,
+            "low-density accumulated SPD should produce visible RGB energy",
+        );
+        assert_simd_scalar_match(&spd, "low_density_visible_energy");
     }
 
     #[test]

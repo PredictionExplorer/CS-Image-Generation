@@ -900,6 +900,11 @@ mod tests {
         }
     }
 
+    fn png_channel_energy(path: &Path) -> u64 {
+        let image = image::open(path).expect("PNG should decode").to_rgb16();
+        image.as_raw().iter().map(|&channel| u64::from(channel)).sum()
+    }
+
     #[test]
     fn pipeline_smoke_test_uses_video_encoder_seam() {
         let _lock = CWD_LOCK.lock().expect("cwd test lock should not be poisoned");
@@ -930,6 +935,43 @@ mod tests {
             encoder.calls.borrow().iter().all(|(_, _, _, _, bytes)| *bytes > 0),
             "fake encoder should receive non-empty frame streams"
         );
+    }
+
+    #[test]
+    fn pipeline_low_density_smoke_test_outputs_nonblack_assets() {
+        let _lock = CWD_LOCK.lock().expect("cwd test lock should not be poisoned");
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let output_name = tmp
+            .path()
+            .file_name()
+            .expect("tempdir should have a final component")
+            .to_string_lossy()
+            .to_string();
+        let output_parent =
+            tmp.path().parent().expect("tempdir should have a parent").to_path_buf();
+        let _cwd = CurrentDirGuard::enter(&output_parent);
+
+        let encoder = FakeVideoEncoder::default();
+        let request = GenerationRequest {
+            width: 256,
+            height: 256,
+            ..tiny_generation_request(output_name, GenerationDriftMode::Elliptical)
+        };
+
+        let summary = run_generation_with_video_encoder(&request, &encoder)
+            .expect("low-density smoke generation should complete");
+
+        assert!(
+            png_channel_energy(summary.outputs.image_png_path()) > 0,
+            "final image.png must contain visible non-black pixels",
+        );
+        assert!(
+            summary.outputs.spectral_dir_path().join("32_542nm.png").is_file(),
+            "spectral gallery should still be generated",
+        );
+        assert_eq!(encoder.calls.borrow().len(), 2, "main and spectral sweep videos are encoded");
+        let main_video_bytes = encoder.calls.borrow()[0].4;
+        assert!(main_video_bytes > 0, "main video encoder should receive frame bytes");
     }
 
     #[test]

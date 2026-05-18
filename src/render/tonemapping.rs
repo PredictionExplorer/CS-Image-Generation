@@ -36,8 +36,9 @@ pub(super) fn tonemap_core(
         return [0.0, 0.0, 0.0];
     }
 
-    let source = [fr.max(0.0), fg.max(0.0), fb.max(0.0)];
-    let premult = [source[0] * alpha, source[1] * alpha, source[2] * alpha];
+    // PixelBuffer RGB is already premultiplied by alpha throughout the render pipeline.
+    // Multiplying by alpha again would erase low-density, short, or preview renders.
+    let premult = [fr.max(0.0), fg.max(0.0), fb.max(0.0)];
     if premult[0] <= 0.0 && premult[1] <= 0.0 && premult[2] <= 0.0 {
         return [0.0, 0.0, 0.0];
     }

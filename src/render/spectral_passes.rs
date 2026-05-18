@@ -227,8 +227,8 @@ fn pass_1_build_histogram_spectral_with_backend(
         accum_rgba.resize(pixel_count, (0.0, 0.0, 0.0, 0.0));
 
         histogram.reserve(pixel_count);
-        for &(r, g, b, a) in &trajectory_proxy {
-            histogram.push(r * a, g * a, b * a);
+        for &(r, g, b, _a) in &trajectory_proxy {
+            histogram.push(r, g, b);
         }
 
         step_start = checkpoint_step + 1;

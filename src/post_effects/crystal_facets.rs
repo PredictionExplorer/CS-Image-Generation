@@ -93,10 +93,7 @@ impl PostEffect for CrystalFacetContrast {
                 if a <= 0.0 {
                     return (r, g, b, a);
                 }
-                let sr = r / a;
-                let sg = g / a;
-                let sb = b / a;
-                let lum = Self::luminance(sr, sg, sb);
+                let lum = Self::luminance(r, g, b);
                 let gate =
                     ((lum - self.config.threshold) / (1.0 - self.config.threshold)).clamp(0.0, 1.0);
                 if gate <= 0.0 {
@@ -110,9 +107,9 @@ impl PostEffect for CrystalFacetContrast {
                 let modulation = 1.0 + facet * self.config.strength * gate + lift;
 
                 (
-                    (sr * modulation).clamp(0.0, 1.35) * a,
-                    (sg * modulation).clamp(0.0, 1.35) * a,
-                    (sb * modulation).clamp(0.0, 1.35) * a,
+                    (r * modulation).clamp(0.0, 1.35),
+                    (g * modulation).clamp(0.0, 1.35),
+                    (b * modulation).clamp(0.0, 1.35),
                     a,
                 )
             })
@@ -148,6 +145,25 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.windows(2).any(|pair| (pair[0].0 - pair[1].0).abs() > 1e-6));
+    }
+
+    #[test]
+    fn test_crystal_facets_do_not_collapse_low_alpha_display_pixels() {
+        let effect = CrystalFacetContrast::new(CrystalFacetConfig {
+            strength: 0.20,
+            cell_size: 4,
+            threshold: 0.0,
+            highlight_gain: 0.04,
+        });
+        let input = vec![(0.6, 0.5, 0.4, 1e-7); 64];
+
+        let output = effect.process(&input, 8, 8).expect("facet effect should process");
+
+        assert!(
+            output.iter().any(|pixel| pixel.0 > 0.1),
+            "display RGB should stay visible even when alpha is tiny",
+        );
+        assert!(output.iter().all(|pixel| pixel.3 == 1e-7), "alpha should be preserved");
     }
 
     #[test]

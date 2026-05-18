@@ -717,6 +717,18 @@ mod tests {
     }
 
     #[test]
+    fn test_tonemap_keeps_low_alpha_premultiplied_signal_visible() {
+        let levels = ChannelLevels::new(0.0, 1e-14, 0.0, 1e-14, 0.0, 1e-14);
+
+        let result = tonemap_core(5e-15, 7e-15, 4e-15, 1e-7, &levels, true);
+
+        assert!(
+            result.iter().any(|&channel| channel > 0.0),
+            "premultiplied low-alpha signal should survive tone mapping",
+        );
+    }
+
+    #[test]
     fn test_agx_tweak_changes_output() {
         let levels = default_levels();
 
@@ -1260,6 +1272,31 @@ mod tests {
                 &format!("video-last-frame/stylized/threads={thread_count}"),
             );
         }
+    }
+
+    #[test]
+    fn test_full_resolution_stylized_still_and_video_are_not_black() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let resolved = stylized_resolved_config(720, 720);
+        let render_config =
+            RenderConfig { hdr_scale: 4.2, bloom_mode: BloomMode::Dog, ..Default::default() };
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let frame_interval = 1usize;
+        let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
+
+        let still = render_final_frame_spectral(scene, &levels, settings)
+            .expect("full-resolution stylized still should render");
+        assert!(image_energy(&still) > 0, "full-resolution stylized still must not be black");
+
+        let (frame_bytes, last_frame) =
+            capture_frame_bytes_with_pool(scene, frame_interval, &levels, settings, true, true, 1);
+        let last_frame = last_frame.expect("video path should capture final frame");
+        assert!(frame_bytes.iter().any(|&byte| byte != 0), "video bytes must not be all zero");
+        assert!(
+            image_energy(&last_frame) > 0,
+            "full-resolution video final frame must not be black"
+        );
     }
 
     #[test]

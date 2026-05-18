@@ -43,7 +43,7 @@ impl PrismaticSparkle {
         if a <= 0.0 {
             return 0.0;
         }
-        constants::rec709_luminance(r / a, g / a, b / a)
+        constants::rec709_luminance(r, g, b)
     }
 
     #[inline]
@@ -182,15 +182,7 @@ impl PostEffect for PrismaticSparkle {
                     return (r, g, b, a);
                 }
 
-                let sr = r / a;
-                let sg = g / a;
-                let sb = b / a;
-                (
-                    (sr + boost[0]).min(1.35) * a,
-                    (sg + boost[1]).min(1.35) * a,
-                    (sb + boost[2]).min(1.35) * a,
-                    a,
-                )
+                ((r + boost[0]).min(1.35), (g + boost[1]).min(1.35), (b + boost[2]).min(1.35), a)
             })
             .collect();
 
@@ -227,5 +219,22 @@ mod tests {
             output.iter().zip(input.iter()).any(|(out, inp)| out.0 > inp.0),
             "sparkle should brighten at least one highlight-adjacent pixel",
         );
+    }
+
+    #[test]
+    fn test_sparkle_does_not_collapse_low_alpha_display_pixels() {
+        let effect = PrismaticSparkle::new(PrismaticSparkleConfig {
+            strength: 0.2,
+            threshold: 0.5,
+            density: 1.0,
+            radius: 1,
+        });
+        let mut input = vec![(0.02, 0.02, 0.02, 1e-7); 25];
+        input[12] = (0.8, 0.8, 0.8, 1e-7);
+
+        let output = effect.process(&input, 5, 5).expect("sparkle effect should process");
+
+        assert!(output[12].0 >= input[12].0, "display RGB should not be premultiplied again");
+        assert_eq!(output[12].3, input[12].3, "alpha should be preserved");
     }
 }

@@ -43,7 +43,7 @@ impl InkCutEdges {
         if a <= 0.0 {
             return 0.0;
         }
-        constants::rec709_luminance(r / a, g / a, b / a)
+        constants::rec709_luminance(r, g, b)
     }
 
     #[inline]
@@ -136,13 +136,10 @@ impl PostEffect for InkCutEdges {
                     1.0 - self.config.strength * self.config.darken * edge_gate
                 };
 
-                let sr = r / a;
-                let sg = g / a;
-                let sb = b / a;
                 (
-                    (sr * factor).clamp(0.0, 1.35) * a,
-                    (sg * factor).clamp(0.0, 1.35) * a,
-                    (sb * factor).clamp(0.0, 1.35) * a,
+                    (r * factor).clamp(0.0, 1.35),
+                    (g * factor).clamp(0.0, 1.35),
+                    (b * factor).clamp(0.0, 1.35),
                     a,
                 )
             })
@@ -181,6 +178,27 @@ mod tests {
 
         assert!(output[2 * 5 + 1].0 < input[2 * 5 + 1].0, "dark edge side should darken");
         assert!(output[2 * 5 + 2].0 > input[2 * 5 + 2].0, "bright edge side should glint");
+    }
+
+    #[test]
+    fn test_ink_cut_does_not_collapse_low_alpha_display_pixels() {
+        let effect = InkCutEdges::new(InkCutConfig {
+            strength: 1.0,
+            threshold: 0.05,
+            darken: 0.30,
+            glint: 0.30,
+        });
+        let mut input = vec![(0.2, 0.2, 0.2, 1e-7); 25];
+        for y in 0..5 {
+            for x in 2..5 {
+                input[y * 5 + x] = (0.8, 0.8, 0.8, 1e-7);
+            }
+        }
+
+        let output = effect.process(&input, 5, 5).expect("ink cut should process");
+
+        assert!(output[2 * 5 + 2].0 > 0.5, "bright display edge should remain visible");
+        assert_eq!(output[2 * 5 + 2].3, input[2 * 5 + 2].3, "alpha should be preserved");
     }
 
     #[test]
