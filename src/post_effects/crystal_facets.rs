@@ -3,6 +3,7 @@
 use super::{PixelBuffer, PostEffect, PostEffectError, validate_buffer_shape};
 use crate::render::constants;
 use rayon::prelude::*;
+use std::f64::consts::TAU;
 
 /// Configuration for angular crystal facet contrast.
 #[derive(Clone, Debug)]
@@ -42,31 +43,18 @@ impl CrystalFacetContrast {
         constants::rec709_luminance(r, g, b)
     }
 
-    #[inline]
-    fn hash_signed(cell_x: usize, cell_y: usize, salt: u64) -> f64 {
-        let mut n = (cell_x as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93)
-            ^ (cell_y as u64).wrapping_mul(0xA5A3_58B9_3217_58B5)
-            ^ salt;
-        n ^= n >> 32;
-        n = n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        n ^= n >> 29;
-        let unit = (n >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64));
-        unit * 2.0 - 1.0
-    }
-
     fn facet_value(&self, x: usize, y: usize) -> f64 {
-        let cell = self.config.cell_size;
-        let cell_x = x / cell;
-        let cell_y = y / cell;
-        let local_x = (x % cell) as f64 / cell as f64;
-        let local_y = (y % cell) as f64 / cell as f64;
-        let diagonal = if (cell_x + cell_y).is_multiple_of(2) {
-            local_x - local_y
-        } else {
-            local_x + local_y - 1.0
-        };
-        let grain = Self::hash_signed(cell_x, cell_y, 0xC875_FAC7);
-        (diagonal * 0.65 + grain * 0.35).clamp(-1.0, 1.0)
+        let scale = self.config.cell_size as f64;
+        let xf = x as f64 / scale;
+        let yf = y as f64 / scale;
+
+        // Use continuous, angled bands instead of per-cell random values. The old
+        // grid-cell hash created visible square seams at `cell_size` boundaries.
+        let wave_a = (TAU * (xf * 0.73 + yf * 0.41)).sin();
+        let wave_b = (TAU * (xf * -0.29 + yf * 0.91) / 1.618).sin();
+        let wave_c = (TAU * (xf * 0.17 - yf * 0.67) / 2.414).sin();
+
+        (wave_a * 0.50 + wave_b * 0.32 + wave_c * 0.18).clamp(-1.0, 1.0)
     }
 }
 
@@ -164,6 +152,41 @@ mod tests {
             "display RGB should stay visible even when alpha is tiny",
         );
         assert!(output.iter().all(|pixel| pixel.3 == 1e-7), "alpha should be preserved");
+    }
+
+    #[test]
+    fn test_crystal_facets_do_not_imprint_square_cell_boundaries() {
+        let effect = CrystalFacetContrast::new(CrystalFacetConfig {
+            strength: 0.30,
+            cell_size: 14,
+            threshold: 0.0,
+            highlight_gain: 0.08,
+        });
+        let width = 140;
+        let height = 140;
+        let input = vec![(0.55, 0.48, 0.36, 1.0); width * height];
+
+        let output = effect.process(&input, width, height).expect("facet effect should process");
+
+        let mut boundary = Vec::new();
+        let mut interior = Vec::new();
+        for y in 0..height {
+            for x in 1..width {
+                let diff = (output[y * width + x].0 - output[y * width + x - 1].0).abs();
+                if x % 14 == 0 {
+                    boundary.push(diff);
+                } else {
+                    interior.push(diff);
+                }
+            }
+        }
+        let boundary_mean = boundary.iter().sum::<f64>() / boundary.len() as f64;
+        let interior_mean = interior.iter().sum::<f64>() / interior.len() as f64;
+
+        assert!(
+            boundary_mean <= interior_mean * 1.25,
+            "facet finish should not create square-cell seams (boundary={boundary_mean:.6}, interior={interior_mean:.6})",
+        );
     }
 
     #[test]
