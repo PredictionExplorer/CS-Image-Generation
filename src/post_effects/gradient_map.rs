@@ -226,6 +226,50 @@ impl LuxuryPalette {
             LuxuryPalette::RoyalAmethyst => &ROYAL_AMETHYST_STOPS,
         }
     }
+
+    /// Palette-aware grade tints for shadow/highlight contrast.
+    #[must_use]
+    pub fn color_grade_tints(&self) -> ([f64; 3], [f64; 3]) {
+        match self {
+            LuxuryPalette::GoldPurple => ([-0.05, -0.02, 0.09], [0.11, 0.07, -0.02]),
+            LuxuryPalette::CosmicTealPink => ([-0.03, -0.01, 0.06], [0.10, 0.02, 0.07]),
+            LuxuryPalette::AmberCyan => ([-0.04, -0.01, 0.05], [0.12, 0.06, -0.03]),
+            LuxuryPalette::IndigoGold => ([-0.06, -0.02, 0.10], [0.13, 0.08, -0.04]),
+            LuxuryPalette::BlueOrange => ([-0.04, -0.01, 0.08], [0.12, 0.05, -0.04]),
+            LuxuryPalette::VenetianRenaissance => ([-0.03, -0.02, 0.05], [0.14, 0.07, -0.04]),
+            LuxuryPalette::JapaneseUkiyoe => ([-0.04, -0.01, 0.07], [0.13, 0.04, -0.02]),
+            LuxuryPalette::ArtNouveau => ([-0.03, 0.01, 0.04], [0.10, 0.06, -0.03]),
+            LuxuryPalette::LunarOpal => ([-0.02, -0.01, 0.05], [0.06, 0.04, 0.04]),
+            LuxuryPalette::FireOpal => ([-0.02, -0.02, 0.04], [0.16, 0.07, -0.05]),
+            LuxuryPalette::DeepOcean => ([-0.03, 0.00, 0.06], [0.08, 0.07, -0.01]),
+            LuxuryPalette::AuroraBorealis => ([-0.03, -0.01, 0.06], [0.09, 0.03, 0.07]),
+            LuxuryPalette::MoltenMetal => ([-0.02, -0.02, 0.03], [0.16, 0.09, -0.04]),
+            LuxuryPalette::AncientJade => ([-0.03, 0.01, 0.03], [0.09, 0.07, -0.02]),
+            LuxuryPalette::RoyalAmethyst => ([-0.05, -0.02, 0.08], [0.11, 0.04, 0.04]),
+        }
+    }
+
+    /// Dark atmospheric tint that follows the selected palette without forcing blue fog.
+    #[must_use]
+    pub fn atmospheric_fog_color(&self) -> (f64, f64, f64) {
+        match self {
+            LuxuryPalette::GoldPurple => (0.08, 0.05, 0.13),
+            LuxuryPalette::CosmicTealPink => (0.05, 0.09, 0.12),
+            LuxuryPalette::AmberCyan => (0.10, 0.07, 0.06),
+            LuxuryPalette::IndigoGold => (0.05, 0.06, 0.14),
+            LuxuryPalette::BlueOrange => (0.06, 0.07, 0.13),
+            LuxuryPalette::VenetianRenaissance => (0.12, 0.05, 0.05),
+            LuxuryPalette::JapaneseUkiyoe => (0.05, 0.07, 0.13),
+            LuxuryPalette::ArtNouveau => (0.06, 0.09, 0.07),
+            LuxuryPalette::LunarOpal => (0.08, 0.08, 0.12),
+            LuxuryPalette::FireOpal => (0.13, 0.05, 0.04),
+            LuxuryPalette::DeepOcean => (0.03, 0.08, 0.11),
+            LuxuryPalette::AuroraBorealis => (0.04, 0.08, 0.10),
+            LuxuryPalette::MoltenMetal => (0.11, 0.06, 0.04),
+            LuxuryPalette::AncientJade => (0.05, 0.09, 0.07),
+            LuxuryPalette::RoyalAmethyst => (0.08, 0.05, 0.12),
+        }
+    }
 }
 
 /// Configuration for gradient mapping effect
@@ -427,5 +471,64 @@ mod tests {
         assert!(matches!(err, PostEffectError::InvalidBuffer { .. }));
         assert!(err.to_string().contains("GradientMap"));
         assert!(err.to_string().contains("buffer length"));
+    }
+
+    #[test]
+    fn test_all_luxury_palette_grade_tints_are_bounded_and_directional() {
+        for idx in 0..=14 {
+            let palette = LuxuryPalette::from_index(idx);
+            let (shadow, highlight) = palette.color_grade_tints();
+
+            for (channel_idx, value) in shadow.iter().chain(highlight.iter()).enumerate() {
+                assert!(
+                    (-0.12..=0.18).contains(value),
+                    "palette {idx} tint channel {channel_idx} out of safe range: {value}"
+                );
+            }
+
+            assert!(
+                highlight[0] >= 0.06,
+                "palette {idx} should keep highlights warm or rose-gold: {highlight:?}"
+            );
+            assert!(
+                shadow[2] <= 0.10,
+                "palette {idx} should avoid the old heavy-blue shadow cast: {shadow:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_palette_atmospheric_fog_colors_are_dark_and_varied() {
+        let mut unique_fogs = std::collections::HashSet::new();
+        for idx in 0..=14 {
+            let fog = LuxuryPalette::from_index(idx).atmospheric_fog_color();
+            let max_channel = fog.0.max(fog.1).max(fog.2);
+            let min_channel = fog.0.min(fog.1).min(fog.2);
+
+            assert!(min_channel >= 0.03, "palette {idx} fog too close to black: {fog:?}");
+            assert!(max_channel <= 0.14, "palette {idx} fog too bright: {fog:?}");
+            unique_fogs.insert((
+                (fog.0 * 100.0).round() as i32,
+                (fog.1 * 100.0).round() as i32,
+                (fog.2 * 100.0).round() as i32,
+            ));
+        }
+
+        assert!(
+            unique_fogs.len() >= 10,
+            "palette fog colors should remain art-directed and varied"
+        );
+    }
+
+    #[test]
+    fn test_from_index_wraps_to_identical_palette_metadata() {
+        for idx in 0..=14 {
+            let base = LuxuryPalette::from_index(idx);
+            let wrapped = LuxuryPalette::from_index(idx + 15);
+
+            assert_eq!(base.stops(), wrapped.stops());
+            assert_eq!(base.color_grade_tints(), wrapped.color_grade_tints());
+            assert_eq!(base.atmospheric_fog_color(), wrapped.atmospheric_fog_color());
+        }
     }
 }

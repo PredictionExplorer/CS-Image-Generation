@@ -77,10 +77,21 @@ fn build_chromatic_bloom_config(
     }
 }
 
+fn mix_rgb(base: (f64, f64, f64), accent: (f64, f64, f64), amount: f64) -> (f64, f64, f64) {
+    let amount = amount.clamp(0.0, 1.0);
+    (
+        base.0 * (1.0 - amount) + accent.0 * amount,
+        base.1 * (1.0 - amount) + accent.1 * amount,
+        base.2 * (1.0 - amount) + accent.2 * amount,
+    )
+}
+
 fn build_color_grade_params(
     resolved: &ResolvedEffectConfig,
     min_dim: usize,
 ) -> crate::post_effects::ColorGradeParams {
+    let palette = LuxuryPalette::from_index(resolved.gradient_map_palette);
+    let (shadow_tint, highlight_tint) = palette.color_grade_tints();
     crate::post_effects::ColorGradeParams {
         strength: resolved.color_grade_strength,
         vignette_strength: resolved.vignette_strength,
@@ -89,9 +100,9 @@ fn build_color_grade_params(
         clarity_strength: resolved.clarity_strength,
         clarity_radius: (0.0028 * min_dim as f64).round().max(1.0) as usize,
         tone_curve: resolved.tone_curve_strength,
-        shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
-        highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
-        palette_wave_strength: 0.25,
+        shadow_tint,
+        highlight_tint,
+        palette_wave_strength: if resolved.enable_gradient_map { 0.18 } else { 0.24 },
     }
 }
 
@@ -174,13 +185,21 @@ fn build_micro_contrast_config(resolved: &ResolvedEffectConfig) -> MicroContrast
 }
 
 fn build_atmospheric_depth_config(resolved: &ResolvedEffectConfig) -> AtmosphericDepthConfig {
+    let palette = LuxuryPalette::from_index(resolved.gradient_map_palette);
+    let randomized_fog = (
+        resolved.atmospheric_fog_color_r,
+        resolved.atmospheric_fog_color_g,
+        resolved.atmospheric_fog_color_b,
+    );
+    let palette_fog = palette.atmospheric_fog_color();
+    let fog_color = mix_rgb(
+        randomized_fog,
+        palette_fog,
+        if resolved.enable_gradient_map { 0.70 } else { 0.45 },
+    );
     AtmosphericDepthConfig {
         strength: resolved.atmospheric_depth_strength,
-        fog_color: (
-            resolved.atmospheric_fog_color_r,
-            resolved.atmospheric_fog_color_g,
-            resolved.atmospheric_fog_color_b,
-        ),
+        fog_color,
         density_threshold: 0.15,
         desaturation: resolved.atmospheric_desaturation,
         darkening: resolved.atmospheric_darkening,

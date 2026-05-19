@@ -467,13 +467,8 @@ impl RandomizableEffectConfig {
             randomizer,
             log,
         );
-        resolved.gradient_map_palette = Self::resolve_int(
-            "gradient_map_palette",
-            self.gradient_map_palette,
-            &pd::GRADIENT_MAP_PALETTE,
-            randomizer,
-            log,
-        );
+        resolved.gradient_map_palette =
+            Self::resolve_gradient_map_palette(self.gradient_map_palette, randomizer, log);
     }
 
     fn resolve_material_params(
@@ -802,6 +797,57 @@ impl RandomizableEffectConfig {
         resolved
     }
 
+    fn resolve_gradient_map_palette(
+        value: Option<usize>,
+        randomizer: &mut EffectRandomizer,
+        log: &mut RandomizationLog,
+    ) -> usize {
+        const WEIGHTED_PALETTES: &[usize] = &[
+            0, 0, // GoldPurple
+            1, // CosmicTealPink
+            2, 2, // AmberCyan
+            3, 3, // IndigoGold
+            4, // BlueOrange
+            5, 5, // VenetianRenaissance
+            6, // JapaneseUkiyoe
+            7, // ArtNouveau
+            8, // LunarOpal
+            9, 9, 9,  // FireOpal
+            10, // DeepOcean
+            11, // AuroraBorealis
+            12, 12, 12, // MoltenMetal
+            13, // AncientJade
+            14, 14, // RoyalAmethyst
+        ];
+
+        let (resolved, was_randomized) = match value {
+            Some(v) => (v, false),
+            None => {
+                let idx =
+                    (randomizer.random_f64() * WEIGHTED_PALETTES.len() as f64).floor() as usize;
+                (WEIGHTED_PALETTES[idx.min(WEIGHTED_PALETTES.len() - 1)], true)
+            }
+        };
+
+        let effect_name = Self::effect_group_name("gradient_map_palette");
+        let record_idx = log.effects.iter().position(|r| r.effect_name == effect_name);
+        let range = (pd::GRADIENT_MAP_PALETTE.min, pd::GRADIENT_MAP_PALETTE.max);
+        if let Some(idx) = record_idx {
+            log.effects[idx].add_int(
+                "gradient_map_palette".to_string(),
+                resolved,
+                was_randomized,
+                range,
+            );
+        } else {
+            let mut record = RandomizationRecord::new(effect_name, true, false);
+            record.add_int("gradient_map_palette".to_string(), resolved, was_randomized, range);
+            log.add_record(record);
+        }
+
+        resolved
+    }
+
     /// Extract effect group name from parameter name (e.g., "`glow_strength`" -> "glow")
     fn effect_group_name(param_name: &str) -> String {
         if param_name.starts_with("atmospheric_") {
@@ -1094,6 +1140,86 @@ mod tests {
                 resolved.gradient_map_palette
             );
         }
+    }
+
+    #[test]
+    fn test_weighted_gradient_palette_randomization_favors_warm_luxury_indices() {
+        let config = RandomizableEffectConfig::default();
+        let mut warm_or_balanced = 0usize;
+        let mut cool_forward = 0usize;
+        let mut seen = std::collections::HashSet::new();
+
+        for seed_val in 0u16..512 {
+            let seed = [
+                (seed_val & 0xFF) as u8,
+                (seed_val >> 8) as u8,
+                0xC0,
+                0x10,
+                0xCA,
+                0xFE,
+                0x42,
+                0x99,
+            ];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let (resolved, _) = config.resolve(&mut rng, 1920, 1080);
+            seen.insert(resolved.gradient_map_palette);
+
+            match resolved.gradient_map_palette {
+                0 | 2 | 3 | 5 | 9 | 12 | 14 => warm_or_balanced += 1,
+                8 | 10 | 11 | 13 => cool_forward += 1,
+                _ => {}
+            }
+        }
+
+        assert!(seen.len() >= 12, "weighted randomization should still explore broadly: {seen:?}");
+        assert!(
+            warm_or_balanced > cool_forward * 2,
+            "warm/balanced palettes should dominate cool-forward picks ({warm_or_balanced} vs {cool_forward})"
+        );
+    }
+
+    #[test]
+    fn test_explicit_gradient_palette_still_overrides_weighted_randomization() {
+        for palette in 0..=14 {
+            let config = RandomizableEffectConfig {
+                gradient_map_palette: Some(palette),
+                ..Default::default()
+            };
+            let seed = [palette as u8, 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let (resolved, log) = config.resolve(&mut rng, 1920, 1080);
+
+            assert_eq!(resolved.gradient_map_palette, palette);
+            let palette_param = log
+                .effects
+                .iter()
+                .flat_map(|record| record.parameters.iter())
+                .find(|parameter| parameter.name == "gradient_map_palette")
+                .expect("gradient_map_palette should be logged");
+            assert!(
+                !palette_param.was_randomized,
+                "explicit palette {palette} should not be marked randomized"
+            );
+        }
+    }
+
+    #[test]
+    fn test_randomized_gradient_palette_log_records_weighted_choice() {
+        let config = RandomizableEffectConfig::default();
+        let seed = [0xAA, 0xBB, 0xCC, 0xDD, 1, 2, 3, 4];
+        let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+        let (resolved, log) = config.resolve(&mut rng, 1920, 1080);
+
+        let palette_param = log
+            .effects
+            .iter()
+            .flat_map(|record| record.parameters.iter())
+            .find(|parameter| parameter.name == "gradient_map_palette")
+            .expect("gradient_map_palette should be logged");
+
+        assert!(palette_param.was_randomized);
+        assert_eq!(palette_param.value, resolved.gradient_map_palette.to_string());
+        assert_eq!(palette_param.range_used, "[0, 14]");
     }
 
     /// Test that atmospheric fog color randomization produces valid RGB values

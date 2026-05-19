@@ -317,6 +317,7 @@ pub fn save_image_as_png_16bit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::post_effects::LuxuryPalette;
     use crate::render::context::RenderContext;
     use crate::render::histogram::HistogramData;
     use crate::render::randomizable_config::ResolvedEffectConfig;
@@ -800,6 +801,77 @@ mod tests {
 
         assert_eq!(effect_config.bloom_mode, BloomMode::None);
         assert_eq!(effect_config.blur_radius_px, 0);
+    }
+
+    #[test]
+    fn test_build_effect_config_derives_color_grade_from_selected_palette() {
+        let resolved = ResolvedEffectConfig {
+            enable_color_grade: true,
+            gradient_map_palette: 9, // FireOpal
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config = RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let (expected_shadow, expected_highlight) = LuxuryPalette::FireOpal.color_grade_tints();
+
+        assert_eq!(effect_config.color_grade_params.shadow_tint, expected_shadow);
+        assert_eq!(effect_config.color_grade_params.highlight_tint, expected_highlight);
+        assert!(
+            effect_config.color_grade_params.highlight_tint[0]
+                > effect_config.color_grade_params.highlight_tint[2],
+            "FireOpal grade should keep highlights warm"
+        );
+    }
+
+    #[test]
+    fn test_gradient_map_reduces_palette_wave_to_avoid_double_casting() {
+        let base = baseline_resolved_config(1920, 1080);
+        let render_config = RenderConfig { hdr_scale: base.hdr_scale, ..Default::default() };
+        let no_gradient =
+            build_effect_config_from_resolved(&base, &render_config, FinishOutputMode::Still);
+        let with_gradient = build_effect_config_from_resolved(
+            &ResolvedEffectConfig { enable_gradient_map: true, ..base },
+            &render_config,
+            FinishOutputMode::Still,
+        );
+
+        assert!(
+            with_gradient.color_grade_params.palette_wave_strength
+                < no_gradient.color_grade_params.palette_wave_strength,
+            "gradient-mapped renders should use subtler grade sway"
+        );
+    }
+
+    #[test]
+    fn test_atmospheric_fog_blends_toward_palette_when_gradient_map_is_enabled() {
+        fn distance(a: (f64, f64, f64), b: (f64, f64, f64)) -> f64 {
+            ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
+        }
+
+        let randomized_fog = (0.04, 0.07, 0.12);
+        let palette_fog = LuxuryPalette::MoltenMetal.atmospheric_fog_color();
+        let resolved = ResolvedEffectConfig {
+            enable_gradient_map: true,
+            enable_atmospheric_depth: true,
+            gradient_map_palette: 12, // MoltenMetal
+            atmospheric_fog_color_r: randomized_fog.0,
+            atmospheric_fog_color_g: randomized_fog.1,
+            atmospheric_fog_color_b: randomized_fog.2,
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config = RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };
+
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let fog = effect_config.atmospheric_depth_config.fog_color;
+
+        assert!(
+            distance(fog, palette_fog) < distance(randomized_fog, palette_fog),
+            "enabled gradient map should pull fog toward palette identity"
+        );
+        assert!(fog.0 > fog.2, "MoltenMetal fog should become warmer than the default blue bias");
     }
 
     #[test]
