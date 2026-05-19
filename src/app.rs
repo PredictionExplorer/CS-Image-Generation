@@ -13,9 +13,8 @@ use crate::generation_log::{
 };
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
-    VideoEncodingOptions, constants, generate_body_color_sequences,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, render_final_frame_spectral,
-    save_image_as_png_16bit,
+    VideoEncodingOptions, constants, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
+    render_final_frame_spectral, save_image_as_png_16bit,
     video::{VideoEncoder, create_video_from_frames_singlepass_with_encoder},
 };
 use crate::sim::{self, Body, BordaWeights, Sha3RandomByteStream, TrajectoryResult};
@@ -353,20 +352,24 @@ pub fn apply_drift_transformation(
 }
 
 /// Generate color sequences and alpha values for bodies
-pub fn generate_colors(
+pub(crate) fn generate_colors(
     rng: &mut Sha3RandomByteStream,
+    positions: &[Vec<Vector3<f64>>],
     num_steps_sim: usize,
     alpha_denom: usize,
     enhancements: &Enhancements,
-) -> (Vec<Vec<render::OklabColor>>, Vec<f64>) {
+) -> (Vec<Vec<render::OklabColor>>, Vec<f64>, render::CreativeProfile) {
     info!("STAGE 3/7: Generating color sequences + alpha...");
-    generate_body_color_sequences(
+    let profile = render::CreativeProfile::choose(rng, positions);
+    let (colors, alphas) = render::generate_body_color_sequences_with_profile(
         rng,
         num_steps_sim,
         alpha_denom,
         enhancements.chroma_boost,
         enhancements.alpha_variation,
-    )
+        &profile,
+    );
+    (colors, alphas, profile)
 }
 
 /// Build histogram and determine color levels.
@@ -715,6 +718,23 @@ mod tests {
         }
     }
 
+    fn sample_color_positions(steps: usize) -> Vec<Vec<Vector3<f64>>> {
+        (0..3)
+            .map(|body| {
+                (0..steps)
+                    .map(|step| {
+                        let t = step as f64 * 0.07 + body as f64 * 2.1;
+                        Vector3::new(
+                            t.cos() * (1.0 + body as f64 * 0.2),
+                            t.sin() * (0.8 + body as f64 * 0.15),
+                            (t * 0.5).sin() * 0.2,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     #[test]
     fn test_parse_seed_valid() {
         let result = parse_seed("0x100033");
@@ -782,7 +802,9 @@ mod tests {
         use crate::sim::Sha3RandomByteStream;
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
         let enhancements = Enhancements::default();
-        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
+        let positions = sample_color_positions(100);
+        let (colors, alphas, profile) =
+            generate_colors(&mut rng, &positions, 100, 15_000_000, &enhancements);
 
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas.len(), 3);
@@ -791,6 +813,7 @@ mod tests {
         }
         let unique: std::collections::HashSet<u64> = alphas.iter().map(|a| a.to_bits()).collect();
         assert!(unique.len() > 1, "default enhancements should enable alpha variation");
+        assert!(profile.framing_zoom > 0.0);
     }
 
     #[test]
@@ -799,11 +822,17 @@ mod tests {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
         let enhancements =
             Enhancements { alpha_variation: false, chroma_boost: false, ..Enhancements::default() };
-        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
+        let positions = sample_color_positions(100);
+        let (colors, alphas, _) =
+            generate_colors(&mut rng, &positions, 100, 15_000_000, &enhancements);
 
         assert_eq!(colors.len(), 3);
-        assert_eq!(alphas[0], alphas[1]);
-        assert_eq!(alphas[1], alphas[2]);
+        assert!(alphas.iter().all(|alpha| *alpha > 0.0));
+        assert_ne!(
+            alphas[0].to_bits(),
+            alphas[2].to_bits(),
+            "creative profile should still create depth hierarchy with uniform base alpha"
+        );
     }
 
     #[test]
@@ -1088,7 +1117,10 @@ mod tests {
             aspect_correction: false,
             dispersion_boost: false,
         };
-        let (colors, body_alphas) = generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
+        let (colors, body_alphas, profile) =
+            generate_colors(&mut rng, &positions, num_steps, 15_000_000, &enhancements);
+        let mut resolved = resolved;
+        profile.apply_to_effect_config(&mut resolved);
 
         let render_config =
             render::RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };

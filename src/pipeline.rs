@@ -326,7 +326,7 @@ pub(crate) fn run_generation_with_video_encoder(
         DEFAULT_VELOCITY,
     );
 
-    let (resolved_effect_config, randomization_log) =
+    let (mut resolved_effect_config, randomization_log) =
         resolve_randomized_effects(&mut rng, request.width, request.height);
     let borda_weights = resolve_borda_weights(request.borda_weights, &mut rng);
 
@@ -340,8 +340,21 @@ pub(crate) fn run_generation_with_video_encoder(
 
     let mut positions = app::simulate_best_orbit(best_bodies, request.steps);
     let drift_config = apply_optional_drift(request, &mut positions, &mut rng)?;
-    let (colors, body_alphas) =
-        app::generate_colors(&mut rng, request.steps, DEFAULT_ALPHA_DENOM, &enhancements);
+    let (colors, body_alphas, creative_profile) = app::generate_colors(
+        &mut rng,
+        &positions,
+        request.steps,
+        DEFAULT_ALPHA_DENOM,
+        &enhancements,
+    );
+    creative_profile.apply_to_effect_config(&mut resolved_effect_config);
+    info!(
+        "Creative profile: {:?} / {:?} / {:?} / {:?}",
+        creative_profile.art_direction,
+        creative_profile.material_finish,
+        creative_profile.composition_mode,
+        creative_profile.rare_event,
+    );
 
     let render_config = RenderConfig {
         hdr_scale: resolved_effect_config.hdr_scale,

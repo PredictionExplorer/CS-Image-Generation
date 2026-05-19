@@ -139,6 +139,12 @@ pub struct ResolvedEffectConfig {
     pub fine_texture_contrast: f64,
     /// Resolved HDR scaling factor.
     pub hdr_scale: f64,
+    /// Art-directed framing zoom (>1 zooms in, <1 adds negative space).
+    pub composition_zoom: f64,
+    /// Horizontal art-directed framing offset.
+    pub composition_offset_x: f64,
+    /// Vertical art-directed framing offset.
+    pub composition_offset_y: f64,
     /// Resolved black point clipping threshold.
     pub clip_black: f64,
     /// Resolved white point clipping threshold.

@@ -59,6 +59,23 @@ pub struct RenderContext {
     bounds: BoundingBox,
 }
 
+/// Art-directed framing applied after scene bounds and optional aspect correction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FramingConfig {
+    /// Values > 1 zoom in; values < 1 create more negative space.
+    pub zoom: f64,
+    /// Horizontal offset as a fraction of the current bound width.
+    pub offset_x: f64,
+    /// Vertical offset as a fraction of the current bound height.
+    pub offset_y: f64,
+}
+
+impl Default for FramingConfig {
+    fn default() -> Self {
+        Self { zoom: 1.0, offset_x: 0.0, offset_y: 0.0 }
+    }
+}
+
 impl RenderContext {
     fn validate_dimensions(width: u32, height: u32) -> Result<(usize, usize, usize)> {
         if width == 0 || height == 0 {
@@ -95,6 +112,31 @@ impl RenderContext {
         if aspect_correction {
             bounds.apply_aspect_correction(width, height);
         }
+        bounds.apply_framing(FramingConfig::default());
+
+        let context = Self { width, height, width_usize, height_usize, bounds };
+        debug_assert_eq!(context.width_usize * context.height_usize, pixel_count);
+        Ok(context)
+    }
+
+    /// Try to create a render context with art-directed framing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::try_new`].
+    pub fn try_new_with_framing(
+        width: u32,
+        height: u32,
+        positions: &[Vec<Vector3<f64>>],
+        aspect_correction: bool,
+        framing: FramingConfig,
+    ) -> Result<Self> {
+        let (width_usize, height_usize, pixel_count) = Self::validate_dimensions(width, height)?;
+        let mut bounds = BoundingBox::try_from_positions(positions)?;
+        if aspect_correction {
+            bounds.apply_aspect_correction(width, height);
+        }
+        bounds.apply_framing(framing);
 
         let context = Self { width, height, width_usize, height_usize, bounds };
         debug_assert_eq!(context.width_usize * context.height_usize, pixel_count);
@@ -260,6 +302,27 @@ impl BoundingBox {
             self.height = new_height;
         }
     }
+
+    /// Apply a tasteful zoom/offset framing transform around the current bounds.
+    pub fn apply_framing(&mut self, framing: FramingConfig) {
+        let zoom = if framing.zoom.is_finite() { framing.zoom.clamp(0.65, 1.35) } else { 1.0 };
+        let offset_x =
+            if framing.offset_x.is_finite() { framing.offset_x.clamp(-0.18, 0.18) } else { 0.0 };
+        let offset_y =
+            if framing.offset_y.is_finite() { framing.offset_y.clamp(-0.18, 0.18) } else { 0.0 };
+
+        let center_x = f64::midpoint(self.min_x, self.max_x) + self.width * offset_x;
+        let center_y = f64::midpoint(self.min_y, self.max_y) + self.height * offset_y;
+        let new_width = (self.width / zoom).max(1e-12);
+        let new_height = (self.height / zoom).max(1e-12);
+
+        self.min_x = center_x - new_width * 0.5;
+        self.max_x = center_x + new_width * 0.5;
+        self.min_y = center_y - new_height * 0.5;
+        self.max_y = center_y + new_height * 0.5;
+        self.width = new_width;
+        self.height = new_height;
+    }
 }
 
 #[cfg(test)]
@@ -420,6 +483,56 @@ mod tests {
         assert!(
             (ar - target_ar).abs() < 0.05,
             "aspect-corrected context AR {ar:.3} should be near {target_ar:.3}"
+        );
+    }
+
+    #[test]
+    fn test_framing_zoom_in_tightens_bounds_around_center() {
+        let positions = make_positions(&[(0.0, 0.0), (100.0, 100.0)]);
+        let base = RenderContext::try_new(1000, 1000, &positions, false)
+            .expect("valid context should build");
+        let framed = RenderContext::try_new_with_framing(
+            1000,
+            1000,
+            &positions,
+            false,
+            FramingConfig { zoom: 1.25, offset_x: 0.0, offset_y: 0.0 },
+        )
+        .expect("valid framed context should build");
+
+        assert!(framed.bounds().width < base.bounds().width);
+        assert!(framed.bounds().height < base.bounds().height);
+        assert!(
+            (f64::midpoint(framed.bounds().min_x, framed.bounds().max_x)
+                - f64::midpoint(base.bounds().min_x, base.bounds().max_x))
+            .abs()
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn test_framing_negative_space_expands_bounds_and_offsets_center() {
+        let positions = make_positions(&[(0.0, 0.0), (100.0, 100.0)]);
+        let base = RenderContext::try_new(1000, 1000, &positions, false)
+            .expect("valid context should build");
+        let framed = RenderContext::try_new_with_framing(
+            1000,
+            1000,
+            &positions,
+            false,
+            FramingConfig { zoom: 0.75, offset_x: 0.10, offset_y: -0.08 },
+        )
+        .expect("valid framed context should build");
+
+        assert!(framed.bounds().width > base.bounds().width);
+        assert!(framed.bounds().height > base.bounds().height);
+        assert!(
+            f64::midpoint(framed.bounds().min_x, framed.bounds().max_x)
+                > f64::midpoint(base.bounds().min_x, base.bounds().max_x)
+        );
+        assert!(
+            f64::midpoint(framed.bounds().min_y, framed.bounds().max_y)
+                < f64::midpoint(base.bounds().min_y, base.bounds().max_y)
         );
     }
 

@@ -3,7 +3,7 @@
 use super::batch_drawing::{
     BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices,
 };
-use super::context::RenderContext;
+use super::context::{FramingConfig, RenderContext};
 use super::effect_config::build_effect_config_from_resolved;
 use super::effects::{FinishEffectPipeline, FrameParams, try_convert_spd_buffer_to_rgba};
 use super::error::{RenderError, Result};
@@ -15,6 +15,16 @@ use crate::spectrum::NUM_BINS;
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
 use tracing::{debug, info};
+
+fn framing_from_resolved(
+    resolved: &super::randomizable_config::ResolvedEffectConfig,
+) -> FramingConfig {
+    FramingConfig {
+        zoom: if resolved.composition_zoom > 0.0 { resolved.composition_zoom } else { 1.0 },
+        offset_x: resolved.composition_offset_x,
+        offset_y: resolved.composition_offset_y,
+    }
+}
 
 /// Apply energy density wavelength shift to spectral buffer.
 /// Hot regions (high energy) shift toward red, cool regions stay blue.
@@ -165,7 +175,13 @@ fn pass_1_build_histogram_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
+    let ctx = RenderContext::try_new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        framing_from_resolved(resolved_config),
+    )?;
     let pixel_count = ctx.try_pixel_count()?;
     let histogram_capacity =
         pixel_count.checked_mul(10).ok_or_else(|| RenderError::InvalidScene {
@@ -322,7 +338,13 @@ fn pass_2_write_frames_spectral_with_backend(
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
+    let ctx = RenderContext::try_new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        framing_from_resolved(resolved_config),
+    )?;
     let pixel_count = ctx.try_pixel_count()?;
     accum_spd.resize(pixel_count, [0.0f64; NUM_BINS]);
     for s in accum_spd.iter_mut() {
@@ -483,7 +505,13 @@ fn render_final_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
+    let ctx = RenderContext::try_new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        framing_from_resolved(resolved_config),
+    )?;
     let pixel_count = ctx.try_pixel_count()?;
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];
@@ -586,7 +614,13 @@ fn render_single_frame_spectral_with_backend(
 
     let width = resolved_config.width;
     let height = resolved_config.height;
-    let ctx = RenderContext::try_new(width, height, scene.positions, aspect_correction)?;
+    let ctx = RenderContext::try_new_with_framing(
+        width,
+        height,
+        scene.positions,
+        aspect_correction,
+        framing_from_resolved(resolved_config),
+    )?;
     let pixel_count = ctx.try_pixel_count()?;
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; pixel_count];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); pixel_count];

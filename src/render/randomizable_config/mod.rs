@@ -946,6 +946,9 @@ mod tests {
             fine_texture_scale: 0.0018,
             fine_texture_contrast: 0.35,
             hdr_scale: 0.12,
+            composition_zoom: 1.0,
+            composition_offset_x: 0.0,
+            composition_offset_y: 0.0,
             clip_black: 0.01,
             clip_white: 0.99,
         }

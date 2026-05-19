@@ -35,6 +35,7 @@ use self::error::{RenderError, Result};
 use self::tonemapping::{tonemap_core, tonemap_to_16bit};
 
 // Re-export core types and functions for public API compatibility
+pub(crate) use color::{CreativeProfile, generate_body_color_sequences_with_profile};
 pub use color::{OklabColor, generate_body_color_sequences};
 pub use drawing::{
     LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral, parallel_blur_2d_rgba,
@@ -433,6 +434,9 @@ mod tests {
             fine_texture_scale: 0.0018,
             fine_texture_contrast: 0.35,
             hdr_scale: 0.12,
+            composition_zoom: 1.0,
+            composition_offset_x: 0.0,
+            composition_offset_y: 0.0,
             clip_black: 0.01,
             clip_white: 0.99,
         }
