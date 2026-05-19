@@ -1,10 +1,7 @@
 //! Fine art texture overlay for tactile richness and material quality.
 //!
-//! Adds subtle procedural textures that simulate fine art materials:
-//! - Canvas weave patterns
-//! - Handmade paper grain
-//! - Metallic surface variations
-//! - Subtle noise for organic imperfection
+//! Adds subtle procedural grain that simulates fine art materials without
+//! directional weave or screen-door artifacts.
 //!
 //! These textures add a sense of physicality and craftsmanship to digital renders.
 
@@ -56,8 +53,9 @@ impl FineTexture {
     /// Fast 2D hash function
     #[inline]
     fn hash2d(x: f64, y: f64) -> f64 {
-        let h = ((x * 127.1 + y * 311.7).sin() * 43758.5453).fract();
-        (h - 0.5) * 2.0 // Map to [-1, 1]
+        let h = (x * 127.1 + y * 311.7).sin() * 43758.5453;
+        let unit = h - h.floor();
+        unit * 2.0 - 1.0
     }
 
     /// Value noise (smooth interpolated noise)
@@ -83,44 +81,22 @@ impl FineTexture {
         v0 * (1.0 - sy) + v1 * sy
     }
 
-    /// Canvas weave pattern (two perpendicular wave patterns)
+    /// Isotropic paper-grain pattern with no directional weave.
     fn canvas_pattern(&self, x: f64, y: f64) -> f64 {
-        let scale = 1.0 / self.config.scale;
+        let scale = 1.0 / self.config.scale.max(1e-6);
 
-        // Horizontal threads
-        let h_wave = (y * scale * 8.0).sin();
-        let h_noise = Self::value_noise(x * scale * 0.5, y * scale * 8.0);
-        let h_thread = (h_wave + h_noise * 0.3) * 0.5;
+        let fine = Self::value_noise(x * scale * 17.0 + 19.7, y * scale * 17.0 - 3.1) * 0.55;
+        let mid = Self::value_noise(x * scale * 7.0 + 101.3, y * scale * 7.0 + 47.9) * 0.30;
+        let coarse = Self::value_noise(x * scale * 2.7 - 61.0, y * scale * 2.7 + 13.0) * 0.15;
 
-        // Vertical threads
-        let v_wave = (x * scale * 8.0).sin();
-        let v_noise = Self::value_noise(x * scale * 8.0, y * scale * 0.5);
-        let v_thread = (v_wave + v_noise * 0.3) * 0.5;
-
-        // Combine with slight offset for weave pattern
-        let weave = (h_thread + v_thread) * 0.5 + h_thread * v_thread * 0.3;
-
-        // Add fine grain
-        let grain = Self::value_noise(x * scale * 20.0, y * scale * 20.0) * 0.2;
-
-        weave + grain
+        fine + mid + coarse
     }
 
     /// Get texture value for a given position
     fn get_texture_value(&self, x: f64, y: f64) -> f64 {
         let raw_value = self.canvas_pattern(x, y);
 
-        // Apply contrast
-        let centered = raw_value * self.config.contrast;
-
-        // Apply anisotropy (makes texture more directional)
-        if self.config.anisotropy > 0.0 {
-            let angle_rad = self.config.angle.to_radians();
-            let directional = (x * angle_rad.cos() + y * angle_rad.sin()).sin() * 0.1;
-            centered * (1.0 - self.config.anisotropy) + directional * self.config.anisotropy
-        } else {
-            centered
-        }
+        raw_value * self.config.contrast
     }
 }
 
@@ -225,6 +201,38 @@ mod tests {
         let v1 = texture.get_texture_value(0.0, 0.0);
         let v2 = texture.get_texture_value(10.0, 10.0);
         assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_texture_is_not_directional_weave() {
+        let texture = FineTexture::new(FineTextureConfig {
+            strength: 0.2,
+            scale: 12.0,
+            contrast: 0.6,
+            anisotropy: 1.0,
+            angle: 0.0,
+        });
+        let input = vec![(0.5, 0.5, 0.5, 1.0); 128 * 128];
+
+        let output = texture.process(&input, 128, 128).expect("texture should process");
+
+        let mut horizontal = Vec::new();
+        let mut vertical = Vec::new();
+        for y in 1..127 {
+            for x in 1..127 {
+                let idx = y * 128 + x;
+                horizontal.push((output[idx].0 - output[idx - 1].0).abs());
+                vertical.push((output[idx].0 - output[idx - 128].0).abs());
+            }
+        }
+        let h_mean = horizontal.iter().sum::<f64>() / horizontal.len() as f64;
+        let v_mean = vertical.iter().sum::<f64>() / vertical.len() as f64;
+        let ratio = h_mean / v_mean.max(1e-12);
+
+        assert!(
+            (0.70..=1.30).contains(&ratio),
+            "texture should be isotropic grain, not horizontal/vertical weave (ratio={ratio:.3})",
+        );
     }
 
     #[test]

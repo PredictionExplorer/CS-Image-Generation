@@ -219,17 +219,17 @@ fn build_prismatic_sparkle_config(
     let radius = f64_to_usize_saturating((0.0014 * min_dim as f64).round()).clamp(1, 3);
     let strength = (resolved.edge_luminance_strength * 0.34
         + resolved.micro_contrast_strength * 0.18)
-        .clamp(0.10, 0.22);
-    let density = if resolved.enable_glow { 0.024 } else { 0.016 };
+        .clamp(0.08, 0.16);
+    let density = if resolved.enable_glow { 0.014 } else { 0.008 };
 
-    (enabled, PrismaticSparkleConfig { strength, threshold: 0.76, density, radius })
+    (enabled, PrismaticSparkleConfig { strength, threshold: 0.82, density, radius })
 }
 
 fn build_crystal_facet_config(
     resolved: &ResolvedEffectConfig,
     min_dim: usize,
 ) -> (bool, CrystalFacetConfig) {
-    let enabled = min_dim >= 720 && (resolved.enable_color_grade || resolved.enable_micro_contrast);
+    let enabled = false;
     let cell_size = f64_to_usize_saturating((0.013 * min_dim as f64).round()).clamp(10, 28);
     let strength =
         (0.04 + resolved.clarity_strength * 0.08 + resolved.micro_contrast_strength * 0.10)
@@ -238,8 +238,8 @@ fn build_crystal_facet_config(
     (enabled, CrystalFacetConfig { strength, cell_size, threshold: 0.16, highlight_gain: 0.04 })
 }
 
-fn build_ink_cut_config(resolved: &ResolvedEffectConfig, min_dim: usize) -> (bool, InkCutConfig) {
-    let enabled = min_dim >= 720 && resolved.enable_edge_luminance;
+fn build_ink_cut_config(resolved: &ResolvedEffectConfig, _min_dim: usize) -> (bool, InkCutConfig) {
+    let enabled = false;
     let strength = (resolved.edge_luminance_strength * 0.42
         + resolved.micro_contrast_strength * 0.16)
         .clamp(0.12, 0.26);

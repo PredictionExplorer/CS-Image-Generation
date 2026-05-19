@@ -871,9 +871,9 @@ mod tests {
             assert!(effect_config.prismatic_sparkle_enabled);
             assert!(effect_config.prismatic_sparkle_config.radius <= 3);
             assert!(effect_config.prismatic_sparkle_config.strength > 0.0);
-            assert!(effect_config.crystal_facets_enabled);
+            assert!(!effect_config.crystal_facets_enabled);
             assert!(effect_config.crystal_facet_config.cell_size >= 10);
-            assert!(effect_config.ink_cut_edges_enabled);
+            assert!(!effect_config.ink_cut_edges_enabled);
             assert!(effect_config.ink_cut_config.strength > 0.0);
         }
         assert_eq!(
@@ -911,6 +911,67 @@ mod tests {
             assert!(!effect_config.ink_cut_edges_enabled);
             assert!(!effect_config.prismatic_sparkle_enabled);
         }
+    }
+
+    #[test]
+    fn test_artifact_safe_image_chain_does_not_add_directional_lines() {
+        let resolved = ResolvedEffectConfig {
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            enable_color_grade: true,
+            enable_fine_texture: true,
+            ..baseline_resolved_config(1920, 1080)
+        };
+        let render_config = RenderConfig {
+            hdr_scale: resolved.hdr_scale,
+            bloom_mode: BloomMode::Dog,
+            ..Default::default()
+        };
+        let effect_config =
+            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
+        let pipeline = effects::FinishEffectPipeline::new(&effect_config);
+        let width = 128;
+        let height = 128;
+        let input = vec![(0.55, 0.48, 0.36, 1.0); width * height];
+
+        let output = pipeline
+            .process_image(
+                input,
+                width,
+                height,
+                &effects::FrameParams { frame_number: 0, density: None },
+            )
+            .expect("image chain should process smooth display field");
+
+        let mut horizontal = Vec::new();
+        let mut vertical = Vec::new();
+        let mut diagonal_a = Vec::new();
+        let mut diagonal_b = Vec::new();
+        for y in 1..height - 1 {
+            for x in 1..width - 1 {
+                let idx = y * width + x;
+                horizontal.push((output[idx].0 - output[idx - 1].0).abs());
+                vertical.push((output[idx].0 - output[idx - width].0).abs());
+                diagonal_a.push((output[idx].0 - output[idx - width - 1].0).abs());
+                diagonal_b.push((output[idx].0 - output[idx - width + 1].0).abs());
+            }
+        }
+        let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+        let horizontal_mean = mean(&horizontal);
+        let vertical_mean = mean(&vertical);
+        let diagonal_a_mean = mean(&diagonal_a);
+        let diagonal_b_mean = mean(&diagonal_b);
+        let hv_ratio = horizontal_mean / vertical_mean.max(1e-12);
+        let diag_ratio = diagonal_a_mean / diagonal_b_mean.max(1e-12);
+
+        assert!(
+            (0.70..=1.30).contains(&hv_ratio),
+            "image chain should not add horizontal/vertical line bias (ratio={hv_ratio:.3})",
+        );
+        assert!(
+            (0.70..=1.30).contains(&diag_ratio),
+            "image chain should not add diagonal line bias (ratio={diag_ratio:.3})",
+        );
     }
 
     #[test]

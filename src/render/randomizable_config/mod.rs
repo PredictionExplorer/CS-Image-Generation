@@ -944,8 +944,15 @@ mod tests {
             "Opalescence layers should not be capped at low strength"
         );
 
-        // Verify no adjustment was logged
-        assert!(log.effects.is_empty(), "No adjustment should be logged for safe parameters");
+        // Verify the opalescence performance guard did not log a cap. Other
+        // quality guards may still add artifact-safe detail to low-detail stacks.
+        let opalescence_cap_logged = log.effects.iter().any(|record| {
+            record
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.contains("Capped opalescence_layers"))
+        });
+        assert!(!opalescence_cap_logged, "Opalescence layers should not be capped at low strength");
     }
 
     #[test]
@@ -1363,6 +1370,47 @@ mod tests {
         assert!(result.edge_luminance_brightness_boost >= 0.34);
         assert!(log.effects.iter().any(|record| {
             record.parameters.iter().any(|parameter| parameter.value.contains("detail rescue"))
+        }));
+    }
+
+    #[test]
+    fn test_low_detail_stack_gets_artifact_safe_clarity_floor() {
+        let config = ResolvedEffectConfig {
+            enable_bloom: false,
+            enable_glow: false,
+            enable_chromatic_bloom: false,
+            enable_perceptual_blur: false,
+            enable_color_grade: false,
+            enable_fine_texture: false,
+            enable_champleve: false,
+            enable_aether: false,
+            enable_opalescence: true,
+            enable_gradient_map: true,
+            enable_micro_contrast: true,
+            enable_edge_luminance: true,
+            color_grade_strength: 0.40,
+            clarity_strength: 0.30,
+            tone_curve_strength: 0.45,
+            micro_contrast_strength: 0.28,
+            micro_contrast_radius: 6,
+            ..baseline_resolved_config()
+        };
+
+        let mut log = RandomizationLog::new();
+        let result = apply_conflict_detection(config, &mut log);
+
+        assert!(result.enable_color_grade, "low-detail stacks should get color-grade clarity");
+        assert!(result.enable_micro_contrast);
+        assert!(result.color_grade_strength >= 0.55);
+        assert!(result.clarity_strength >= 0.44);
+        assert!(result.tone_curve_strength >= 0.58);
+        assert!(result.micro_contrast_strength >= 0.34);
+        assert!(result.micro_contrast_radius <= 3);
+        assert!(log.effects.iter().any(|record| {
+            record
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.contains("artifact-safe clarity floor"))
         }));
     }
 

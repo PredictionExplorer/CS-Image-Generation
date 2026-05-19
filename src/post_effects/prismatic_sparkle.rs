@@ -13,7 +13,7 @@ pub struct PrismaticSparkleConfig {
     pub threshold: f64,
     /// Probability gate for eligible local maxima.
     pub density: f64,
-    /// Sparkle cross radius in pixels.
+    /// Sparkle radius in pixels.
     pub radius: usize,
 }
 
@@ -120,7 +120,8 @@ impl PrismaticSparkle {
 
         for dy in -radius..=radius {
             for dx in -radius..=radius {
-                if dx != 0 && dy != 0 && dx.abs() != dy.abs() {
+                let distance_sq = dx * dx + dy * dy;
+                if distance_sq > radius * radius {
                     continue;
                 }
                 let cx = x as isize + dx;
@@ -133,7 +134,7 @@ impl PrismaticSparkle {
                     continue;
                 }
 
-                let distance = dx.abs().max(dy.abs()) as f64;
+                let distance = (distance_sq as f64).sqrt();
                 let falloff = 1.0 - distance / (radius as f64 + 1.0);
                 let gate = ((luma[cidx] - self.config.threshold) / (1.0 - self.config.threshold))
                     .clamp(0.0, 1.0);
@@ -227,14 +228,36 @@ mod tests {
             strength: 0.2,
             threshold: 0.5,
             density: 1.0,
-            radius: 1,
+            radius: 3,
         });
-        let mut input = vec![(0.02, 0.02, 0.02, 1e-7); 25];
-        input[12] = (0.8, 0.8, 0.8, 1e-7);
+        let mut input = vec![(0.02, 0.02, 0.02, 1e-7); 81];
+        input[4 * 9 + 4] = (0.8, 0.8, 0.8, 1e-7);
 
-        let output = effect.process(&input, 5, 5).expect("sparkle effect should process");
+        let output = effect.process(&input, 9, 9).expect("sparkle effect should process");
 
-        assert!(output[12].0 >= input[12].0, "display RGB should not be premultiplied again");
-        assert_eq!(output[12].3, input[12].3, "alpha should be preserved");
+        assert!(
+            output[4 * 9 + 4].0 >= input[4 * 9 + 4].0,
+            "display RGB should not be premultiplied again"
+        );
+        assert_eq!(output[4 * 9 + 4].3, input[4 * 9 + 4].3, "alpha should be preserved");
+    }
+
+    #[test]
+    fn test_sparkle_uses_isotropic_glints_not_cross_arms() {
+        let effect = PrismaticSparkle::new(PrismaticSparkleConfig {
+            strength: 0.2,
+            threshold: 0.5,
+            density: 1.0,
+            radius: 3,
+        });
+        let mut input = vec![(0.02, 0.02, 0.02, 1.0); 81];
+        input[4 * 9 + 4] = (0.8, 0.8, 0.8, 1.0);
+
+        let output = effect.process(&input, 9, 9).expect("sparkle effect should process");
+
+        assert!(
+            output[(4 + 2) * 9 + (4 + 1)].0 > input[(4 + 2) * 9 + (4 + 1)].0,
+            "off-axis pixels inside the sparkle radius should brighten; otherwise the sparkle reads as cross arms",
+        );
     }
 }

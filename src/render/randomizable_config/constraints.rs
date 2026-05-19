@@ -183,6 +183,41 @@ fn remove_extreme_softness_blur(
     }
 }
 
+fn enforce_crisp_detail_floor(config: &mut ResolvedEffectConfig, adjustments: &mut Vec<String>) {
+    let has_structural_detail = config.enable_color_grade
+        || config.enable_fine_texture
+        || config.enable_champleve
+        || config.enable_aether
+        || config.enable_bloom
+        || config.enable_glow;
+
+    if has_structural_detail {
+        return;
+    }
+
+    let original = config.clone();
+
+    config.enable_color_grade = true;
+    config.enable_micro_contrast = true;
+    config.color_grade_strength = config.color_grade_strength.max(0.55);
+    config.clarity_strength = config.clarity_strength.max(0.44);
+    config.tone_curve_strength = config.tone_curve_strength.max(0.58);
+    config.micro_contrast_strength = config.micro_contrast_strength.max(0.34);
+    config.micro_contrast_radius = config.micro_contrast_radius.min(3);
+
+    if *config != original {
+        adjustments.push(format!(
+            "Quality guard: Enabled artifact-safe clarity floor for low-detail stack (color_grade: {} -> {}, micro_contrast: {} -> {}, clarity: {:.3} -> {:.3})",
+            original.enable_color_grade,
+            config.enable_color_grade,
+            original.enable_micro_contrast,
+            config.enable_micro_contrast,
+            original.clarity_strength,
+            config.clarity_strength,
+        ));
+    }
+}
+
 fn log_constraint_adjustments(log: &mut RandomizationLog, adjustments: Vec<String>) {
     if adjustments.is_empty() {
         return;
@@ -218,6 +253,7 @@ pub(super) fn apply_conflict_detection(
     disable_isolated_chromatic_bloom(&mut config, &mut adjustments);
     soften_unsupported_atmospheric_depth(&mut config, &mut adjustments);
     rebalance_gradient_map_without_color_grade(&mut config, &mut adjustments);
+    enforce_crisp_detail_floor(&mut config, &mut adjustments);
     let initial_softness_score = softness_stack_score(&config);
     rescue_detail_for_softness_stack(&mut config, initial_softness_score, &mut adjustments);
     break_heavy_softness_stack(&mut config, &mut adjustments);
