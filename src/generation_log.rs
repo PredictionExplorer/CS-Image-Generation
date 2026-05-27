@@ -44,6 +44,7 @@ pub struct GenerationRecord {
 
 /// Snapshot of render pipeline settings written to the generation log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LoggedRenderConfig {
     /// Output width in pixels.
     pub width: u32,
@@ -57,26 +58,18 @@ pub struct LoggedRenderConfig {
     pub alpha_denom: usize,
     /// Curve strength compressing very high alpha values.
     pub alpha_compress: f64,
+    /// Visual profile identifier.
+    pub visual_profile: String,
+    /// Whether any legacy post-processing effect was enabled.
+    pub post_effects_enabled: bool,
     /// Bloom algorithm name (`dog`, `gaussian`, or `none`).
     pub bloom_mode: String,
-    /// Difference-of-Gaussians bloom strength.
-    pub dog_strength: f64,
-    /// Inner Gaussian sigma for `DoG` bloom, if overridden.
-    pub dog_sigma: Option<f64>,
-    /// Outer-to-inner sigma ratio for `DoG` bloom.
-    pub dog_ratio: f64,
     /// HDR handling mode string (e.g. `auto`).
     pub hdr_mode: String,
     /// Scalar applied to HDR accumulation before tone mapping.
     pub hdr_scale: f64,
-    /// Perceptual blur on/off flag string.
-    pub perceptual_blur: String,
-    /// Blur radius in pixels when set.
-    pub perceptual_blur_radius: Option<usize>,
-    /// Blend strength for perceptual blur.
-    pub perceptual_blur_strength: f64,
-    /// Gamut mapping mode for blur (e.g. hue preservation).
-    pub perceptual_gamut_mode: String,
+    /// Active radial spectral dispersion strength.
+    pub dispersion_strength: f64,
 }
 
 /// Camera drift parameters used for the logged generation.
@@ -161,16 +154,13 @@ impl Default for LoggedRenderConfig {
             clip_white: 0.990,
             alpha_denom: 15_000_000,
             alpha_compress: 6.0,
-            bloom_mode: "dog".to_string(),
-            dog_strength: 0.32,
-            dog_sigma: None,
-            dog_ratio: 2.8,
+            visual_profile: crate::render::visual_profile::COSMIC_SIGNATURE_PROFILE_NAME
+                .to_string(),
+            post_effects_enabled: false,
+            bloom_mode: "none".to_string(),
             hdr_mode: "auto".to_string(),
-            hdr_scale: 0.12,
-            perceptual_blur: "on".to_string(),
-            perceptual_blur_radius: None,
-            perceptual_blur_strength: 0.65,
-            perceptual_gamut_mode: "preserve-hue".to_string(),
+            hdr_scale: 0.18,
+            dispersion_strength: crate::render::constants::SPECTRAL_DISPERSION_STRENGTH,
         }
     }
 }

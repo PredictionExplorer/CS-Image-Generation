@@ -24,13 +24,13 @@ pub const HUE_FULL_CIRCLE: f64 = 360.0;
 pub const BODY_HUE_SEPARATION: f64 = 120.0;
 
 /// Controls drift rate of hue over time (higher = more palette movement)
-pub const HUE_DRIFT_SCALE: f64 = 1.85;
+pub const HUE_DRIFT_SCALE: f64 = 1.15;
 
 /// Base time drift factor for subtle color evolution
 pub const BASE_HUE_DRIFT: f64 = 1.4;
 
 /// Amplitude, in degrees, applied by the palette sway wave
-pub const HUE_WAVE_AMPLITUDE: f64 = 52.0;
+pub const HUE_WAVE_AMPLITUDE: f64 = 34.0;
 
 /// Additional per-body phase offsets (degrees) to guarantee separation
 pub const BODY_HUE_PHASE: [f64; 3] = [0.0, 120.0, 240.0];
@@ -40,26 +40,26 @@ pub const BODY_HUE_PHASE: [f64; 3] = [0.0, 120.0, 240.0];
 /// Base chroma value (typical range 0-0.3 for natural colors)
 pub const OKLAB_CHROMA_BASE: f64 = 0.18;
 /// Boosted base chroma for museum-quality output
-pub const OKLAB_CHROMA_BASE_BOOSTED: f64 = 0.22;
+pub const OKLAB_CHROMA_BASE_BOOSTED: f64 = 0.24;
 
 /// Range of chroma variation around the base value
 pub const OKLAB_CHROMA_RANGE: f64 = 0.12;
 /// Boosted chroma range
-pub const OKLAB_CHROMA_RANGE_BOOSTED: f64 = 0.14;
+pub const OKLAB_CHROMA_RANGE_BOOSTED: f64 = 0.10;
 
 /// Additional chroma modulation applied via palette waves
 pub const OKLAB_CHROMA_WAVE_AMPLITUDE: f64 = 0.07;
 /// Boosted chroma wave amplitude
-pub const OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED: f64 = 0.10;
+pub const OKLAB_CHROMA_WAVE_AMPLITUDE_BOOSTED: f64 = 0.06;
 
 /// Base lightness value (0=black, 1=white)
-pub const OKLAB_LIGHTNESS_BASE: f64 = 0.62;
+pub const OKLAB_LIGHTNESS_BASE: f64 = 0.68;
 
 /// Range of lightness variation around the base value
-pub const OKLAB_LIGHTNESS_RANGE: f64 = 0.32;
+pub const OKLAB_LIGHTNESS_RANGE: f64 = 0.22;
 
 /// Additional lightness modulation applied via palette waves
-pub const OKLAB_LIGHTNESS_WAVE_AMPLITUDE: f64 = 0.28;
+pub const OKLAB_LIGHTNESS_WAVE_AMPLITUDE: f64 = 0.18;
 
 // ========== Rendering Constants ==========
 
@@ -192,9 +192,9 @@ pub const DEFAULT_AETHER_CAUSTIC_SOFTNESS: f64 = 3.0;
 // ========== Special Mode Enhancement Constants ==========
 
 /// Spectral dispersion strength - controls prismatic trail separation
-pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.8;
+pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.12;
 /// Boosted dispersion for wider rainbow trails
-pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 1.1;
+pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 0.24;
 
 /// Velocity-based HDR boost factor - multiplies HDR scale at high velocities
 /// 1.0 = no boost, 2.0 = double brightness at max velocity
@@ -206,11 +206,11 @@ pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15; // Lowered from 0.3 to activ
 
 /// Energy density threshold for wavelength shift (normalized energy)
 /// Pixels above this threshold shift toward red (heat)
-pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.08; // Lowered from 0.25 to affect more pixels
+pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.16;
 
 /// Wavelength shift strength (fraction of bin to shift per density unit)
 /// Higher values create stronger red-shift in high-energy regions
-pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.75; // Increased from 0.35 for stronger heat effect
+pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.28;
 
 // ========== Video Encoding Constants ==========
 

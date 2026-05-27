@@ -9,7 +9,7 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
 - Simulates large batches of random three-body systems
 - Selects the strongest orbit with a Borda-style score
 - Renders spectral trails with SIMD acceleration
-- Applies a curated post-processing pipeline
+- Applies the crisp CosmicSignature visual profile with legacy post-effects off by default
 - Writes outputs to `output/<name>/`
 
 ## Requirements
@@ -351,8 +351,8 @@ This repository does not ship an SPDX `LICENSE` file. Before redistributing or p
 src/main.rs              CLI entry point
 src/app.rs               Pipeline orchestration
 src/sim.rs               Physics simulation and selection
-src/render/              Rendering, tonemapping, video
-src/post_effects/        Post-processing effects
+src/render/              Rendering, tonemapping, visual profiles, video
+src/post_effects/        Legacy optional post-processing effects
 src/spectrum.rs          Spectral conversion
 src/spectrum_simd.rs     SIMD spectral fast paths
 src/oklab.rs             OKLab utilities

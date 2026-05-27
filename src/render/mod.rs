@@ -34,6 +34,7 @@ pub mod spectral_output;
 pub mod types;
 pub mod velocity_hdr;
 pub mod video;
+pub mod visual_profile;
 
 // Import from our submodules
 use self::batch_drawing::{

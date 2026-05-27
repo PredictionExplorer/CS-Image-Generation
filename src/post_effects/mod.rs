@@ -1,7 +1,7 @@
-//! Post-processing effects pipeline for the Three Body Problem renderer.
+//! Legacy post-processing effects for optional renderer experiments.
 //!
-//! This module provides a trait-based system for applying visual effects
-//! in a composable, modular fashion.
+//! The default CosmicSignature profile leaves these effects disabled, but the
+//! modules remain available for experiments, benchmarks, and compatibility tests.
 
 use thiserror::Error;
 

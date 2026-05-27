@@ -1,7 +1,7 @@
-//! Post-processing effects pipeline
+//! Legacy finish-effect pipeline
 //!
-//! This module manages the visual effects chain including bloom, blur, and tone mapping.
-//! It provides a configurable pipeline for post-processing rendered frames.
+//! The default `CosmicSignature` profile builds an empty chain here. The machinery
+//! remains for optional experiments and tests that exercise legacy effects.
 
 use super::constants;
 use super::context::PixelBuffer;
@@ -512,9 +512,9 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     use std::sync::atomic::Ordering;
 
     let dispersion_strength = if DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed) {
-        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED
     } else {
-        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH * 3.0
+        crate::render::constants::SPECTRAL_DISPERSION_STRENGTH
     };
 
     let cx = width as f64 / 2.0;

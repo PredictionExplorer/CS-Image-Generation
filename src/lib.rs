@@ -2,7 +2,7 @@
 //!
 //! This library provides simulation and rendering capabilities for the
 //! three-body gravitational problem, producing museum-quality visualizations
-//! with physically-based spectral rendering and cinematic post-processing.
+//! with physically-based spectral rendering and a crisp `CosmicSignature` visual profile.
 //!
 //! # Modules
 //!
@@ -11,7 +11,7 @@
 //! - [`drift_config`] -- drift parameter resolution and validation.
 //! - [`error`] -- error types and the crate-wide [`Result`] alias.
 //! - [`generation_log`] -- persistent JSON generation log.
-//! - [`post_effects`] -- composable image post-processing effects.
+//! - [`post_effects`] -- legacy optional image post-processing effects.
 //! - [`render`] -- rendering pipeline (histogram, tonemapping, effects, video).
 //! - [`sim`] -- N-body gravitational simulation with RNG.
 //! - [`spectral_constants`] -- wavelength/bin conversion constants.

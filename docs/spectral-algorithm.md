@@ -484,28 +484,18 @@ while the RGB channels encode the spectral color.
 
 ---
 
-## 6. Post-Processing Pipeline
+## 6. CosmicSignature Finish Pipeline
 
-After SPD-to-RGBA conversion produces a linear RGBA buffer, the image passes
-through a multi-stage post-processing pipeline.
+After SPD-to-RGBA conversion produces a linear RGBA buffer, the default
+CosmicSignature profile keeps the finish path intentionally minimal. Legacy
+post-effects still exist as optional modules, but the production profile leaves
+them disabled so the final image is driven by spectral geometry, transparent
+overlap, thin luminous edges, clean tonemapping, and black negative space.
 
 ### 6.1 Trajectory Effects (`process_trajectory`)
 
-Applied in order:
-
-1. **Bloom** -- Gaussian blur blended with the original for diffuse glow
-2. **DoG Bloom** -- Difference-of-Gaussians for edge-detected glow
-3. **Glow Enhancement** -- Tight sparkle on very bright areas
-4. **Chromatic Bloom** -- Prismatic color separation in bloom
-5. **Perceptual Blur** -- OkLab-space smoothing
-6. **Micro-Contrast** -- Local contrast enhancement
-7. **Gradient Map** -- Artistic color palette mapping
-8. **Cinematic Color Grade** -- Film-like color grading with split toning
-9. **Opalescence** -- Gem-like shimmer
-10. **Champlevé** -- Voronoi cell structure with metallic rims
-11. **Aether** -- Woven filament and volumetric scattering
-12. **Edge Luminance** -- Selective edge brightening
-13. **Atmospheric Depth** -- Spatial perspective and fog
+Default production chain: empty. The trajectory buffer is passed through
+unchanged after spectral conversion.
 
 ### 6.2 Tone Mapping
 
@@ -520,9 +510,8 @@ A custom tone mapper uses histogram-derived exposure levels:
 
 ### 6.3 Image Effects (`process_image`)
 
-Applied after tone mapping to the composited display image:
-
-1. **Fine Texture** -- Subtle surface grain
+Default production chain: empty. The display buffer is quantized without a grain
+or texture overlay.
 
 ### 6.4 Quantization
 
@@ -545,9 +534,9 @@ To produce a single spectral image (16-bit PNG):
 1. Initialize accum_spd to zeros: Vec<[f64; 64]> of size width * height
 2. Accumulate all simulation steps (0..total_steps) into accum_spd
 3. convert_spd_buffer_to_rgba(accum_spd) -> linear RGBA buffer
-4. process_trajectory(rgba_buffer)         -> post-processed RGBA
+4. process_trajectory(rgba_buffer)         -> unchanged RGBA by default
 5. tonemap(rgba_buffer, channel_levels)    -> display-space RGBA
-6. process_image(rgba_buffer)              -> final RGBA
+6. process_image(rgba_buffer)              -> unchanged display RGBA by default
 7. quantize to 16-bit sRGB
 8. Save as PNG
 ```
@@ -582,15 +571,15 @@ For each checkpoint (frame) in sequence:
 
 2. Convert: convert_spd_buffer_to_rgba(accum_spd) -> RGBA
 
-3. Trajectory effects: process_trajectory(RGBA)
+3. Trajectory finish: process_trajectory(RGBA), unchanged by default
 
 4. Tone map using pre-computed ChannelLevels from Pass 1
 
-5. Temporal smoothing (optional):
+5. Temporal smoothing (optional, default off in production):
    display[i] = display[i] * 0.10 + previous_display[i] * 0.90
    (blends 10% new frame with 90% previous for smooth transitions)
 
-6. Image effects: process_image(display)
+6. Image finish: process_image(display), unchanged by default
 
 7. Quantize to 16-bit: rgb48le format (6 bytes per pixel)
 

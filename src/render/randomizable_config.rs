@@ -999,6 +999,27 @@ pub struct ResolvedEffectConfig {
     pub nebula_base_frequency: f64,
 }
 
+impl ResolvedEffectConfig {
+    /// Return true when any legacy post-processing effect is active.
+    #[must_use]
+    pub fn any_legacy_effect_enabled(&self) -> bool {
+        self.enable_bloom
+            || self.enable_glow
+            || self.enable_chromatic_bloom
+            || self.enable_perceptual_blur
+            || self.enable_micro_contrast
+            || self.enable_gradient_map
+            || self.enable_color_grade
+            || self.enable_champleve
+            || self.enable_aether
+            || self.enable_opalescence
+            || self.enable_edge_luminance
+            || self.enable_atmospheric_depth
+            || self.enable_fine_texture
+            || self.nebula_strength > 0.0
+    }
+}
+
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.
 ///
 /// Philosophy: Maximum exploration with minimum intervention.

@@ -23,7 +23,7 @@ use nalgebra::Vector3;
 use std::fs;
 use tracing::{info, warn};
 
-/// Museum-quality enhancement flags (all default to true / enabled).
+/// Core `CosmicSignature` enhancement flags.
 #[derive(Clone, Debug)]
 pub struct Enhancements {
     /// Enable chroma boosting for richer color saturation.
@@ -47,8 +47,8 @@ impl Default for Enhancements {
             sat_boost: true,
             aces_tweak: true,
             alpha_variation: true,
-            aspect_correction: false,
-            dispersion_boost: true,
+            aspect_correction: true,
+            dispersion_boost: false,
         }
     }
 }
@@ -73,26 +73,18 @@ pub struct GenerationLogConfig {
     pub escape_threshold: f64,
     /// Drift mode identifier (e.g. `"elliptical"`, `"none"`).
     pub drift_mode: String,
-    /// Bloom post-processing mode.
+    /// Visual profile identifier.
+    pub visual_profile: String,
+    /// Whether any legacy post-processing effect was enabled.
+    pub post_effects_enabled: bool,
+    /// Bloom post-processing mode, kept for compatibility with older logs.
     pub bloom_mode: String,
-    /// Difference-of-Gaussians edge-enhancement strength.
-    pub dog_strength: f64,
-    /// Optional sigma for the `DoG` narrow Gaussian.
-    pub dog_sigma: Option<f64>,
-    /// Ratio between the two `DoG` Gaussian widths.
-    pub dog_ratio: f64,
     /// HDR tone-mapping mode.
     pub hdr_mode: String,
     /// HDR intensity scale factor.
     pub hdr_scale: f64,
-    /// Perceptual blur mode identifier.
-    pub perceptual_blur: String,
-    /// Optional explicit radius for perceptual blur.
-    pub perceptual_blur_radius: Option<usize>,
-    /// Perceptual blur strength multiplier.
-    pub perceptual_blur_strength: f64,
-    /// Perceptual gamut-mapping mode.
-    pub perceptual_gamut_mode: String,
+    /// Active radial spectral dispersion strength.
+    pub dispersion_strength: f64,
     /// Minimum body mass for simulation.
     pub min_mass: f64,
     /// Maximum body mass for simulation.
@@ -403,16 +395,12 @@ pub fn log_generation(
         clip_white: config.clip_white,
         alpha_denom: config.alpha_denom,
         alpha_compress: config.alpha_compress,
+        visual_profile: config.visual_profile.clone(),
+        post_effects_enabled: config.post_effects_enabled,
         bloom_mode: config.bloom_mode.clone(),
-        dog_strength: config.dog_strength,
-        dog_sigma: config.dog_sigma,
-        dog_ratio: config.dog_ratio,
         hdr_mode: config.hdr_mode.clone(),
         hdr_scale: config.hdr_scale,
-        perceptual_blur: config.perceptual_blur.clone(),
-        perceptual_blur_radius: config.perceptual_blur_radius,
-        perceptual_blur_strength: config.perceptual_blur_strength,
-        perceptual_gamut_mode: config.perceptual_gamut_mode.clone(),
+        dispersion_strength: config.dispersion_strength,
     };
 
     record.drift_config = if let Some(drift) = drift_config {
@@ -500,8 +488,8 @@ mod tests {
         assert!(e.sat_boost);
         assert!(e.aces_tweak);
         assert!(e.alpha_variation);
-        assert!(!e.aspect_correction);
-        assert!(e.dispersion_boost);
+        assert!(e.aspect_correction);
+        assert!(!e.dispersion_boost);
     }
 
     #[test]

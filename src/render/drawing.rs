@@ -201,16 +201,15 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let len_sq = dx * dx + dy * dy;
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
 
-    // Dynamic line width: faster -> thinner, slower -> thicker
-    let base_thickness = 1.2;
-    let thickness = (base_thickness / (0.1 + len_3d * 0.5)).clamp(0.2, 4.0);
+    // Dynamic line width: keep the spectral core thin so overlaps form crisp ribbons.
+    let base_thickness = 0.78;
+    let thickness = (base_thickness / (0.1 + len_3d * 0.5)).clamp(0.16, 2.4);
 
     // Z-depth calculation (center of segment)
     let avg_z = (z0 + z1) * 0.5;
 
-    // Depth of field (Circle of Confusion)
-    // Assuming focal plane is at Z = 0
-    let coc = (avg_z * 0.05).abs();
+    // Minimal depth broadening preserves structure while still layering distant sheets.
+    let coc = (avg_z * 0.014).abs();
     let effective_thickness = thickness + coc;
 
     // Maximum extent of the SDF bounding box
@@ -236,8 +235,8 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     // Energy conservation: wider lines due to DOF should distribute same total energy
     let energy_conservation = thickness / effective_thickness;
 
-    // Atmospheric attenuation (fog)
-    let depth_fade = (-avg_z.abs() * 0.002).exp().clamp(0.05, 1.0);
+    // Keep distant geometry visible; the black field provides separation without fog.
+    let depth_fade = (-avg_z.abs() * 0.0007).exp().clamp(0.18, 1.0);
     let base_energy_mult = hdr_scale * f64::from(depth_fade) * f64::from(energy_conservation);
 
     for py in min_y..=max_y {

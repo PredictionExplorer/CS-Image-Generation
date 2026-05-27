@@ -27,7 +27,6 @@ const DEFAULT_ALPHA_DENOM: usize = 15_000_000;
 const DEFAULT_ALPHA_COMPRESS: f64 = 6.0;
 const DEFAULT_ESCAPE_THRESHOLD: f64 = -0.3;
 const DEFAULT_HDR_MODE: &str = "auto";
-const DEFAULT_PERCEPTUAL_GAMUT_MODE: &str = "preserve-hue";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OutputResolution {
@@ -201,7 +200,6 @@ fn build_generation_log_config(
     render_config: &RenderConfig,
     borda_weights: &ResolvedBordaWeights,
 ) -> app::GenerationLogConfig {
-    let min_dim = resolved.width.min(resolved.height);
     let bloom_mode = if resolved.enable_bloom {
         render_config.bloom_mode.as_str()
     } else {
@@ -218,20 +216,12 @@ fn build_generation_log_config(
         alpha_compress: DEFAULT_ALPHA_COMPRESS,
         escape_threshold: DEFAULT_ESCAPE_THRESHOLD,
         drift_mode: args.drift.as_str().to_string(),
+        visual_profile: render::visual_profile::COSMIC_SIGNATURE_PROFILE_NAME.to_string(),
+        post_effects_enabled: resolved.any_legacy_effect_enabled(),
         bloom_mode: bloom_mode.to_string(),
-        dog_strength: resolved.dog_strength,
-        dog_sigma: Some(resolved.dog_sigma_scale * f64::from(min_dim)),
-        dog_ratio: resolved.dog_ratio,
         hdr_mode: DEFAULT_HDR_MODE.to_string(),
         hdr_scale: render_config.hdr_scale,
-        perceptual_blur: if resolved.enable_perceptual_blur {
-            "on".to_string()
-        } else {
-            "off".to_string()
-        },
-        perceptual_blur_radius: render::compute_softness_radius(resolved, render_config.bloom_mode),
-        perceptual_blur_strength: resolved.perceptual_blur_strength,
-        perceptual_gamut_mode: DEFAULT_PERCEPTUAL_GAMUT_MODE.to_string(),
+        dispersion_strength: render::constants::SPECTRAL_DISPERSION_STRENGTH,
         min_mass: DEFAULT_MIN_MASS,
         max_mass: DEFAULT_MAX_MASS,
         location: DEFAULT_LOCATION,
@@ -275,10 +265,14 @@ fn main() -> Result<()> {
         DEFAULT_VELOCITY,
     );
 
-    info!("Resolving effect configuration...");
-    let randomizable_config = render::randomizable_config::RandomizableEffectConfig::default();
-    let (resolved_effect_config, randomization_log) =
-        randomizable_config.resolve(&mut rng, args.resolution.width, args.resolution.height);
+    info!("Resolving CosmicSignature visual profile...");
+    let visual_profile = render::visual_profile::ResolvedVisualProfile::cosmic_signature(
+        &mut rng,
+        args.resolution.width,
+        args.resolution.height,
+    );
+    let resolved_effect_config = visual_profile.effect_config.clone();
+    let randomization_log = visual_profile.randomization_log.clone();
 
     let num_randomized = randomization_log
         .effects
@@ -287,7 +281,7 @@ fn main() -> Result<()> {
         .sum::<usize>();
 
     info!(
-        "   => Resolved {} effects ({} parameters randomized, {} explicit)",
+        "   => Resolved {} visual profile record(s) ({} parameters randomized, {} explicit)",
         randomization_log.effects.len(),
         num_randomized,
         randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
@@ -368,7 +362,7 @@ fn main() -> Result<()> {
         &output_vid,
         &output_png,
         args.fast_encode,
-        true,
+        false,
     )?;
 
     let spectral_dir = format!("{seed_dir}/spectral");
