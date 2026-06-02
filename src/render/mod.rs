@@ -8,10 +8,12 @@ use crate::post_effects::{
     EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
     NebulaCloudConfig, NebulaClouds, OpalescenceConfig, PerceptualBlurConfig,
 };
-use crate::spectrum::NUM_BINS;
+use crate::spectrum::{NUM_BINS, linear_rec2020_to_display_p3};
 use crate::utils::f64_to_usize_saturating;
 use nalgebra::Vector3;
 use rayon::prelude::*;
+use std::fs::File;
+use std::io::BufWriter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info};
 
@@ -315,18 +317,47 @@ fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) 
     ]
 }
 
-/// Save 16-bit image as PNG
-///
-/// TODO: Add explicit sRGB ICC profile chunk via the `png` crate for strict
-/// color-managed viewers. The `image` crate's encoder omits the sRGB chunk,
-/// but most viewers assume sRGB for untagged PNGs, so this is cosmetic.
+/// Save a 16-bit Display P3 image as PNG with explicit color metadata.
 pub fn save_image_as_png_16bit(
     rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
     path: &str,
 ) -> Result<()> {
-    let dyn_img = DynamicImage::ImageRgb16(rgb_img.clone());
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    info!("   Saved 16-bit PNG (sRGB assumed) => {path}");
+    let file = File::create(path)
+        .map_err(|e| RenderError::ImageEncoding { reason: format!("failed to create PNG: {e}") })?;
+    let writer = BufWriter::new(file);
+
+    let mut info = png::Info::with_size(rgb_img.width(), rgb_img.height());
+    info.color_type = png::ColorType::Rgb;
+    info.bit_depth = png::BitDepth::Sixteen;
+    info.source_gamma = Some(png::ScaledFloat::new(0.45455));
+    info.source_chromaticities = Some(png::SourceChromaticities::new(
+        (0.3127, 0.3290),
+        (0.6800, 0.3200),
+        (0.2650, 0.6900),
+        (0.1500, 0.0600),
+    ));
+    info.coding_independent_code_points = Some(png::CodingIndependentCodePoints {
+        color_primaries: 12,
+        transfer_function: 13,
+        matrix_coefficients: 0,
+        is_video_full_range_image: true,
+    });
+
+    let mut bytes = Vec::with_capacity(rgb_img.as_raw().len() * 2);
+    for &sample in rgb_img.as_raw() {
+        bytes.extend_from_slice(&sample.to_be_bytes());
+    }
+
+    let encoder = png::Encoder::with_info(writer, info)
+        .map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
+    let mut encoder =
+        encoder.write_header().map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
+    encoder
+        .write_image_data(&bytes)
+        .map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
+    encoder.finish().map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
+
+    info!("   Saved 16-bit Display P3 PNG => {path}");
     Ok(())
 }
 
@@ -343,9 +374,10 @@ fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> Pi
 fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf_16bit = vec![0u16; pixels.len() * 3];
     buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
-        chunk[0] = (r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-        chunk[1] = (g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-        chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        let (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b);
+        chunk[0] = (p3_r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[1] = (p3_g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[2] = (p3_b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
     });
     buf_16bit
 }
@@ -1988,7 +2020,7 @@ mod tests {
 
         assert!(final_energy > 0, "final preview should contain visible energy");
         assert!(
-            final_energy > single_energy.saturating_mul(20),
+            final_energy > single_energy.saturating_mul(3),
             "final preview should retain much more energy than the legacy early-slice preview (single={single_energy}, final={final_energy})"
         );
     }

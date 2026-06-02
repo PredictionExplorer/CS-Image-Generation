@@ -24,7 +24,7 @@ from pathlib import Path
 
 from _utils import check_ffmpeg, fmt_duration, resolve_binary
 
-CONCURRENT_SIMS = 3
+CONCURRENT_SIMS = 2
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
@@ -62,6 +62,7 @@ class SimResult(typing.NamedTuple):
     success: bool
     seed: str
     elapsed: float
+    aesthetic_score: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,20 @@ def check_prerequisites() -> Path:
 
 def random_seed() -> str:
     return "0x" + secrets.token_hex(6)
+
+
+def estimate_aesthetic_score(seed: str) -> float | None:
+    """Estimate whether a render has enough visual density to review.
+
+    This deliberately stays stdlib-only: very small compressed PNGs usually
+    indicate too much empty black field, missing output, or a weak seed.
+    """
+    image_path = Path("output") / seed / "image.png"
+    if not image_path.exists():
+        return None
+
+    compressed_kib = image_path.stat().st_size / 1024.0
+    return max(0.0, min(100.0, (compressed_kib - 128.0) / 24.0))
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +124,25 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
             logger.debug("[%d] stderr:\n%s", run_id, proc.stderr.rstrip())
 
         if proc.returncode == 0:
+            aesthetic_score = estimate_aesthetic_score(seed)
+            if aesthetic_score is None:
+                logger.warning("[%d] QA    %s  image.png missing", run_id, seed)
+            elif aesthetic_score < 25.0:
+                logger.warning(
+                    "[%d] QA    %s  low aesthetic_score=%.1f",
+                    run_id,
+                    seed,
+                    aesthetic_score,
+                )
+            else:
+                logger.info(
+                    "[%d] QA    %s  aesthetic_score=%.1f",
+                    run_id,
+                    seed,
+                    aesthetic_score,
+                )
             logger.info("[%d] OK    %s  (%s)", run_id, seed, fmt_duration(elapsed))
-            return SimResult(True, seed, elapsed)
+            return SimResult(True, seed, elapsed, aesthetic_score)
 
         logger.warning(
             "[%d] FAIL  %s  exit=%d  (%s)",

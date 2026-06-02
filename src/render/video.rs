@@ -82,6 +82,7 @@ impl Default for VideoEncodingOptions {
                  psy-rd=2.5:psy-rdoq=1.5:\
                  deblock=-1,-1:\
                  no-sao=0:\
+                 colorprim=smpte432:transfer=iec61966-2-1:colormatrix=bt709:\
                  qg-size=8:\
                  rdoq-level=2"
                     .to_string(),
@@ -95,7 +96,7 @@ impl Default for VideoEncodingOptions {
                 "-colorspace".to_string(),
                 "bt709".to_string(),
                 "-color_primaries".to_string(),
-                "bt709".to_string(),
+                "smpte432".to_string(),
                 "-color_trc".to_string(),
                 "iec61966-2-1".to_string(),
                 "-color_range".to_string(),
@@ -145,7 +146,7 @@ impl VideoEncodingOptions {
                 "-colorspace".to_string(),
                 "bt709".to_string(),
                 "-color_primaries".to_string(),
-                "bt709".to_string(),
+                "smpte432".to_string(),
                 "-color_trc".to_string(),
                 "iec61966-2-1".to_string(),
                 "-color_range".to_string(),
@@ -176,7 +177,7 @@ impl VideoEncodingOptions {
                 "-colorspace".to_string(),
                 "bt709".to_string(),
                 "-color_primaries".to_string(),
-                "bt709".to_string(),
+                "smpte432".to_string(),
                 "-color_trc".to_string(),
                 "iec61966-2-1".to_string(),
                 "-color_range".to_string(),
@@ -378,7 +379,7 @@ mod tests {
             .iter()
             .position(|s| s == "-color_primaries")
             .expect("expected -color_primaries arg");
-        assert_eq!(args[primaries_idx + 1], "bt709");
+        assert_eq!(args[primaries_idx + 1], "smpte432");
 
         let trc_idx = args.iter().position(|s| s == "-color_trc").expect("expected -color_trc arg");
         assert_eq!(args[trc_idx + 1], "iec61966-2-1");

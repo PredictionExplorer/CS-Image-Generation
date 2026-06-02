@@ -205,6 +205,7 @@ fn build_generation_log_config(
     } else {
         render::BloomMode::None.as_str()
     };
+    let (palette_harmony, palette_mood) = render::color::current_palette_metadata();
 
     app::GenerationLogConfig {
         num_steps_sim: args.steps,
@@ -222,6 +223,8 @@ fn build_generation_log_config(
         hdr_mode: DEFAULT_HDR_MODE.to_string(),
         hdr_scale: render_config.hdr_scale,
         dispersion_strength: render::constants::SPECTRAL_DISPERSION_STRENGTH,
+        palette_harmony: palette_harmony.to_string(),
+        palette_mood: palette_mood.to_string(),
         min_mass: DEFAULT_MIN_MASS,
         max_mass: DEFAULT_MAX_MASS,
         location: DEFAULT_LOCATION,

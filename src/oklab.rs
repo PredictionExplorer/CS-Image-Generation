@@ -81,6 +81,73 @@ pub fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     (r, g, b)
 }
 
+/// Convert D65-relative CIE XYZ to `OKLab`.
+///
+/// This uses the published `OKLab` XYZ-to-LMS matrix, so it can be used with
+/// wide-gamut working spaces without first clipping through sRGB.
+#[must_use]
+#[inline]
+pub fn xyz_to_oklab(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+    let l = 0.819_022_443_216_431_9 * x + 0.361_906_256_280_122_1 * y - 0.128_873_782_612_164_1 * z;
+    let m = 0.032_983_667_198_027_1 * x + 0.929_286_846_896_554_6 * y + 0.036_144_668_169_998_4 * z;
+    let s = 0.048_177_199_566_046_3 * x + 0.264_239_524_944_227_6 * y + 0.633_547_825_813_693_7 * z;
+
+    let l_prime = l.cbrt();
+    let m_prime = m.cbrt();
+    let s_prime = s.cbrt();
+
+    let lab_l = 0.2104542553 * l_prime + 0.7936177850 * m_prime - 0.0040720468 * s_prime;
+    let lab_a = 1.9779984951 * l_prime - 2.4285922050 * m_prime + 0.4505937099 * s_prime;
+    let lab_b = 0.0259040371 * l_prime + 0.7827717662 * m_prime - 0.8086757660 * s_prime;
+
+    (lab_l, lab_a, lab_b)
+}
+
+/// Convert `OKLab` to D65-relative CIE XYZ.
+#[must_use]
+#[inline]
+pub fn oklab_to_xyz(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let l_prime = l + 0.3963377774 * a + 0.2158037573 * b;
+    let m_prime = l - 0.1055613458 * a - 0.0638541728 * b;
+    let s_prime = l - 0.0894841775 * a - 1.2914855480 * b;
+
+    let l_lms = l_prime * l_prime * l_prime;
+    let m_lms = m_prime * m_prime * m_prime;
+    let s_lms = s_prime * s_prime * s_prime;
+
+    let x = 1.226_879_873_374_155_7 * l_lms - 0.557_814_996_555_481_3 * m_lms
+        + 0.281_391_050_177_215_8 * s_lms;
+    let y = -0.040_575_762_624_313_7 * l_lms + 1.112_286_829_397_059_4 * m_lms
+        - 0.071_711_066_661_517 * s_lms;
+    let z = -0.076_372_949_746_721_4 * l_lms - 0.421_493_323_962_791_4 * m_lms
+        + 1.586_924_024_427_241_8 * s_lms;
+
+    (x, y, z)
+}
+
+/// Convert linear Rec.2020 RGB to `OKLab` through D65-relative XYZ.
+#[must_use]
+#[inline]
+pub fn linear_rec2020_to_oklab(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let x = 0.636_958_048_301_291_4 * r + 0.144_616_903_586_208_3 * g + 0.168_880_975_164_172_1 * b;
+    let y = 0.262_700_212_011_267_1 * r + 0.677_998_071_518_870_8 * g + 0.059_301_716_469_862 * b;
+    let z = 0.028_072_693_049_087_4 * g + 1.060_985_057_710_791 * b;
+
+    xyz_to_oklab(x, y, z)
+}
+
+/// Convert `OKLab` to linear Rec.2020 RGB through D65-relative XYZ.
+#[must_use]
+#[inline]
+pub fn oklab_to_linear_rec2020(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let (x, y, z) = oklab_to_xyz(l, a, b);
+    let r = 1.716_651_187_971_268 * x - 0.355_670_783_776_392 * y - 0.253_366_281_373_66 * z;
+    let g = -0.666_684_351_832_489 * x + 1.616_481_236_634_939 * y + 0.015_768_545_813_911_1 * z;
+    let b = 0.017_639_857_445_310_8 * x - 0.042_770_613_257_808_5 * y + 0.942_103_121_235_474 * z;
+
+    (r, g, b)
+}
+
 /// Batch convert linear sRGB pixels to `OKLab`.
 ///
 /// This function processes multiple pixels in parallel for better performance.

@@ -85,6 +85,10 @@ pub struct GenerationLogConfig {
     pub hdr_scale: f64,
     /// Active radial spectral dispersion strength.
     pub dispersion_strength: f64,
+    /// Seed-selected palette harmony template.
+    pub palette_harmony: String,
+    /// Seed-selected palette mood envelope.
+    pub palette_mood: String,
     /// Minimum body mass for simulation.
     pub min_mass: f64,
     /// Maximum body mass for simulation.
@@ -401,6 +405,8 @@ pub fn log_generation(
         hdr_mode: config.hdr_mode.clone(),
         hdr_scale: config.hdr_scale,
         dispersion_strength: config.dispersion_strength,
+        palette_harmony: config.palette_harmony.clone(),
+        palette_mood: config.palette_mood.clone(),
     };
 
     record.drift_config = if let Some(drift) = drift_config {

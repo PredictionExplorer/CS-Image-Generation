@@ -4,7 +4,7 @@ use super::color::OklabColor;
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use spectral_constants::{LAMBDA_END, LAMBDA_START};
+use spectral_constants::{BIN_WIDTH, LAMBDA_END, LAMBDA_START};
 
 /// Runtime toggle: when true, spectral dispersion boost is applied in the render path.
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
@@ -51,16 +51,34 @@ pub struct SpectralLineSegment {
 #[must_use]
 #[inline]
 pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
+    let hue_deg = oklab_hue_degrees(a, b);
+
+    // A smoothed violet-to-red bridge avoids the old hard magenta discontinuity.
+    // The dual-lobe path below handles this wrap with richer spectral energy.
+    if hue_deg >= 330.0 {
+        let t = smoothstep((hue_deg - 330.0) / 30.0);
+        return (405.0 + t * 285.0).clamp(LAMBDA_START, LAMBDA_END);
+    }
+
+    hue_to_wavelength_no_wrap(hue_deg).clamp(LAMBDA_START, LAMBDA_END)
+}
+
+#[inline]
+fn oklab_hue_degrees(a: f64, b: f64) -> f64 {
     let hue_rad = b.atan2(a);
     let mut hue_deg = hue_rad.to_degrees();
     if hue_deg < 0.0 {
         hue_deg += 360.0;
     }
+    hue_deg
+}
 
+#[inline]
+fn hue_to_wavelength_no_wrap(hue_deg: f64) -> f64 {
     // Map hue to wavelength using a perceptually uniform distribution
     // This mapping is designed to maximize color variety and align with
     // the natural color spectrum while accounting for OkLab's hue distribution
-    let wavelength = if hue_deg < 30.0 {
+    if hue_deg < 30.0 {
         // Red to red-orange (0-30°) -> 700-650nm
         700.0 - (hue_deg / 30.0) * 50.0
     } else if hue_deg < 60.0 {
@@ -79,15 +97,78 @@ pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
         // Cyan to blue (210-270°) -> 485-450nm
         485.0 - ((hue_deg - 210.0) / 60.0) * 35.0
     } else if hue_deg < 330.0 {
-        // Blue to violet (270-330°) -> 450-380nm
-        450.0 - ((hue_deg - 270.0) / 60.0) * 70.0
+        // Blue to violet (270-330°) -> 450-405nm, leaving deep violet for wrap lobes.
+        450.0 - ((hue_deg - 270.0) / 60.0) * 45.0
     } else {
-        // Violet to red (330-360°) -> 380-700nm (wrap around)
-        // Create smooth transition back to red
-        380.0 + ((hue_deg - 330.0) / 30.0) * 320.0
-    };
+        405.0
+    }
+}
 
-    wavelength.clamp(LAMBDA_START, LAMBDA_END)
+#[inline]
+fn smoothstep(t: f64) -> f64 {
+    let x = t.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+type SpectralKernel = SmallVec<[(usize, f64); 16]>;
+
+fn add_gaussian_lobe(
+    kernel: &mut SpectralKernel,
+    center_wavelength: f64,
+    sigma_bins: f64,
+    weight: f64,
+) {
+    if weight <= 0.0 {
+        return;
+    }
+
+    let center_bin = spectral_constants::wavelength_to_bin(center_wavelength);
+    let radius = (sigma_bins * 3.0).ceil() as isize;
+    let base = center_bin.round() as isize;
+
+    for bin_i in (base - radius)..=(base + radius) {
+        if !(0..NUM_BINS as isize).contains(&bin_i) {
+            continue;
+        }
+        let bin = bin_i as usize;
+        let d = bin as f64 - center_bin;
+        let value = weight * (-(d * d) / (2.0 * sigma_bins * sigma_bins)).exp();
+        if value <= 1e-6 {
+            continue;
+        }
+
+        if let Some((_, existing)) = kernel.iter_mut().find(|(idx, _)| *idx == bin) {
+            *existing += value;
+        } else {
+            kernel.push((bin, value));
+        }
+    }
+}
+
+fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
+    let (_l, a, b) = color;
+    let chroma = (a * a + b * b).sqrt();
+    let hue = oklab_hue_degrees(a, b);
+    let purity = (chroma / 0.34).clamp(0.0, 1.0);
+    let sigma_nm = 20.0 - 13.0 * purity;
+    let sigma_bins = (sigma_nm / BIN_WIDTH).clamp(1.1, 4.6);
+    let mut kernel = SpectralKernel::new();
+
+    if hue >= 330.0 {
+        let red_weight = smoothstep((hue - 330.0) / 30.0);
+        add_gaussian_lobe(&mut kernel, 405.0, sigma_bins, 1.0 - red_weight);
+        add_gaussian_lobe(&mut kernel, 690.0, sigma_bins * 0.8, red_weight);
+    } else {
+        add_gaussian_lobe(&mut kernel, oklab_hue_to_wavelength(a, b), sigma_bins, 1.0);
+    }
+
+    let sum: f64 = kernel.iter().map(|(_, w)| *w).sum();
+    if sum > 0.0 {
+        for (_, weight) in &mut kernel {
+            *weight /= sum;
+        }
+    }
+    kernel
 }
 
 /// Gaussian blur context for efficient blurring with reusable temp buffer
@@ -224,13 +305,8 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
         return;
     }
 
-    let (_l0, a0, b0) = col0;
-    let (_l1, a1, b1) = col1;
-    let wavelength0 = oklab_hue_to_wavelength(a0, b0);
-    let wavelength1 = oklab_hue_to_wavelength(a1, b1);
-
-    let bin0_f = spectral_constants::wavelength_to_bin(wavelength0);
-    let bin1_f = spectral_constants::wavelength_to_bin(wavelength1);
+    let kernel0 = spectral_kernel_for_oklab(col0);
+    let kernel1 = spectral_kernel_for_oklab(col1);
 
     // Energy conservation: wider lines due to DOF should distribute same total energy
     let energy_conservation = thickness / effective_thickness;
@@ -260,18 +336,16 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             let alpha = alpha0 * (1.0 - f64::from(h)) + alpha1 * f64::from(h);
             let final_energy = f64::from(energy) * alpha * base_energy_mult;
 
-            let bin_f = bin0_f * (1.0 - f64::from(h)) + bin1_f * f64::from(h);
-            let bin_left = (bin_f.floor() as usize).min(NUM_BINS - 1);
-            let bin_right = (bin_left + 1).min(NUM_BINS - 1);
-            let w_right = bin_f.fract();
-
             let idx = (py as usize - row_start) * width as usize + px as usize;
+            let h64 = f64::from(h);
+            let start_weight = 1.0 - h64;
+            let end_weight = h64;
 
-            if bin_right == bin_left {
-                accum[idx][bin_left] += final_energy;
-            } else {
-                accum[idx][bin_left] += final_energy * (1.0 - w_right);
-                accum[idx][bin_right] += final_energy * w_right;
+            for &(bin, weight) in &kernel0 {
+                accum[idx][bin] += final_energy * start_weight * weight;
+            }
+            for &(bin, weight) in &kernel1 {
+                accum[idx][bin] += final_energy * end_weight * weight;
             }
         }
     }

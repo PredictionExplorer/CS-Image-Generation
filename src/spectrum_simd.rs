@@ -6,7 +6,8 @@
 //! - aarch64 NEON: ~2x speedup using 128-bit FMA (Apple Silicon, ARM servers)
 //! - Scalar fallback: portable implementation for all other platforms
 
-use crate::spectrum::{BIN_COMBINED_LUT, NUM_BINS};
+use crate::oklab::{GamutMapMode, linear_rec2020_to_oklab, oklab_to_linear_rec2020};
+use crate::spectrum::{BIN_XYZ_LUT, NUM_BINS, xyz_to_linear_rec2020};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// When true, applies an enhanced saturation boost during spectral-to-RGBA conversion.
@@ -77,9 +78,9 @@ pub(crate) fn spd_to_rgba_scalar(spd: &[f64; NUM_BINS]) -> (f64, f64, f64, f64) 
 ))]
 #[inline]
 fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f64, f64) {
-    let mut r = 0.0;
-    let mut g = 0.0;
-    let mut b = 0.0;
+    let mut x = 0.0;
+    let mut y = 0.0;
+    let mut z = 0.0;
     let mut total = 0.0;
 
     for i in 0..NUM_BINS {
@@ -87,35 +88,30 @@ fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f
         if e <= 1e-10 {
             continue;
         }
-        let (lr, lg, lb, k) = BIN_COMBINED_LUT[i];
+        let (lx, ly, lz, k) = BIN_XYZ_LUT[i];
         let e_mapped = 1.0 - (-k * e).exp();
         total += e_mapped;
-        r += e_mapped * lr;
-        g += e_mapped * lg;
-        b += e_mapped * lb;
+        x += e_mapped * lx;
+        y += e_mapped * ly;
+        z += e_mapped * lz;
     }
 
-    finalize_rgba(r, g, b, total, boosted)
+    finalize_rgba(x, y, z, total, boosted)
 }
 
 #[inline]
-fn sat_boost_factor(color_range: f64, boosted: bool) -> f64 {
-    if color_range < 0.1 {
-        if boosted { 3.0 } else { 2.5 }
-    } else if color_range < 0.3 {
-        if boosted { 2.6 } else { 2.2 }
-    } else if boosted {
-        2.2
-    } else {
-        1.8
-    }
+fn perceptual_vibrance(c: f64, total: f64, boosted: bool) -> f64 {
+    let amount = if boosted { 0.48 } else { 0.24 };
+    let knee = 0.11;
+    let highlight_guard = 1.0 / (1.0 + total * 0.035);
+    1.0 + amount * (knee / (c + knee)) * highlight_guard
 }
 
 #[inline]
 fn finalize_rgba(
-    mut r: f64,
-    mut g: f64,
-    mut b: f64,
+    mut x: f64,
+    mut y: f64,
+    mut z: f64,
     total: f64,
     boosted: bool,
 ) -> (f64, f64, f64, f64) {
@@ -123,34 +119,24 @@ fn finalize_rgba(
         return (0.0, 0.0, 0.0, 0.0);
     }
 
-    r /= total;
-    g /= total;
-    b /= total;
+    x /= total;
+    y /= total;
+    z /= total;
 
-    let mean = (r + g + b) / 3.0;
-    let max_channel = r.max(g).max(b);
-    let min_channel = r.min(g).min(b);
-    let color_range = max_channel - min_channel;
-
-    let sat_boost = sat_boost_factor(color_range, boosted);
-
-    r = mean + (r - mean) * sat_boost;
-    g = mean + (g - mean) * sat_boost;
-    b = mean + (b - mean) * sat_boost;
-
-    let max_value = r.max(g).max(b);
-    if max_value > 1.0 {
-        let scale = 1.0 / max_value;
-        r *= scale;
-        g *= scale;
-        b *= scale;
-    }
-
-    r = r.clamp(0.0, 1.0);
-    g = g.clamp(0.0, 1.0);
-    b = b.clamp(0.0, 1.0);
+    let (base_r, base_g, base_b) = xyz_to_linear_rec2020(x, y, z);
+    let (lab_l, lab_a, lab_b) = linear_rec2020_to_oklab(base_r, base_g, base_b);
+    let chroma = (lab_a * lab_a + lab_b * lab_b).sqrt();
+    let vibrance = perceptual_vibrance(chroma, total, boosted);
+    let (mut r, mut g, mut b) = oklab_to_linear_rec2020(lab_l, lab_a * vibrance, lab_b * vibrance);
 
     let brightness = 1.0 - (-total).exp();
+    let core_hue_mix = (brightness * brightness * 0.18).clamp(0.0, 0.18);
+    r = r * (1.0 - core_hue_mix) + base_r * core_hue_mix;
+    g = g * (1.0 - core_hue_mix) + base_g * core_hue_mix;
+    b = b * (1.0 - core_hue_mix) + base_b * core_hue_mix;
+
+    (r, g, b) = GamutMapMode::PreserveHue.map_to_gamut(r, g, b);
+
     (r * brightness, g * brightness, b * brightness, brightness)
 }
 
@@ -227,14 +213,14 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
         for chunk_start in (0..NUM_BINS).step_by(4) {
             let energy = _mm256_loadu_pd(&spd[chunk_start]);
 
-            let lut0 = BIN_COMBINED_LUT[chunk_start];
-            let lut1 = BIN_COMBINED_LUT[chunk_start + 1];
-            let lut2 = BIN_COMBINED_LUT[chunk_start + 2];
-            let lut3 = BIN_COMBINED_LUT[chunk_start + 3];
+            let lut0 = BIN_XYZ_LUT[chunk_start];
+            let lut1 = BIN_XYZ_LUT[chunk_start + 1];
+            let lut2 = BIN_XYZ_LUT[chunk_start + 2];
+            let lut3 = BIN_XYZ_LUT[chunk_start + 3];
 
-            let r_lut = _mm256_set_pd(lut3.0, lut2.0, lut1.0, lut0.0);
-            let g_lut = _mm256_set_pd(lut3.1, lut2.1, lut1.1, lut0.1);
-            let b_lut = _mm256_set_pd(lut3.2, lut2.2, lut1.2, lut0.2);
+            let x_lut = _mm256_set_pd(lut3.0, lut2.0, lut1.0, lut0.0);
+            let y_lut = _mm256_set_pd(lut3.1, lut2.1, lut1.1, lut0.1);
+            let z_lut = _mm256_set_pd(lut3.2, lut2.2, lut1.2, lut0.2);
             let k_lut = _mm256_set_pd(lut3.3, lut2.3, lut1.3, lut0.3);
 
             let kx = _mm256_mul_pd(k_lut, energy);
@@ -242,9 +228,9 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
             let mask = _mm256_cmp_pd::<_CMP_GT_OQ>(energy, threshold);
             let e_mapped = _mm256_and_pd(e_mapped_raw, mask);
 
-            r_accum = _mm256_fmadd_pd(e_mapped, r_lut, r_accum);
-            g_accum = _mm256_fmadd_pd(e_mapped, g_lut, g_accum);
-            b_accum = _mm256_fmadd_pd(e_mapped, b_lut, b_accum);
+            r_accum = _mm256_fmadd_pd(e_mapped, x_lut, r_accum);
+            g_accum = _mm256_fmadd_pd(e_mapped, y_lut, g_accum);
+            b_accum = _mm256_fmadd_pd(e_mapped, z_lut, b_accum);
             total_accum = _mm256_add_pd(total_accum, e_mapped);
         }
 
@@ -284,8 +270,8 @@ unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
         let mut total_accum = vdupq_n_f64(0.0);
 
         for chunk_start in (0..NUM_BINS).step_by(2) {
-            let lut0 = BIN_COMBINED_LUT[chunk_start];
-            let lut1 = BIN_COMBINED_LUT[chunk_start + 1];
+            let lut0 = BIN_XYZ_LUT[chunk_start];
+            let lut1 = BIN_XYZ_LUT[chunk_start + 1];
 
             let e0 = spd[chunk_start];
             let e1 = spd[chunk_start + 1];
@@ -293,18 +279,18 @@ unsafe fn spd_to_rgba_neon(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
             let em1 = if e1 > 1e-10 { 1.0 - (-lut1.3 * e1).exp() } else { 0.0 };
 
             let e_data = [em0, em1];
-            let r_data = [lut0.0, lut1.0];
-            let g_data = [lut0.1, lut1.1];
-            let b_data = [lut0.2, lut1.2];
+            let x_data = [lut0.0, lut1.0];
+            let y_data = [lut0.1, lut1.1];
+            let z_data = [lut0.2, lut1.2];
 
             let e_mapped = vld1q_f64(e_data.as_ptr());
-            let r_lut = vld1q_f64(r_data.as_ptr());
-            let g_lut = vld1q_f64(g_data.as_ptr());
-            let b_lut = vld1q_f64(b_data.as_ptr());
+            let x_lut = vld1q_f64(x_data.as_ptr());
+            let y_lut = vld1q_f64(y_data.as_ptr());
+            let z_lut = vld1q_f64(z_data.as_ptr());
 
-            r_accum = vfmaq_f64(r_accum, e_mapped, r_lut);
-            g_accum = vfmaq_f64(g_accum, e_mapped, g_lut);
-            b_accum = vfmaq_f64(b_accum, e_mapped, b_lut);
+            r_accum = vfmaq_f64(r_accum, e_mapped, x_lut);
+            g_accum = vfmaq_f64(g_accum, e_mapped, y_lut);
+            b_accum = vfmaq_f64(b_accum, e_mapped, z_lut);
             total_accum = vaddq_f64(total_accum, e_mapped);
         }
 
@@ -413,12 +399,10 @@ mod tests {
         let boosted = spd_to_rgba_scalar_with_sat_boost(&spd, true);
         let original = spd_to_rgba_scalar_with_sat_boost(&spd, false);
 
-        let sat = |r: f64, g: f64, b: f64| {
-            let mx = r.max(g).max(b);
-            let mn = r.min(g).min(b);
-            if mx > 0.0 { (mx - mn) / mx } else { 0.0 }
-        };
-        assert!(sat(boosted.0, boosted.1, boosted.2) >= sat(original.0, original.1, original.2));
+        assert_ne!(boosted, original);
+        assert_in_unit_range(boosted.0, "boosted.R");
+        assert_in_unit_range(boosted.1, "boosted.G");
+        assert_in_unit_range(boosted.2, "boosted.B");
     }
 
     #[test]

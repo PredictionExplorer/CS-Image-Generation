@@ -70,6 +70,10 @@ pub struct LoggedRenderConfig {
     pub hdr_scale: f64,
     /// Active radial spectral dispersion strength.
     pub dispersion_strength: f64,
+    /// Seed-selected palette harmony template.
+    pub palette_harmony: String,
+    /// Seed-selected palette mood envelope.
+    pub palette_mood: String,
 }
 
 /// Camera drift parameters used for the logged generation.
@@ -161,6 +165,8 @@ impl Default for LoggedRenderConfig {
             hdr_mode: "auto".to_string(),
             hdr_scale: 0.18,
             dispersion_strength: crate::render::constants::SPECTRAL_DISPERSION_STRENGTH,
+            palette_harmony: "unresolved".to_string(),
+            palette_mood: "unresolved".to_string(),
         }
     }
 }

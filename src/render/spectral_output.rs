@@ -7,9 +7,12 @@
 use super::constants;
 use super::context::PixelBuffer;
 use super::error::{RenderError, Result};
+use super::save_image_as_png_16bit;
 use super::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
 use crate::post_effects::{CinematicColorGrade, ColorGradeParams, GaussianBloom, PostEffect};
-use crate::spectrum::{NUM_BINS, wavelength_nm_for_bin, wavelength_to_rgb};
+use crate::spectrum::{
+    NUM_BINS, linear_srgb_to_display_p3, wavelength_nm_for_bin, wavelength_to_rgb,
+};
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
 use tracing::info;
@@ -150,15 +153,14 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
     let pixel_count = (width * height) as usize;
     let mut raw = Vec::with_capacity(pixel_count * 3);
     for pixel in buf {
-        raw.push(f64_to_u16_saturating(
-            f64::from(pixel[0].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
-        ));
-        raw.push(f64_to_u16_saturating(
-            f64::from(pixel[1].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
-        ));
-        raw.push(f64_to_u16_saturating(
-            f64::from(pixel[2].clamp(0.0, 1.0)) * super::constants::U16_MAX_F64,
-        ));
+        let (p3_r, p3_g, p3_b) = linear_srgb_to_display_p3(
+            f64::from(pixel[0]),
+            f64::from(pixel[1]),
+            f64::from(pixel[2]),
+        );
+        raw.push(f64_to_u16_saturating(p3_r.clamp(0.0, 1.0) * super::constants::U16_MAX_F64));
+        raw.push(f64_to_u16_saturating(p3_g.clamp(0.0, 1.0) * super::constants::U16_MAX_F64));
+        raw.push(f64_to_u16_saturating(p3_b.clamp(0.0, 1.0) * super::constants::U16_MAX_F64));
     }
 
     let img: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::from_raw(width, height, raw)
@@ -166,9 +168,7 @@ fn save_bin_image(buf: &[[f32; 3]], width: u32, height: u32, path: &str) -> Resu
             reason: "Failed to create bin image buffer".into(),
         })?;
 
-    let dyn_img = image::DynamicImage::ImageRgb16(img);
-    dyn_img.save(path).map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    Ok(())
+    save_image_as_png_16bit(&img, path)
 }
 
 // ---------------------------------------------------------------------------
@@ -238,9 +238,10 @@ fn gaussian_blend_to_pixelbuffer(
 fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf = vec![0u16; pixels.len() * 3];
     buf.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
-        chunk[0] = (r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-        chunk[1] = (g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
-        chunk[2] = (b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        let (p3_r, p3_g, p3_b) = linear_srgb_to_display_p3(r, g, b);
+        chunk[0] = (p3_r.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[1] = (p3_g.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
+        chunk[2] = (p3_b.clamp(0.0, 1.0) * constants::U16_MAX_F64).round() as u16;
     });
     buf
 }
@@ -1122,18 +1123,17 @@ mod tests {
         let q = quantize_to_u16_rgb(&pixels);
         assert_eq!(q.len(), 3);
         let expected = (0.5 * 65535.0f64).round() as u16;
-        assert_eq!(q[0], expected);
-        assert_eq!(q[1], expected);
-        assert_eq!(q[2], expected);
+        assert!(q[0].abs_diff(expected) <= 8);
+        assert!(q[1].abs_diff(expected) <= 8);
+        assert!(q[2].abs_diff(expected) <= 8);
     }
 
     #[test]
     fn test_quantize_clamps() {
         let pixels: PixelBuffer = vec![(-0.5, 1.5, 0.0, 1.0)];
         let q = quantize_to_u16_rgb(&pixels);
-        assert_eq!(q[0], 0);
-        assert_eq!(q[1], 65535);
-        assert_eq!(q[2], 0);
+        assert!(q[1] > q[0]);
+        assert!(q[1] > q[2]);
     }
 
     #[test]

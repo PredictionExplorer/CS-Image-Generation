@@ -150,18 +150,24 @@ edge_multiplier = (multiplier_A + multiplier_B) / 2.0
 A stationary body gets multiplier 1.0. A body at or above the threshold velocity
 gets multiplier 8.0.
 
-### 3.4 OkLab Hue to Wavelength
+### 3.4 OkLab Hue to Spectral Emission Lobes
 
-Each vertex has an OkLab color (L, a, b). The hue determines which wavelength
-bin receives energy. The mapping uses only the `a` and `b` components:
+Each vertex has an OkLab color (L, a, b). The hue chooses the dominant
+wavelength region, while chroma controls the width of a Gaussian spectral
+emission lobe. This means saturated colors emit narrow, pure spectral bands;
+pastel colors emit broader bands that mix more naturally toward white.
 
 ```
 hue_rad = atan2(b, a)
 hue_deg = hue_rad.to_degrees()
 if hue_deg < 0: hue_deg += 360
+chroma = sqrt(a*a + b*b)
+sigma_nm = 20 - 13 * clamp(chroma / 0.34, 0, 1)
 ```
 
-Then a piecewise linear mapping converts hue degrees to wavelength:
+The hue-to-wavelength map is piecewise linear, with a smoothed violet-to-red
+bridge at the hue-wheel wrap. Hue values in the wrap region emit a dual lobe
+near violet and deep red instead of jumping through the whole spectrum.
 
 | Hue Range (degrees) | Color Region | Wavelength Range (nm) |
 |---------------------|-------------|----------------------|
@@ -171,14 +177,15 @@ Then a piecewise linear mapping converts hue degrees to wavelength:
 | 90 - 150 | Yellow to green | 570 - 510 |
 | 150 - 210 | Green to cyan | 510 - 485 |
 | 210 - 270 | Cyan to blue | 485 - 450 |
-| 270 - 330 | Blue to violet | 450 - 380 |
-| 330 - 360 | Violet to red (wrap) | 380 - 700 |
+| 270 - 330 | Blue to violet | 450 - 405 |
+| 330 - 360 | Violet/red wrap | dual lobe: 405 and 690 |
 
-Each sub-range uses linear interpolation. The result is clamped to [380, 700].
-
-Example for hue in [0, 30):
+For each lobe, energy is spread across nearby bins and normalized:
 ```
-wavelength = 700.0 - (hue_deg / 30.0) * 50.0
+center_bin = wavelength_to_bin(center_wavelength)
+for bin near center_bin:
+    weight = exp(-distance_bins^2 / (2 * sigma_bins^2))
+normalize(weights)
 ```
 
 ### 3.5 Gaussian SDF Line Segment Splatting
@@ -210,13 +217,11 @@ effective_thickness = thickness + coc
 pad = ceil(effective_thickness * 2.5)
 ```
 
-**Wavelength bins for endpoints:**
+**Spectral kernels for endpoints:**
 
 ```
-wavelength0 = oklab_hue_to_wavelength(v0.color.a, v0.color.b)
-wavelength1 = oklab_hue_to_wavelength(v1.color.a, v1.color.b)
-bin0_f = wavelength_to_bin(wavelength0)   // fractional bin [0, 63]
-bin1_f = wavelength_to_bin(wavelength1)   // fractional bin [0, 63]
+kernel0 = spectral_kernel_for_oklab(v0.color)
+kernel1 = spectral_kernel_for_oklab(v1.color)
 ```
 
 **Energy conservation and depth fade:**
@@ -257,20 +262,11 @@ for py in min_y..=max_y:
         // Final energy for this pixel
         final_energy = energy * alpha * base_energy_mult
 
-        // Interpolate fractional bin along segment
-        bin_f = bin0_f * (1 - h) + bin1_f * h
-
-        // Split energy between two adjacent bins
-        bin_left  = floor(bin_f) as usize, clamped to [0, 63]
-        bin_right = min(bin_left + 1, 63)
-        w_right   = fract(bin_f)
-
-        // Deposit into SPD buffer
-        if bin_left == bin_right:
-            accum_spd[pixel_index][bin_left] += final_energy
-        else:
-            accum_spd[pixel_index][bin_left]  += final_energy * (1 - w_right)
-            accum_spd[pixel_index][bin_right] += final_energy * w_right
+        // Interpolate endpoint kernels and deposit a normalized spectral band
+        for (bin, weight) in kernel0:
+            accum_spd[pixel_index][bin] += final_energy * (1 - h) * weight
+        for (bin, weight) in kernel1:
+            accum_spd[pixel_index][bin] += final_energy * h * weight
 ```
 
 ### 3.6 Parallelization
@@ -395,81 +391,52 @@ if total_energy >= 0.08:
 
 ### 5.3 SPD to Linear RGBA
 
-The final conversion maps the 64-bin spectrum to a linear-sRGB (R, G, B, A)
-tuple using a precomputed lookup table.
+The final conversion maps the 64-bin spectrum to CIE XYZ, then to a linear
+Rec.2020 working RGB tuple. This replaced the older Dan Bruton wavelength
+approximation with CIE 1931 2-degree color matching functions.
 
-#### The Combined LUT
+#### The CIE XYZ LUT
 
-A 64-entry LUT is precomputed at startup. Each entry stores `(R, G, B, k)`:
+A 64-entry LUT is precomputed at startup. Each entry stores `(X, Y, Z, k)`:
 
-- **(R, G, B):** The linear-sRGB color of that bin's center wavelength, computed
-  from Dan Bruton's spectrum-to-RGB formula. This assigns each bin a "basis
-  color" -- e.g., bin 0 is deep violet, bin 32 is green, bin 63 is deep red.
-
-- **k (tone steepness):** A per-bin tone-mapping strength that controls how
-  quickly energy saturates. Blue wavelengths have higher k (compress faster),
-  red wavelengths have lower k (stay linear longer):
-
-| Wavelength Range | k Value |
-|-----------------|---------|
-| < 450 nm (violet) | 2.2 + 0.3 * (450 - lambda) / 70 |
-| 450-490 nm (blue) | 2.0 |
-| 490-550 nm (cyan-green) | 1.8 |
-| 550-590 nm (green-yellow) | 1.6 |
-| 590-650 nm (orange) | 1.4 - 0.2 * (lambda - 590) / 60 |
-| 650-700 nm (red) | 1.2 - 0.2 * (lambda - 650) / 50 |
+- **(X, Y, Z):** Simpson-integrated CIE 1931 color matching values across the
+  5 nm bin span. The table is normalized so a flat SPD reads as D65 white.
+- **k (tone steepness):** A smooth per-bin compression value retuned for CIE
+  energy. It gently decreases from violet/blue toward red to keep highlights
+  colorful without letting any one spectral edge dominate.
 
 #### Conversion Algorithm
 
 ```
-R_sum = 0, G_sum = 0, B_sum = 0, total = 0
+X_sum = 0, Y_sum = 0, Z_sum = 0, total = 0
 
 for i in 0..64:
     e = local_spd[i]
     if e <= 1e-10: continue
 
-    (lut_R, lut_G, lut_B, k) = BIN_COMBINED_LUT[i]
+    (lut_X, lut_Y, lut_Z, k) = BIN_XYZ_LUT[i]
 
     // Per-bin tone mapping: soft saturation curve
     e_mapped = 1.0 - exp(-k * e)
 
     total += e_mapped
-    R_sum += e_mapped * lut_R
-    G_sum += e_mapped * lut_G
-    B_sum += e_mapped * lut_B
+    X_sum += e_mapped * lut_X
+    Y_sum += e_mapped * lut_Y
+    Z_sum += e_mapped * lut_Z
 
 if total < 1e-10:
     return (0, 0, 0, 0)    // black pixel
 
-// Normalize to get the "chromaticity" (hue/saturation)
-R = R_sum / total
-G = G_sum / total
-B = B_sum / total
+X = X_sum / total
+Y = Y_sum / total
+Z = Z_sum / total
 
-// Saturation boost
-mean = (R + G + B) / 3.0
-color_range = max(R, G, B) - min(R, G, B)
-
-if color_range < 0.1:
-    sat_boost = 3.0      // low-saturation: strong boost
-elif color_range < 0.3:
-    sat_boost = 2.6      // medium: moderate boost
-else:
-    sat_boost = 2.2      // high-saturation: gentle boost
-
-R = mean + (R - mean) * sat_boost
-G = mean + (G - mean) * sat_boost
-B = mean + (B - mean) * sat_boost
-
-// Rescale if any channel exceeds 1.0
-max_val = max(R, G, B)
-if max_val > 1.0:
-    scale = 1.0 / max_val
-    R *= scale; G *= scale; B *= scale
-
-R = clamp(R, 0, 1)
-G = clamp(G, 0, 1)
-B = clamp(B, 0, 1)
+// Perceptual vibrance in OkLab/OkLCh, not linear RGB buckets
+(L, a, b) = linear_rec2020_to_oklab(xyz_to_linear_rec2020(X, Y, Z))
+C = sqrt(a*a + b*b)
+boost = 1 + vibrance_amount * knee / (C + knee)
+(R, G, B) = oklab_to_linear_rec2020(L, a * boost, b * boost)
+(R, G, B) = preserve_hue_gamut_map(R, G, B)
 
 // Brightness from total accumulated energy
 brightness = 1.0 - exp(-total)
@@ -478,9 +445,10 @@ brightness = 1.0 - exp(-total)
 output = (R * brightness, G * brightness, B * brightness, brightness)
 ```
 
-The output is a premultiplied-alpha linear-sRGB tuple in [0, 1]. The alpha
-channel (brightness) represents how much light the pixel received overall,
-while the RGB channels encode the spectral color.
+The output is a premultiplied-alpha linear Rec.2020 tuple in [0, 1]. The alpha
+channel (brightness) represents how much light the pixel received overall.
+During final quantization, Rec.2020 display values are converted to Display P3
+and written as 16-bit PNG/video frames with explicit P3 metadata.
 
 ---
 
@@ -513,15 +481,19 @@ A custom tone mapper uses histogram-derived exposure levels:
 Default production chain: empty. The display buffer is quantized without a grain
 or texture overlay.
 
-### 6.4 Quantization
+### 6.4 Display P3 Quantization
 
-The final linear RGBA buffer is converted to 16-bit sRGB:
+The final linear Rec.2020 RGBA buffer is converted to linear Display P3 and
+then quantized to 16-bit RGB. PNG outputs include Display P3 chromaticities and
+cICP metadata (`color_primaries = 12`, `transfer_function = 13`,
+`matrix_coefficients = 0`). Video encodes use Display P3 primaries in FFmpeg
+metadata.
 
 ```
 for each pixel:
-    // Apply sRGB transfer function (gamma ~2.2)
+    (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b)
     // Quantize to [0, 65535]
-    output_u16 = round(srgb_transfer(linear_value) * 65535)
+    output_u16 = round(clamp(p3_channel, 0, 1) * 65535)
 ```
 
 ---

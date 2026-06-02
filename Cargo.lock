@@ -1398,6 +1398,7 @@ dependencies = [
  "image",
  "nalgebra",
  "opensimplex2",
+ "png",
  "proptest",
  "rayon",
  "rustfft",

@@ -5,6 +5,7 @@
 //! draws into this SPD buffer, then we convert the spectrum → linear-sRGB
 //! right before the normal tone-mapping / bloom pipeline.
 
+use crate::oklab::GamutMapMode;
 use crate::spectrum_simd;
 
 /// Number of wavelength buckets in the SPD.
@@ -20,33 +21,200 @@ pub fn wavelength_nm_for_bin(bin: usize) -> f64 {
     LAMBDA_START + (bin as f64 + 0.5) * (LAMBDA_END - LAMBDA_START) / NUM_BINS as f64
 }
 
-/// Approximate (linear-sRGB) colour corresponding to a given wavelength.
-/// Formula adapted from Dan Bruton's reference (gamma removed → stay linear).
+const D65_WHITE: (f64, f64, f64) = (0.95047, 1.0, 1.08883);
+
+#[rustfmt::skip]
+const CIE_1931_2_DEG_5NM: [(f64, f64, f64, f64); 65] = [
+    (380.0, 0.001368, 0.000039, 0.006450),
+    (385.0, 0.002236, 0.000064, 0.010550),
+    (390.0, 0.004243, 0.000120, 0.020050),
+    (395.0, 0.007650, 0.000217, 0.036210),
+    (400.0, 0.014310, 0.000396, 0.067850),
+    (405.0, 0.023190, 0.000640, 0.110200),
+    (410.0, 0.043510, 0.001210, 0.207400),
+    (415.0, 0.077630, 0.002180, 0.371300),
+    (420.0, 0.134380, 0.004000, 0.645600),
+    (425.0, 0.214770, 0.007300, 1.039050),
+    (430.0, 0.283900, 0.011600, 1.385600),
+    (435.0, 0.328500, 0.016840, 1.622960),
+    (440.0, 0.348280, 0.023000, 1.747060),
+    (445.0, 0.348060, 0.029800, 1.782600),
+    (450.0, 0.336200, 0.038000, 1.772110),
+    (455.0, 0.318700, 0.048000, 1.744100),
+    (460.0, 0.290800, 0.060000, 1.669200),
+    (465.0, 0.251100, 0.073900, 1.528100),
+    (470.0, 0.195360, 0.090980, 1.287640),
+    (475.0, 0.142100, 0.112600, 1.041900),
+    (480.0, 0.095640, 0.139020, 0.812950),
+    (485.0, 0.057950, 0.169300, 0.616200),
+    (490.0, 0.032010, 0.208020, 0.465180),
+    (495.0, 0.014700, 0.258600, 0.353300),
+    (500.0, 0.004900, 0.323000, 0.272000),
+    (505.0, 0.002400, 0.407300, 0.212300),
+    (510.0, 0.009300, 0.503000, 0.158200),
+    (515.0, 0.029100, 0.608200, 0.111700),
+    (520.0, 0.063270, 0.710000, 0.078250),
+    (525.0, 0.109600, 0.793200, 0.057250),
+    (530.0, 0.165500, 0.862000, 0.042160),
+    (535.0, 0.225750, 0.914850, 0.029840),
+    (540.0, 0.290400, 0.954000, 0.020300),
+    (545.0, 0.359700, 0.980300, 0.013400),
+    (550.0, 0.433450, 0.994950, 0.008750),
+    (555.0, 0.512050, 1.000000, 0.005750),
+    (560.0, 0.594500, 0.995000, 0.003900),
+    (565.0, 0.678400, 0.978600, 0.002750),
+    (570.0, 0.762100, 0.952000, 0.002100),
+    (575.0, 0.842500, 0.915400, 0.001800),
+    (580.0, 0.916300, 0.870000, 0.001650),
+    (585.0, 0.978600, 0.816300, 0.001400),
+    (590.0, 1.026300, 0.757000, 0.001100),
+    (595.0, 1.056700, 0.694900, 0.001000),
+    (600.0, 1.062200, 0.631000, 0.000800),
+    (605.0, 1.045600, 0.566800, 0.000600),
+    (610.0, 1.002600, 0.503000, 0.000340),
+    (615.0, 0.938400, 0.441200, 0.000240),
+    (620.0, 0.854450, 0.381000, 0.000190),
+    (625.0, 0.751400, 0.321000, 0.000100),
+    (630.0, 0.642400, 0.265000, 0.000050),
+    (635.0, 0.541900, 0.217000, 0.000030),
+    (640.0, 0.447900, 0.175000, 0.000020),
+    (645.0, 0.360800, 0.138200, 0.000010),
+    (650.0, 0.283500, 0.107000, 0.000000),
+    (655.0, 0.218700, 0.081600, 0.000000),
+    (660.0, 0.164900, 0.061000, 0.000000),
+    (665.0, 0.121200, 0.044580, 0.000000),
+    (670.0, 0.087400, 0.032000, 0.000000),
+    (675.0, 0.063600, 0.023200, 0.000000),
+    (680.0, 0.046770, 0.017000, 0.000000),
+    (685.0, 0.032900, 0.011920, 0.000000),
+    (690.0, 0.022700, 0.008210, 0.000000),
+    (695.0, 0.015840, 0.005723, 0.000000),
+    (700.0, 0.011359, 0.004102, 0.000000),
+];
+
+#[inline]
+fn cie_xyz_at_nm(lambda: f64) -> (f64, f64, f64) {
+    if !(LAMBDA_START..=LAMBDA_END).contains(&lambda) {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let position = ((lambda - LAMBDA_START) / 5.0).clamp(0.0, 64.0);
+    let left = position.floor() as usize;
+    let right = (left + 1).min(CIE_1931_2_DEG_5NM.len() - 1);
+    let t = position.fract();
+    let (_, x0, y0, z0) = CIE_1931_2_DEG_5NM[left];
+    let (_, x1, y1, z1) = CIE_1931_2_DEG_5NM[right];
+
+    (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, z0 + (z1 - z0) * t)
+}
+
+#[inline]
+fn raw_bin_xyz(bin: usize) -> (f64, f64, f64) {
+    let center = wavelength_nm_for_bin(bin);
+    let left = (center - 2.5).max(LAMBDA_START);
+    let right = (center + 2.5).min(LAMBDA_END);
+    let (xl, yl, zl) = cie_xyz_at_nm(left);
+    let (xc, yc, zc) = cie_xyz_at_nm(center);
+    let (xr, yr, zr) = cie_xyz_at_nm(right);
+
+    ((xl + 4.0 * xc + xr) / 6.0, (yl + 4.0 * yc + yr) / 6.0, (zl + 4.0 * zc + zr) / 6.0)
+}
+
+#[inline]
+fn tone_k_for_wavelength(lambda: f64) -> f64 {
+    let normalized = ((lambda - LAMBDA_START) / (LAMBDA_END - LAMBDA_START)).clamp(0.0, 1.0);
+    2.05 - 0.68 * normalized
+}
+
+/// Convert D65-relative CIE XYZ to linear sRGB.
+#[must_use]
+#[inline]
+pub fn xyz_to_linear_srgb(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+    let r = 3.240_454_2 * x - 1.537_138_5 * y - 0.498_531_4 * z;
+    let g = -0.969_266 * x + 1.876_010_8 * y + 0.041_556 * z;
+    let b = 0.055_643_4 * x - 0.204_025_9 * y + 1.057_225_2 * z;
+
+    (r, g, b)
+}
+
+/// Convert D65-relative CIE XYZ to linear Rec.2020.
+#[must_use]
+#[inline]
+pub fn xyz_to_linear_rec2020(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+    let r = 1.716_651_187_971_268 * x - 0.355_670_783_776_392 * y - 0.253_366_281_373_66 * z;
+    let g = -0.666_684_351_832_489 * x + 1.616_481_236_634_939 * y + 0.015_768_545_813_911_1 * z;
+    let b = 0.017_639_857_445_310_8 * x - 0.042_770_613_257_808_5 * y + 0.942_103_121_235_474 * z;
+
+    (r, g, b)
+}
+
+/// Convert linear Rec.2020 to D65-relative CIE XYZ.
+#[must_use]
+#[inline]
+pub fn linear_rec2020_to_xyz(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let x = 0.636_958_048_301_291_4 * r + 0.144_616_903_586_208_3 * g + 0.168_880_975_164_172_1 * b;
+    let y = 0.262_700_212_011_267_1 * r + 0.677_998_071_518_870_8 * g + 0.059_301_716_469_862 * b;
+    let z = 0.028_072_693_049_087_4 * g + 1.060_985_057_710_791 * b;
+
+    (x, y, z)
+}
+
+/// Convert linear Rec.2020 to linear Display P3.
+#[must_use]
+#[inline]
+pub fn linear_rec2020_to_display_p3(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let (x, y, z) = linear_rec2020_to_xyz(r, g, b);
+    let p3_r = 2.493_496_911_941_425 * x - 0.931_383_617_919_124 * y - 0.402_710_784_450_717 * z;
+    let p3_g = -0.829_488_969_561_574 * x + 1.762_664_060_318_346 * y + 0.023_624_685_841_943 * z;
+    let p3_b = 0.035_845_830_243_784 * x - 0.076_172_389_268_041 * y + 0.956_884_524_007_687 * z;
+
+    (p3_r, p3_g, p3_b)
+}
+
+/// Convert linear sRGB to linear Display P3 through D65-relative CIE XYZ.
+#[must_use]
+#[inline]
+pub fn linear_srgb_to_display_p3(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let x = 0.412_456_4 * r + 0.357_576_1 * g + 0.180_437_5 * b;
+    let y = 0.212_672_9 * r + 0.715_152_2 * g + 0.072_175 * b;
+    let z = 0.019_333_9 * r + 0.119_192 * g + 0.950_304_1 * b;
+    let p3_r = 2.493_496_911_941_425 * x - 0.931_383_617_919_124 * y - 0.402_710_784_450_717 * z;
+    let p3_g = -0.829_488_969_561_574 * x + 1.762_664_060_318_346 * y + 0.023_624_685_841_943 * z;
+    let p3_b = 0.035_845_830_243_784 * x - 0.076_172_389_268_041 * y + 0.956_884_524_007_687 * z;
+
+    (p3_r, p3_g, p3_b)
+}
+
+/// CIE-derived linear-sRGB colour for a display tint at the given wavelength.
 #[must_use]
 pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
-    let (r, g, b) = if (380.0..440.0).contains(&lambda) {
-        (-(lambda - 440.0) / (440.0 - 380.0), 0.0, 1.0)
-    } else if (440.0..490.0).contains(&lambda) {
-        (0.0, (lambda - 440.0) / (490.0 - 440.0), 1.0)
-    } else if (490.0..510.0).contains(&lambda) {
-        (0.0, 1.0, -(lambda - 510.0) / (510.0 - 490.0))
-    } else if (510.0..580.0).contains(&lambda) {
-        ((lambda - 510.0) / (580.0 - 510.0), 1.0, 0.0)
-    } else if (580.0..645.0).contains(&lambda) {
-        (1.0, -(lambda - 645.0) / (645.0 - 580.0), 0.0)
-    } else if (645.0..=700.0).contains(&lambda) {
-        (1.0, 0.0, 0.0)
-    } else {
-        (0.0, 0.0, 0.0)
-    };
+    let (x, y, z) = cie_xyz_at_nm(lambda);
+    let max_xyz = x.max(y).max(z);
+    if max_xyz <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
 
-    // Intensity falloff near ends of visible range (simple linear ramp).
+    let (mut r, mut g, mut b) = xyz_to_linear_srgb(x / max_xyz, y / max_xyz, z / max_xyz);
+    let min_channel = r.min(g).min(b);
+    if min_channel < 0.0 {
+        r -= min_channel;
+        g -= min_channel;
+        b -= min_channel;
+    }
+    let max_channel = r.max(g).max(b);
+    if max_channel > 1.0 {
+        r /= max_channel;
+        g /= max_channel;
+        b /= max_channel;
+    }
+
+    let (r, g, b) = GamutMapMode::Clamp.map_to_gamut(r, g, b);
     let factor = if (380.0..420.0).contains(&lambda) {
-        0.3 + 0.7 * (lambda - 380.0) / (420.0 - 380.0)
+        0.35 + 0.65 * (lambda - 380.0) / 40.0
     } else if (420.0..645.0).contains(&lambda) {
         1.0
     } else if (645.0..=700.0).contains(&lambda) {
-        0.3 + 0.7 * (700.0 - lambda) / (700.0 - 645.0)
+        0.35 + 0.65 * (700.0 - lambda) / 55.0
     } else {
         0.0
     };
@@ -54,31 +222,41 @@ pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
     (r * factor, g * factor, b * factor)
 }
 
-/// Combined lookup table for cache-friendly SPD conversion
-/// Stores (R, G, B, `tone_k`) in a single cache line for better performance
+/// Combined CIE XYZ lookup table for cache-friendly SPD conversion.
+/// Stores (X, Y, Z, `tone_k`) in a single cache line for better performance.
+pub static BIN_XYZ_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
+    std::sync::LazyLock::new(|| {
+        let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut sum_z = 0.0;
+        for i in 0..NUM_BINS {
+            let (x, y, z) = raw_bin_xyz(i);
+            sum_x += x;
+            sum_y += y;
+            sum_z += z;
+        }
+
+        let norm_x = if sum_x > 0.0 { D65_WHITE.0 / sum_x } else { 1.0 };
+        let norm_y = if sum_y > 0.0 { D65_WHITE.1 / sum_y } else { 1.0 };
+        let norm_z = if sum_z > 0.0 { D65_WHITE.2 / sum_z } else { 1.0 };
+
+        for (i, entry) in arr.iter_mut().enumerate() {
+            let lambda = wavelength_nm_for_bin(i);
+            let (x, y, z) = raw_bin_xyz(i);
+            *entry = (x * norm_x, y * norm_y, z * norm_z, tone_k_for_wavelength(lambda));
+        }
+        arr
+    });
+
+/// CIE-derived display RGB lookup for diagnostics and legacy callers.
 pub static BIN_COMBINED_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
     std::sync::LazyLock::new(|| {
         let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
         for (i, entry) in arr.iter_mut().enumerate() {
-            let (r, g, b) = wavelength_to_rgb(wavelength_nm_for_bin(i));
             let lambda = wavelength_nm_for_bin(i);
-
-            // Compute tone-mapping strength inline
-            let k = if lambda < 450.0 {
-                2.2 + 0.3 * (450.0 - lambda) / 70.0
-            } else if lambda < 490.0 {
-                2.0
-            } else if lambda < 550.0 {
-                1.8
-            } else if lambda < 590.0 {
-                1.6
-            } else if lambda < 650.0 {
-                1.4 - 0.2 * (lambda - 590.0) / 60.0
-            } else {
-                1.2 - 0.2 * (lambda - 650.0) / 50.0
-            };
-
-            *entry = (r, g, b, k);
+            let (r, g, b) = wavelength_to_rgb(lambda);
+            *entry = (r, g, b, tone_k_for_wavelength(lambda));
         }
         arr
     });
