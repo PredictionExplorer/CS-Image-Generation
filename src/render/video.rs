@@ -75,7 +75,7 @@ impl Default for VideoEncodingOptions {
             input_pixel_format: "rgb48le".to_string(),
             extra_args: vec![
                 "-x265-params".to_string(),
-                "profile=main422-10:level=5.0:\
+                "profile=main422-10:\
                  bframes=8:ref=6:\
                  rc-lookahead=250:\
                  aq-mode=3:aq-strength=1.0:\

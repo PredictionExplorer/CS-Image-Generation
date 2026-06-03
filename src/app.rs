@@ -312,6 +312,10 @@ pub fn render_video(
         VideoEncodingOptions::default()
     };
 
+    info!("Rendering and saving still image before video encode: {}", output_png);
+    let still_frame = render::render_final_frame_spectral(scene, levels, settings)?;
+    save_image_as_png_16bit(&still_frame, output_png)?;
+
     let mut accum_spd = Vec::new();
 
     create_video_from_frames_singlepass(
@@ -340,11 +344,7 @@ pub fn render_video(
         &video_options,
     )?;
 
-    // Save final frame
-    if let Some(last_frame) = last_frame_png {
-        info!("Attempting to save 16-bit PNG to: {}", output_png);
-        save_image_as_png_16bit(&last_frame, output_png)?;
-    } else {
+    if last_frame_png.is_none() {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
 
