@@ -16,8 +16,8 @@ pub type OklabColor = (f64, f64, f64);
 /// Small random hue variation for visual interest
 const HUE_DRIFT_JITTER: f64 = 0.1;
 
-static LAST_PALETTE_METADATA: LazyLock<Mutex<(&'static str, &'static str)>> =
-    LazyLock::new(|| Mutex::new(("unresolved", "unresolved")));
+static LAST_PALETTE_METADATA: LazyLock<Mutex<(String, String)>> =
+    LazyLock::new(|| Mutex::new(("unresolved".to_string(), "unresolved".to_string())));
 
 #[derive(Clone, Copy)]
 struct MoodEnvelope {
@@ -32,12 +32,16 @@ struct MoodEnvelope {
     lightness_wave: f64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct PaletteSpec {
-    harmony: &'static str,
+    harmony: String,
+    mood_label: String,
     mood: MoodEnvelope,
     base_hue: f64,
     offsets: [f64; 3],
+    palette_phase: f64,
+    hue_accent_strength: f64,
+    lightness_contrast: f64,
 }
 
 const MOODS: [MoodEnvelope; 6] = [
@@ -111,34 +115,130 @@ const MOODS: [MoodEnvelope; 6] = [
 
 /// Return the harmony and mood chosen by the most recent body palette generation.
 #[must_use]
-pub fn current_palette_metadata() -> (&'static str, &'static str) {
-    LAST_PALETTE_METADATA.lock().map_or(("unresolved", "unresolved"), |metadata| *metadata)
+pub fn current_palette_metadata() -> (String, String) {
+    LAST_PALETTE_METADATA.lock().map_or_else(
+        |_| ("unresolved".to_string(), "unresolved".to_string()),
+        |metadata| metadata.clone(),
+    )
 }
 
-fn harmony_offsets(rng: &mut Sha3RandomByteStream) -> (&'static str, [f64; 3]) {
-    match (rng.next_f64() * 6.0).floor() as usize {
-        0 => ("analogous", [0.0, 28.0, -32.0]),
-        1 => ("complementary", [0.0, 180.0, 150.0]),
-        2 => ("split_complementary", [0.0, 150.0, 210.0]),
-        3 => ("triadic", [0.0, 118.0, 242.0]),
-        4 => ("tetradic", [0.0, 88.0, 180.0]),
-        _ => ("golden_angle", [0.0, 137.5, 275.0]),
+#[inline]
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+#[inline]
+fn smoothstep(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+#[inline]
+fn lerp_hue_degrees(a: f64, b: f64, t: f64) -> f64 {
+    let delta = (b - a + 540.0).rem_euclid(HUE_FULL_CIRCLE) - 180.0;
+    (a + delta * t).rem_euclid(HUE_FULL_CIRCLE)
+}
+
+fn blend_mood_envelope(rng: &mut Sha3RandomByteStream) -> (MoodEnvelope, String) {
+    let mood_position = rng.next_f64() * MOODS.len() as f64;
+    let primary_index = (mood_position.floor() as usize).min(MOODS.len() - 1);
+    let secondary_index = (primary_index + 1) % MOODS.len();
+    let primary = MOODS[primary_index];
+    let secondary = MOODS[secondary_index];
+    let blend = smoothstep(mood_position.fract());
+
+    let mood = MoodEnvelope {
+        name: primary.name,
+        center_hue: lerp_hue_degrees(primary.center_hue, secondary.center_hue, blend),
+        hue_span: lerp(primary.hue_span, secondary.hue_span, blend),
+        chroma_base: lerp(primary.chroma_base, secondary.chroma_base, blend),
+        chroma_range: lerp(primary.chroma_range, secondary.chroma_range, blend),
+        chroma_wave: lerp(primary.chroma_wave, secondary.chroma_wave, blend),
+        lightness_base: lerp(primary.lightness_base, secondary.lightness_base, blend),
+        lightness_range: lerp(primary.lightness_range, secondary.lightness_range, blend),
+        lightness_wave: lerp(primary.lightness_wave, secondary.lightness_wave, blend),
+    };
+
+    let label = if blend < 0.12 {
+        primary.name.to_string()
+    } else if blend > 0.88 {
+        secondary.name.to_string()
+    } else {
+        format!("{}_{}_blend", primary.name, secondary.name)
+    };
+
+    (mood, label)
+}
+
+fn harmony_offsets(rng: &mut Sha3RandomByteStream, palette_phase: f64) -> (String, [f64; 3]) {
+    let templates = [
+        ("analogous", [0.0, 28.0, -32.0], 12.0),
+        ("complementary", [0.0, 180.0, 150.0], 14.0),
+        ("split_complementary", [0.0, 150.0, 210.0], 16.0),
+        ("triadic", [0.0, 118.0, 242.0], 14.0),
+        ("tetradic", [0.0, 88.0, 180.0], 12.0),
+        ("golden_angle", [0.0, 137.5, 275.0], 18.0),
+        ("luminous_arc", [0.0, 52.0, 194.0], 18.0),
+        ("opal_cross", [0.0, 104.0, 219.0], 16.0),
+    ];
+    let index =
+        ((rng.next_f64() * templates.len() as f64).floor() as usize).min(templates.len() - 1);
+    let (name, mut offsets, jitter_radius) = templates[index];
+    let phase_bias = (palette_phase.clamp(0.0, 1.0) - 0.5) * 10.0;
+
+    for (body, offset) in offsets.iter_mut().enumerate().skip(1) {
+        let jitter = (rng.next_f64() - 0.5) * jitter_radius;
+        *offset = (*offset + jitter + phase_bias * body as f64).rem_euclid(HUE_FULL_CIRCLE);
+    }
+
+    if rng.next_f64() < 0.22 {
+        let pivot = if rng.next_f64() < 0.5 { -26.0 } else { 26.0 };
+        offsets[2] = (offsets[2] + pivot).rem_euclid(HUE_FULL_CIRCLE);
+        (format!("{name}_accent"), offsets)
+    } else {
+        (name.to_string(), offsets)
     }
 }
 
-fn resolve_palette_spec(rng: &mut Sha3RandomByteStream, chroma_boost: bool) -> PaletteSpec {
-    let mood_index = ((rng.next_f64() * MOODS.len() as f64).floor() as usize).min(MOODS.len() - 1);
-    let mut mood = MOODS[mood_index];
+fn resolve_palette_spec(
+    rng: &mut Sha3RandomByteStream,
+    chroma_boost: bool,
+    palette_phase: f64,
+) -> PaletteSpec {
+    let palette_phase = palette_phase.clamp(0.0, 1.0);
+    let (mut mood, mood_label) = blend_mood_envelope(rng);
+    mood.center_hue = (mood.center_hue + (rng.next_f64() - 0.5) * 28.0).rem_euclid(HUE_FULL_CIRCLE);
+    mood.hue_span = (mood.hue_span + (rng.next_f64() - 0.5) * 36.0).clamp(64.0, 180.0);
+    mood.chroma_base = (mood.chroma_base + (rng.next_f64() - 0.5) * 0.035).clamp(0.16, 0.29);
+    mood.chroma_range = (mood.chroma_range + (rng.next_f64() - 0.5) * 0.035).clamp(0.07, 0.15);
+    mood.chroma_wave = (mood.chroma_wave + (rng.next_f64() - 0.5) * 0.025).clamp(0.035, 0.085);
+    mood.lightness_base = (mood.lightness_base + (rng.next_f64() - 0.5) * 0.06).clamp(0.55, 0.76);
+    mood.lightness_range =
+        (mood.lightness_range + (rng.next_f64() - 0.5) * 0.055).clamp(0.14, 0.28);
+    mood.lightness_wave = (mood.lightness_wave + (rng.next_f64() - 0.5) * 0.04).clamp(0.10, 0.20);
+
     if !chroma_boost {
         mood.chroma_base = (mood.chroma_base - 0.04).max(OKLAB_CHROMA_BASE);
         mood.chroma_range = (mood.chroma_range + 0.02).min(OKLAB_CHROMA_RANGE + 0.04);
         mood.chroma_wave = mood.chroma_wave.min(OKLAB_CHROMA_WAVE_AMPLITUDE);
     }
 
-    let (harmony, offsets) = harmony_offsets(rng);
-    let base_hue = mood.center_hue + (rng.next_f64() - 0.5) * mood.hue_span + rng.next_f64() * 11.0;
+    let (harmony, offsets) = harmony_offsets(rng, palette_phase);
+    let base_hue = mood.center_hue
+        + (rng.next_f64() - 0.5) * mood.hue_span
+        + (palette_phase - 0.5) * 48.0
+        + (rng.next_f64() - 0.5) * 18.0;
 
-    PaletteSpec { harmony, mood, base_hue: base_hue.rem_euclid(HUE_FULL_CIRCLE), offsets }
+    PaletteSpec {
+        harmony,
+        mood_label,
+        mood,
+        base_hue: base_hue.rem_euclid(HUE_FULL_CIRCLE),
+        offsets,
+        palette_phase,
+        hue_accent_strength: 8.0 + rng.next_f64() * 22.0,
+        lightness_contrast: 0.9 + rng.next_f64() * 0.22,
+    }
 }
 
 fn classic_palette_spec(rng: &mut Sha3RandomByteStream, chroma_boost: bool) -> PaletteSpec {
@@ -159,10 +259,14 @@ fn classic_palette_spec(rng: &mut Sha3RandomByteStream, chroma_boost: bool) -> P
     };
 
     PaletteSpec {
-        harmony: "classic_triad",
+        harmony: "classic_triad".to_string(),
+        mood_label: "classic".to_string(),
         mood,
         base_hue: rng.next_f64() * HUE_FULL_CIRCLE,
         offsets: [0.0, 120.0, 240.0],
+        palette_phase: 0.5,
+        hue_accent_strength: 10.0,
+        lightness_contrast: 1.0,
     }
 }
 
@@ -186,7 +290,7 @@ pub fn generate_color_gradient_oklab(
         body_index,
         base_hue_offset,
         hue_wave_freq,
-        palette,
+        &palette,
     )
 }
 
@@ -196,13 +300,13 @@ fn generate_color_gradient_with_palette(
     body_index: usize,
     base_hue_offset: f64,
     hue_wave_freq: f64,
-    palette: PaletteSpec,
+    palette: &PaletteSpec,
 ) -> Vec<OklabColor> {
     let mut colors = Vec::with_capacity(length);
 
     let body_offset = palette.offsets[body_index % palette.offsets.len()];
     let base_hue = palette.base_hue + body_offset;
-    let phase_jitter = rng.next_f64() * 0.1;
+    let phase_jitter = rng.next_f64() * 0.1 + palette.palette_phase;
 
     let ln_cache: Vec<f64> =
         (0..length).map(|i| if i > 0 { (i as f64).ln() } else { 0.0 }).collect();
@@ -213,6 +317,13 @@ fn generate_color_gradient_with_palette(
             ((phase_offset + t * hue_wave_freq) * std::f64::consts::TAU).sin()
         })
         .collect();
+    let accent_cache: Vec<f64> = (0..length)
+        .map(|i| {
+            let t = i as f64 / length.max(1) as f64;
+            let accent_phase = palette.palette_phase + body_index as f64 * 0.618;
+            ((accent_phase + t * (hue_wave_freq * 0.37 + 0.71)) * std::f64::consts::TAU).sin()
+        })
+        .collect();
 
     let random_bits: Vec<u8> = (0..length).map(|_| rng.next_byte()).collect();
     let random_chromas: Vec<f64> = (0..length).map(|_| rng.next_f64()).collect();
@@ -221,7 +332,8 @@ fn generate_color_gradient_with_palette(
     for step in 0..length {
         let mut current_hue = base_hue
             + base_hue_offset * (1.0 + ln_cache[step]) * HUE_DRIFT_SCALE
-            + wave_cache[step] * HUE_WAVE_AMPLITUDE;
+            + wave_cache[step] * HUE_WAVE_AMPLITUDE
+            + accent_cache[step] * palette.hue_accent_strength;
 
         if random_bits[step] & 1 == 0 {
             current_hue += HUE_DRIFT_JITTER;
@@ -231,17 +343,20 @@ fn generate_color_gradient_with_palette(
         current_hue = current_hue.rem_euclid(HUE_FULL_CIRCLE);
 
         let wave_factor = wave_cache[step];
+        let accent_factor = accent_cache[step];
         let chroma = (palette.mood.chroma_base
             + random_chromas[step] * palette.mood.chroma_range
             + wave_factor * palette.mood.chroma_wave
+            + accent_factor.abs() * 0.018
             + body_index as f64 * 0.01)
-            .max(0.0);
+            .clamp(0.045, 0.38);
 
         let lightness = (palette.mood.lightness_base
             + random_lightnesses[step] * palette.mood.lightness_range
-            + wave_factor * palette.mood.lightness_wave
+            + wave_factor * palette.mood.lightness_wave * palette.lightness_contrast
+            + accent_factor * 0.025
             + body_index as f64 * 0.015)
-            .clamp(0.0, 1.0);
+            .clamp(0.36, 0.94);
 
         let hue_rad = current_hue.to_radians();
         let a = chroma * hue_rad.cos();
@@ -263,18 +378,20 @@ pub fn generate_body_color_sequences(
     alpha_denom: usize,
     chroma_boost: bool,
     alpha_variation: bool,
+    palette_phase: f64,
 ) -> (Vec<Vec<OklabColor>>, Vec<f64>) {
     let base_hue_offset = BASE_HUE_DRIFT;
 
     // #14: randomize hue wave frequency per seed for unique color rhythm
-    let hue_wave_freq = 1.8 + rng.next_f64() * 2.2; // [1.8, 4.0]
-    let palette = resolve_palette_spec(rng, chroma_boost);
+    let palette_phase = palette_phase.clamp(0.0, 1.0);
+    let hue_wave_freq = 1.8 + rng.next_f64() * 2.2 + palette_phase * 0.45; // [1.8, 4.45]
+    let palette = resolve_palette_spec(rng, chroma_boost, palette_phase);
     if let Ok(mut metadata) = LAST_PALETTE_METADATA.lock() {
-        *metadata = (palette.harmony, palette.mood.name);
+        *metadata = (palette.harmony.clone(), palette.mood_label.clone());
     }
     info!(
-        "   => Palette harmony={} mood={} base_hue={:.1}",
-        palette.harmony, palette.mood.name, palette.base_hue
+        "   => Palette harmony={} mood={} base_hue={:.1} phase={:.3}",
+        palette.harmony, palette.mood_label, palette.base_hue, palette.palette_phase
     );
 
     let b1 = generate_color_gradient_with_palette(
@@ -283,7 +400,7 @@ pub fn generate_body_color_sequences(
         0,
         base_hue_offset,
         hue_wave_freq,
-        palette,
+        &palette,
     );
     let b2 = generate_color_gradient_with_palette(
         rng,
@@ -291,7 +408,7 @@ pub fn generate_body_color_sequences(
         1,
         base_hue_offset,
         hue_wave_freq,
-        palette,
+        &palette,
     );
     let b3 = generate_color_gradient_with_palette(
         rng,
@@ -299,7 +416,7 @@ pub fn generate_body_color_sequences(
         2,
         base_hue_offset,
         hue_wave_freq,
-        palette,
+        &palette,
     );
 
     let body_alphas = if alpha_variation {
@@ -364,7 +481,7 @@ mod tests {
     fn test_body_color_sequences_uniform_alpha() {
         let mut rng = Sha3RandomByteStream::new(&[5, 6, 7, 8], 1.0, 1.0, 1.0, 1.0);
         let (colors, alphas) =
-            generate_body_color_sequences(&mut rng, 50, 15_000_000, false, false);
+            generate_body_color_sequences(&mut rng, 50, 15_000_000, false, false, 0.5);
 
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas.len(), 3);
@@ -376,7 +493,7 @@ mod tests {
     #[test]
     fn test_body_color_sequences_alpha_variation() {
         let mut rng = Sha3RandomByteStream::new(&[5, 6, 7, 8], 1.0, 1.0, 1.0, 1.0);
-        let (_, alphas) = generate_body_color_sequences(&mut rng, 50, 15_000_000, false, true);
+        let (_, alphas) = generate_body_color_sequences(&mut rng, 50, 15_000_000, false, true, 0.5);
 
         assert_eq!(alphas.len(), 3);
         let unique: std::collections::HashSet<u64> = alphas.iter().map(|a| a.to_bits()).collect();
@@ -390,11 +507,11 @@ mod tests {
 
         let mut rng1 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
         let (colors1, alphas1) =
-            generate_body_color_sequences(&mut rng1, steps, 15_000_000, true, true);
+            generate_body_color_sequences(&mut rng1, steps, 15_000_000, true, true, 0.37);
 
         let mut rng2 = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
         let (colors2, alphas2) =
-            generate_body_color_sequences(&mut rng2, steps, 15_000_000, true, true);
+            generate_body_color_sequences(&mut rng2, steps, 15_000_000, true, true, 0.37);
 
         for body in 0..3 {
             assert_eq!(
@@ -408,6 +525,61 @@ mod tests {
                 assert_eq!(l1.to_bits(), l2.to_bits(), "body {body} step {step} L diverged");
                 assert_eq!(a1.to_bits(), a2.to_bits(), "body {body} step {step} a diverged");
                 assert_eq!(b1.to_bits(), b2.to_bits(), "body {body} step {step} b diverged");
+            }
+        }
+    }
+
+    #[test]
+    fn test_procedural_palettes_cover_many_hue_regions() {
+        let mut hue_bins = std::collections::HashSet::new();
+
+        for seed in 0u8..36 {
+            let mut rng = Sha3RandomByteStream::new(&[seed, 0xA5, 0x5A], 100.0, 300.0, 300.0, 1.0);
+            let (colors, _) = generate_body_color_sequences(
+                &mut rng,
+                24,
+                15_000_000,
+                true,
+                false,
+                f64::from(seed) / 35.0,
+            );
+
+            for body_colors in &colors {
+                for &(_, a, b) in body_colors.iter().step_by(8) {
+                    let hue = b.atan2(a).to_degrees().rem_euclid(HUE_FULL_CIRCLE);
+                    hue_bins.insert((hue / 30.0).floor() as u8);
+                }
+            }
+        }
+
+        assert!(
+            hue_bins.len() >= 10,
+            "procedural palettes should occupy most hue regions, saw bins {hue_bins:?}"
+        );
+    }
+
+    #[test]
+    fn test_procedural_palettes_stay_in_curated_oklch_bounds() {
+        for seed in 0u8..24 {
+            let mut rng = Sha3RandomByteStream::new(&[0x33, seed, 0x77], 100.0, 300.0, 300.0, 1.0);
+            let (colors, _) = generate_body_color_sequences(
+                &mut rng,
+                64,
+                15_000_000,
+                true,
+                false,
+                f64::from(seed) / 23.0,
+            );
+
+            for body_colors in &colors {
+                for &(l, a, b) in body_colors {
+                    let chroma = (a * a + b * b).sqrt();
+                    assert!((0.36..=0.94).contains(&l), "lightness out of bounds: {l}");
+                    assert!(
+                        (0.045..=0.380_000_1).contains(&chroma),
+                        "chroma out of bounds: {chroma}"
+                    );
+                }
             }
         }
     }

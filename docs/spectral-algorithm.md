@@ -94,6 +94,40 @@ integer bins using linear interpolation (see Section 3).
 This is the core rendering step: for every simulation timestep, rasterize the
 triangle formed by the three bodies into the SPD buffer.
 
+### 3.0 Procedural OkLab Palette Synthesis
+
+Before rasterization, each body receives an OKLCh color sequence. The generator
+is deterministic for a seed, but it no longer chooses only one fixed mood and one
+fixed harmony template. It blends between curated mood anchors, jitters the
+result inside safe OKLCh bounds, and then perturbs harmony offsets around
+beautiful base structures such as analogous, complementary, triadic,
+golden-angle, luminous-arc, and opal-cross palettes.
+
+```
+mood_position = rng * mood_anchor_count
+primary_mood = floor(mood_position)
+secondary_mood = primary_mood + 1
+blend = smoothstep(fract(mood_position))
+
+mood = interpolate_oklch_envelope(primary_mood, secondary_mood, blend)
+harmony_offsets = jitter_harmony_template(rng, palette_phase)
+base_hue = mood.center_hue + random_span + phase_bias
+```
+
+The resolved `palette_phase` from the `CosmicSignature` visual profile modulates
+the hue rhythm and secondary accent wave:
+
+```
+hue = base_hue
+    + logarithmic_drift
+    + primary_wave * HUE_WAVE_AMPLITUDE
+    + accent_wave * hue_accent_strength
+```
+
+Chroma and lightness are also wave-modulated, then clamped to curated bounds.
+This keeps seed-to-seed variety high while avoiding muddy low-chroma colors,
+overexposed lightness, and hard gamut clipping.
+
 ### 3.1 Overview
 
 ```
@@ -208,8 +242,8 @@ len_sq = dx*dx + dy*dy           // 2D length squared (pixel space)
 len_3d = sqrt(dx*dx + dy*dy + dz*dz)
 
 // Dynamic line width: faster segments are thinner
-base_thickness = 0.62
-thickness = clamp(base_thickness / (0.1 + len_3d * 0.5), 0.08, 1.35)
+base_thickness = 0.82
+thickness = clamp(base_thickness / (0.1 + len_3d * 0.5), 0.30, 1.55)
 
 // Crisp production mode disables depth-of-field broadening
 avg_z = (v0.z + v1.z) * 0.5
@@ -217,7 +251,7 @@ coc = |avg_z * 0.0|
 effective_thickness = thickness + coc
 
 // Bounding box padding
-pad = ceil(effective_thickness * 2.5)
+pad = ceil(effective_thickness * 3.0)
 ```
 
 **Spectral kernels for endpoints:**
@@ -240,9 +274,9 @@ base_energy_mult = hdr_scale * edge_hdr_multiplier * depth_fade * energy_conserv
 ```
 for py in min_y..=max_y:
     for px in min_x..=max_x:
-        // Vector from v0 to pixel
-        pax = px - v0.x
-        pay = py - v0.y
+        // Vector from v0 to pixel center
+        pax = (px + 0.5) - v0.x
+        pay = (py + 0.5) - v0.y
 
         // Project pixel onto segment, get parameter h in [0, 1]
         if len_sq > 1e-6:
@@ -257,8 +291,8 @@ for py in min_y..=max_y:
 
         // Crisp super-Gaussian falloff
         normalized = dist_sq / (effective_thickness * effective_thickness)
-        energy = exp(-(normalized * normalized) * 3.2)
-        if energy < 0.02: continue    // skip negligible contributions
+        energy = exp(-(normalized * normalized) * 2.0)
+        if energy < 0.004: continue   // skip negligible contributions
 
         // Interpolate alpha along segment
         alpha = v0.alpha * (1 - h) + v1.alpha * h
@@ -762,10 +796,10 @@ main trajectory video (default quality vs `--fast-encode`).
 
 | Constant/Expression | Value | Description |
 |---------------------|-------|-------------|
-| Base thickness | 0.62 | Starting line width in pixels |
-| Thickness range | [0.08, 1.35] | Clamped dynamic thickness |
+| Base thickness | 0.82 | Starting line width in pixels |
+| Thickness range | [0.30, 1.55] | Clamped dynamic thickness |
 | CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
-| Bounding box pad | `ceil(effective_thickness * 2.5)` | Pixel padding around segment |
-| Energy cutoff | 0.02 | Minimum super-Gaussian energy to deposit |
+| Bounding box pad | `ceil(effective_thickness * 3.0)` | Pixel padding around segment |
+| Energy cutoff | 0.004 | Minimum super-Gaussian energy to deposit |
 | Depth fade rate | 0.0007 | Exponential depth separation coefficient |
 | Depth fade range | [0.18, 1.0] | Clamped depth visibility range |

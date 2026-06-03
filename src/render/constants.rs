@@ -192,19 +192,22 @@ pub const DEFAULT_AETHER_CAUSTIC_SOFTNESS: f64 = 3.0;
 // ========== Special Mode Enhancement Constants ==========
 
 /// Production crisp line base thickness in pixels.
-pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.62;
+pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.82;
 
 /// Minimum production line thickness in pixels.
-pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.08;
+pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.30;
 
 /// Maximum production line thickness in pixels.
-pub const CRISP_LINE_MAX_THICKNESS: f32 = 1.35;
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 1.55;
 
 /// Z-depth broadening factor for production stills; zero means no depth-of-field blur.
 pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
 
 /// Super-Gaussian exponent used for crisp anti-aliased line splats.
-pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 3.2;
+pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 2.0;
+
+/// Minimum per-pixel coverage retained by crisp line splats.
+pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.004;
 
 /// Minimum spectral lobe width, in SPD bins, for crisp color deposits.
 pub const CRISP_SPECTRAL_SIGMA_MIN_BINS: f64 = 0.45;

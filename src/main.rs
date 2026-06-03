@@ -319,8 +319,13 @@ fn main() -> Result<()> {
         )?
     };
 
-    let (colors, body_alphas) =
-        app::generate_colors(&mut rng, args.steps, DEFAULT_ALPHA_DENOM, &enhancements);
+    let (colors, body_alphas) = app::generate_colors(
+        &mut rng,
+        args.steps,
+        DEFAULT_ALPHA_DENOM,
+        &enhancements,
+        visual_profile.parameters.palette_phase,
+    );
 
     info!("   => Using OKLab color space for accumulation");
     info!("STAGE 4/7: Determining bounding box...");

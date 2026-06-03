@@ -2,9 +2,10 @@
 
 use super::color::OklabColor;
 use super::constants::{
-    CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_FALLOFF_EXPONENT,
-    CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS, CRISP_SPECTRAL_KERNEL_RADIUS_BINS,
-    CRISP_SPECTRAL_SIGMA_MAX_BINS, CRISP_SPECTRAL_SIGMA_MIN_BINS,
+    CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_ENERGY_CUTOFF,
+    CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
+    CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
+    CRISP_SPECTRAL_SIGMA_MIN_BINS,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
@@ -300,7 +301,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let effective_thickness = thickness + coc;
 
     // Maximum extent of the SDF bounding box
-    let pad = (effective_thickness * 2.5).ceil() as i32;
+    let pad = (effective_thickness * 3.0).ceil() as i32;
 
     let min_x = (x0.min(x1) as i32 - pad).max(0);
     let max_x = (x0.max(x1) as i32 + pad).min(width as i32 - 1);
@@ -323,8 +324,8 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
 
     for py in min_y..=max_y {
         for px in min_x..=max_x {
-            let pax = px as f32 - x0;
-            let pay = py as f32 - y0;
+            let pax = px as f32 + 0.5 - x0;
+            let pay = py as f32 + 0.5 - y0;
 
             let h =
                 if len_sq > 1e-6 { ((pax * dx + pay * dy) / len_sq).clamp(0.0, 1.0) } else { 0.5 };
@@ -337,7 +338,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             let normalized_dist_sq = dist_sq / (effective_thickness * effective_thickness);
             let energy =
                 (-(normalized_dist_sq * normalized_dist_sq) * CRISP_LINE_FALLOFF_EXPONENT).exp();
-            if energy < 0.02 {
+            if energy < CRISP_LINE_ENERGY_CUTOFF {
                 continue;
             }
 
@@ -512,5 +513,23 @@ mod tests {
                 assert_spd_buffers_bits_eq(&banded, &full, &format!("{label}/bands={band_count}"));
             }
         }
+    }
+
+    #[test]
+    fn test_center_sampled_line_splat_spreads_subpixel_diagonal_coverage() {
+        let width = 18usize;
+        let height = 10usize;
+        let segment = make_segment((1.25, 3.35, 0.0), (16.25, 5.15, 0.0), 1.0);
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+
+        draw_line_segment_aa_spectral(&mut accum, width as u32, height as u32, segment);
+
+        let row_energy = |row: usize| -> f64 {
+            accum[row * width..(row + 1) * width].iter().flat_map(|bins| bins.iter()).sum::<f64>()
+        };
+        let active_rows = (0..height).filter(|&row| row_energy(row) > f64::EPSILON).count();
+
+        assert!(active_rows >= 2, "subpixel diagonal should retain anti-aliased row coverage");
+        assert!(row_energy(4) > row_energy(2), "main diagonal band should dominate distant rows");
     }
 }

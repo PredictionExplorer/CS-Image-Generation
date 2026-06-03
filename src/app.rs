@@ -219,6 +219,7 @@ pub fn generate_colors(
     num_steps_sim: usize,
     alpha_denom: usize,
     enhancements: &Enhancements,
+    palette_phase: f64,
 ) -> (Vec<Vec<render::OklabColor>>, Vec<f64>) {
     info!("STAGE 3/7: Generating color sequences + alpha...");
     generate_body_color_sequences(
@@ -227,6 +228,7 @@ pub fn generate_colors(
         alpha_denom,
         enhancements.chroma_boost,
         enhancements.alpha_variation,
+        palette_phase,
     )
 }
 
@@ -523,7 +525,7 @@ mod tests {
         use crate::sim::Sha3RandomByteStream;
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
         let enhancements = Enhancements::default();
-        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
+        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements, 0.5);
 
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas.len(), 3);
@@ -540,7 +542,7 @@ mod tests {
         let mut rng = Sha3RandomByteStream::new(&[1, 2, 3, 4], 100.0, 300.0, 300.0, 1.0);
         let enhancements =
             Enhancements { alpha_variation: false, chroma_boost: false, ..Enhancements::default() };
-        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements);
+        let (colors, alphas) = generate_colors(&mut rng, 100, 15_000_000, &enhancements, 0.5);
 
         assert_eq!(colors.len(), 3);
         assert_eq!(alphas[0], alphas[1]);
@@ -623,7 +625,8 @@ mod tests {
             aspect_correction: false,
             dispersion_boost: false,
         };
-        let (colors, body_alphas) = generate_colors(&mut rng, num_steps, 15_000_000, &enhancements);
+        let (colors, body_alphas) =
+            generate_colors(&mut rng, num_steps, 15_000_000, &enhancements, 0.5);
 
         let render_config =
             render::RenderConfig { hdr_scale: resolved.hdr_scale, ..Default::default() };

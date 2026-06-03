@@ -178,6 +178,8 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
     assert_eq!(constants::CRISP_DISPERSION_STRENGTH, 0.0);
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH, 0.0);
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED, 0.0);
+    assert!(constants::CRISP_LINE_MIN_THICKNESS >= 0.30);
+    assert!(constants::CRISP_LINE_FALLOFF_EXPONENT <= 2.1);
     assert_eq!(constants::SWEEP_BLOOM_RADIUS, 0);
     assert_eq!(constants::SWEEP_BLOOM_STRENGTH, 0.0);
     const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.75) };
