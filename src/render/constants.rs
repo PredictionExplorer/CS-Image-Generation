@@ -209,6 +209,50 @@ pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 2.0;
 /// Minimum per-pixel coverage retained by crisp line splats.
 pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.004;
 
+/// Reference short-edge resolution for crisp line thickness tuning.
+pub const CRISP_LINE_REFERENCE_MIN_DIM: f32 = 2234.0;
+
+/// Lower bound for resolution-aware crisp line scaling.
+pub const CRISP_LINE_RESOLUTION_SCALE_MIN: f32 = 0.55;
+
+/// Upper bound for resolution-aware crisp line scaling.
+pub const CRISP_LINE_RESOLUTION_SCALE_MAX: f32 = 32.0;
+
+/// Resolution scale at which render-time line interpolation begins.
+pub const CRISP_INTERPOLATION_SCALE_START: f32 = 1.5;
+
+/// Target maximum pixel travel per interpolated high-resolution sample.
+pub const CRISP_INTERPOLATION_TARGET_STEP_PX: f32 = 2.5;
+
+/// Maximum number of render-time interpolation samples per simulation interval.
+pub const CRISP_INTERPOLATION_MAX_SUBSTEPS: usize = 24;
+
+/// Compute the resolution-aware scale for crisp spectral line widths.
+#[must_use]
+#[inline]
+pub fn crisp_line_resolution_scale(width: u32, height: u32) -> f32 {
+    if width == 0 || height == 0 {
+        return CRISP_LINE_RESOLUTION_SCALE_MIN;
+    }
+
+    let min_dim = width.min(height) as f32;
+    (min_dim / CRISP_LINE_REFERENCE_MIN_DIM)
+        .clamp(CRISP_LINE_RESOLUTION_SCALE_MIN, CRISP_LINE_RESOLUTION_SCALE_MAX)
+}
+
+/// Compute adaptive render-time samples for high-resolution trajectory intervals.
+#[must_use]
+#[inline]
+pub fn crisp_line_interpolation_substeps(width: u32, height: u32, max_motion_px: f32) -> usize {
+    let scale = crisp_line_resolution_scale(width, height);
+    if scale < CRISP_INTERPOLATION_SCALE_START || max_motion_px <= f32::EPSILON {
+        return 1;
+    }
+
+    ((max_motion_px / CRISP_INTERPOLATION_TARGET_STEP_PX).ceil() as usize)
+        .clamp(1, CRISP_INTERPOLATION_MAX_SUBSTEPS)
+}
+
 /// Minimum spectral lobe width, in SPD bins, for crisp color deposits.
 pub const CRISP_SPECTRAL_SIGMA_MIN_BINS: f64 = 0.45;
 

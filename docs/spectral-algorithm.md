@@ -133,6 +133,8 @@ overexposed lightness, and hard gamut clipping.
 ```
 for step in 0..total_steps:
     form triangle from positions[0][step], positions[1][step], positions[2][step]
+    if high-resolution interpolation is active:
+        draw interpolated triangle samples toward step + 1 with compensated energy
     for each of 3 edges (0-1, 1-2, 2-0):
         compute velocity HDR multiplier for this edge
         rasterize edge as anti-aliased spectral line segment into SPD buffer
@@ -223,7 +225,36 @@ for bin near center_bin:
 normalize(weights)
 ```
 
-### 3.5 Crisp SDF Line Segment Splatting
+### 3.5 High-Resolution Triangle Interpolation
+
+For default-resolution output, the renderer draws one triangle sample per
+simulation step. For larger outputs, the renderer adaptively inserts
+interpolated triangle samples between `step` and `step + 1` when the projected
+screen-space motion is large. This preserves trajectory density at 10k+ output
+sizes without requiring a more expensive simulation rerun.
+
+```
+resolution_scale = clamp(min(width, height) / 2234, 0.55, 32.0)
+max_motion_px = max distance any body moves between step and step + 1
+
+if resolution_scale < 1.5:
+    substeps = 1
+else:
+    substeps = clamp(ceil(max_motion_px / 2.5), 1, 24)
+
+for substep in 0..substeps:
+    t = substep / substeps
+    sample_position = lerp(position[step], position[step + 1], t)
+    sample_color = lerp(color[step], color[step + 1], t)
+    sample_hdr_scale = hdr_scale / substeps
+    draw sample triangle
+```
+
+The `1 / substeps` energy compensation is important: interpolation increases
+spatial sampling density, not exposure. Checkpointed video frames do not
+interpolate beyond their current checkpoint, so frames do not leak future motion.
+
+### 3.6 Crisp SDF Line Segment Splatting
 
 Each edge is rasterized as an anti-aliased line segment with a steep
 super-Gaussian falloff. This is the innermost loop and deposits energy into the
@@ -241,9 +272,16 @@ dz = v1.z - v0.z
 len_sq = dx*dx + dy*dy           // 2D length squared (pixel space)
 len_3d = sqrt(dx*dx + dy*dy + dz*dz)
 
-// Dynamic line width: faster segments are thinner
-base_thickness = 0.82
-thickness = clamp(base_thickness / (0.1 + len_3d * 0.5), 0.30, 1.55)
+// Dynamic line width: faster segments are thinner, but all crisp thickness
+// constants scale with the output short edge.
+resolution_scale = clamp(min(width, height) / 2234, 0.55, 32.0)
+normalized_len_3d = len_3d / resolution_scale
+base_thickness = 0.82 * resolution_scale
+min_thickness = 0.30 * resolution_scale
+max_thickness = 1.55 * resolution_scale
+thickness = clamp(base_thickness / (0.1 + normalized_len_3d * 0.5),
+                  min_thickness,
+                  max_thickness)
 
 // Crisp production mode disables depth-of-field broadening
 avg_z = (v0.z + v1.z) * 0.5
@@ -307,7 +345,7 @@ for py in min_y..=max_y:
             accum_spd[pixel_index][bin] += final_energy * h * weight
 ```
 
-### 3.6 Parallelization
+### 3.7 Parallelization
 
 The accumulation supports two parallelization strategies:
 
@@ -796,8 +834,13 @@ main trajectory video (default quality vs `--fast-encode`).
 
 | Constant/Expression | Value | Description |
 |---------------------|-------|-------------|
-| Base thickness | 0.82 | Starting line width in pixels |
-| Thickness range | [0.30, 1.55] | Clamped dynamic thickness |
+| Reference short edge | 2234 | Default-size anchor for crisp line scaling |
+| Resolution scale | `clamp(min_dim / 2234, 0.55, 32.0)` | Multiplier for crisp line thickness |
+| Base thickness | `0.82 * scale` | Starting line width in pixels |
+| Thickness range | `[0.30, 1.55] * scale` | Clamped dynamic thickness |
+| Interpolation start | 1.5 | Minimum resolution scale for render-time substeps |
+| Interpolation target motion | 2.5 px | Desired max body motion per high-res substep |
+| Max interpolation substeps | 24 | Upper bound per simulation interval |
 | CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
 | Bounding box pad | `ceil(effective_thickness * 3.0)` | Pixel padding around segment |
 | Energy cutoff | 0.004 | Minimum super-Gaussian energy to deposit |

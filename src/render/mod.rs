@@ -40,7 +40,8 @@ pub mod visual_profile;
 
 // Import from our submodules
 use self::batch_drawing::{
-    BatchDrawParams, draw_triangle_batch_spectral_rows, prepare_triangle_vertices,
+    BatchDrawParams, draw_triangle_batch_spectral_rows, interpolate_triangle_vertices,
+    max_triangle_vertex_motion_px, prepare_triangle_vertices,
 };
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
@@ -823,19 +824,59 @@ fn accumulate_spectral_steps_into_rows(
         let hdr_mult_01 = params.velocity_calc.compute_segment_multiplier(step, 0, 1);
         let hdr_mult_12 = params.velocity_calc.compute_segment_multiplier(step, 1, 2);
         let hdr_mult_20 = params.velocity_calc.compute_segment_multiplier(step, 2, 0);
+        let hdr_multipliers = [hdr_mult_01, hdr_mult_12, hdr_mult_20];
 
-        draw_triangle_batch_spectral_rows(
-            accum_spd,
-            &BatchDrawParams {
-                width: params.ctx.width,
-                height: params.ctx.height,
-                row_start,
-                row_end,
-                vertices,
-                hdr_multipliers: [hdr_mult_01, hdr_mult_12, hdr_mult_20],
-                hdr_scale: params.hdr_scale,
-            },
+        if step + 1 >= params.step_end || step + 1 >= params.scene.step_count() {
+            draw_triangle_batch_spectral_rows(
+                accum_spd,
+                &BatchDrawParams {
+                    width: params.ctx.width,
+                    height: params.ctx.height,
+                    row_start,
+                    row_end,
+                    vertices,
+                    hdr_multipliers,
+                    hdr_scale: params.hdr_scale,
+                },
+            );
+            continue;
+        }
+
+        let next_vertices = prepare_triangle_vertices(
+            params.scene.positions,
+            params.scene.colors,
+            &triangle_alphas,
+            step + 1,
+            params.ctx,
         );
+        let max_motion_px = max_triangle_vertex_motion_px(vertices, next_vertices);
+        let substeps = constants::crisp_line_interpolation_substeps(
+            params.ctx.width,
+            params.ctx.height,
+            max_motion_px,
+        );
+        let substep_hdr_scale = params.hdr_scale / substeps as f64;
+
+        for substep in 0..substeps {
+            let t = substep as f32 / substeps as f32;
+            let sample_vertices = if substep == 0 {
+                vertices
+            } else {
+                interpolate_triangle_vertices(vertices, next_vertices, t)
+            };
+            draw_triangle_batch_spectral_rows(
+                accum_spd,
+                &BatchDrawParams {
+                    width: params.ctx.width,
+                    height: params.ctx.height,
+                    row_start,
+                    row_end,
+                    vertices: sample_vertices,
+                    hdr_multipliers,
+                    hdr_scale: substep_hdr_scale,
+                },
+            );
+        }
     }
 }
 

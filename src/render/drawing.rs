@@ -5,7 +5,7 @@ use super::constants::{
     CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_ENERGY_CUTOFF,
     CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
     CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
-    CRISP_SPECTRAL_SIGMA_MIN_BINS,
+    CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
@@ -289,9 +289,15 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let len_sq = dx * dx + dy * dy;
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
 
-    // Dynamic line width: keep the spectral core thin so overlaps form crisp ribbons.
-    let thickness = (CRISP_LINE_BASE_THICKNESS / (0.1 + len_3d * 0.5))
-        .clamp(CRISP_LINE_MIN_THICKNESS, CRISP_LINE_MAX_THICKNESS);
+    // Dynamic line width: scale the crisp footprint with output resolution while
+    // keeping the motion attenuation comparable to the default render size.
+    let resolution_scale = crisp_line_resolution_scale(width, height);
+    let normalized_len_3d = len_3d / resolution_scale;
+    let thickness =
+        ((CRISP_LINE_BASE_THICKNESS * resolution_scale) / (0.1 + normalized_len_3d * 0.5)).clamp(
+            CRISP_LINE_MIN_THICKNESS * resolution_scale,
+            CRISP_LINE_MAX_THICKNESS * resolution_scale,
+        );
 
     // Z-depth calculation (center of segment)
     let avg_z = (z0 + z1) * 0.5;
@@ -531,5 +537,32 @@ mod tests {
 
         assert!(active_rows >= 2, "subpixel diagonal should retain anti-aliased row coverage");
         assert!(row_energy(4) > row_energy(2), "main diagonal band should dominate distant rows");
+    }
+
+    #[test]
+    fn test_crisp_line_resolution_scale_tracks_output_size() {
+        let default_scale = crate::render::constants::crisp_line_resolution_scale(3456, 2234);
+        let preview_scale = crate::render::constants::crisp_line_resolution_scale(640, 360);
+        let large_scale = crate::render::constants::crisp_line_resolution_scale(10_000, 6_460);
+        let huge_scale = crate::render::constants::crisp_line_resolution_scale(200_000, 100_000);
+
+        assert!((default_scale - 1.0).abs() < 0.001);
+        assert_eq!(preview_scale, crate::render::constants::CRISP_LINE_RESOLUTION_SCALE_MIN);
+        assert!(large_scale > default_scale);
+        assert_eq!(huge_scale, crate::render::constants::CRISP_LINE_RESOLUTION_SCALE_MAX);
+    }
+
+    #[test]
+    fn test_crisp_line_interpolation_activates_for_large_motion_at_high_resolution() {
+        let default_substeps =
+            crate::render::constants::crisp_line_interpolation_substeps(3456, 2234, 20.0);
+        let large_substeps =
+            crate::render::constants::crisp_line_interpolation_substeps(10_000, 6_460, 20.0);
+        let capped_substeps =
+            crate::render::constants::crisp_line_interpolation_substeps(100_000, 64_640, 10_000.0);
+
+        assert_eq!(default_substeps, 1);
+        assert!(large_substeps > default_substeps);
+        assert_eq!(capped_substeps, crate::render::constants::CRISP_INTERPOLATION_MAX_SUBSTEPS);
     }
 }

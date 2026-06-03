@@ -81,6 +81,52 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
     );
 }
 
+/// Return the maximum 2D pixel motion between two triangle samples.
+#[must_use]
+#[inline]
+pub(crate) fn max_triangle_vertex_motion_px(
+    start: [TriangleVertex; 3],
+    end: [TriangleVertex; 3],
+) -> f32 {
+    start
+        .iter()
+        .zip(end.iter())
+        .map(|(a, b)| {
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .fold(0.0, f32::max)
+}
+
+/// Linearly interpolate a triangle sample in pixel/OkLab space.
+#[must_use]
+#[inline]
+pub(crate) fn interpolate_triangle_vertices(
+    start: [TriangleVertex; 3],
+    end: [TriangleVertex; 3],
+    t: f32,
+) -> [TriangleVertex; 3] {
+    std::array::from_fn(|idx| interpolate_vertex(start[idx], end[idx], t))
+}
+
+#[inline]
+fn interpolate_vertex(start: TriangleVertex, end: TriangleVertex, t: f32) -> TriangleVertex {
+    let t64 = f64::from(t);
+    let inv_t64 = 1.0 - t64;
+    TriangleVertex {
+        x: start.x + (end.x - start.x) * t,
+        y: start.y + (end.y - start.y) * t,
+        z: start.z + (end.z - start.z) * t,
+        color: (
+            start.color.0 * inv_t64 + end.color.0 * t64,
+            start.color.1 * inv_t64 + end.color.1 * t64,
+            start.color.2 * inv_t64 + end.color.2 * t64,
+        ),
+        alpha: start.alpha * inv_t64 + end.alpha * t64,
+    }
+}
+
 /// Prepare triangle vertices from position data for batched drawing
 #[must_use]
 #[inline]
@@ -160,5 +206,45 @@ mod tests {
         assert_eq!(vertices[0].alpha, 0.5);
         assert_eq!(vertices[1].alpha, 0.6);
         assert_eq!(vertices[2].alpha, 0.7);
+    }
+
+    #[test]
+    fn test_triangle_interpolation_blends_positions_colors_and_alpha() {
+        let start = [
+            TriangleVertex { x: 0.0, y: 2.0, z: 4.0, color: (0.4, 0.1, -0.2), alpha: 0.2 },
+            TriangleVertex { x: 10.0, y: 12.0, z: 14.0, color: (0.5, 0.2, -0.1), alpha: 0.4 },
+            TriangleVertex { x: 20.0, y: 22.0, z: 24.0, color: (0.6, 0.3, 0.0), alpha: 0.6 },
+        ];
+        let end = [
+            TriangleVertex { x: 2.0, y: 4.0, z: 6.0, color: (0.8, -0.1, 0.2), alpha: 0.6 },
+            TriangleVertex { x: 12.0, y: 14.0, z: 16.0, color: (0.9, -0.2, 0.1), alpha: 0.8 },
+            TriangleVertex { x: 22.0, y: 24.0, z: 26.0, color: (1.0, -0.3, 0.0), alpha: 1.0 },
+        ];
+
+        let blended = interpolate_triangle_vertices(start, end, 0.25);
+
+        assert_eq!(blended[0].x, 0.5);
+        assert_eq!(blended[0].y, 2.5);
+        assert_eq!(blended[0].z, 4.5);
+        assert!((blended[0].color.0 - 0.5).abs() < 1e-12);
+        assert!((blended[0].color.1 - 0.05).abs() < 1e-12);
+        assert!((blended[0].color.2 - -0.1).abs() < 1e-12);
+        assert!((blended[0].alpha - 0.3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_triangle_motion_reports_max_screen_delta() {
+        let start = [
+            TriangleVertex { x: 0.0, y: 0.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+            TriangleVertex { x: 10.0, y: 0.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+            TriangleVertex { x: 0.0, y: 10.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+        ];
+        let end = [
+            TriangleVertex { x: 3.0, y: 4.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+            TriangleVertex { x: 11.0, y: 0.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+            TriangleVertex { x: 0.0, y: 12.0, z: 0.0, color: (0.0, 0.0, 0.0), alpha: 1.0 },
+        ];
+
+        assert_eq!(max_triangle_vertex_motion_px(start, end), 5.0);
     }
 }
