@@ -268,12 +268,8 @@ pub fn generate_spectral_sweep_video(
     let w = width as usize;
     let h = height as usize;
 
-    info!("Preparing sweep post-effects (bloom + colour grade)...");
-    let bloom = GaussianBloom::new(
-        constants::SWEEP_BLOOM_RADIUS,
-        constants::SWEEP_BLOOM_STRENGTH,
-        constants::SWEEP_BLOOM_CORE_BRIGHTNESS,
-    );
+    info!("Preparing sweep post-effects (crisp colour grade; bloom disabled in production)...");
+    let bloom: Option<GaussianBloom> = None;
     let color_grade = CinematicColorGrade::new(ColorGradeParams {
         strength: 1.0,
         vignette_strength: constants::SWEEP_VIGNETTE_STRENGTH,
@@ -313,7 +309,7 @@ pub fn generate_spectral_sweep_video(
 
                 gaussian_blend_to_pixelbuffer(&bin_buffers, bin_f, sigma, &mut frame_buf);
 
-                let processed = apply_sweep_effects(&bloom, &color_grade, &frame_buf, w, h)
+                let processed = apply_sweep_effects(bloom.as_ref(), &color_grade, &frame_buf, w, h)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
                 let quantized = quantize_to_u16_rgb(&processed);
@@ -332,16 +328,19 @@ pub fn generate_spectral_sweep_video(
 
 /// Run bloom then colour-grade on a single `PixelBuffer`.
 fn apply_sweep_effects(
-    bloom: &GaussianBloom,
+    bloom: Option<&GaussianBloom>,
     color_grade: &CinematicColorGrade,
     buf: &PixelBuffer,
     w: usize,
     h: usize,
 ) -> Result<PixelBuffer> {
-    let bloomed = bloom.process(buf, w, h).map_err(|e| RenderError::EffectChain {
-        effect_name: "gaussian_bloom".into(),
-        reason: e.to_string(),
-    })?;
+    let bloomed = match bloom {
+        Some(effect) => effect.process(buf, w, h).map_err(|e| RenderError::EffectChain {
+            effect_name: "gaussian_bloom".into(),
+            reason: e.to_string(),
+        })?,
+        None => buf.clone(),
+    };
     color_grade.process(&bloomed, w, h).map_err(|e| RenderError::EffectChain {
         effect_name: "color_grade".into(),
         reason: e.to_string(),
@@ -980,12 +979,13 @@ mod tests {
     #[test]
     fn test_sweep_gaussian_sigma_positive() {
         const { assert!(constants::SWEEP_GAUSSIAN_SIGMA > 0.0) };
+        const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.75) };
     }
 
     #[test]
-    fn test_sweep_bloom_constants_positive() {
-        const { assert!(constants::SWEEP_BLOOM_RADIUS > 0) };
-        const { assert!(constants::SWEEP_BLOOM_STRENGTH > 0.0) };
+    fn test_sweep_bloom_constants_disabled_for_crisp_mode() {
+        const { assert!(constants::SWEEP_BLOOM_RADIUS == 0) };
+        const { assert!(constants::SWEEP_BLOOM_STRENGTH == 0.0) };
         const { assert!(constants::SWEEP_BLOOM_CORE_BRIGHTNESS > 0.0) };
     }
 

@@ -1,9 +1,13 @@
 //! Image-quality invariants for the `CosmicSignature` default profile.
 
+use nalgebra::Vector3;
 use three_body_problem::post_effects::{GaussianBloom, PostEffect};
 use three_body_problem::render::effects::FinishEffectPipeline;
 use three_body_problem::render::visual_profile::ResolvedVisualProfile;
-use three_body_problem::render::{self, BloomMode, FinishOutputMode, RenderConfig};
+use three_body_problem::render::{
+    self, BloomMode, ChannelLevels, FinishOutputMode, RenderConfig, SpectralRenderSettings,
+    SpectralScene, constants,
+};
 use three_body_problem::sim::Sha3RandomByteStream;
 
 type Pixel = (f64, f64, f64, f64);
@@ -48,6 +52,63 @@ fn laplacian_energy(buffer: &[Pixel]) -> f64 {
         }
     }
     total
+}
+
+fn rendered_edge_score(image: &image::ImageBuffer<image::Rgb<u16>, Vec<u16>>) -> f64 {
+    let width = image.width() as usize;
+    let height = image.height() as usize;
+    let raw = image.as_raw();
+    let mut edge = 0.0;
+    let mut energy = 0.0;
+
+    for y in 1..height.saturating_sub(1) {
+        for x in 1..width.saturating_sub(1) {
+            let idx = (y * width + x) * 3;
+            let luma = |i: usize| -> f64 {
+                0.2126 * f64::from(raw[i])
+                    + 0.7152 * f64::from(raw[i + 1])
+                    + 0.0722 * f64::from(raw[i + 2])
+            };
+            let center = luma(idx);
+            let left = luma(idx - 3);
+            let right = luma(idx + 3);
+            let up = luma(idx - width * 3);
+            let down = luma(idx + width * 3);
+            edge += ((center * 4.0) - left - right - up - down).abs();
+            energy += center;
+        }
+    }
+
+    edge / energy.max(1.0)
+}
+
+fn crisp_scene(
+    step_count: usize,
+) -> (Vec<Vec<Vector3<f64>>>, Vec<Vec<render::OklabColor>>, Vec<f64>) {
+    let mut positions = vec![
+        Vec::with_capacity(step_count),
+        Vec::with_capacity(step_count),
+        Vec::with_capacity(step_count),
+    ];
+    for step in 0..step_count {
+        let t = step as f64 / (step_count - 1).max(1) as f64;
+        positions[0].push(Vector3::new(-0.85 + 1.7 * t, -0.38, 0.0));
+        positions[1].push(Vector3::new(-0.65 + 1.3 * t, 0.44, 0.0));
+        positions[2].push(Vector3::new(
+            -0.15 + 0.3 * (t * std::f64::consts::TAU).sin(),
+            -0.08,
+            0.0,
+        ));
+    }
+
+    let colors = vec![
+        vec![(0.72, 0.25, 0.02); step_count],
+        vec![(0.72, -0.08, 0.24); step_count],
+        vec![(0.72, -0.16, -0.12); step_count],
+    ];
+    let alphas = vec![0.05, 0.05, 0.05];
+
+    (positions, colors, alphas)
 }
 
 #[test]
@@ -101,4 +162,62 @@ fn cosmic_signature_distinct_seeds_keep_no_effects_invariant() {
             "seed {seed:02X?} enabled a legacy effect"
         );
     }
+}
+
+#[test]
+fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
+    let mut rng = make_rng(&[0x5A, 0xA5]);
+    let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 1024, 576);
+    let config = profile.effect_config;
+
+    assert!(!config.any_legacy_effect_enabled(), "legacy post-effects must stay disabled");
+    assert_eq!(config.blur_strength, 0.0);
+    assert_eq!(config.glow_strength, 0.0);
+    assert_eq!(config.chromatic_bloom_strength, 0.0);
+    assert_eq!(config.perceptual_blur_strength, 0.0);
+    assert_eq!(constants::CRISP_DISPERSION_STRENGTH, 0.0);
+    assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH, 0.0);
+    assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED, 0.0);
+    assert_eq!(constants::SWEEP_BLOOM_RADIUS, 0);
+    assert_eq!(constants::SWEEP_BLOOM_STRENGTH, 0.0);
+    const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.75) };
+}
+
+#[test]
+fn full_spd_memory_estimate_scales_for_extreme_resolutions() {
+    let normal = render::estimate_full_spd_bytes(1920, 1080);
+    let extreme = render::estimate_full_spd_bytes(50_000, 28_125);
+
+    assert!(extreme > normal);
+    assert_eq!(normal, 1920_u128 * 1080_u128 * 64_u128 * 8_u128);
+    assert_eq!(extreme, 50_000_u128 * 28_125_u128 * 64_u128 * 8_u128);
+}
+
+#[test]
+fn crisp_render_edge_score_survives_resolution_scaling() {
+    let (positions, colors, alphas) = crisp_scene(64);
+    let levels = ChannelLevels::new(0.0, 0.004, 0.0, 0.004, 0.0, 0.004);
+    let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None };
+
+    let render_at = |width: u32, height: u32| {
+        let mut rng = make_rng(&[0xC0, width as u8, height as u8]);
+        let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, width, height);
+        render::render_final_frame_spectral(
+            SpectralScene::new(&positions, &colors, &alphas),
+            &levels,
+            SpectralRenderSettings::new(&profile.effect_config, &render_config, 0, false),
+        )
+        .expect("crisp fixture should render")
+    };
+
+    let low = render_at(96, 54);
+    let high = render_at(192, 108);
+    let low_score = rendered_edge_score(&low);
+    let high_score = rendered_edge_score(&high);
+
+    assert!(low_score > 0.02, "low-res edge score too soft: {low_score}");
+    assert!(
+        high_score > low_score * 0.35,
+        "edge score collapsed when scaling: low={low_score} high={high_score}"
+    );
 }

@@ -191,10 +191,46 @@ pub const DEFAULT_AETHER_CAUSTIC_SOFTNESS: f64 = 3.0;
 
 // ========== Special Mode Enhancement Constants ==========
 
-/// Spectral dispersion strength - controls prismatic trail separation
-pub const SPECTRAL_DISPERSION_STRENGTH: f64 = 0.12;
+/// Production crisp line base thickness in pixels.
+pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.62;
+
+/// Minimum production line thickness in pixels.
+pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.08;
+
+/// Maximum production line thickness in pixels.
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 1.35;
+
+/// Z-depth broadening factor for production stills; zero means no depth-of-field blur.
+pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
+
+/// Super-Gaussian exponent used for crisp anti-aliased line splats.
+pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 3.2;
+
+/// Minimum spectral lobe width, in SPD bins, for crisp color deposits.
+pub const CRISP_SPECTRAL_SIGMA_MIN_BINS: f64 = 0.45;
+
+/// Maximum spectral lobe width, in SPD bins, for crisp color deposits.
+pub const CRISP_SPECTRAL_SIGMA_MAX_BINS: f64 = 1.35;
+
+/// Maximum bin radius included when depositing crisp spectral lobes.
+pub const CRISP_SPECTRAL_KERNEL_RADIUS_BINS: isize = 3;
+
+/// Production still spectral dispersion strength. Zero disables radial chromatic smear.
+pub const CRISP_DISPERSION_STRENGTH: f64 = 0.0;
+
+/// Pixel-count threshold above which final still rendering switches to row stripes.
+pub const HIGH_RES_TILED_PIXEL_THRESHOLD: usize = 32_000_000;
+
+/// Row count per stripe in the high-resolution still renderer.
+pub const HIGH_RES_TILE_ROWS: usize = 384;
+
+/// Guard rows above and below each high-resolution stripe.
+pub const HIGH_RES_TILE_GUARD_ROWS: usize = 4;
+
+/// Spectral dispersion strength - controls prismatic trail separation in non-crisp modes.
+pub const SPECTRAL_DISPERSION_STRENGTH: f64 = CRISP_DISPERSION_STRENGTH;
 /// Boosted dispersion for wider rainbow trails
-pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = 0.24;
+pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = CRISP_DISPERSION_STRENGTH;
 
 /// Velocity-based HDR boost factor - multiplies HDR scale at high velocities
 /// 1.0 = no boost, 2.0 = double brightness at max velocity
@@ -244,13 +280,13 @@ pub const SWEEP_BIN_START: usize = 4;
 pub const SWEEP_BIN_END: usize = 59;
 
 /// Gaussian kernel sigma (in bin-units) for multi-bin blending during the sweep.
-pub const SWEEP_GAUSSIAN_SIGMA: f64 = 2.5;
+pub const SWEEP_GAUSSIAN_SIGMA: f64 = 0.55;
 
 /// Gaussian bloom blur radius (pixels) applied to each sweep frame.
-pub const SWEEP_BLOOM_RADIUS: usize = 12;
+pub const SWEEP_BLOOM_RADIUS: usize = 0;
 
 /// Gaussian bloom strength multiplier for sweep frames.
-pub const SWEEP_BLOOM_STRENGTH: f64 = 0.3;
+pub const SWEEP_BLOOM_STRENGTH: f64 = 0.0;
 
 /// Gaussian bloom core brightness multiplier for sweep frames.
 pub const SWEEP_BLOOM_CORE_BRIGHTNESS: f64 = 1.0;

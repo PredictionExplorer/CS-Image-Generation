@@ -223,6 +223,7 @@ fn build_generation_log_config(
         hdr_mode: DEFAULT_HDR_MODE.to_string(),
         hdr_scale: render_config.hdr_scale,
         dispersion_strength: render::constants::SPECTRAL_DISPERSION_STRENGTH,
+        dispersion_mode: "crisp_off".to_string(),
         palette_harmony: palette_harmony.to_string(),
         palette_mood: palette_mood.to_string(),
         min_mass: DEFAULT_MIN_MASS,
@@ -334,6 +335,10 @@ fn main() -> Result<()> {
         "   => X: [{:.3}, {:.3}], Y: [{:.3}, {:.3}]",
         bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y
     );
+    let spd_gib = render::estimate_full_spd_bytes(args.resolution.width, args.resolution.height)
+        as f64
+        / (1024.0 * 1024.0 * 1024.0);
+    info!("   => Full-frame SPD memory estimate: {spd_gib:.2} GiB");
 
     let render_config = RenderConfig {
         hdr_scale: resolved_effect_config.hdr_scale,

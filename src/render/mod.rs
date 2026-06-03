@@ -382,6 +382,12 @@ fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     buf_16bit
 }
 
+/// Estimate bytes needed for a full-frame 64-bin SPD buffer.
+#[must_use]
+pub fn estimate_full_spd_bytes(width: u32, height: u32) -> u128 {
+    u128::from(width) * u128::from(height) * NUM_BINS as u128 * std::mem::size_of::<f64>() as u128
+}
+
 // ====================== HELPER FUNCTIONS ===========================
 
 /// Generate nebula background buffer (separate from trajectories)
@@ -1181,6 +1187,14 @@ fn render_final_frame_spectral_with_backend(
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
+    let pixel_count = ctx.pixel_count();
+    if pixel_count > constants::HIGH_RES_TILED_PIXEL_THRESHOLD
+        && !resolved_config.any_legacy_effect_enabled()
+        && backend == AccumulationBackend::ParallelScanlines
+    {
+        return render_final_frame_spectral_tiled(scene, levels, settings, &ctx);
+    }
+
     let mut accum_spd = vec![[0.0f64; NUM_BINS]; ctx.pixel_count()];
     let mut accum_rgba = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
@@ -1244,6 +1258,93 @@ fn render_final_frame_spectral_with_backend(
 
     ImageBuffer::from_raw(width, height, buf_16bit).ok_or_else(|| RenderError::ImageEncoding {
         reason: "Failed to create 16-bit image buffer".into(),
+    })
+}
+
+fn render_final_frame_spectral_tiled(
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
+    ctx: &RenderContext,
+) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
+    let SpectralRenderSettings {
+        resolved_config,
+        render_config,
+        noise_seed: _,
+        aspect_correction: _,
+    } = settings;
+    let full_spd_gib =
+        estimate_full_spd_bytes(ctx.width, ctx.height) as f64 / (1024.0 * 1024.0 * 1024.0);
+    info!(
+        "   Rendering final still in crisp tiled mode: {}x{} ({:.2} GiB full SPD avoided)",
+        ctx.width, ctx.height, full_spd_gib
+    );
+
+    let tile_rows = constants::HIGH_RES_TILE_ROWS.max(1);
+    let guard_rows = constants::HIGH_RES_TILE_GUARD_ROWS;
+    let total_steps = scene.step_count();
+    let dt = constants::DEFAULT_DT;
+    let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
+    let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
+    let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
+    let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
+    let effect_config =
+        build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
+    let finish_pipeline = FinishEffectPipeline::new(effect_config);
+    let mut full_output = vec![0u16; ctx.pixel_count() * 3];
+
+    for core_start in (0..ctx.height_usize).step_by(tile_rows) {
+        let core_end = (core_start + tile_rows).min(ctx.height_usize);
+        let guard_start = core_start.saturating_sub(guard_rows);
+        let guard_end = (core_end + guard_rows).min(ctx.height_usize);
+        let guard_height = guard_end - guard_start;
+        let mut tile_spd = vec![[0.0f64; NUM_BINS]; ctx.width_usize * guard_height];
+        let mut tile_rgba = vec![(0.0, 0.0, 0.0, 0.0); tile_spd.len()];
+
+        accumulate_spectral_steps_into_rows(
+            &mut tile_spd,
+            &AccumulationParams {
+                scene,
+                ctx,
+                velocity_calc: &velocity_calc,
+                step_start: 0,
+                step_end: total_steps,
+                hdr_scale: render_config.hdr_scale,
+            },
+            guard_start,
+            guard_end,
+        );
+        apply_energy_density_shift(&mut tile_spd);
+        convert_spd_buffer_to_rgba(&tile_spd, &mut tile_rgba, ctx.width_usize, guard_height);
+
+        let trajectory_pixels = finish_pipeline
+            .process_trajectory(tile_rgba, ctx.width_usize, guard_height, &frame_params)
+            .map_err(|e| RenderError::EffectChain {
+                effect_name: "trajectory_chain".into(),
+                reason: e.to_string(),
+            })?;
+        let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
+        let final_display = finish_pipeline
+            .process_image(display_buffer, ctx.width_usize, guard_height, &frame_params)
+            .map_err(|e| RenderError::EffectChain {
+                effect_name: "image_chain".into(),
+                reason: e.to_string(),
+            })?;
+        let tile_u16 = quantize_display_buffer_to_16bit(&final_display);
+
+        let core_offset = core_start - guard_start;
+        for global_y in core_start..core_end {
+            let local_y = global_y - guard_start;
+            let src = local_y * ctx.width_usize * 3;
+            let dst = global_y * ctx.width_usize * 3;
+            let len = ctx.width_usize * 3;
+            debug_assert!(local_y >= core_offset);
+            full_output[dst..dst + len].copy_from_slice(&tile_u16[src..src + len]);
+        }
+    }
+
+    ImageBuffer::from_raw(ctx.width, ctx.height, full_output).ok_or_else(|| {
+        RenderError::ImageEncoding { reason: "Failed to create tiled 16-bit image buffer".into() }
     })
 }
 

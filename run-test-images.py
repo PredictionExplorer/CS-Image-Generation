@@ -24,11 +24,12 @@ from pathlib import Path
 
 from _utils import check_ffmpeg, fmt_duration, resolve_binary
 
-CONCURRENT_SIMS = 2
+CONCURRENT_SIMS = 1
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
 REPORT_EVERY = 3  # print a status line every N completions
+TEST_RESOLUTION = "6080x3420"
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,8 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
         seed,
         "--output",
         seed,
+        "--resolution",
+        TEST_RESOLUTION,
     ]
 
     logger.debug("[%d] START %s  cmd=%s", run_id, seed, " ".join(cmd))
@@ -181,10 +184,15 @@ def main() -> int:
     binary_str = str(binary)
 
     logger.info("=" * 60)
-    logger.info("Session started  concurrency=%d", CONCURRENT_SIMS)
+    logger.info(
+        "Session started  concurrency=%d  resolution=%s  output=full-package",
+        CONCURRENT_SIMS,
+        TEST_RESOLUTION,
+    )
     logger.info("=" * 60)
 
     print(f"Three Body Problem batch runner  ({CONCURRENT_SIMS} concurrent)")
+    print(f"High-resolution full-package mode: {TEST_RESOLUTION}")
     print(f"Detailed logs -> {LOG_FILE}")
     print("Ctrl+C to stop gracefully (twice to force)\n")
 

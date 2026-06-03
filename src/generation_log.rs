@@ -70,6 +70,8 @@ pub struct LoggedRenderConfig {
     pub hdr_scale: f64,
     /// Active radial spectral dispersion strength.
     pub dispersion_strength: f64,
+    /// Active spectral dispersion mode.
+    pub dispersion_mode: String,
     /// Seed-selected palette harmony template.
     pub palette_harmony: String,
     /// Seed-selected palette mood envelope.
@@ -165,6 +167,7 @@ impl Default for LoggedRenderConfig {
             hdr_mode: "auto".to_string(),
             hdr_scale: 0.18,
             dispersion_strength: crate::render::constants::SPECTRAL_DISPERSION_STRENGTH,
+            dispersion_mode: "crisp_off".to_string(),
             palette_harmony: "unresolved".to_string(),
             palette_mood: "unresolved".to_string(),
         }

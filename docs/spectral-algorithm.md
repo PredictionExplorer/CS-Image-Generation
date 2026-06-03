@@ -162,7 +162,8 @@ hue_rad = atan2(b, a)
 hue_deg = hue_rad.to_degrees()
 if hue_deg < 0: hue_deg += 360
 chroma = sqrt(a*a + b*b)
-sigma_nm = 20 - 13 * clamp(chroma / 0.34, 0, 1)
+sigma_nm = 8 - 5.5 * clamp(chroma / 0.34, 0, 1)
+sigma_bins = clamp(sigma_nm / 5.0, 0.45, 1.35)
 ```
 
 The hue-to-wavelength map is piecewise linear, with a smoothed violet-to-red
@@ -188,10 +189,12 @@ for bin near center_bin:
 normalize(weights)
 ```
 
-### 3.5 Gaussian SDF Line Segment Splatting
+### 3.5 Crisp SDF Line Segment Splatting
 
-Each edge is rasterized as an anti-aliased line segment with Gaussian falloff.
-This is the innermost loop and deposits energy into the SPD buffer.
+Each edge is rasterized as an anti-aliased line segment with a steep
+super-Gaussian falloff. This is the innermost loop and deposits energy into the
+SPD buffer. Production CosmicSignature output intentionally avoids depth blur,
+bloom haze, or broad line halos.
 
 **Setup per segment:**
 
@@ -205,12 +208,12 @@ len_sq = dx*dx + dy*dy           // 2D length squared (pixel space)
 len_3d = sqrt(dx*dx + dy*dy + dz*dz)
 
 // Dynamic line width: faster segments are thinner
-base_thickness = 1.2
-thickness = clamp(base_thickness / (0.1 + len_3d * 0.5), 0.2, 4.0)
+base_thickness = 0.62
+thickness = clamp(base_thickness / (0.1 + len_3d * 0.5), 0.08, 1.35)
 
-// Depth of field: Circle of Confusion from average z-depth
+// Crisp production mode disables depth-of-field broadening
 avg_z = (v0.z + v1.z) * 0.5
-coc = |avg_z * 0.05|
+coc = |avg_z * 0.0|
 effective_thickness = thickness + coc
 
 // Bounding box padding
@@ -252,9 +255,10 @@ for py in min_y..=max_y:
         proj_y = pay - dy * h
         dist_sq = proj_x*proj_x + proj_y*proj_y
 
-        // Gaussian falloff
-        energy = exp(-dist_sq / (effective_thickness * effective_thickness))
-        if energy < 0.01: continue    // skip negligible contributions
+        // Crisp super-Gaussian falloff
+        normalized = dist_sq / (effective_thickness * effective_thickness)
+        energy = exp(-(normalized * normalized) * 3.2)
+        if energy < 0.02: continue    // skip negligible contributions
 
         // Interpolate alpha along segment
         alpha = v0.alpha * (1 - h) + v1.alpha * h
@@ -329,11 +333,12 @@ This stage converts the per-pixel 64-bin SPD into linear-space premultiplied
 RGBA. It is a fused operation that combines three sub-steps in a single pass
 over the buffer.
 
-### 5.1 Radial Spectral Dispersion (Chromatic Aberration)
+### 5.1 Radial Spectral Dispersion (Disabled in Crisp Mode)
 
-Before converting each pixel, bins are sampled from spatially shifted positions
-to simulate optical dispersion (prismatic color separation radiating from the
-image center).
+The renderer still contains a radial spectral-dispersion path for experiments,
+but production CosmicSignature output sets the active dispersion strength to
+zero. This prevents wavelength-dependent spatial shifts from becoming chromatic
+blur at high resolution.
 
 **Setup:**
 
@@ -341,7 +346,7 @@ image center).
 cx = width / 2.0
 cy = height / 2.0
 max_r = sqrt(cx*cx + cy*cy)
-dispersion_strength = SPECTRAL_DISPERSION_STRENGTH_BOOSTED * 3.0   // default: 1.1 * 3.0 = 3.3
+dispersion_strength = 0.0   // CRISP_DISPERSION_STRENGTH
 ```
 
 **Per pixel:**
@@ -373,8 +378,7 @@ for bin in 0..64:
         local_spd[bin] = 0.0
 ```
 
-At the image center (`r = 0`), there is no shift -- the dispersion is purely
-zero there. The effect increases toward the edges of the image.
+In production, the branch is skipped and `local_spd = src_spd[pixel]`.
 
 ### 5.2 Fused Energy-Density Redshift
 
@@ -512,6 +516,13 @@ To produce a single spectral image (16-bit PNG):
 7. quantize to 16-bit sRGB
 8. Save as PNG
 ```
+
+For very large stills, the final accumulated frame can switch to a striped
+renderer. The striped path renders row bands with guard rows, quantizes each
+band to Display P3, and stitches the final 16-bit image without allocating a
+full-frame `width * height * 64 * f64` SPD buffer. The generator logs a
+full-frame SPD memory estimate before rendering so extreme-resolution jobs are
+visible up front.
 
 ---
 
@@ -684,10 +695,9 @@ deviation `SWEEP_GAUSSIAN_SIGMA` (bins within about `3 * sigma` of the centre
 contribute). This produces smooth transitions between wavelength-dominated looks
 without hard banding.
 
-The blended linear RGB is then run through **Gaussian bloom** and **cinematic
-colour grade** (vignette, vibrance) tuned for the sweep (`SWEEP_BLOOM_*`,
-`SWEEP_VIGNETTE_*`, `SWEEP_VIBRANCE` in `render/constants.rs`), quantized to
-16-bit RGB (`rgb48le`), and piped to FFmpeg like the main video.
+The blended linear RGB is then run through a crisp colour-grade pass. Gaussian
+bloom is disabled in production sweep output (`SWEEP_BLOOM_RADIUS = 0`,
+`SWEEP_BLOOM_STRENGTH = 0.0`) so auxiliary outputs do not introduce haze.
 
 ### 10.5 Video parameters
 
@@ -729,8 +739,9 @@ main trajectory video (default quality vs `--fast-encode`).
 | `VELOCITY_HDR_BOOST_THRESHOLD` | 0.15 | Velocity at which max boost is reached |
 | `ENERGY_DENSITY_SHIFT_THRESHOLD` | 0.08 | Minimum energy for redshift |
 | `ENERGY_DENSITY_SHIFT_STRENGTH` | 0.75 | How strongly high energy shifts to red |
-| `SPECTRAL_DISPERSION_STRENGTH` | 0.8 | Base chromatic aberration strength |
-| `SPECTRAL_DISPERSION_STRENGTH_BOOSTED` | 1.1 | Boosted chromatic aberration |
+| `CRISP_DISPERSION_STRENGTH` | 0.0 | Production chromatic dispersion strength (disabled) |
+| `SPECTRAL_DISPERSION_STRENGTH` | 0.0 | Base chromatic aberration strength in crisp mode |
+| `SPECTRAL_DISPERSION_STRENGTH_BOOSTED` | 0.0 | Boosted chromatic aberration in crisp mode |
 
 ### Video Parameters
 
@@ -742,17 +753,17 @@ main trajectory video (default quality vs `--fast-encode`).
 | `CYCLE_DURATION_SECONDS` | 12.0 | Spectral sweep video duration |
 | `CYCLE_TOTAL_FRAMES` | 720 | Spectral sweep frame count (`duration * fps`) |
 | `SWEEP_BIN_START` / `SWEEP_BIN_END` | 4 / 59 | Fallback active bin range when energy detection finds nothing |
-| `SWEEP_GAUSSIAN_SIGMA` | 2.5 | Bin-domain Gaussian width for sweep frame blending |
+| `SWEEP_GAUSSIAN_SIGMA` | 0.55 | Narrow bin-domain Gaussian width for sweep frame blending |
 | `DISPLAY_GAMMA` | 2.2 | Gamma for spectral gallery/bin images |
 
 ### Line Splatting Parameters
 
 | Constant/Expression | Value | Description |
 |---------------------|-------|-------------|
-| Base thickness | 1.2 | Starting line width in pixels |
-| Thickness range | [0.2, 4.0] | Clamped dynamic thickness |
-| CoC factor | 0.05 | Circle of confusion from z-depth |
+| Base thickness | 0.62 | Starting line width in pixels |
+| Thickness range | [0.08, 1.35] | Clamped dynamic thickness |
+| CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
 | Bounding box pad | `ceil(effective_thickness * 2.5)` | Pixel padding around segment |
-| Energy cutoff | 0.01 | Minimum Gaussian energy to deposit |
-| Depth fade rate | 0.002 | Exponential fog coefficient |
-| Depth fade range | [0.05, 1.0] | Clamped atmospheric fade |
+| Energy cutoff | 0.02 | Minimum super-Gaussian energy to deposit |
+| Depth fade rate | 0.0007 | Exponential depth separation coefficient |
+| Depth fade range | [0.18, 1.0] | Clamped depth visibility range |

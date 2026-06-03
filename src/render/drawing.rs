@@ -1,14 +1,19 @@
 //! Line drawing, plot functions, and primitive rendering
 
 use super::color::OklabColor;
+use super::constants::{
+    CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_FALLOFF_EXPONENT,
+    CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS, CRISP_SPECTRAL_KERNEL_RADIUS_BINS,
+    CRISP_SPECTRAL_SIGMA_MAX_BINS, CRISP_SPECTRAL_SIGMA_MIN_BINS,
+};
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use spectral_constants::{BIN_WIDTH, LAMBDA_END, LAMBDA_START};
 
-/// Runtime toggle: when true, spectral dispersion boost is applied in the render path.
+/// Runtime toggle: when true, non-production spectral dispersion is applied in the render path.
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(true);
+    std::sync::atomic::AtomicBool::new(false);
 
 /// One endpoint of a line in pixel space with `OkLab` color and coverage.
 #[derive(Clone, Copy, Debug)]
@@ -123,7 +128,7 @@ fn add_gaussian_lobe(
     }
 
     let center_bin = spectral_constants::wavelength_to_bin(center_wavelength);
-    let radius = (sigma_bins * 3.0).ceil() as isize;
+    let radius = (sigma_bins * 2.0).ceil().min(CRISP_SPECTRAL_KERNEL_RADIUS_BINS as f64) as isize;
     let base = center_bin.round() as isize;
 
     for bin_i in (base - radius)..=(base + radius) {
@@ -150,8 +155,9 @@ fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
     let chroma = (a * a + b * b).sqrt();
     let hue = oklab_hue_degrees(a, b);
     let purity = (chroma / 0.34).clamp(0.0, 1.0);
-    let sigma_nm = 20.0 - 13.0 * purity;
-    let sigma_bins = (sigma_nm / BIN_WIDTH).clamp(1.1, 4.6);
+    let sigma_nm = 8.0 - 5.5 * purity;
+    let sigma_bins =
+        (sigma_nm / BIN_WIDTH).clamp(CRISP_SPECTRAL_SIGMA_MIN_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS);
     let mut kernel = SpectralKernel::new();
 
     if hue >= 330.0 {
@@ -283,14 +289,14 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
 
     // Dynamic line width: keep the spectral core thin so overlaps form crisp ribbons.
-    let base_thickness = 0.78;
-    let thickness = (base_thickness / (0.1 + len_3d * 0.5)).clamp(0.16, 2.4);
+    let thickness = (CRISP_LINE_BASE_THICKNESS / (0.1 + len_3d * 0.5))
+        .clamp(CRISP_LINE_MIN_THICKNESS, CRISP_LINE_MAX_THICKNESS);
 
     // Z-depth calculation (center of segment)
     let avg_z = (z0 + z1) * 0.5;
 
-    // Minimal depth broadening preserves structure while still layering distant sheets.
-    let coc = (avg_z * 0.014).abs();
+    // Production crisp mode uses no depth-of-field broadening.
+    let coc = (avg_z * CRISP_DEPTH_BROADENING_FACTOR).abs();
     let effective_thickness = thickness + coc;
 
     // Maximum extent of the SDF bounding box
@@ -327,9 +333,11 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             let proj_y = pay - dy * h;
             let dist_sq = proj_x * proj_x + proj_y * proj_y;
 
-            // Gaussian SDF falloff
-            let energy = (-dist_sq / (effective_thickness * effective_thickness)).exp();
-            if energy < 0.01 {
+            // Super-Gaussian SDF falloff: still anti-aliased, but with minimal halo.
+            let normalized_dist_sq = dist_sq / (effective_thickness * effective_thickness);
+            let energy =
+                (-(normalized_dist_sq * normalized_dist_sq) * CRISP_LINE_FALLOFF_EXPONENT).exp();
+            if energy < 0.02 {
                 continue;
             }
 
@@ -445,10 +453,10 @@ mod tests {
     }
 
     #[test]
-    fn test_dispersion_boost_default_enabled() {
+    fn test_dispersion_boost_default_disabled() {
         assert!(
-            DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed),
-            "dispersion boost should be enabled by default"
+            !DISPERSION_BOOST_ENABLED.load(Ordering::Relaxed),
+            "dispersion boost should be disabled by default for crisp production output"
         );
     }
 
