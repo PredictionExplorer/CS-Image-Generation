@@ -312,10 +312,6 @@ pub fn render_video(
         VideoEncodingOptions::default()
     };
 
-    info!("Rendering and saving still image before video encode: {}", output_png);
-    let still_frame = render::render_final_frame_spectral(scene, levels, settings)?;
-    save_image_as_png_16bit(&still_frame, output_png)?;
-
     let mut accum_spd = Vec::new();
 
     create_video_from_frames_singlepass(
@@ -344,7 +340,10 @@ pub fn render_video(
         &video_options,
     )?;
 
-    if last_frame_png.is_none() {
+    if let Some(frame) = last_frame_png {
+        info!("Saving still image from final video frame: {}", output_png);
+        save_image_as_png_16bit(&frame, output_png)?;
+    } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
 
@@ -361,7 +360,7 @@ pub fn generate_spectral_gallery(
     Ok(render::spectral_output::generate_spectral_gallery(accum_spd, width, height, spectral_dir)?)
 }
 
-/// Generate the spectral sweep video (violet-to-red cycle) at `output_path`.
+/// Generate the spectral sweep video (violet-to-red-to-violet cycle) at `output_path`.
 pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,

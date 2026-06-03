@@ -265,10 +265,10 @@ pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
 // ========== Spectral Output Constants ==========
 
 /// Duration of the spectral sweep video in seconds
-pub const CYCLE_DURATION_SECONDS: f64 = 12.0;
+pub const CYCLE_DURATION_SECONDS: f64 = 24.0;
 
-/// Total frames in the spectral sweep video (12s * 60fps)
-pub const CYCLE_TOTAL_FRAMES: u32 = 720;
+/// Total frames in the spectral sweep video (24s * 60fps)
+pub const CYCLE_TOTAL_FRAMES: u32 = 1440;
 
 /// Display gamma used for spectral gallery and bin image output
 pub const DISPLAY_GAMMA: f64 = 2.2;

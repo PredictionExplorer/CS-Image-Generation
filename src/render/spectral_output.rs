@@ -2,7 +2,7 @@
 //!
 //! After the main rendering pass accumulates the full SPD buffer, this module
 //! produces per-bin wavelength images (the "spectral gallery") and a single
-//! spectral sweep video that cycles through all 64 bins from violet to red.
+//! spectral sweep video that cycles from violet to red and back to violet.
 
 use super::constants;
 use super::context::PixelBuffer;
@@ -246,7 +246,7 @@ fn quantize_to_u16_rgb(pixels: &PixelBuffer) -> Vec<u16> {
     buf
 }
 
-/// Generate a single spectral sweep video (violet to red) at the given path.
+/// Generate a single spectral sweep video (violet to red to violet) at the given path.
 ///
 /// The sweep applies cosine easing for smooth pacing, Gaussian bloom and
 /// subtle colour grading (vignette + vibrance) per frame.  The bin range is
@@ -303,9 +303,7 @@ pub fn generate_spectral_sweep_video(
             let sigma = constants::SWEEP_GAUSSIAN_SIGMA;
 
             for frame in 0..total_frames {
-                let t_linear = f64::from(frame) / f64::from(total_frames - 1);
-                let t_eased = (1.0 - (t_linear * std::f64::consts::PI).cos()) * 0.5;
-                let bin_f = start + t_eased * (end - start);
+                let bin_f = spectral_sweep_bin_f(frame, total_frames, start, end);
 
                 gaussian_blend_to_pixelbuffer(&bin_buffers, bin_f, sigma, &mut frame_buf);
 
@@ -324,6 +322,25 @@ pub fn generate_spectral_sweep_video(
 
     info!("   Spectral sweep video complete => {output_path}");
     Ok(())
+}
+
+fn spectral_sweep_bin_f(frame: u32, total_frames: u32, start: f64, end: f64) -> f64 {
+    if total_frames <= 1 {
+        return start;
+    }
+
+    let frame = frame.min(total_frames - 1);
+    let leg_frames = (total_frames / 2).max(2);
+    let leg_denominator = f64::from(leg_frames - 1);
+    let leg_t = if frame < leg_frames {
+        f64::from(frame) / leg_denominator
+    } else {
+        f64::from(total_frames - 1 - frame) / leg_denominator
+    }
+    .clamp(0.0, 1.0);
+    let eased = (1.0 - (leg_t * std::f64::consts::PI).cos()) * 0.5;
+
+    start + eased * (end - start)
 }
 
 /// Run bloom then colour-grade on a single `PixelBuffer`.
@@ -673,27 +690,37 @@ mod tests {
     // -- Sweep math ---------------------------------------------------------
 
     fn sweep_bin_f(frame: u32) -> f64 {
-        let total = constants::CYCLE_TOTAL_FRAMES;
         let start = constants::SWEEP_BIN_START as f64;
         let end = constants::SWEEP_BIN_END as f64;
-        let t = f64::from(frame) / f64::from(total - 1);
-        start + t * (end - start)
+        spectral_sweep_bin_f(frame, constants::CYCLE_TOTAL_FRAMES, start, end)
     }
 
     #[test]
-    fn test_sweep_bin_f_monotonic() {
+    fn test_sweep_bin_f_ping_pong_direction() {
         let total = constants::CYCLE_TOTAL_FRAMES;
-        let mut prev = -1.0f64;
-        for frame in 0..total {
+        let turn_frame = total / 2;
+
+        let mut prev = sweep_bin_f(0);
+        for frame in 1..turn_frame {
             let val = sweep_bin_f(frame);
-            assert!(val >= prev, "sweep should be monotonically non-decreasing");
+            assert!(val >= prev, "outbound sweep should be monotonically non-decreasing");
+            prev = val;
+        }
+
+        prev = sweep_bin_f(turn_frame);
+        for frame in turn_frame + 1..total {
+            let val = sweep_bin_f(frame);
+            assert!(val <= prev, "return sweep should be monotonically non-increasing");
             prev = val;
         }
     }
 
     #[test]
-    fn test_sweep_bin_f_range() {
+    fn test_sweep_bin_f_ping_pong_endpoints() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
         let first = sweep_bin_f(0);
+        let outbound_end = sweep_bin_f(total / 2 - 1);
+        let return_start = sweep_bin_f(total / 2);
         let last = sweep_bin_f(constants::CYCLE_TOTAL_FRAMES - 1);
         let start = constants::SWEEP_BIN_START as f64;
         let end = constants::SWEEP_BIN_END as f64;
@@ -702,8 +729,16 @@ mod tests {
             "first frame should be at SWEEP_BIN_START ({start}), got {first}"
         );
         assert!(
-            (last - end).abs() < 1e-10,
-            "last frame should be at SWEEP_BIN_END ({end}), got {last}"
+            (outbound_end - end).abs() < 1e-10,
+            "outbound turn frame should be at SWEEP_BIN_END ({end}), got {outbound_end}"
+        );
+        assert!(
+            (return_start - end).abs() < 1e-10,
+            "return turn frame should be at SWEEP_BIN_END ({end}), got {return_start}"
+        );
+        assert!(
+            (last - start).abs() < 1e-10,
+            "last frame should return to SWEEP_BIN_START ({start}), got {last}"
         );
     }
 

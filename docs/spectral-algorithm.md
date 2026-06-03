@@ -33,7 +33,7 @@ is re-simulated at full resolution, the rendering pipeline receives:
 | `positions` | `[Vec<Vector3<f64>>; 3]` | 3 bodies, each with N timesteps of (x, y, z) |
 | `colors` | `[Vec<(f64, f64, f64)>; 3]` | Per-body OkLab (L, a, b) color at each timestep |
 | `body_alphas` | `[f64; 3]` | Per-body opacity (constant across time) |
-| `width`, `height` | `u32` | Output resolution (default 1920x1080) |
+| `width`, `height` | `u32` | Output resolution (default 3456x2234) |
 | `hdr_scale` | `f64` | Global energy multiplier (typically 3.0) |
 | `effect_config` | struct | Post-processing effect parameters |
 
@@ -672,13 +672,15 @@ range `[active_start, active_end]`, not necessarily the full 0..63 span.
 
 ### 10.3 Time easing and centre bin
 
-Let `total_frames` be `CYCLE_TOTAL_FRAMES` (720), `frame` in `0..total_frames`,
-and `t_linear = frame / (total_frames - 1)`.
+Let `total_frames` be `CYCLE_TOTAL_FRAMES` (1440), `frame` in `0..total_frames`,
+and `leg_t` be the normalized position within the current outbound or return
+leg. The first leg sweeps from violet to red; the second sweeps back from red
+to violet, so the first and last frames share the same centre bin.
 
-Cosine easing (slow at the ends of the sweep):
+Cosine easing (slow at both ends of each leg):
 
 ```
-t_eased = (1.0 - cos(t_linear * pi)) * 0.5    // 0 at first frame, 1 at last
+t_eased = (1.0 - cos(leg_t * pi)) * 0.5
 ```
 
 Fractional centre bin (within the active range):
@@ -703,10 +705,10 @@ bloom is disabled in production sweep output (`SWEEP_BLOOM_RADIUS = 0`,
 
 | Parameter | Value | Source constant |
 |-----------|-------|------------------|
-| Duration | 12.0 s | `CYCLE_DURATION_SECONDS` |
+| Duration | 24.0 s | `CYCLE_DURATION_SECONDS` |
 | FPS | 60 | `DEFAULT_VIDEO_FPS` |
-| Total frames | 720 | `CYCLE_TOTAL_FRAMES` |
-| Gaussian sigma (bins) | 2.5 | `SWEEP_GAUSSIAN_SIGMA` |
+| Total frames | 1440 | `CYCLE_TOTAL_FRAMES` |
+| Gaussian sigma (bins) | 0.55 | `SWEEP_GAUSSIAN_SIGMA` |
 | Pixel format | rgb48le | same as main video path |
 | Codec | HEVC (libx265) | same options as main encode / fast-encode mode |
 
@@ -750,8 +752,8 @@ main trajectory video (default quality vs `--fast-encode`).
 | `DEFAULT_VIDEO_FPS` | 60 | Frames per second |
 | `DEFAULT_TARGET_FRAMES` | 1800 | Target frame count (30 seconds) |
 | `DEFAULT_DT` | 0.001 | Simulation timestep |
-| `CYCLE_DURATION_SECONDS` | 12.0 | Spectral sweep video duration |
-| `CYCLE_TOTAL_FRAMES` | 720 | Spectral sweep frame count (`duration * fps`) |
+| `CYCLE_DURATION_SECONDS` | 24.0 | Spectral sweep video duration |
+| `CYCLE_TOTAL_FRAMES` | 1440 | Spectral sweep frame count (`duration * fps`) |
 | `SWEEP_BIN_START` / `SWEEP_BIN_END` | 4 / 59 | Fallback active bin range when energy detection finds nothing |
 | `SWEEP_GAUSSIAN_SIGMA` | 0.55 | Narrow bin-domain Gaussian width for sweep frame blending |
 | `DISPLAY_GAMMA` | 2.2 | Gamma for spectral gallery/bin images |

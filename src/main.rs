@@ -17,7 +17,7 @@ const DEFAULT_NUM_SIMS: usize = 100_000;
 const DEFAULT_NUM_STEPS: usize = 1_000_000;
 const MAX_NUM_SIMS: usize = 10_000_000;
 const MAX_NUM_STEPS: usize = 100_000_000;
-const DEFAULT_RESOLUTION: &str = "1920x1080";
+const DEFAULT_RESOLUTION: &str = "3456x2234";
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_LOCATION: f64 = 300.0;
 const DEFAULT_VELOCITY: f64 = 1.0;
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(args.output, DEFAULT_OUTPUT_NAME);
         assert_eq!(args.sims, DEFAULT_NUM_SIMS);
         assert_eq!(args.steps, DEFAULT_NUM_STEPS);
-        assert_eq!(args.resolution, OutputResolution { width: 1920, height: 1080 });
+        assert_eq!(args.resolution, OutputResolution { width: 3456, height: 2234 });
         assert_eq!(args.drift, DriftModeArg::Elliptical);
         assert!(!args.fast_encode);
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);

@@ -71,7 +71,7 @@ CLI reference:
 | `-o, --output` | `output` | Base name for output files |
 | `--sims` | `100000` | Number of orbits evaluated in the Borda search |
 | `--steps` | `1000000` | Simulation steps per orbit |
-| `-r, --resolution` | `1920x1080` | Output resolution as `WIDTHxHEIGHT` |
+| `-r, --resolution` | `3456x2234` | Output resolution as `WIDTHxHEIGHT` |
 | `--drift` | `elliptical` | Camera drift mode: `none`, `linear`, `brownian`, `elliptical` |
 | `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
 | `--equil-weight` | random | Borda weight for equilateralness; omit to sample from a curated range |

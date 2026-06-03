@@ -154,8 +154,8 @@ impl GenerationRecord {
 impl Default for LoggedRenderConfig {
     fn default() -> Self {
         Self {
-            width: 1920,
-            height: 1080,
+            width: 3456,
+            height: 2234,
             clip_black: 0.010,
             clip_white: 0.990,
             alpha_denom: 15_000_000,
