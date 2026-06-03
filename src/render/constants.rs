@@ -206,8 +206,11 @@ pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
 /// Super-Gaussian exponent used for crisp anti-aliased line splats.
 pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 2.0;
 
-/// Minimum per-pixel coverage retained by crisp line splats.
-pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.004;
+/// Minimum averaged per-pixel coverage retained by crisp line splats.
+pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.0005;
+
+/// Subpixel grid dimension used for crisp line coverage integration.
+pub const CRISP_LINE_SUBPIXEL_GRID: usize = 2;
 
 /// Reference short-edge resolution for crisp line thickness tuning.
 pub const CRISP_LINE_REFERENCE_MIN_DIM: f32 = 2234.0;
@@ -218,11 +221,11 @@ pub const CRISP_LINE_RESOLUTION_SCALE_MIN: f32 = 0.55;
 /// Upper bound for resolution-aware crisp line scaling.
 pub const CRISP_LINE_RESOLUTION_SCALE_MAX: f32 = 32.0;
 
-/// Resolution scale at which render-time line interpolation begins.
-pub const CRISP_INTERPOLATION_SCALE_START: f32 = 1.5;
+/// Minimum projected body motion that enables render-time line interpolation.
+pub const CRISP_INTERPOLATION_MIN_MOTION_PX: f32 = 1.0;
 
 /// Target maximum pixel travel per interpolated high-resolution sample.
-pub const CRISP_INTERPOLATION_TARGET_STEP_PX: f32 = 2.5;
+pub const CRISP_INTERPOLATION_TARGET_STEP_PX: f32 = 1.0;
 
 /// Maximum number of render-time interpolation samples per simulation interval.
 pub const CRISP_INTERPOLATION_MAX_SUBSTEPS: usize = 24;
@@ -244,8 +247,8 @@ pub fn crisp_line_resolution_scale(width: u32, height: u32) -> f32 {
 #[must_use]
 #[inline]
 pub fn crisp_line_interpolation_substeps(width: u32, height: u32, max_motion_px: f32) -> usize {
-    let scale = crisp_line_resolution_scale(width, height);
-    if scale < CRISP_INTERPOLATION_SCALE_START || max_motion_px <= f32::EPSILON {
+    let _scale = crisp_line_resolution_scale(width, height);
+    if max_motion_px <= CRISP_INTERPOLATION_MIN_MOTION_PX {
         return 1;
     }
 

@@ -4,7 +4,7 @@ use super::color::OklabColor;
 use super::constants::{
     CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_ENERGY_CUTOFF,
     CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
-    CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
+    CRISP_LINE_SUBPIXEL_GRID, CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
     CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
@@ -327,40 +327,61 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     // Keep distant geometry visible; the black field provides separation without fog.
     let depth_fade = (-avg_z.abs() * 0.0007).exp().clamp(0.18, 1.0);
     let base_energy_mult = hdr_scale * f64::from(depth_fade) * f64::from(energy_conservation);
+    let subpixel_grid = CRISP_LINE_SUBPIXEL_GRID.max(1);
+    let subpixel_count = (subpixel_grid * subpixel_grid) as f64;
 
     for py in min_y..=max_y {
         for px in min_x..=max_x {
-            let pax = px as f32 + 0.5 - x0;
-            let pay = py as f32 + 0.5 - y0;
+            let mut energy_sum = 0.0_f64;
+            let mut start_energy_sum = 0.0_f64;
+            let mut end_energy_sum = 0.0_f64;
 
-            let h =
-                if len_sq > 1e-6 { ((pax * dx + pay * dy) / len_sq).clamp(0.0, 1.0) } else { 0.5 };
+            for sy in 0..subpixel_grid {
+                for sx in 0..subpixel_grid {
+                    let sample_x = px as f32 + (sx as f32 + 0.5) / subpixel_grid as f32;
+                    let sample_y = py as f32 + (sy as f32 + 0.5) / subpixel_grid as f32;
+                    let pax = sample_x - x0;
+                    let pay = sample_y - y0;
 
-            let proj_x = pax - dx * h;
-            let proj_y = pay - dy * h;
-            let dist_sq = proj_x * proj_x + proj_y * proj_y;
+                    let h = if len_sq > 1e-6 {
+                        ((pax * dx + pay * dy) / len_sq).clamp(0.0, 1.0)
+                    } else {
+                        0.5
+                    };
 
-            // Super-Gaussian SDF falloff: still anti-aliased, but with minimal halo.
-            let normalized_dist_sq = dist_sq / (effective_thickness * effective_thickness);
-            let energy =
-                (-(normalized_dist_sq * normalized_dist_sq) * CRISP_LINE_FALLOFF_EXPONENT).exp();
-            if energy < CRISP_LINE_ENERGY_CUTOFF {
+                    let proj_x = pax - dx * h;
+                    let proj_y = pay - dy * h;
+                    let dist_sq = proj_x * proj_x + proj_y * proj_y;
+
+                    // Super-Gaussian SDF coverage integrated over subpixel samples.
+                    let normalized_dist_sq = dist_sq / (effective_thickness * effective_thickness);
+                    let energy = f64::from(
+                        (-(normalized_dist_sq * normalized_dist_sq) * CRISP_LINE_FALLOFF_EXPONENT)
+                            .exp(),
+                    );
+                    let h64 = f64::from(h);
+                    let alpha = alpha0 * (1.0 - h64) + alpha1 * h64;
+                    let weighted_energy = energy * alpha;
+
+                    energy_sum += weighted_energy;
+                    start_energy_sum += weighted_energy * (1.0 - h64);
+                    end_energy_sum += weighted_energy * h64;
+                }
+            }
+
+            let coverage = energy_sum / subpixel_count;
+            if coverage < f64::from(CRISP_LINE_ENERGY_CUTOFF) {
                 continue;
             }
 
-            let alpha = alpha0 * (1.0 - f64::from(h)) + alpha1 * f64::from(h);
-            let final_energy = f64::from(energy) * alpha * base_energy_mult;
-
             let idx = (py as usize - row_start) * width as usize + px as usize;
-            let h64 = f64::from(h);
-            let start_weight = 1.0 - h64;
-            let end_weight = h64;
+            let energy_scale = base_energy_mult / subpixel_count;
 
             for &(bin, weight) in &kernel0 {
-                accum[idx][bin] += final_energy * start_weight * weight;
+                accum[idx][bin] += energy_scale * start_energy_sum * weight;
             }
             for &(bin, weight) in &kernel1 {
-                accum[idx][bin] += final_energy * end_weight * weight;
+                accum[idx][bin] += energy_scale * end_energy_sum * weight;
             }
         }
     }
@@ -558,11 +579,14 @@ mod tests {
             crate::render::constants::crisp_line_interpolation_substeps(3456, 2234, 20.0);
         let large_substeps =
             crate::render::constants::crisp_line_interpolation_substeps(10_000, 6_460, 20.0);
+        let subpixel_motion =
+            crate::render::constants::crisp_line_interpolation_substeps(3456, 2234, 0.75);
         let capped_substeps =
             crate::render::constants::crisp_line_interpolation_substeps(100_000, 64_640, 10_000.0);
 
-        assert_eq!(default_substeps, 1);
-        assert!(large_substeps > default_substeps);
+        assert_eq!(subpixel_motion, 1);
+        assert!(default_substeps > 1);
+        assert_eq!(large_substeps, default_substeps);
         assert_eq!(capped_substeps, crate::render::constants::CRISP_INTERPOLATION_MAX_SUBSTEPS);
     }
 }

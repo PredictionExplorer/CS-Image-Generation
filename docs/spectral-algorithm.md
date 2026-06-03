@@ -227,20 +227,20 @@ normalize(weights)
 
 ### 3.5 High-Resolution Triangle Interpolation
 
-For default-resolution output, the renderer draws one triangle sample per
-simulation step. For larger outputs, the renderer adaptively inserts
-interpolated triangle samples between `step` and `step + 1` when the projected
-screen-space motion is large. This preserves trajectory density at 10k+ output
-sizes without requiring a more expensive simulation rerun.
+For very small projected motion, the renderer draws one triangle sample per
+simulation step. When a body's projected screen-space motion exceeds roughly one
+pixel, the renderer adaptively inserts interpolated triangle samples between
+`step` and `step + 1`. This reduces dotted/stamped trajectories at normal and
+high resolutions without requiring a more expensive simulation rerun.
 
 ```
 resolution_scale = clamp(min(width, height) / 2234, 0.55, 32.0)
 max_motion_px = max distance any body moves between step and step + 1
 
-if resolution_scale < 1.5:
+if max_motion_px <= 1.0:
     substeps = 1
 else:
-    substeps = clamp(ceil(max_motion_px / 2.5), 1, 24)
+    substeps = clamp(ceil(max_motion_px / 1.0), 1, 24)
 
 for substep in 0..substeps:
     t = substep / substeps
@@ -312,37 +312,31 @@ base_energy_mult = hdr_scale * edge_hdr_multiplier * depth_fade * energy_conserv
 ```
 for py in min_y..=max_y:
     for px in min_x..=max_x:
-        // Vector from v0 to pixel center
-        pax = (px + 0.5) - v0.x
-        pay = (py + 0.5) - v0.y
+        energy_sum = 0
+        start_energy_sum = 0
+        end_energy_sum = 0
 
-        // Project pixel onto segment, get parameter h in [0, 1]
-        if len_sq > 1e-6:
-            h = clamp((pax*dx + pay*dy) / len_sq, 0.0, 1.0)
-        else:
-            h = 0.5   // degenerate (zero-length) segment
+        for each 2x2 subpixel sample:
+            pax = sample_x - v0.x
+            pay = sample_y - v0.y
+            h = project sample onto segment, clamped to [0, 1]
+            dist_sq = squared distance from sample to segment
+            normalized = dist_sq / (effective_thickness * effective_thickness)
+            energy = exp(-(normalized * normalized) * 2.0)
+            alpha = v0.alpha * (1 - h) + v1.alpha * h
 
-        // Perpendicular distance from pixel to segment
-        proj_x = pax - dx * h
-        proj_y = pay - dy * h
-        dist_sq = proj_x*proj_x + proj_y*proj_y
+            weighted_energy = energy * alpha
+            energy_sum += weighted_energy
+            start_energy_sum += weighted_energy * (1 - h)
+            end_energy_sum += weighted_energy * h
 
-        // Crisp super-Gaussian falloff
-        normalized = dist_sq / (effective_thickness * effective_thickness)
-        energy = exp(-(normalized * normalized) * 2.0)
-        if energy < 0.004: continue   // skip negligible contributions
+        coverage = energy_sum / 4
+        if coverage < 0.0005: continue
 
-        // Interpolate alpha along segment
-        alpha = v0.alpha * (1 - h) + v1.alpha * h
-
-        // Final energy for this pixel
-        final_energy = energy * alpha * base_energy_mult
-
-        // Interpolate endpoint kernels and deposit a normalized spectral band
         for (bin, weight) in kernel0:
-            accum_spd[pixel_index][bin] += final_energy * (1 - h) * weight
+            accum_spd[pixel_index][bin] += base_energy_mult * start_energy_sum * weight / 4
         for (bin, weight) in kernel1:
-            accum_spd[pixel_index][bin] += final_energy * h * weight
+            accum_spd[pixel_index][bin] += base_energy_mult * end_energy_sum * weight / 4
 ```
 
 ### 3.7 Parallelization
@@ -838,11 +832,12 @@ main trajectory video (default quality vs `--fast-encode`).
 | Resolution scale | `clamp(min_dim / 2234, 0.55, 32.0)` | Multiplier for crisp line thickness |
 | Base thickness | `0.82 * scale` | Starting line width in pixels |
 | Thickness range | `[0.30, 1.55] * scale` | Clamped dynamic thickness |
-| Interpolation start | 1.5 | Minimum resolution scale for render-time substeps |
-| Interpolation target motion | 2.5 px | Desired max body motion per high-res substep |
+| Interpolation start | 1.0 px | Minimum projected motion for render-time substeps |
+| Interpolation target motion | 1.0 px | Desired max body motion per render-time substep |
 | Max interpolation substeps | 24 | Upper bound per simulation interval |
+| Subpixel coverage grid | 2x2 | Per-pixel line coverage samples |
 | CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
 | Bounding box pad | `ceil(effective_thickness * 3.0)` | Pixel padding around segment |
-| Energy cutoff | 0.004 | Minimum super-Gaussian energy to deposit |
+| Energy cutoff | 0.0005 | Minimum averaged super-Gaussian coverage to deposit |
 | Depth fade rate | 0.0007 | Exponential depth separation coefficient |
 | Depth fade range | [0.18, 1.0] | Clamped depth visibility range |
