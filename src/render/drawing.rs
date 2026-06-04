@@ -6,8 +6,7 @@ use super::constants::{
     CRISP_LINE_BASE_THICKNESS, CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD, CRISP_LINE_ENERGY_CUTOFF,
     CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
     CRISP_LINE_SUBPIXEL_GRID, CRISP_LINE_SUBPIXEL_GRID_MAX, CRISP_SPECTRAL_KERNEL_RADIUS_BINS,
-    CRISP_SPECTRAL_SIGMA_MAX_BINS, CRISP_SPECTRAL_SIGMA_MIN_BINS, CRISP_TRIANGLE_FILL_STRENGTH,
-    CRISP_TRIANGLE_FILL_SUBPIXEL_GRID, crisp_line_resolution_scale,
+    CRISP_SPECTRAL_SIGMA_MAX_BINS, CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
@@ -421,125 +420,6 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     }
 }
 
-#[inline]
-fn edge_function(ax: f32, ay: f32, bx: f32, by: f32, px: f32, py: f32) -> f32 {
-    (px - ax) * (by - ay) - (py - ay) * (bx - ax)
-}
-
-#[inline]
-fn barycentric_weights(
-    vertices: [LineVertex; 3],
-    area2: f32,
-    px: f32,
-    py: f32,
-) -> Option<[f64; 3]> {
-    if area2.abs() <= 1e-6 {
-        return None;
-    }
-
-    let [v0, v1, v2] = vertices;
-    let w0 = edge_function(v1.x, v1.y, v2.x, v2.y, px, py) / area2;
-    let w1 = edge_function(v2.x, v2.y, v0.x, v0.y, px, py) / area2;
-    let w2 = edge_function(v0.x, v0.y, v1.x, v1.y, px, py) / area2;
-    let epsilon = -1e-5;
-    if w0 < epsilon || w1 < epsilon || w2 < epsilon {
-        return None;
-    }
-
-    Some([f64::from(w0.max(0.0)), f64::from(w1.max(0.0)), f64::from(w2.max(0.0))])
-}
-
-/// Draw a conservative anti-aliased spectral fill for the triangle interior.
-pub(crate) fn draw_triangle_fill_spectral_rows(
-    accum: &mut [[f64; NUM_BINS]],
-    width: u32,
-    height: u32,
-    row_start: usize,
-    row_end: usize,
-    vertices: [LineVertex; 3],
-    hdr_scale: f64,
-) {
-    let row_end = row_end.min(height as usize);
-    if row_start >= row_end || width == 0 || height == 0 || CRISP_TRIANGLE_FILL_STRENGTH <= 0.0 {
-        return;
-    }
-
-    let [v0, v1, v2] = vertices;
-    let area2 = edge_function(v0.x, v0.y, v1.x, v1.y, v2.x, v2.y);
-    let area = f64::from(area2.abs()) * 0.5;
-    if area <= 1e-6 {
-        return;
-    }
-
-    let min_x = v0.x.min(v1.x).min(v2.x).floor().max(0.0) as i32;
-    let max_x = v0.x.max(v1.x).max(v2.x).ceil().min(width as f32 - 1.0) as i32;
-    let min_y = (v0.y.min(v1.y).min(v2.y).floor() as i32).max(row_start as i32);
-    let max_y = (v0.y.max(v1.y).max(v2.y).ceil() as i32).min(row_end as i32 - 1);
-
-    if min_x > max_x || min_y > max_y {
-        return;
-    }
-
-    let perimeter = f64::from(
-        ((v1.x - v0.x).hypot(v1.y - v0.y))
-            + ((v2.x - v1.x).hypot(v2.y - v1.y))
-            + ((v0.x - v2.x).hypot(v0.y - v2.y)),
-    );
-    let resolution_scale = f64::from(crisp_line_resolution_scale(width, height));
-    let edge_equivalent_width = f64::from(CRISP_LINE_MIN_THICKNESS) * resolution_scale;
-    let area_normalizer = ((perimeter * edge_equivalent_width) / area).clamp(0.0, 1.0);
-    if area_normalizer <= 0.0 {
-        return;
-    }
-
-    let subpixel_grid = CRISP_TRIANGLE_FILL_SUBPIXEL_GRID.max(1);
-    let subpixel_count = (subpixel_grid * subpixel_grid) as f64;
-    let base_energy = hdr_scale * CRISP_TRIANGLE_FILL_STRENGTH * area_normalizer / subpixel_count;
-
-    for py in min_y..=max_y {
-        for px in min_x..=max_x {
-            let mut alpha_sum = 0.0;
-            let mut lightness_sum = 0.0;
-            let mut a_sum = 0.0;
-            let mut b_sum = 0.0;
-
-            for sy in 0..subpixel_grid {
-                for sx in 0..subpixel_grid {
-                    let sample_x = px as f32 + (sx as f32 + 0.5) / subpixel_grid as f32;
-                    let sample_y = py as f32 + (sy as f32 + 0.5) / subpixel_grid as f32;
-                    let Some([w0, w1, w2]) =
-                        barycentric_weights(vertices, area2, sample_x, sample_y)
-                    else {
-                        continue;
-                    };
-
-                    let alpha = (v0.alpha * w0 + v1.alpha * w1 + v2.alpha * w2).max(0.0);
-                    if alpha <= 0.0 {
-                        continue;
-                    }
-
-                    alpha_sum += alpha;
-                    lightness_sum += alpha * (v0.color.0 * w0 + v1.color.0 * w1 + v2.color.0 * w2);
-                    a_sum += alpha * (v0.color.1 * w0 + v1.color.1 * w1 + v2.color.1 * w2);
-                    b_sum += alpha * (v0.color.2 * w0 + v1.color.2 * w1 + v2.color.2 * w2);
-                }
-            }
-
-            if alpha_sum <= 0.0 {
-                continue;
-            }
-
-            let color = (lightness_sum / alpha_sum, a_sum / alpha_sum, b_sum / alpha_sum);
-            let kernel = spectral_kernel_for_oklab(color);
-            let idx = (py as usize - row_start) * width as usize + px as usize;
-            let final_energy = base_energy * alpha_sum;
-            for &(bin, weight) in &kernel {
-                accum[idx][bin] += final_energy * weight;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,52 +603,6 @@ mod tests {
         assert_eq!(thick_axis, CRISP_LINE_SUBPIXEL_GRID);
         assert_eq!(thin_axis, CRISP_LINE_SUBPIXEL_GRID_MAX);
         assert_eq!(diagonal, CRISP_LINE_SUBPIXEL_GRID_MAX);
-    }
-
-    #[test]
-    fn test_triangle_fill_deposits_interior_spectral_energy() {
-        let width = 20usize;
-        let height = 20usize;
-        let mut accum = vec![[0.0; NUM_BINS]; width * height];
-        let vertices = [
-            LineVertex {
-                x: 4.0,
-                y: 4.0,
-                z: 0.0,
-                color: wavelength_to_oklab(520.0, 0.8),
-                alpha: 1.0,
-            },
-            LineVertex {
-                x: 16.0,
-                y: 5.0,
-                z: 0.0,
-                color: wavelength_to_oklab(610.0, 0.8),
-                alpha: 1.0,
-            },
-            LineVertex {
-                x: 8.0,
-                y: 16.0,
-                z: 0.0,
-                color: wavelength_to_oklab(450.0, 0.8),
-                alpha: 1.0,
-            },
-        ];
-
-        draw_triangle_fill_spectral_rows(
-            &mut accum,
-            width as u32,
-            height as u32,
-            0,
-            height,
-            vertices,
-            1.0,
-        );
-
-        let interior_energy: f64 = accum[8 * width + 8].iter().sum();
-        let outside_energy: f64 = accum[1 * width + 1].iter().sum();
-
-        assert!(interior_energy > 0.0, "triangle fill should deposit interior energy");
-        assert_eq!(outside_energy, 0.0, "outside pixels should remain untouched");
     }
 
     #[test]

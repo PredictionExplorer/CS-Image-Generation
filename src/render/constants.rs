@@ -221,15 +221,6 @@ pub const CRISP_LINE_ADAPTIVE_AA_THINNESS_FACTOR: f32 = 0.85;
 /// Slope ratio above which a line is treated as diagonal for adaptive AA.
 pub const CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD: f32 = 0.08;
 
-/// Relative strength of the conservative spectral triangle interior fill.
-pub const CRISP_TRIANGLE_FILL_STRENGTH: f64 = 0.35;
-
-/// Relative strength of luminous triangle edge accents when fill is active.
-pub const CRISP_TRIANGLE_EDGE_STRENGTH: f64 = 1.0;
-
-/// Subpixel grid dimension used for anti-aliased triangle fill coverage.
-pub const CRISP_TRIANGLE_FILL_SUBPIXEL_GRID: usize = 2;
-
 /// Additional guard rows beyond the maximum scaled crisp footprint.
 pub const HIGH_RES_TILE_GUARD_MARGIN_ROWS: usize = 2;
 

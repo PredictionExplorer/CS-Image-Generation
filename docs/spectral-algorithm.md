@@ -135,10 +135,9 @@ for step in 0..total_steps:
     form triangle from positions[0][step], positions[1][step], positions[2][step]
     if motion interpolation is active:
         draw interpolated triangle samples toward step + 1 with compensated energy
-    rasterize a conservative anti-aliased spectral triangle fill
     for each of 3 edges (0-1, 1-2, 2-0):
         compute velocity HDR multiplier for this edge
-        rasterize luminous edge accent as anti-aliased spectral line segment
+        rasterize edge as anti-aliased spectral line segment into SPD buffer
 ```
 
 ### 3.2 Triangle Vertex Preparation
@@ -244,39 +243,22 @@ else:
     substeps = clamp(ceil(max_motion_px / 1.0), 1, 24)
 
 for substep in 0..substeps:
-    t = (substep + 0.5) / substeps
-    sample_position = lerp(position[step], position[step + 1], t)
-    sample_color = lerp(color[step], color[step + 1], t)
+    if substep == 0:
+        sample = exact current-step triangle
+    else:
+        t = substep / substeps
+        sample = lerp(triangle[step], triangle[step + 1], t)
     sample_hdr_scale = hdr_scale / substeps
     draw sample triangle
 ```
 
 The `1 / substeps` energy compensation is important: interpolation increases
-spatial sampling density, not exposure. Checkpointed video frames do not
-interpolate beyond their current checkpoint, so frames do not leak future motion.
+spatial sampling density, not exposure. The first substep preserves the exact
+simulation knot, so low-motion intervals do not smear to their midpoint.
+Checkpointed video frames do not interpolate beyond their current checkpoint,
+so frames do not leak future motion.
 
-### 3.6 Anti-Aliased Spectral Triangle Fill
-
-Each triangle also deposits a conservative translucent interior fill. This makes
-large translucent regions real filled surfaces instead of relying only on dense
-wireframe edge overlap.
-
-```
-area = abs(edge(v0, v1, v2)) / 2
-perimeter = length(v0-v1) + length(v1-v2) + length(v2-v0)
-edge_equivalent_width = 0.30 * resolution_scale
-area_normalizer = clamp((perimeter * edge_equivalent_width) / area, 0, 1)
-fill_energy = hdr_scale * 0.35 * area_normalizer
-```
-
-Pixels inside the triangle are tested with barycentric coordinates over a 2x2
-subpixel grid. Covered samples interpolate `OkLab` color and alpha
-barycentrically, convert the averaged color to a spectral kernel, and deposit a
-low-energy SPD contribution. The `area_normalizer` keeps very large triangles
-from overwhelming the image while still providing smooth anti-aliased
-silhouettes.
-
-### 3.7 Crisp SDF Line Segment Splatting
+### 3.6 Crisp SDF Line Segment Splatting
 
 Each edge is rasterized as an anti-aliased line segment with a steep
 super-Gaussian falloff. This is the innermost loop and deposits energy into the
@@ -364,7 +346,7 @@ for py in min_y..=max_y:
 Thin or diagonal lines use the 4x4 grid; thick near-axis-aligned lines use the
 cheaper 2x2 grid.
 
-### 3.8 Parallelization
+### 3.7 Parallelization
 
 The accumulation supports two parallelization strategies:
 
@@ -863,9 +845,6 @@ main trajectory video (default quality vs `--fast-encode`).
 | Interpolation target motion | 1.0 px | Desired max body motion per render-time substep |
 | Max interpolation substeps | 24 | Upper bound per simulation interval |
 | Line subpixel coverage grid | 2x2 or 4x4 | Adaptive per-pixel line coverage samples |
-| Triangle fill strength | 0.35 | Conservative interior fill relative strength |
-| Triangle fill subpixel grid | 2x2 | Per-pixel fill coverage samples |
-| Edge accent strength | 1.0 | Luminous edge strength when fill is active |
 | CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
 | Bounding box pad | `ceil(effective_thickness * 3.0)` | Pixel padding around segment |
 | Energy cutoff | 0.0005 | Minimum averaged super-Gaussian coverage to deposit |

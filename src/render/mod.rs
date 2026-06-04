@@ -858,8 +858,12 @@ fn accumulate_spectral_steps_into_rows(
         let substep_hdr_scale = params.hdr_scale / substeps as f64;
 
         for substep in 0..substeps {
-            let t = (substep as f32 + 0.5) / substeps as f32;
-            let sample_vertices = interpolate_triangle_vertices(vertices, next_vertices, t);
+            let sample_vertices = if substep == 0 {
+                vertices
+            } else {
+                let t = substep as f32 / substeps as f32;
+                interpolate_triangle_vertices(vertices, next_vertices, t)
+            };
             draw_triangle_batch_spectral_rows(
                 accum_spd,
                 &BatchDrawParams {

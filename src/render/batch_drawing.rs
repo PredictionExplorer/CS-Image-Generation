@@ -4,11 +4,7 @@
 //! line segments together, improving CPU cache utilization and instruction pipelining.
 
 use super::color::OklabColor;
-use super::constants::CRISP_TRIANGLE_EDGE_STRENGTH;
-use super::drawing::{
-    LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_rows,
-    draw_triangle_fill_spectral_rows,
-};
+use super::drawing::{LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_rows};
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 
@@ -57,14 +53,13 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
     let [v0, v1, v2] = params.vertices;
     let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = params.hdr_multipliers;
 
-    draw_triangle_fill_spectral_rows(
+    draw_line_segment_aa_spectral_rows(
         accum,
         params.width,
         params.height,
         params.row_start,
         params.row_end,
-        params.vertices,
-        params.hdr_scale,
+        SpectralLineSegment { start: v0, end: v1, hdr_scale: params.hdr_scale * hdr_mult_01 },
     );
 
     draw_line_segment_aa_spectral_rows(
@@ -73,11 +68,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
         params.height,
         params.row_start,
         params.row_end,
-        SpectralLineSegment {
-            start: v0,
-            end: v1,
-            hdr_scale: params.hdr_scale * CRISP_TRIANGLE_EDGE_STRENGTH * hdr_mult_01,
-        },
+        SpectralLineSegment { start: v1, end: v2, hdr_scale: params.hdr_scale * hdr_mult_12 },
     );
 
     draw_line_segment_aa_spectral_rows(
@@ -86,24 +77,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
         params.height,
         params.row_start,
         params.row_end,
-        SpectralLineSegment {
-            start: v1,
-            end: v2,
-            hdr_scale: params.hdr_scale * CRISP_TRIANGLE_EDGE_STRENGTH * hdr_mult_12,
-        },
-    );
-
-    draw_line_segment_aa_spectral_rows(
-        accum,
-        params.width,
-        params.height,
-        params.row_start,
-        params.row_end,
-        SpectralLineSegment {
-            start: v2,
-            end: v0,
-            hdr_scale: params.hdr_scale * CRISP_TRIANGLE_EDGE_STRENGTH * hdr_mult_20,
-        },
+        SpectralLineSegment { start: v2, end: v0, hdr_scale: params.hdr_scale * hdr_mult_20 },
     );
 }
 
@@ -272,5 +246,29 @@ mod tests {
         ];
 
         assert_eq!(max_triangle_vertex_motion_px(start, end), 5.0);
+    }
+
+    #[test]
+    fn test_triangle_batch_does_not_fill_interior_by_default() {
+        let width = 48usize;
+        let height = 48usize;
+        let mut accum = vec![[0.0; NUM_BINS]; width * height];
+        let vertices = [
+            TriangleVertex { x: 4.0, y: 4.0, z: 0.0, color: (0.7, 0.2, 0.0), alpha: 1.0 },
+            TriangleVertex { x: 44.0, y: 4.0, z: 0.0, color: (0.7, -0.1, 0.2), alpha: 1.0 },
+            TriangleVertex { x: 4.0, y: 44.0, z: 0.0, color: (0.7, 0.0, -0.2), alpha: 1.0 },
+        ];
+
+        draw_triangle_batch_spectral(
+            &mut accum,
+            width as u32,
+            height as u32,
+            vertices,
+            [1.0, 1.0, 1.0],
+            1.0,
+        );
+
+        let interior_energy: f64 = accum[16 * width + 16].iter().sum();
+        assert_eq!(interior_energy, 0.0, "default triangle batch must remain edge-only");
     }
 }
