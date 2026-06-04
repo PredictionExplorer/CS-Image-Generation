@@ -133,11 +133,12 @@ overexposed lightness, and hard gamut clipping.
 ```
 for step in 0..total_steps:
     form triangle from positions[0][step], positions[1][step], positions[2][step]
-    if high-resolution interpolation is active:
+    if motion interpolation is active:
         draw interpolated triangle samples toward step + 1 with compensated energy
+    rasterize a conservative anti-aliased spectral triangle fill
     for each of 3 edges (0-1, 1-2, 2-0):
         compute velocity HDR multiplier for this edge
-        rasterize edge as anti-aliased spectral line segment into SPD buffer
+        rasterize luminous edge accent as anti-aliased spectral line segment
 ```
 
 ### 3.2 Triangle Vertex Preparation
@@ -243,7 +244,7 @@ else:
     substeps = clamp(ceil(max_motion_px / 1.0), 1, 24)
 
 for substep in 0..substeps:
-    t = substep / substeps
+    t = (substep + 0.5) / substeps
     sample_position = lerp(position[step], position[step + 1], t)
     sample_color = lerp(color[step], color[step + 1], t)
     sample_hdr_scale = hdr_scale / substeps
@@ -254,7 +255,28 @@ The `1 / substeps` energy compensation is important: interpolation increases
 spatial sampling density, not exposure. Checkpointed video frames do not
 interpolate beyond their current checkpoint, so frames do not leak future motion.
 
-### 3.6 Crisp SDF Line Segment Splatting
+### 3.6 Anti-Aliased Spectral Triangle Fill
+
+Each triangle also deposits a conservative translucent interior fill. This makes
+large translucent regions real filled surfaces instead of relying only on dense
+wireframe edge overlap.
+
+```
+area = abs(edge(v0, v1, v2)) / 2
+perimeter = length(v0-v1) + length(v1-v2) + length(v2-v0)
+edge_equivalent_width = 0.30 * resolution_scale
+area_normalizer = clamp((perimeter * edge_equivalent_width) / area, 0, 1)
+fill_energy = hdr_scale * 0.35 * area_normalizer
+```
+
+Pixels inside the triangle are tested with barycentric coordinates over a 2x2
+subpixel grid. Covered samples interpolate `OkLab` color and alpha
+barycentrically, convert the averaged color to a spectral kernel, and deposit a
+low-energy SPD contribution. The `area_normalizer` keeps very large triangles
+from overwhelming the image while still providing smooth anti-aliased
+silhouettes.
+
+### 3.7 Crisp SDF Line Segment Splatting
 
 Each edge is rasterized as an anti-aliased line segment with a steep
 super-Gaussian falloff. This is the innermost loop and deposits energy into the
@@ -316,7 +338,7 @@ for py in min_y..=max_y:
         start_energy_sum = 0
         end_energy_sum = 0
 
-        for each 2x2 subpixel sample:
+        for each adaptive 2x2 or 4x4 subpixel sample:
             pax = sample_x - v0.x
             pay = sample_y - v0.y
             h = project sample onto segment, clamped to [0, 1]
@@ -330,16 +352,19 @@ for py in min_y..=max_y:
             start_energy_sum += weighted_energy * (1 - h)
             end_energy_sum += weighted_energy * h
 
-        coverage = energy_sum / 4
+        coverage = energy_sum / sample_count
         if coverage < 0.0005: continue
 
         for (bin, weight) in kernel0:
-            accum_spd[pixel_index][bin] += base_energy_mult * start_energy_sum * weight / 4
+            accum_spd[pixel_index][bin] += base_energy_mult * start_energy_sum * weight / sample_count
         for (bin, weight) in kernel1:
-            accum_spd[pixel_index][bin] += base_energy_mult * end_energy_sum * weight / 4
+            accum_spd[pixel_index][bin] += base_energy_mult * end_energy_sum * weight / sample_count
 ```
 
-### 3.7 Parallelization
+Thin or diagonal lines use the 4x4 grid; thick near-axis-aligned lines use the
+cheaper 2x2 grid.
+
+### 3.8 Parallelization
 
 The accumulation supports two parallelization strategies:
 
@@ -586,7 +611,9 @@ To produce a single spectral image (16-bit PNG):
 For very large stills, the final accumulated frame can switch to a striped
 renderer. The striped path renders row bands with guard rows, quantizes each
 band to Display P3, and stitches the final 16-bit image without allocating a
-full-frame `width * height * 64 * f64` SPD buffer. The generator logs a
+full-frame `width * height * 64 * f64` SPD buffer. Guard rows scale with the
+maximum crisp footprint at the output resolution so cross-tile splats are not
+clipped. The generator logs a
 full-frame SPD memory estimate before rendering so extreme-resolution jobs are
 visible up front.
 
@@ -835,7 +862,10 @@ main trajectory video (default quality vs `--fast-encode`).
 | Interpolation start | 1.0 px | Minimum projected motion for render-time substeps |
 | Interpolation target motion | 1.0 px | Desired max body motion per render-time substep |
 | Max interpolation substeps | 24 | Upper bound per simulation interval |
-| Subpixel coverage grid | 2x2 | Per-pixel line coverage samples |
+| Line subpixel coverage grid | 2x2 or 4x4 | Adaptive per-pixel line coverage samples |
+| Triangle fill strength | 0.35 | Conservative interior fill relative strength |
+| Triangle fill subpixel grid | 2x2 | Per-pixel fill coverage samples |
+| Edge accent strength | 1.0 | Luminous edge strength when fill is active |
 | CoC factor | 0.0 | Circle of confusion disabled in crisp mode |
 | Bounding box pad | `ceil(effective_thickness * 3.0)` | Pixel padding around segment |
 | Energy cutoff | 0.0005 | Minimum averaged super-Gaussian coverage to deposit |

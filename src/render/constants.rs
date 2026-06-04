@@ -212,6 +212,27 @@ pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.0005;
 /// Subpixel grid dimension used for crisp line coverage integration.
 pub const CRISP_LINE_SUBPIXEL_GRID: usize = 2;
 
+/// Higher-quality subpixel grid used for thin or diagonal high-risk line coverage.
+pub const CRISP_LINE_SUBPIXEL_GRID_MAX: usize = 4;
+
+/// Lines thinner than this scaled width use the higher-quality AA grid.
+pub const CRISP_LINE_ADAPTIVE_AA_THINNESS_FACTOR: f32 = 0.85;
+
+/// Slope ratio above which a line is treated as diagonal for adaptive AA.
+pub const CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD: f32 = 0.08;
+
+/// Relative strength of the conservative spectral triangle interior fill.
+pub const CRISP_TRIANGLE_FILL_STRENGTH: f64 = 0.35;
+
+/// Relative strength of luminous triangle edge accents when fill is active.
+pub const CRISP_TRIANGLE_EDGE_STRENGTH: f64 = 1.0;
+
+/// Subpixel grid dimension used for anti-aliased triangle fill coverage.
+pub const CRISP_TRIANGLE_FILL_SUBPIXEL_GRID: usize = 2;
+
+/// Additional guard rows beyond the maximum scaled crisp footprint.
+pub const HIGH_RES_TILE_GUARD_MARGIN_ROWS: usize = 2;
+
 /// Reference short-edge resolution for crisp line thickness tuning.
 pub const CRISP_LINE_REFERENCE_MIN_DIM: f32 = 2234.0;
 
@@ -247,13 +268,22 @@ pub fn crisp_line_resolution_scale(width: u32, height: u32) -> f32 {
 #[must_use]
 #[inline]
 pub fn crisp_line_interpolation_substeps(width: u32, height: u32, max_motion_px: f32) -> usize {
-    let _scale = crisp_line_resolution_scale(width, height);
+    let scale = crisp_line_resolution_scale(width, height).sqrt().clamp(1.0, 4.0);
     if max_motion_px <= CRISP_INTERPOLATION_MIN_MOTION_PX {
         return 1;
     }
 
-    ((max_motion_px / CRISP_INTERPOLATION_TARGET_STEP_PX).ceil() as usize)
+    ((max_motion_px / (CRISP_INTERPOLATION_TARGET_STEP_PX / scale)).ceil() as usize)
         .clamp(1, CRISP_INTERPOLATION_MAX_SUBSTEPS)
+}
+
+/// Minimum guard rows needed for tiled rendering at the given resolution.
+#[must_use]
+#[inline]
+pub fn crisp_tiled_guard_rows(width: u32, height: u32) -> usize {
+    let scale = crisp_line_resolution_scale(width, height);
+    let max_footprint = (CRISP_LINE_MAX_THICKNESS * scale * 3.0).ceil() as usize;
+    HIGH_RES_TILE_GUARD_ROWS.max(max_footprint + HIGH_RES_TILE_GUARD_MARGIN_ROWS)
 }
 
 /// Minimum spectral lobe width, in SPD bins, for crisp color deposits.

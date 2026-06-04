@@ -185,6 +185,9 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
     assert_eq!(constants::crisp_line_interpolation_substeps(3456, 2234, 0.75), 1);
     assert!(constants::crisp_line_interpolation_substeps(3456, 2234, 50.0) > 1);
     assert!(constants::CRISP_LINE_SUBPIXEL_GRID >= 2);
+    assert!(
+        constants::crisp_tiled_guard_rows(100_000, 64_640) > constants::HIGH_RES_TILE_GUARD_ROWS
+    );
     assert_eq!(constants::SWEEP_BLOOM_RADIUS, 0);
     assert_eq!(constants::SWEEP_BLOOM_STRENGTH, 0.0);
     const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.75) };

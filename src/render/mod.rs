@@ -858,12 +858,8 @@ fn accumulate_spectral_steps_into_rows(
         let substep_hdr_scale = params.hdr_scale / substeps as f64;
 
         for substep in 0..substeps {
-            let t = substep as f32 / substeps as f32;
-            let sample_vertices = if substep == 0 {
-                vertices
-            } else {
-                interpolate_triangle_vertices(vertices, next_vertices, t)
-            };
+            let t = (substep as f32 + 0.5) / substeps as f32;
+            let sample_vertices = interpolate_triangle_vertices(vertices, next_vertices, t);
             draw_triangle_batch_spectral_rows(
                 accum_spd,
                 &BatchDrawParams {
@@ -1322,7 +1318,7 @@ fn render_final_frame_spectral_tiled(
     );
 
     let tile_rows = constants::HIGH_RES_TILE_ROWS.max(1);
-    let guard_rows = constants::HIGH_RES_TILE_GUARD_ROWS;
+    let guard_rows = constants::crisp_tiled_guard_rows(ctx.width, ctx.height);
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
