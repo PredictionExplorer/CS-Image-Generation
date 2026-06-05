@@ -180,11 +180,13 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED, 0.0);
     assert!(constants::CRISP_LINE_MIN_THICKNESS >= 0.30);
     assert!(constants::CRISP_LINE_FALLOFF_EXPONENT <= 2.1);
+    assert!(constants::CRISP_LINE_ENERGY_CUTOFF >= 0.004);
     assert!((constants::crisp_line_resolution_scale(3456, 2234) - 1.0).abs() < 0.001);
     assert!(constants::crisp_line_resolution_scale(10_000, 6_460) > 1.0);
     assert_eq!(constants::crisp_line_interpolation_substeps(3456, 2234, 0.75), 1);
-    assert!(constants::crisp_line_interpolation_substeps(3456, 2234, 50.0) > 1);
-    assert!(constants::CRISP_LINE_SUBPIXEL_GRID >= 2);
+    assert_eq!(constants::crisp_line_interpolation_substeps(3456, 2234, 8.0), 1);
+    assert!(constants::crisp_line_interpolation_substeps(3456, 2234, 50.0) <= 8);
+    assert_eq!(constants::CRISP_LINE_SUBPIXEL_GRID, 2);
     assert!(
         constants::crisp_tiled_guard_rows(100_000, 64_640) > constants::HIGH_RES_TILE_GUARD_ROWS
     );

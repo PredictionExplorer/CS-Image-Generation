@@ -207,19 +207,10 @@ pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
 pub const CRISP_LINE_FALLOFF_EXPONENT: f32 = 2.0;
 
 /// Minimum averaged per-pixel coverage retained by crisp line splats.
-pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.0005;
+pub const CRISP_LINE_ENERGY_CUTOFF: f32 = 0.004;
 
 /// Subpixel grid dimension used for crisp line coverage integration.
 pub const CRISP_LINE_SUBPIXEL_GRID: usize = 2;
-
-/// Higher-quality subpixel grid used for thin or diagonal high-risk line coverage.
-pub const CRISP_LINE_SUBPIXEL_GRID_MAX: usize = 4;
-
-/// Lines thinner than this scaled width use the higher-quality AA grid.
-pub const CRISP_LINE_ADAPTIVE_AA_THINNESS_FACTOR: f32 = 0.85;
-
-/// Slope ratio above which a line is treated as diagonal for adaptive AA.
-pub const CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD: f32 = 0.08;
 
 /// Additional guard rows beyond the maximum scaled crisp footprint.
 pub const HIGH_RES_TILE_GUARD_MARGIN_ROWS: usize = 2;
@@ -236,11 +227,17 @@ pub const CRISP_LINE_RESOLUTION_SCALE_MAX: f32 = 32.0;
 /// Minimum projected body motion that enables render-time line interpolation.
 pub const CRISP_INTERPOLATION_MIN_MOTION_PX: f32 = 1.0;
 
+/// Resolution scale at which normal motion interpolation begins.
+pub const CRISP_INTERPOLATION_SCALE_START: f32 = 1.5;
+
+/// Default-resolution motion that is large enough to justify interpolation.
+pub const CRISP_INTERPOLATION_EXTREME_MOTION_PX: f32 = 12.0;
+
 /// Target maximum pixel travel per interpolated high-resolution sample.
-pub const CRISP_INTERPOLATION_TARGET_STEP_PX: f32 = 1.0;
+pub const CRISP_INTERPOLATION_TARGET_STEP_PX: f32 = 2.5;
 
 /// Maximum number of render-time interpolation samples per simulation interval.
-pub const CRISP_INTERPOLATION_MAX_SUBSTEPS: usize = 24;
+pub const CRISP_INTERPOLATION_MAX_SUBSTEPS: usize = 8;
 
 /// Compute the resolution-aware scale for crisp spectral line widths.
 #[must_use]
@@ -259,12 +256,19 @@ pub fn crisp_line_resolution_scale(width: u32, height: u32) -> f32 {
 #[must_use]
 #[inline]
 pub fn crisp_line_interpolation_substeps(width: u32, height: u32, max_motion_px: f32) -> usize {
-    let scale = crisp_line_resolution_scale(width, height).sqrt().clamp(1.0, 4.0);
+    let scale = crisp_line_resolution_scale(width, height);
     if max_motion_px <= CRISP_INTERPOLATION_MIN_MOTION_PX {
         return 1;
     }
 
-    ((max_motion_px / (CRISP_INTERPOLATION_TARGET_STEP_PX / scale)).ceil() as usize)
+    let high_resolution = scale >= CRISP_INTERPOLATION_SCALE_START;
+    let extreme_motion = max_motion_px >= CRISP_INTERPOLATION_EXTREME_MOTION_PX;
+    if !high_resolution && !extreme_motion {
+        return 1;
+    }
+
+    let scale_factor = if high_resolution { scale.sqrt().clamp(1.0, 2.0) } else { 1.0 };
+    ((max_motion_px / (CRISP_INTERPOLATION_TARGET_STEP_PX / scale_factor)).ceil() as usize)
         .clamp(1, CRISP_INTERPOLATION_MAX_SUBSTEPS)
 }
 

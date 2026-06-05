@@ -2,11 +2,10 @@
 
 use super::color::OklabColor;
 use super::constants::{
-    CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_ADAPTIVE_AA_THINNESS_FACTOR,
-    CRISP_LINE_BASE_THICKNESS, CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD, CRISP_LINE_ENERGY_CUTOFF,
+    CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_ENERGY_CUTOFF,
     CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
-    CRISP_LINE_SUBPIXEL_GRID, CRISP_LINE_SUBPIXEL_GRID_MAX, CRISP_SPECTRAL_KERNEL_RADIUS_BINS,
-    CRISP_SPECTRAL_SIGMA_MAX_BINS, CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
+    CRISP_LINE_SUBPIXEL_GRID, CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
+    CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
@@ -266,37 +265,6 @@ pub fn draw_line_segment_aa_spectral(
     draw_line_segment_aa_spectral_rows(accum, width, height, 0, height as usize, segment);
 }
 
-#[inline]
-fn line_subpixel_grid(dx: f32, dy: f32, thickness: f32, resolution_scale: f32) -> usize {
-    let abs_dx = dx.abs();
-    let abs_dy = dy.abs();
-    let max_axis = abs_dx.max(abs_dy);
-    if max_axis <= f32::EPSILON {
-        return CRISP_LINE_SUBPIXEL_GRID;
-    }
-
-    let slope_ratio = abs_dx.min(abs_dy) / max_axis;
-    let thin_line = thickness
-        <= CRISP_LINE_MIN_THICKNESS * resolution_scale * CRISP_LINE_ADAPTIVE_AA_THINNESS_FACTOR;
-    let diagonal = slope_ratio >= CRISP_LINE_DIAGONAL_SLOPE_THRESHOLD;
-    if thin_line || diagonal { CRISP_LINE_SUBPIXEL_GRID_MAX } else { CRISP_LINE_SUBPIXEL_GRID }
-}
-
-#[inline]
-fn smooth_cutoff_fade(coverage: f64) -> f64 {
-    let cutoff = f64::from(CRISP_LINE_ENERGY_CUTOFF);
-    if coverage <= cutoff {
-        return 0.0;
-    }
-
-    let soft_end = cutoff * 8.0;
-    if coverage >= soft_end {
-        return 1.0;
-    }
-
-    smoothstep((coverage - cutoff) / (soft_end - cutoff))
-}
-
 /// Draw anti-aliased line segment into an owned row band of the destination buffer.
 pub(crate) fn draw_line_segment_aa_spectral_rows(
     accum: &mut [[f64; NUM_BINS]],
@@ -359,7 +327,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     // Keep distant geometry visible; the black field provides separation without fog.
     let depth_fade = (-avg_z.abs() * 0.0007).exp().clamp(0.18, 1.0);
     let base_energy_mult = hdr_scale * f64::from(depth_fade) * f64::from(energy_conservation);
-    let subpixel_grid = line_subpixel_grid(dx, dy, thickness, resolution_scale).max(1);
+    let subpixel_grid = CRISP_LINE_SUBPIXEL_GRID.max(1);
     let subpixel_count = (subpixel_grid * subpixel_grid) as f64;
 
     for py in min_y..=max_y {
@@ -402,13 +370,12 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             }
 
             let coverage = energy_sum / subpixel_count;
-            let cutoff_fade = smooth_cutoff_fade(coverage);
-            if cutoff_fade <= 0.0 {
+            if coverage < f64::from(CRISP_LINE_ENERGY_CUTOFF) {
                 continue;
             }
 
             let idx = (py as usize - row_start) * width as usize + px as usize;
-            let energy_scale = (base_energy_mult * cutoff_fade) / subpixel_count;
+            let energy_scale = base_energy_mult / subpixel_count;
 
             for &(bin, weight) in &kernel0 {
                 accum[idx][bin] += energy_scale * start_energy_sum * weight;
@@ -594,18 +561,6 @@ mod tests {
     }
 
     #[test]
-    fn test_adaptive_line_aa_uses_more_samples_for_diagonals_and_thin_lines() {
-        let scale = crate::render::constants::crisp_line_resolution_scale(3456, 2234);
-        let thick_axis = line_subpixel_grid(20.0, 0.0, 2.0, scale);
-        let thin_axis = line_subpixel_grid(20.0, 0.0, 0.2, scale);
-        let diagonal = line_subpixel_grid(20.0, 13.0, 2.0, scale);
-
-        assert_eq!(thick_axis, CRISP_LINE_SUBPIXEL_GRID);
-        assert_eq!(thin_axis, CRISP_LINE_SUBPIXEL_GRID_MAX);
-        assert_eq!(diagonal, CRISP_LINE_SUBPIXEL_GRID_MAX);
-    }
-
-    #[test]
     fn test_crisp_line_resolution_scale_tracks_output_size() {
         let default_scale = crate::render::constants::crisp_line_resolution_scale(3456, 2234);
         let preview_scale = crate::render::constants::crisp_line_resolution_scale(640, 360);
@@ -619,8 +574,10 @@ mod tests {
     }
 
     #[test]
-    fn test_crisp_line_interpolation_activates_for_large_motion_at_high_resolution() {
-        let default_substeps =
+    fn test_crisp_line_interpolation_is_conservative_at_default_resolution() {
+        let moderate_default_substeps =
+            crate::render::constants::crisp_line_interpolation_substeps(3456, 2234, 8.0);
+        let extreme_default_substeps =
             crate::render::constants::crisp_line_interpolation_substeps(3456, 2234, 20.0);
         let large_substeps =
             crate::render::constants::crisp_line_interpolation_substeps(10_000, 6_460, 20.0);
@@ -630,8 +587,9 @@ mod tests {
             crate::render::constants::crisp_line_interpolation_substeps(100_000, 64_640, 10_000.0);
 
         assert_eq!(subpixel_motion, 1);
-        assert!(default_substeps > 1);
-        assert!(large_substeps >= default_substeps);
+        assert_eq!(moderate_default_substeps, 1);
+        assert!(extreme_default_substeps > 1);
+        assert!(large_substeps >= extreme_default_substeps);
         assert_eq!(capped_substeps, crate::render::constants::CRISP_INTERPOLATION_MAX_SUBSTEPS);
     }
 }
