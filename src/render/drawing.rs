@@ -332,7 +332,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
 
     for py in min_y..=max_y {
         for px in min_x..=max_x {
-            let mut energy_sum = 0.0_f64;
+            let mut coverage_sum = 0.0_f64;
             let mut start_energy_sum = 0.0_f64;
             let mut end_energy_sum = 0.0_f64;
 
@@ -363,13 +363,13 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
                     let alpha = alpha0 * (1.0 - h64) + alpha1 * h64;
                     let weighted_energy = energy * alpha;
 
-                    energy_sum += weighted_energy;
+                    coverage_sum += energy;
                     start_energy_sum += weighted_energy * (1.0 - h64);
                     end_energy_sum += weighted_energy * h64;
                 }
             }
 
-            let coverage = energy_sum / subpixel_count;
+            let coverage = coverage_sum / subpixel_count;
             if coverage < f64::from(CRISP_LINE_ENERGY_CUTOFF) {
                 continue;
             }
@@ -558,6 +558,34 @@ mod tests {
 
         assert!(active_rows >= 2, "subpixel diagonal should retain anti-aliased row coverage");
         assert!(row_energy(4) > row_energy(2), "main diagonal band should dominate distant rows");
+    }
+
+    #[test]
+    fn test_production_alpha_line_survives_coverage_cutoff() {
+        let width = 2234usize;
+        let height = 2234usize;
+        let row_start = 100usize;
+        let row_end = row_start + 1;
+        let mut accum = vec![[0.0; NUM_BINS]; width * (row_end - row_start)];
+        let mut segment =
+            make_segment((100.0, row_start as f32, 0.0), (300.0, row_start as f32, 0.0), 1.0);
+        segment.start.alpha = 1.0 / 15_000_000.0;
+        segment.end.alpha = 1.0 / 15_000_000.0;
+
+        draw_line_segment_aa_spectral_rows(
+            &mut accum,
+            width as u32,
+            height as u32,
+            row_start,
+            row_end,
+            segment,
+        );
+
+        let total_energy: f64 = accum.iter().flat_map(|bins| bins.iter()).sum();
+        assert!(
+            total_energy > 0.0,
+            "production-scale alpha should not be rejected by the geometric coverage cutoff"
+        );
     }
 
     #[test]
