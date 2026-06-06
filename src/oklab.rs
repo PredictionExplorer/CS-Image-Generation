@@ -148,6 +148,73 @@ pub fn oklab_to_linear_rec2020(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     (r, g, b)
 }
 
+/// Convert cylindrical `OKLCh` coordinates to `OKLab`.
+#[must_use]
+#[inline]
+pub fn oklch_to_oklab(lightness: f64, chroma: f64, hue_degrees: f64) -> (f64, f64, f64) {
+    let hue_rad = hue_degrees.to_radians();
+    (lightness, chroma * hue_rad.cos(), chroma * hue_rad.sin())
+}
+
+/// Convert `OKLab` to cylindrical `OKLCh` coordinates.
+#[must_use]
+#[inline]
+pub fn oklab_to_oklch(lightness: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let chroma = (a * a + b * b).sqrt();
+    let hue = b.atan2(a).to_degrees().rem_euclid(360.0);
+    (lightness, chroma, hue)
+}
+
+#[inline]
+fn oklab_to_linear_display_p3(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let (x, y, z) = oklab_to_xyz(l, a, b);
+    let r = 2.493_496_911_941_425 * x - 0.931_383_617_919_124 * y - 0.402_710_784_450_717 * z;
+    let g = -0.829_488_969_561_574 * x + 1.762_664_060_318_346 * y + 0.023_624_685_841_943 * z;
+    let b = 0.035_845_830_243_784 * x - 0.076_172_389_268_041 * y + 0.956_884_524_007_687 * z;
+    (r, g, b)
+}
+
+#[inline]
+fn in_display_p3_gamut(l: f64, chroma: f64, hue_degrees: f64) -> bool {
+    let (lab_l, a, b) = oklch_to_oklab(l, chroma, hue_degrees);
+    let (r, g, blue) = oklab_to_linear_display_p3(lab_l, a, b);
+    (0.0..=1.0).contains(&r) && (0.0..=1.0).contains(&g) && (0.0..=1.0).contains(&blue)
+}
+
+/// Return the largest Display-P3-safe `OKLCh` chroma for a lightness and hue.
+///
+/// This is an inexpensive binary-search cusp approximation. It lets procedural
+/// palettes sample saturation as a fraction of the displayable color for each
+/// hue, instead of using a flat chroma ceiling that clips some hues and dulls
+/// others.
+#[must_use]
+pub fn max_display_p3_chroma_for_lh(lightness: f64, hue_degrees: f64) -> f64 {
+    let lightness = lightness.clamp(0.0, 1.0);
+    if lightness <= 0.0 || lightness >= 1.0 {
+        return 0.0;
+    }
+
+    let hue = hue_degrees.rem_euclid(360.0);
+    let mut low = 0.0;
+    let mut high = 0.7;
+
+    while in_display_p3_gamut(lightness, high, hue) && high < 1.4 {
+        low = high;
+        high *= 1.5;
+    }
+
+    for _ in 0..28 {
+        let mid = f64::midpoint(low, high);
+        if in_display_p3_gamut(lightness, mid, hue) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+
+    low
+}
+
 /// Batch convert linear sRGB pixels to `OKLab`.
 ///
 /// This function processes multiple pixels in parallel for better performance.
@@ -447,5 +514,30 @@ mod tests {
         assert!((r_unchanged - in_gamut.0).abs() < EPSILON, "In-gamut R changed");
         assert!((g_unchanged - in_gamut.1).abs() < EPSILON, "In-gamut G changed");
         assert!((b_unchanged - in_gamut.2).abs() < EPSILON, "In-gamut B changed");
+    }
+
+    #[test]
+    fn test_oklch_roundtrip_components() {
+        let original = (0.65, 0.18, 312.0);
+        let (l, a, b) = oklch_to_oklab(original.0, original.1, original.2);
+        let (l2, c2, h2) = oklab_to_oklch(l, a, b);
+
+        assert!((l2 - original.0).abs() < EPSILON);
+        assert!((c2 - original.1).abs() < EPSILON);
+        assert!((h2 - original.2).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_display_p3_chroma_cusp_is_positive_and_in_gamut() {
+        for hue in (0..360).step_by(15) {
+            for lightness in [0.42, 0.58, 0.74, 0.88] {
+                let max_chroma = max_display_p3_chroma_for_lh(lightness, f64::from(hue));
+                assert!(max_chroma > 0.0, "expected a positive cusp for hue {hue}");
+                assert!(
+                    in_display_p3_gamut(lightness, max_chroma * 0.995, f64::from(hue)),
+                    "cusp should stay displayable for hue {hue}, L {lightness}, C {max_chroma}"
+                );
+            }
+        }
     }
 }

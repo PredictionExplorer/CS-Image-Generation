@@ -45,6 +45,24 @@ impl Sha3RandomByteStream {
             velocity_range: velocity,
         }
     }
+
+    /// Create an independent deterministic stream from this stream's original seed and `domain`.
+    #[must_use]
+    pub fn fork(&self, domain: &[u8]) -> Self {
+        let mut hasher = Sha3_256::new();
+        hasher.update(&self.seed);
+        hasher.update([0]);
+        hasher.update(domain);
+        let derived_seed = hasher.finalize();
+        Self::new(
+            &derived_seed,
+            self.min_mass,
+            self.max_mass,
+            self.location_range,
+            self.velocity_range,
+        )
+    }
+
     /// Return the next pseudorandom byte, re-hashing when the buffer is exhausted.
     pub fn next_byte(&mut self) -> u8 {
         if self.index >= self.buffer.len() {
@@ -57,7 +75,8 @@ impl Sha3RandomByteStream {
         self.index += 1;
         b
     }
-    fn next_u64(&mut self) -> u64 {
+    /// Return the next pseudorandom `u64`.
+    pub fn next_u64(&mut self) -> u64 {
         let mut bytes = [0u8; 8];
         for b in &mut bytes {
             *b = self.next_byte();

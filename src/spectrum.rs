@@ -5,7 +5,10 @@
 //! draws into this SPD buffer, then we convert the spectrum → linear-sRGB
 //! right before the normal tone-mapping / bloom pipeline.
 
-use crate::oklab::GamutMapMode;
+use crate::oklab::{
+    GamutMapMode, linear_srgb_to_oklab, max_display_p3_chroma_for_lh, oklab_to_oklch,
+    oklch_to_oklab,
+};
 use crate::spectrum_simd;
 
 /// Number of wavelength buckets in the SPD.
@@ -220,6 +223,64 @@ pub fn wavelength_to_rgb(lambda: f64) -> (f64, f64, f64) {
     };
 
     (r * factor, g * factor, b * factor)
+}
+
+/// Convert a visible emission-line wavelength to a display-safe `OKLab` color.
+#[must_use]
+pub fn emission_line_to_oklab(
+    lambda: f64,
+    lightness: f64,
+    chroma_fraction: f64,
+) -> (f64, f64, f64) {
+    let lambda = lambda.clamp(LAMBDA_START, LAMBDA_END);
+    let (r, g, b) = wavelength_to_rgb(lambda);
+    let (_, a, b_lab) = linear_srgb_to_oklab(r, g, b);
+    let (_, _, hue) = oklab_to_oklch(0.0, a, b_lab);
+    let lightness = lightness.clamp(0.34, 0.94);
+    let max_chroma = max_display_p3_chroma_for_lh(lightness, hue);
+    let chroma = max_chroma * chroma_fraction.clamp(0.0, 0.98);
+    oklch_to_oklab(lightness, chroma, hue)
+}
+
+/// Approximate a blackbody temperature as a display-safe `OKLab` color.
+///
+/// The RGB approximation is intentionally lightweight; the palette engine uses
+/// it only to choose a natural warm/cool hue axis before applying gamut-relative
+/// chroma.
+#[must_use]
+pub fn blackbody_temperature_to_oklab(
+    kelvin: f64,
+    lightness: f64,
+    chroma_fraction: f64,
+) -> (f64, f64, f64) {
+    let temp = (kelvin.clamp(1_000.0, 40_000.0) / 100.0).max(1.0);
+
+    let red = if temp <= 66.0 {
+        1.0
+    } else {
+        (329.698_727_446 * (temp - 60.0).powf(-0.133_204_759_2) / 255.0).clamp(0.0, 1.0)
+    };
+    let green = if temp <= 66.0 {
+        (99.470_802_586_1 * temp.ln() - 161.119_568_166_1) / 255.0
+    } else {
+        288.122_169_528_3 * (temp - 60.0).powf(-0.075_514_849_2) / 255.0
+    }
+    .clamp(0.0, 1.0);
+    let blue = if temp >= 66.0 {
+        1.0
+    } else if temp <= 19.0 {
+        0.0
+    } else {
+        (138.517_731_223_1 * (temp - 10.0).ln() - 305.044_792_730_7) / 255.0
+    }
+    .clamp(0.0, 1.0);
+
+    let (_, a, b_lab) = linear_srgb_to_oklab(red, green, blue);
+    let (_, _, hue) = oklab_to_oklch(0.0, a, b_lab);
+    let lightness = lightness.clamp(0.34, 0.94);
+    let max_chroma = max_display_p3_chroma_for_lh(lightness, hue);
+    let chroma = max_chroma * chroma_fraction.clamp(0.0, 0.98);
+    oklch_to_oklab(lightness, chroma, hue)
 }
 
 /// Combined CIE XYZ lookup table for cache-friendly SPD conversion.
@@ -561,5 +622,34 @@ mod tests {
         let (r_650, _, _) = wavelength_to_rgb(650.0);
         let (r_700, _, _) = wavelength_to_rgb(700.0);
         assert!(r_700 < r_650, "700nm should have edge rolloff vs 650nm: {r_700} vs {r_650}");
+    }
+
+    #[test]
+    fn test_emission_line_to_oklab_tracks_wavelength_hue() {
+        let red = emission_line_to_oklab(656.3, 0.68, 0.75);
+        let teal = emission_line_to_oklab(500.7, 0.68, 0.75);
+        let (_, red_chroma, red_hue) = crate::oklab::oklab_to_oklch(red.0, red.1, red.2);
+        let (_, teal_chroma, teal_hue) = crate::oklab::oklab_to_oklch(teal.0, teal.1, teal.2);
+
+        assert!(red_chroma > 0.02);
+        assert!(teal_chroma > 0.02);
+        assert!(!(80.0..=330.0).contains(&red_hue), "H-alpha should land near red, got {red_hue}");
+        assert!(
+            (140.0..=240.0).contains(&teal_hue),
+            "OIII-like emission should land near green/cyan, got {teal_hue}"
+        );
+    }
+
+    #[test]
+    fn test_blackbody_temperature_to_oklab_varies_warm_to_cool() {
+        let warm = blackbody_temperature_to_oklab(2_200.0, 0.67, 0.7);
+        let cool = blackbody_temperature_to_oklab(12_000.0, 0.67, 0.7);
+        let (_, warm_chroma, warm_hue) = crate::oklab::oklab_to_oklch(warm.0, warm.1, warm.2);
+        let (_, cool_chroma, cool_hue) = crate::oklab::oklab_to_oklch(cool.0, cool.1, cool.2);
+
+        assert!(warm_chroma > 0.02);
+        assert!(cool_chroma > 0.02);
+        assert!(!(110.0..=330.0).contains(&warm_hue), "warm blackbody hue: {warm_hue}");
+        assert!((220.0..=320.0).contains(&cool_hue), "cool blackbody hue: {cool_hue}");
     }
 }
