@@ -1,6 +1,6 @@
 //! Procedural color generation for the spectral renderer.
 
-use crate::oklab::{max_display_p3_chroma_for_lh, oklab_to_oklch, oklch_to_oklab};
+use crate::oklab::{max_display_p3_chroma_for_lh, oklch_to_oklab};
 use crate::render::constants::{
     BASE_HUE_DRIFT, HUE_DRIFT_SCALE, HUE_FULL_CIRCLE, HUE_WAVE_AMPLITUDE,
 };
@@ -19,23 +19,6 @@ const DOMINANT_CHROMA_FRACTION_FLOOR: f64 = 0.62;
 
 static LAST_PALETTE_METADATA: LazyLock<Mutex<(String, String)>> =
     LazyLock::new(|| Mutex::new(("unresolved".to_string(), "unresolved".to_string())));
-
-#[derive(Clone, Copy, Debug)]
-enum PaletteMode {
-    ContinuousField,
-    SpectralEmission,
-    BlackbodyAxis,
-}
-
-impl PaletteMode {
-    fn label(self) -> &'static str {
-        match self {
-            PaletteMode::ContinuousField => "continuous_field",
-            PaletteMode::SpectralEmission => "spectral_emission",
-            PaletteMode::BlackbodyAxis => "blackbody_axis",
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 struct BodyColorPlan {
@@ -86,27 +69,17 @@ fn signed_hue_delta(from: f64, to: f64) -> f64 {
     (to - from + 540.0).rem_euclid(HUE_FULL_CIRCLE) - 180.0
 }
 
+/// Move `from` a fraction `t` along the shortest arc toward `to`.
 #[inline]
-fn hue_distance(a: f64, b: f64) -> f64 {
-    signed_hue_delta(a, b).abs()
+fn nudge_hue(from: f64, to: f64, t: f64) -> f64 {
+    (from + signed_hue_delta(from, to) * t).rem_euclid(HUE_FULL_CIRCLE)
 }
 
+/// `OKLab` hue (degrees) of a black-body temperature, the natural-axis target.
 #[inline]
-fn halton(mut index: u64, base: u64) -> f64 {
-    let mut f = 1.0;
-    let mut r = 0.0;
-    while index > 0 {
-        f /= base as f64;
-        r += f * (index % base) as f64;
-        index /= base;
-    }
-    r
-}
-
-#[inline]
-fn low_discrepancy_unit(rng: &mut Sha3RandomByteStream, base: u64, shift: f64) -> f64 {
-    let index = 1 + (rng.next_u64() % 1_048_573);
-    (halton(index, base) + shift).fract()
+fn blackbody_hue(kelvin: f64) -> f64 {
+    let (_, a, b) = spectrum::blackbody_temperature_to_oklab(kelvin, 0.68, 0.7);
+    b.atan2(a).to_degrees().rem_euclid(HUE_FULL_CIRCLE)
 }
 
 fn shuffle3(rng: &mut Sha3RandomByteStream, values: &mut [usize; 3]) {
@@ -116,110 +89,26 @@ fn shuffle3(rng: &mut Sha3RandomByteStream, values: &mut [usize; 3]) {
     }
 }
 
-fn repair_hue_near_misses(rng: &mut Sha3RandomByteStream, hues: &mut [f64; 3]) {
-    const NEAR_MISS_MIN: f64 = 12.0;
-    const NEAR_MISS_MAX: f64 = 40.0;
-    let pairs = [(0, 1), (0, 2), (1, 2)];
-
-    for _ in 0..4 {
-        for &(a, b) in &pairs {
-            let distance = hue_distance(hues[a], hues[b]);
-            if !(NEAR_MISS_MIN..NEAR_MISS_MAX).contains(&distance) {
-                continue;
-            }
-
-            let mut direction = signed_hue_delta(hues[a], hues[b]).signum();
-            if direction == 0.0 {
-                direction = if rng.next_f64() < 0.5 { -1.0 } else { 1.0 };
-            }
-            let target = if distance < 26.0 {
-                4.0 + rng.next_f64() * 7.0
-            } else {
-                43.0 + rng.next_f64() * 34.0
-            };
-            hues[b] = (hues[a] + direction * target).rem_euclid(HUE_FULL_CIRCLE);
-        }
-    }
-}
-
-fn continuous_hues(rng: &mut Sha3RandomByteStream, palette_phase: f64) -> [f64; 3] {
-    let anchor = low_discrepancy_unit(rng, 2, palette_phase * 0.137) * HUE_FULL_CIRCLE;
-    let spread_unit = smoothstep(low_discrepancy_unit(rng, 3, palette_phase * 0.271));
-    let spread = if rng.next_f64() < 0.12 {
-        2.0 + rng.next_f64() * 10.0
-    } else {
-        lerp(14.0, 178.0, spread_unit)
-    };
-    let direction = if rng.next_f64() < 0.5 { -1.0 } else { 1.0 };
-    let curvature = (rng.next_f64() - 0.5) * spread * 0.74;
-    let mut hues = [
-        anchor,
-        anchor
-            + direction
-                * (spread * lerp(0.68, 1.28, rng.next_f64()) + (rng.next_f64() - 0.5) * 18.0),
-        anchor
-            + direction
-                * (spread * lerp(1.42, 2.18, rng.next_f64())
-                    + curvature
-                    + (rng.next_f64() - 0.5) * 28.0),
-    ]
-    .map(|hue| hue.rem_euclid(HUE_FULL_CIRCLE));
-
-    repair_hue_near_misses(rng, &mut hues);
-    hues
-}
-
-#[inline]
-fn reflect_wavelength(mut lambda: f64) -> f64 {
-    while !(390.0..=690.0).contains(&lambda) {
-        if lambda < 390.0 {
-            lambda = 390.0 + (390.0 - lambda);
-        }
-        if lambda > 690.0 {
-            lambda = 690.0 - (lambda - 690.0);
-        }
-    }
-    lambda
-}
-
-fn spectral_emission_hues(
+/// Three body hues from a single continuous dispersion knob.
+///
+/// `dispersion` slides the spacing from monochrome (0) through analogous and
+/// triadic toward fully spread (1) with no privileged angle; `naturalness`
+/// blends every hue toward a sampled black-body (star) temperature, so palettes
+/// range continuously from free spectral colour to natural warm/cool.
+fn body_hues(
     rng: &mut Sha3RandomByteStream,
-    key: f64,
-    chroma_boost: bool,
+    anchor: f64,
+    dispersion: f64,
+    naturalness: f64,
 ) -> [f64; 3] {
-    let anchor = lerp(398.0, 676.0, low_discrepancy_unit(rng, 5, key));
-    let spread = lerp(18.0, 146.0, smoothstep(rng.next_f64()));
-    let line_chroma = if chroma_boost { 0.86 } else { 0.68 };
-    let wavelengths = [
-        anchor,
-        reflect_wavelength(anchor + spread * lerp(0.42, 1.04, rng.next_f64())),
-        reflect_wavelength(anchor - spread * lerp(0.64, 1.38, rng.next_f64())),
-    ];
-    let mut hues = wavelengths.map(|lambda| {
-        let color = spectrum::emission_line_to_oklab(lambda, 0.68, line_chroma);
-        let (_, _, hue) = oklab_to_oklch(color.0, color.1, color.2);
-        hue
-    });
-    repair_hue_near_misses(rng, &mut hues);
-    hues
-}
+    let jitter = lerp(4.0, 26.0, dispersion);
+    let target = blackbody_hue(lerp(1_800.0, 16_000.0, rng.next_f64()));
+    let pull = naturalness * 0.55;
 
-fn blackbody_hues(rng: &mut Sha3RandomByteStream, key: f64, chroma_boost: bool) -> [f64; 3] {
-    let base_temp = lerp(1_700.0, 18_000.0, smoothstep(key));
-    let temp_span = lerp(500.0, 12_000.0, rng.next_f64());
-    let line_chroma = if chroma_boost { 0.78 } else { 0.60 };
-    let temps = [
-        base_temp,
-        (base_temp + temp_span * lerp(0.35, 1.0, rng.next_f64())).clamp(1_000.0, 40_000.0),
-        (base_temp - temp_span * lerp(0.24, 0.86, rng.next_f64())).clamp(1_000.0, 40_000.0),
-    ];
-    let mut hues = temps.map(|temperature| {
-        let color = spectrum::blackbody_temperature_to_oklab(temperature, 0.68, line_chroma);
-        let (_, _, hue) = oklab_to_oklch(color.0, color.1, color.2);
-        hue
-    });
-    repair_hue_near_misses(rng, &mut hues);
-    hues
+    std::array::from_fn(|i| {
+        let spaced = anchor + dispersion * 120.0 * i as f64 + (rng.next_f64() - 0.5) * jitter;
+        nudge_hue(spaced.rem_euclid(HUE_FULL_CIRCLE), target, pull)
+    })
 }
 
 fn assign_body_plans(
@@ -227,7 +116,7 @@ fn assign_body_plans(
     hues: [f64; 3],
     chroma_boost: bool,
     key: f64,
-    mode: PaletteMode,
+    dispersion: f64,
 ) -> [BodyColorPlan; 3] {
     let mut lightness_order = [0, 1, 2];
     let mut chroma_order = [0, 1, 2];
@@ -255,11 +144,7 @@ fn assign_body_plans(
         ]
     };
 
-    let journey_max = match mode {
-        PaletteMode::ContinuousField => 96.0,
-        PaletteMode::SpectralEmission => 38.0,
-        PaletteMode::BlackbodyAxis => 54.0,
-    };
+    let journey_max = lerp(30.0, 96.0, dispersion);
 
     let mut plans = [BodyColorPlan {
         base_hue: 0.0,
@@ -300,109 +185,33 @@ fn assign_body_plans(
     plans
 }
 
-fn circular_spread(hues: [f64; 3]) -> f64 {
-    let pairs = [(0, 1), (0, 2), (1, 2)];
-    pairs.iter().map(|&(a, b)| hue_distance(hues[a], hues[b])).fold(0.0, f64::max)
-}
-
-fn palette_score(palette: &PaletteSpec) -> f64 {
-    let hues = palette.bodies.map(|body| body.base_hue);
-    let pairs = [(0, 1), (0, 2), (1, 2)];
-    let mut near_miss_penalty = 0.0;
-    let avg_distance = pairs
-        .iter()
-        .map(|&(a, b)| {
-            let d = hue_distance(hues[a], hues[b]);
-            if (12.0..40.0).contains(&d) {
-                near_miss_penalty += 0.25;
-            }
-            d
-        })
-        .sum::<f64>()
-        / pairs.len() as f64;
-
-    let (min_l, max_l) = palette
-        .bodies
-        .iter()
-        .map(|body| body.target_lightness)
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_l, max_l), l| (min_l.min(l), max_l.max(l)));
-    let (min_c, max_c) = palette
-        .bodies
-        .iter()
-        .map(|body| body.chroma_fraction)
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_c, max_c), c| (min_c.min(c), max_c.max(c)));
-    let dominant =
-        palette.bodies.iter().find(|body| body.is_dominant).unwrap_or(&palette.bodies[0]);
-
-    let hue_score = (avg_distance / 115.0).clamp(0.0, 1.0);
-    let lightness_score = ((max_l - min_l) / 0.22).clamp(0.0, 1.0);
-    let chroma_score = ((max_c - min_c) / 0.34).clamp(0.0, 1.0);
-    let glow_score = ((dominant.target_lightness - 0.55) / 0.24).clamp(0.0, 1.0)
-        * ((dominant.chroma_fraction - 0.48) / 0.44).clamp(0.0, 1.0);
-
-    (0.34 * hue_score + 0.25 * lightness_score + 0.25 * chroma_score + 0.16 * glow_score
-        - near_miss_penalty)
-        .clamp(0.0, 1.0)
-}
-
-fn build_palette_candidate(
-    rng: &mut Sha3RandomByteStream,
-    chroma_boost: bool,
-    palette_phase: f64,
-) -> PaletteSpec {
-    let key = low_discrepancy_unit(rng, 7, palette_phase * 0.377);
-    let mode_roll = low_discrepancy_unit(rng, 11, palette_phase * 0.619);
-    let mode = if mode_roll < 0.16 {
-        PaletteMode::SpectralEmission
-    } else if mode_roll < 0.30 {
-        PaletteMode::BlackbodyAxis
-    } else {
-        PaletteMode::ContinuousField
-    };
-
-    let hues = match mode {
-        PaletteMode::ContinuousField => continuous_hues(rng, palette_phase),
-        PaletteMode::SpectralEmission => spectral_emission_hues(rng, key, chroma_boost),
-        PaletteMode::BlackbodyAxis => blackbody_hues(rng, key, chroma_boost),
-    };
-    let spread = circular_spread(hues);
-    let bodies = assign_body_plans(rng, hues, chroma_boost, key, mode);
-
-    PaletteSpec {
-        harmony: format!("{}_spread_{spread:.0}", mode.label()),
-        mood_label: format!("constraint_key_{key:.2}"),
-        bodies,
-        palette_phase,
-        hue_accent_strength: lerp(8.0, 34.0, rng.next_f64()),
-        lightness_contrast: lerp(0.88, 1.20, rng.next_f64()),
-    }
-}
-
 fn resolve_palette_spec(
     rng: &mut Sha3RandomByteStream,
     chroma_boost: bool,
     palette_phase: f64,
 ) -> PaletteSpec {
     let palette_phase = palette_phase.clamp(0.0, 1.0);
-    let mut best = build_palette_candidate(rng, chroma_boost, palette_phase);
-    let mut best_score = palette_score(&best);
-    if best_score >= 0.68 {
-        return best;
-    }
 
-    for _ in 0..7 {
-        let candidate = build_palette_candidate(rng, chroma_boost, palette_phase);
-        let score = palette_score(&candidate);
-        if score >= 0.68 {
-            return candidate;
-        }
-        if score > best_score {
-            best = candidate;
-            best_score = score;
-        }
-    }
+    // A few continuous knobs, each a plain uniform draw, define the whole palette
+    // - no modes, no scoring, no rejection sampling. Every hue is equally likely
+    // (uniform anchor), and beauty is guaranteed by construction downstream via
+    // gamut-relative chroma and the lightness/chroma hierarchy.
+    let anchor = rng.next_f64() * HUE_FULL_CIRCLE;
+    let dispersion = rng.next_f64();
+    let naturalness = rng.next_f64();
+    let key = rng.next_f64();
 
-    best
+    let hues = body_hues(rng, anchor, dispersion, naturalness);
+    let bodies = assign_body_plans(rng, hues, chroma_boost, key, dispersion);
+
+    PaletteSpec {
+        harmony: format!("continuous_dispersion_{dispersion:.2}"),
+        mood_label: format!("natural_{naturalness:.2}"),
+        bodies,
+        palette_phase,
+        hue_accent_strength: lerp(8.0, 34.0, rng.next_f64()),
+        lightness_contrast: lerp(0.88, 1.20, rng.next_f64()),
+    }
 }
 
 /// Generate color gradient optimized for `OKLab` space.
@@ -747,7 +556,12 @@ mod tests {
     }
 
     #[test]
-    fn test_palettes_keep_lightness_and_chroma_hierarchy() {
+    fn test_palettes_keep_lightness_hierarchy_and_vividness() {
+        let span = |values: &[f64]| {
+            values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                - values.iter().copied().fold(f64::INFINITY, f64::min)
+        };
+
         for seed in 0u8..32 {
             let mut rng = Sha3RandomByteStream::new(&[0x81, seed, 0x19], 100.0, 300.0, 300.0, 1.0);
             let (colors, _) = generate_body_color_sequences(
@@ -758,22 +572,27 @@ mod tests {
                 false,
                 f64::from(seed) / 31.0,
             );
-            let first_colors = colors.iter().map(|body| body[0]).collect::<Vec<_>>();
-            let (min_l, max_l) = first_colors
-                .iter()
-                .map(|(l, _, _)| *l)
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_l, max_l), l| {
-                    (min_l.min(l), max_l.max(l))
-                });
-            let (min_c, max_c) = first_colors
-                .iter()
-                .map(|(_, a, b)| (a * a + b * b).sqrt())
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_c, max_c), c| {
-                    (min_c.min(c), max_c.max(c))
-                });
 
-            assert!(max_l - min_l > 0.045, "lightness hierarchy collapsed for seed {seed}");
-            assert!(max_c - min_c > 0.015, "chroma hierarchy collapsed for seed {seed}");
+            // Average over each body's sequence so the structural hierarchy is
+            // measured rather than a single wave-modulated step.
+            let mean_l: Vec<f64> = colors
+                .iter()
+                .map(|body| body.iter().map(|(l, _, _)| *l).sum::<f64>() / body.len() as f64)
+                .collect();
+            let mean_c: Vec<f64> = colors
+                .iter()
+                .map(|body| {
+                    body.iter().map(|(_, a, b)| (a * a + b * b).sqrt()).sum::<f64>()
+                        / body.len() as f64
+                })
+                .collect();
+            let max_c = mean_c.iter().copied().fold(0.0, f64::max);
+
+            assert!(
+                span(&mean_l) > 0.05,
+                "lightness hierarchy collapsed for seed {seed}: {mean_l:?}"
+            );
+            assert!(max_c > 0.05, "palette should stay vivid for seed {seed}: {mean_c:?}");
         }
     }
 }

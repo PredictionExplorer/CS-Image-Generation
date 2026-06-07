@@ -10,7 +10,7 @@ use super::constants::{
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use spectral_constants::{BIN_WIDTH, LAMBDA_END, LAMBDA_START};
+use spectral_constants::BIN_WIDTH;
 
 /// Runtime toggle: when true, non-production spectral dispersion is applied in the render path.
 pub static DISPERSION_BOOST_ENABLED: std::sync::atomic::AtomicBool =
@@ -42,72 +42,101 @@ pub struct SpectralLineSegment {
     pub hdr_scale: f64,
 }
 
-/// Convert `OkLab` hue to wavelength with perceptually uniform distribution.
-///
-/// This mapping ensures that the full visible spectrum (380-700nm) is utilized,
-/// providing rich color diversity across blues, greens, yellows, oranges, and reds.
-///
-/// The mapping is designed to align with perceptual color relationships:
-/// - Red hues (around 0°) map to long wavelengths (650-700nm)
-/// - Yellow hues (around 60°) map to yellow wavelengths (570-590nm)
-/// - Green hues (around 120°) map to green wavelengths (510-550nm)
-/// - Cyan hues (around 180°) map to cyan wavelengths (485-510nm)
-/// - Blue hues (around 240°) map to blue wavelengths (450-485nm)
-/// - Violet hues (around 300°) map to violet wavelengths (380-450nm)
-#[must_use]
-#[inline]
-pub(crate) fn oklab_hue_to_wavelength(a: f64, b: f64) -> f64 {
-    let hue_deg = oklab_hue_degrees(a, b);
-
-    // A smoothed violet-to-red bridge avoids the old hard magenta discontinuity.
-    // The dual-lobe path below handles this wrap with richer spectral energy.
-    if hue_deg >= 330.0 {
-        let t = smoothstep((hue_deg - 330.0) / 30.0);
-        return (405.0 + t * 285.0).clamp(LAMBDA_START, LAMBDA_END);
-    }
-
-    hue_to_wavelength_no_wrap(hue_deg).clamp(LAMBDA_START, LAMBDA_END)
-}
-
+/// `OKLab` hue angle in degrees, normalized to `[0, 360)`.
 #[inline]
 fn oklab_hue_degrees(a: f64, b: f64) -> f64 {
-    let hue_rad = b.atan2(a);
-    let mut hue_deg = hue_rad.to_degrees();
-    if hue_deg < 0.0 {
-        hue_deg += 360.0;
-    }
-    hue_deg
+    b.atan2(a).to_degrees().rem_euclid(360.0)
 }
 
 #[inline]
-fn hue_to_wavelength_no_wrap(hue_deg: f64) -> f64 {
-    // Map hue to wavelength using a perceptually uniform distribution
-    // This mapping is designed to maximize color variety and align with
-    // the natural color spectrum while accounting for OkLab's hue distribution
-    if hue_deg < 30.0 {
-        // Red to red-orange (0-30°) -> 700-650nm
-        700.0 - (hue_deg / 30.0) * 50.0
-    } else if hue_deg < 60.0 {
-        // Red-orange to orange (30-60°) -> 650-620nm
-        650.0 - ((hue_deg - 30.0) / 30.0) * 30.0
-    } else if hue_deg < 90.0 {
-        // Orange to yellow (60-90°) -> 620-570nm
-        620.0 - ((hue_deg - 60.0) / 30.0) * 50.0
-    } else if hue_deg < 150.0 {
-        // Yellow to green (90-150°) -> 570-510nm
-        570.0 - ((hue_deg - 90.0) / 60.0) * 60.0
-    } else if hue_deg < 210.0 {
-        // Green to cyan (150-210°) -> 510-485nm
-        510.0 - ((hue_deg - 150.0) / 60.0) * 25.0
-    } else if hue_deg < 270.0 {
-        // Cyan to blue (210-270°) -> 485-450nm
-        485.0 - ((hue_deg - 210.0) / 60.0) * 35.0
-    } else if hue_deg < 330.0 {
-        // Blue to violet (270-330°) -> 450-405nm, leaving deep violet for wrap lobes.
-        450.0 - ((hue_deg - 270.0) / 60.0) * 45.0
-    } else {
-        405.0
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+// ---- Spectral locus inversion -------------------------------------------------
+//
+// Rather than a hand-tuned per-region hue->wavelength ladder, the mapping is the
+// inverse of the CIE-derived spectral locus, measured once: for sampled
+// wavelengths we read back the rendered OKLab hue, then interpolate the inverse.
+// Equal hue steps therefore map to equal perceptual steps (no breakpoints, no
+// green-heavy band), and the "line of purples" between the red and violet ends
+// of the locus becomes one continuous red/violet crossfade instead of a
+// special-cased magenta wrap.
+
+const LOCUS_SAMPLES: usize = 256;
+const LOCUS_LAMBDA_MIN: f64 = 405.0;
+const LOCUS_LAMBDA_MAX: f64 = 690.0;
+
+struct LocusTable {
+    /// `(hue_deg, wavelength_nm)` sorted by ascending hue across the spectral arc.
+    points: Vec<(f64, f64)>,
+}
+
+static SPECTRAL_LOCUS: std::sync::LazyLock<LocusTable> =
+    std::sync::LazyLock::new(LocusTable::build);
+
+#[inline]
+fn locus_hue_for_wavelength(lambda: f64) -> f64 {
+    let (r, g, b) = crate::spectrum::wavelength_to_rgb(lambda);
+    let (_, a, b_lab) = crate::oklab::linear_srgb_to_oklab(r, g, b);
+    oklab_hue_degrees(a, b_lab)
+}
+
+impl LocusTable {
+    fn build() -> Self {
+        let mut points: Vec<(f64, f64)> = (0..=LOCUS_SAMPLES)
+            .map(|i| {
+                let lambda =
+                    lerp(LOCUS_LAMBDA_MIN, LOCUS_LAMBDA_MAX, i as f64 / LOCUS_SAMPLES as f64);
+                (locus_hue_for_wavelength(lambda), lambda)
+            })
+            .collect();
+        points.sort_by(|lhs, rhs| lhs.0.total_cmp(&rhs.0));
+        points.dedup_by(|lhs, rhs| (lhs.0 - rhs.0).abs() < 1e-6);
+        Self { points }
     }
+
+    #[inline]
+    fn arc_min_hue(&self) -> f64 {
+        self.points.first().map_or(0.0, |p| p.0)
+    }
+
+    #[inline]
+    fn arc_max_hue(&self) -> f64 {
+        self.points.last().map_or(360.0, |p| p.0)
+    }
+
+    /// Wavelength whose rendered hue matches `hue_deg` on the spectral arc.
+    fn wavelength_for_arc_hue(&self, hue_deg: f64) -> f64 {
+        let hue = hue_deg.clamp(self.arc_min_hue(), self.arc_max_hue());
+        let idx = self.points.partition_point(|p| p.0 < hue).clamp(1, self.points.len() - 1);
+        let (h0, l0) = self.points[idx - 1];
+        let (h1, l1) = self.points[idx];
+        let t = if (h1 - h0).abs() < 1e-9 { 0.0 } else { (hue - h0) / (h1 - h0) };
+        lerp(l0, l1, t)
+    }
+}
+
+/// Spectral emission lobes `(wavelength_nm, weight)` for an `OKLab` hue.
+///
+/// On the locus arc this is a single lobe; across the line of purples it is a
+/// red/violet pair whose balance slides smoothly, so magenta emerges naturally
+/// instead of from a hard-coded wrap region.
+fn hue_to_spectral_lobes(hue_deg: f64) -> SmallVec<[(f64, f64); 2]> {
+    let locus = &*SPECTRAL_LOCUS;
+    let (arc_min, arc_max) = (locus.arc_min_hue(), locus.arc_max_hue());
+    let mut lobes = SmallVec::new();
+
+    if (arc_min..=arc_max).contains(&hue_deg) {
+        lobes.push((locus.wavelength_for_arc_hue(hue_deg), 1.0));
+        return lobes;
+    }
+
+    let gap_width = 360.0 - arc_max + arc_min;
+    let red_weight = smoothstep((hue_deg - arc_max).rem_euclid(360.0) / gap_width);
+    lobes.push((locus.wavelength_for_arc_hue(arc_max), 1.0 - red_weight));
+    lobes.push((locus.wavelength_for_arc_hue(arc_min), red_weight));
+    lobes
 }
 
 #[inline]
@@ -154,19 +183,14 @@ fn add_gaussian_lobe(
 fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
     let (_l, a, b) = color;
     let chroma = (a * a + b * b).sqrt();
-    let hue = oklab_hue_degrees(a, b);
     let purity = (chroma / 0.34).clamp(0.0, 1.0);
     let sigma_nm = 8.0 - 5.5 * purity;
     let sigma_bins =
         (sigma_nm / BIN_WIDTH).clamp(CRISP_SPECTRAL_SIGMA_MIN_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS);
-    let mut kernel = SpectralKernel::new();
 
-    if hue >= 330.0 {
-        let red_weight = smoothstep((hue - 330.0) / 30.0);
-        add_gaussian_lobe(&mut kernel, 405.0, sigma_bins, 1.0 - red_weight);
-        add_gaussian_lobe(&mut kernel, 690.0, sigma_bins * 0.8, red_weight);
-    } else {
-        add_gaussian_lobe(&mut kernel, oklab_hue_to_wavelength(a, b), sigma_bins, 1.0);
+    let mut kernel = SpectralKernel::new();
+    for (lambda, weight) in hue_to_spectral_lobes(oklab_hue_degrees(a, b)) {
+        add_gaussian_lobe(&mut kernel, lambda, sigma_bins, weight);
     }
 
     let sum: f64 = kernel.iter().map(|(_, w)| *w).sum();
@@ -489,17 +513,95 @@ mod tests {
     }
 
     #[test]
-    fn test_oklab_hue_to_wavelength_range() {
-        for deg in (0..360).step_by(10) {
-            let rad = f64::from(deg).to_radians();
-            let a = 0.15 * rad.cos();
-            let b = 0.15 * rad.sin();
-            let wl = oklab_hue_to_wavelength(a, b);
-            assert!(
-                (380.0..=700.0).contains(&wl),
-                "hue {deg}\u{00b0} -> wavelength {wl} out of visible range"
-            );
+    fn test_hue_to_spectral_lobes_stay_in_visible_range() {
+        for deg in (0..360).step_by(5) {
+            let lobes = hue_to_spectral_lobes(f64::from(deg));
+            let weight: f64 = lobes.iter().map(|(_, w)| *w).sum();
+            assert!(weight > 0.0, "hue {deg}\u{00b0} produced no spectral energy");
+            for (lambda, _) in &lobes {
+                assert!(
+                    (380.0..=700.0).contains(lambda),
+                    "hue {deg}\u{00b0} -> wavelength {lambda} out of visible range"
+                );
+            }
         }
+    }
+
+    /// Energy-weighted histogram of rendered hues across many seeds, for the
+    /// single-colour spectral round-trip. The diagnostic + regression signal for
+    /// even hue coverage after the palette/round-trip redesign.
+    fn rendered_hue_histogram(seeds: u32, bins: usize) -> Vec<f64> {
+        use crate::render::color::generate_body_color_sequences;
+        use crate::spectrum::spd_to_rgba;
+
+        let mut hist = vec![0.0f64; bins];
+        for s in 0..seeds {
+            let seed = [(s & 0xff) as u8, (s >> 8) as u8, 0x5a, 0xa5];
+            let mut rng = crate::sim::Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let phase = f64::from(s % 97) / 97.0;
+            let (colors, alphas) =
+                generate_body_color_sequences(&mut rng, 48, 15_000_000, true, true, phase);
+            for (body, sequence) in colors.iter().enumerate() {
+                for color in sequence.iter().step_by(4) {
+                    let mut spd = [0.0f64; NUM_BINS];
+                    for (bin, weight) in spectral_kernel_for_oklab(*color) {
+                        spd[bin] += weight;
+                    }
+                    let (r, g, b, alpha) = spd_to_rgba(&spd);
+                    if alpha <= 1e-6 {
+                        continue;
+                    }
+                    let (_, la, lb) = crate::oklab::linear_rec2020_to_oklab(r, g, b);
+                    let hue = lb.atan2(la).to_degrees().rem_euclid(360.0);
+                    let idx = ((hue / 360.0 * bins as f64) as usize).min(bins - 1);
+                    hist[idx] += alphas[body];
+                }
+            }
+        }
+        let sum: f64 = hist.iter().sum();
+        if sum > 0.0 {
+            for value in &mut hist {
+                *value /= sum;
+            }
+        }
+        hist
+    }
+
+    fn normalized_entropy(hist: &[f64]) -> f64 {
+        let entropy: f64 = hist.iter().filter(|&&p| p > 0.0).map(|&p| -p * p.ln()).sum();
+        entropy / (hist.len() as f64).ln()
+    }
+
+    #[test]
+    fn rendered_hue_distribution_is_broadly_uniform() {
+        let bins = 12;
+        let hist = rendered_hue_histogram(192, bins);
+        let occupied = hist.iter().filter(|&&p| p > 0.0).count();
+        let max_share = hist.iter().copied().fold(0.0, f64::max);
+        let entropy = normalized_entropy(&hist);
+        assert_eq!(occupied, bins, "every hue bin should receive energy: {hist:?}");
+        assert!(
+            entropy > 0.9,
+            "rendered hue coverage should be near-uniform: entropy={entropy:.3} {hist:?}"
+        );
+        assert!(max_share < 0.25, "no hue bin should dominate: max_share={max_share:.3} {hist:?}");
+    }
+
+    #[test]
+    #[ignore = "diagnostic: run with --ignored --nocapture to print the hue histogram"]
+    fn report_rendered_hue_distribution() {
+        let bins = 12;
+        let hist = rendered_hue_histogram(1024, bins);
+        eprintln!("rendered hue distribution ({bins} bins, normalized):");
+        for (i, share) in hist.iter().enumerate() {
+            let lo = i * 360 / bins;
+            let hi = (i + 1) * 360 / bins;
+            eprintln!("  [{lo:>3}..{hi:>3}) {share:.4} {}", "#".repeat((share * 200.0) as usize));
+        }
+        eprintln!(
+            "normalized entropy = {:.4} (1.0 = perfectly uniform)",
+            normalized_entropy(&hist)
+        );
     }
 
     #[test]
