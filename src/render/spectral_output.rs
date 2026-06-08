@@ -235,6 +235,14 @@ impl SweepLook {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SweepMotion {
+    center: f64,
+    direction: f64,
+    phase: f64,
+    turnaround_flare: f64,
+}
+
 /// Blend multiple bin images with a Gaussian kernel centred at `center`,
 /// producing a `PixelBuffer` (f64 RGBA, alpha = 1.0) suitable for post-effects.
 #[cfg(test)]
@@ -266,8 +274,7 @@ fn gaussian_blend_to_pixelbuffer(
 fn compose_cinematic_sweep_frame(
     bin_buffers: &BinBuffers,
     look: &SweepLook,
-    center: f64,
-    direction: f64,
+    motion: SweepMotion,
     sigma: f64,
     output: &mut PixelBuffer,
 ) {
@@ -276,13 +283,15 @@ fn compose_cinematic_sweep_frame(
     debug_assert_eq!(look.height, bin_buffers.height);
     output.resize(pixel_count, (0.0, 0.0, 0.0, 1.0));
 
-    let weights = cinematic_sweep_weights(center, direction, sigma);
-    let tint = interpolated_wavelength_tint(center);
+    let sigma = sigma * (1.0 + motion.turnaround_flare * 0.38);
+    let weights = cinematic_sweep_weights(motion.center, motion.direction, sigma);
+    let tint = interpolated_wavelength_tint(motion.center);
     let background_tint = [0.065 + tint[0] * 0.92, 0.075 + tint[1] * 0.88, 0.115 + tint[2] * 0.94];
-    let phase = center / (NUM_BINS - 1) as f64 * std::f64::consts::TAU;
+    let phase = motion.center / (NUM_BINS - 1) as f64 * std::f64::consts::TAU;
     let axis_x = phase.cos() * 0.82 + phase.sin() * 0.18;
     let axis_y = phase.sin() * 0.82 - phase.cos() * 0.18;
     let prism_scale = sweep_prism_scale(look.width, look.height);
+    let flare_lift = 1.0 + motion.turnaround_flare * constants::SWEEP_TURNAROUND_FLARE_STRENGTH;
 
     output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
         let x = i % look.width;
@@ -296,10 +305,21 @@ fn compose_cinematic_sweep_frame(
 
         for &(bin, weight) in &weights {
             let spectral_offset = bin as f64 / (NUM_BINS - 1) as f64 - 0.5;
+            let source = bin_buffers.buffers[bin][i];
+            let source_luma = constants::rec709_luminance(
+                f64::from(source[0]),
+                f64::from(source[1]),
+                f64::from(source[2]),
+            );
+            let radius = (nx * nx + ny * ny).sqrt().min(1.0);
+            let displacement_gain = 1.0
+                + radius * constants::SWEEP_RADIAL_PRISM_BURST
+                + source_luma.min(1.5) * constants::SWEEP_LUMINANCE_DISPERSION
+                + motion.turnaround_flare * 0.55;
             let radial_x = nx * 0.32;
             let radial_y = ny * 0.32;
-            let dx = spectral_offset * prism_scale * (axis_x + radial_x);
-            let dy = spectral_offset * prism_scale * (axis_y + radial_y);
+            let dx = spectral_offset * prism_scale * displacement_gain * (axis_x + radial_x);
+            let dy = spectral_offset * prism_scale * displacement_gain * (axis_y + radial_y);
             let sampled = sample_bin_bilinear(
                 &bin_buffers.buffers[bin],
                 look.width,
@@ -319,11 +339,15 @@ fn compose_cinematic_sweep_frame(
         b += ambient_b * constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH;
 
         let (halo_r, halo_g, halo_b, _) = look.ambient_halo[i];
-        r += halo_r * constants::SWEEP_AMBIENT_HALO_STRENGTH;
-        g += halo_g * constants::SWEEP_AMBIENT_HALO_STRENGTH;
-        b += halo_b * constants::SWEEP_AMBIENT_HALO_STRENGTH;
+        r += halo_r * constants::SWEEP_AMBIENT_HALO_STRENGTH * flare_lift;
+        g += halo_g * constants::SWEEP_AMBIENT_HALO_STRENGTH * flare_lift;
+        b += halo_b * constants::SWEEP_AMBIENT_HALO_STRENGTH * flare_lift;
 
-        let atmosphere = f64::from(look.atmosphere_mask[i]);
+        let phase_shimmer =
+            ((nx * 5.0 + ny * 3.0 + motion.phase * std::f64::consts::TAU * 2.0).sin() * 0.5 + 0.5)
+                .powf(2.0);
+        let atmosphere = f64::from(look.atmosphere_mask[i])
+            * (1.0 + motion.turnaround_flare * 0.42 + phase_shimmer * 0.10);
         r += background_tint[0] * atmosphere;
         g += background_tint[1] * atmosphere;
         b += background_tint[2] * atmosphere;
@@ -527,14 +551,11 @@ pub fn generate_spectral_sweep_video(
             let sigma = constants::SWEEP_GAUSSIAN_SIGMA;
 
             for frame in 0..total_frames {
-                let bin_f = spectral_sweep_bin_f(frame, total_frames, start, end);
-
-                let direction = spectral_sweep_direction(frame, total_frames);
+                let motion = spectral_sweep_motion(frame, total_frames, start, end);
                 compose_cinematic_sweep_frame(
                     &bin_buffers,
                     &sweep_look,
-                    bin_f,
-                    direction,
+                    motion,
                     sigma,
                     &mut frame_buf,
                 );
@@ -561,18 +582,58 @@ fn spectral_sweep_bin_f(frame: u32, total_frames: u32, start: f64, end: f64) -> 
         return start;
     }
 
+    let t = spectral_sweep_leg_t(frame, total_frames);
+    let eased = snappy_sweep_ease(t);
+    start + eased * (end - start)
+}
+
+fn spectral_sweep_motion(frame: u32, total_frames: u32, start: f64, end: f64) -> SweepMotion {
+    let base_center = spectral_sweep_bin_f(frame, total_frames, start, end);
+    let phase = sweep_progress_phase(frame, total_frames);
+    let leg_t = spectral_sweep_leg_t(frame, total_frames);
+    let vibrato_gate = (leg_t * (1.0 - leg_t) * 4.0).clamp(0.0, 1.0);
+    let vibrato = (phase * std::f64::consts::TAU * constants::SWEEP_CENTER_VIBRATO_CYCLES).sin()
+        * constants::SWEEP_CENTER_VIBRATO_BINS
+        * vibrato_gate;
+    SweepMotion {
+        center: (base_center + vibrato).clamp(start.min(end), start.max(end)),
+        direction: spectral_sweep_direction(frame, total_frames),
+        phase,
+        turnaround_flare: sweep_turnaround_flare(phase),
+    }
+}
+
+fn spectral_sweep_leg_t(frame: u32, total_frames: u32) -> f64 {
+    if total_frames <= 1 {
+        return 0.0;
+    }
     let frame = frame.min(total_frames - 1);
     let leg_frames = (total_frames / 2).max(2);
     let leg_denominator = f64::from(leg_frames - 1);
-    let leg_t = if frame < leg_frames {
+    if frame < leg_frames {
         f64::from(frame) / leg_denominator
     } else {
         f64::from(total_frames - 1 - frame) / leg_denominator
     }
-    .clamp(0.0, 1.0);
-    let eased = (1.0 - (leg_t * std::f64::consts::PI).cos()) * 0.5;
+    .clamp(0.0, 1.0)
+}
 
-    start + eased * (end - start)
+fn snappy_sweep_ease(t: f64) -> f64 {
+    t.clamp(0.0, 1.0)
+}
+
+fn sweep_progress_phase(frame: u32, total_frames: u32) -> f64 {
+    if total_frames <= 1 {
+        0.0
+    } else {
+        f64::from(frame.min(total_frames - 1)) / f64::from(total_frames - 1)
+    }
+}
+
+fn sweep_turnaround_flare(phase: f64) -> f64 {
+    let width = constants::SWEEP_TURNAROUND_FLARE_WIDTH.max(1e-6);
+    let d = ((phase - 0.5).abs() / width).min(16.0);
+    (-d * d).exp()
 }
 
 fn spectral_sweep_direction(frame: u32, total_frames: u32) -> f64 {
@@ -1245,8 +1306,7 @@ mod tests {
         compose_cinematic_sweep_frame(
             &bb,
             &look,
-            50.0,
-            1.0,
+            SweepMotion { center: 50.0, direction: 1.0, phase: 0.25, turnaround_flare: 0.0 },
             constants::SWEEP_GAUSSIAN_SIGMA,
             &mut output,
         );
@@ -1268,8 +1328,7 @@ mod tests {
         compose_cinematic_sweep_frame(
             &bb,
             &look,
-            30.0,
-            -1.0,
+            SweepMotion { center: 30.0, direction: -1.0, phase: 0.75, turnaround_flare: 0.0 },
             constants::SWEEP_GAUSSIAN_SIGMA,
             &mut output,
         );
@@ -1298,16 +1357,14 @@ mod tests {
         compose_cinematic_sweep_frame(
             &bb,
             &look,
-            17.25,
-            1.0,
+            SweepMotion { center: 17.25, direction: 1.0, phase: 0.25, turnaround_flare: 0.2 },
             constants::SWEEP_GAUSSIAN_SIGMA,
             &mut out_a,
         );
         compose_cinematic_sweep_frame(
             &bb,
             &look,
-            17.25,
-            1.0,
+            SweepMotion { center: 17.25, direction: 1.0, phase: 0.25, turnaround_flare: 0.2 },
             constants::SWEEP_GAUSSIAN_SIGMA,
             &mut out_b,
         );
@@ -1361,6 +1418,12 @@ mod tests {
     }
 
     #[test]
+    fn test_cycle_constants_are_snappy_length() {
+        assert_eq!(constants::CYCLE_DURATION_SECONDS, 10.0);
+        assert_eq!(constants::CYCLE_TOTAL_FRAMES, 600);
+    }
+
+    #[test]
     fn test_display_gamma_is_srgb() {
         assert!(
             (constants::DISPLAY_GAMMA - 2.2).abs() < 0.01,
@@ -1387,7 +1450,7 @@ mod tests {
     #[test]
     fn test_sweep_gaussian_sigma_positive() {
         const { assert!(constants::SWEEP_GAUSSIAN_SIGMA > 0.0) };
-        const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.75) };
+        const { assert!(constants::SWEEP_GAUSSIAN_SIGMA <= 0.5) };
     }
 
     #[test]
@@ -1422,6 +1485,14 @@ mod tests {
         const { assert!(constants::SWEEP_PRISM_DISPLACEMENT_PX > 0.0) };
         const { assert!(constants::SWEEP_MIN_FRAME_LUMINANCE > 0.0) };
         const { assert!(constants::SWEEP_MIN_FRAME_LUMINANCE < 0.05) };
+        const { assert!(constants::SWEEP_CENTER_VIBRATO_BINS > 0.0) };
+        const { assert!(constants::SWEEP_CENTER_VIBRATO_BINS < 0.5) };
+        const { assert!(constants::SWEEP_CENTER_VIBRATO_CYCLES > 0.0) };
+        const { assert!(constants::SWEEP_TURNAROUND_FLARE_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_TURNAROUND_FLARE_WIDTH > 0.0) };
+        const { assert!(constants::SWEEP_TURNAROUND_FLARE_WIDTH < 0.2) };
+        const { assert!(constants::SWEEP_RADIAL_PRISM_BURST > 0.0) };
+        const { assert!(constants::SWEEP_LUMINANCE_DISPERSION > 0.0) };
     }
 
     // -- BlendWeights -------------------------------------------------------
@@ -1615,34 +1686,70 @@ mod tests {
         }
     }
 
-    // -- cosine easing math -------------------------------------------------
+    // -- snappy sweep easing and motion -------------------------------------
 
     #[test]
-    fn test_cosine_easing_endpoints() {
-        let t0 = 0.0f64;
-        let t1 = 1.0f64;
-        let eased_0 = (1.0 - (t0 * std::f64::consts::PI).cos()) * 0.5;
-        let eased_1 = (1.0 - (t1 * std::f64::consts::PI).cos()) * 0.5;
-        assert!(eased_0.abs() < 1e-10, "eased(0) should be 0, got {eased_0}");
-        assert!((eased_1 - 1.0).abs() < 1e-10, "eased(1) should be 1, got {eased_1}");
+    fn test_snappy_sweep_ease_endpoints() {
+        assert!(snappy_sweep_ease(0.0).abs() < 1e-10);
+        assert!((snappy_sweep_ease(1.0) - 1.0).abs() < 1e-10);
     }
 
     #[test]
-    fn test_cosine_easing_midpoint() {
-        let t = 0.5f64;
-        let eased = (1.0 - (t * std::f64::consts::PI).cos()) * 0.5;
-        assert!((eased - 0.5).abs() < 1e-10, "eased(0.5) should be 0.5, got {eased}");
+    fn test_snappy_sweep_ease_is_linear() {
+        for t in [0.1, 0.25, 0.5, 0.75, 0.9] {
+            assert!((snappy_sweep_ease(t) - t).abs() < 1e-10);
+        }
     }
 
     #[test]
-    fn test_cosine_easing_monotonic() {
+    fn test_snappy_sweep_ease_monotonic() {
         let steps = 100;
         let mut prev = -1.0f64;
         for i in 0..=steps {
             let t = f64::from(i) / f64::from(steps);
-            let eased = (1.0 - (t * std::f64::consts::PI).cos()) * 0.5;
-            assert!(eased >= prev - 1e-15, "cosine easing should be monotonic at step {i}");
+            let eased = snappy_sweep_ease(t);
+            assert!(eased >= prev - 1e-15, "snappy easing should be monotonic at step {i}");
             prev = eased;
         }
+    }
+
+    #[test]
+    fn test_sweep_motion_preserves_loop_endpoints() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        let start = constants::SWEEP_BIN_START as f64;
+        let end = constants::SWEEP_BIN_END as f64;
+        let first = spectral_sweep_motion(0, total, start, end);
+        let outbound_end = spectral_sweep_motion(total / 2 - 1, total, start, end);
+        let return_start = spectral_sweep_motion(total / 2, total, start, end);
+        let last = spectral_sweep_motion(total - 1, total, start, end);
+
+        assert!((first.center - start).abs() < 1e-10);
+        assert!((outbound_end.center - end).abs() < 1e-10);
+        assert!((return_start.center - end).abs() < 1e-10);
+        assert!((last.center - start).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_sweep_motion_vibrates_inside_leg() {
+        let total = constants::CYCLE_TOTAL_FRAMES;
+        let start = constants::SWEEP_BIN_START as f64;
+        let end = constants::SWEEP_BIN_END as f64;
+        let frame = total / 4;
+        let base = spectral_sweep_bin_f(frame, total, start, end);
+        let motion = spectral_sweep_motion(frame, total, start, end);
+        assert!(
+            (motion.center - base).abs() > 0.01,
+            "interior sweep motion should add visible micro-vibrato"
+        );
+    }
+
+    #[test]
+    fn test_turnaround_flare_peaks_at_midpoint() {
+        let peak = sweep_turnaround_flare(0.5);
+        let shoulder = sweep_turnaround_flare(0.5 + constants::SWEEP_TURNAROUND_FLARE_WIDTH);
+        let far = sweep_turnaround_flare(0.25);
+        assert!(peak > 0.99);
+        assert!(shoulder < peak);
+        assert!(far < 0.01);
     }
 }

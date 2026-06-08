@@ -339,11 +339,11 @@ pub const DEFAULT_HISTOGRAM_SAMPLE_FRAMES: u32 = 240;
 
 // ========== Spectral Output Constants ==========
 
-/// Duration of the spectral sweep video in seconds
-pub const CYCLE_DURATION_SECONDS: f64 = 24.0;
+/// Duration of the spectral sweep video in seconds.
+pub const CYCLE_DURATION_SECONDS: f64 = 10.0;
 
-/// Total frames in the spectral sweep video (24s * 60fps)
-pub const CYCLE_TOTAL_FRAMES: u32 = 1440;
+/// Total frames in the spectral sweep video (10s * 60fps).
+pub const CYCLE_TOTAL_FRAMES: u32 = 600;
 
 /// Display gamma used for spectral gallery and bin image output
 pub const DISPLAY_GAMMA: f64 = 2.2;
@@ -355,7 +355,7 @@ pub const SWEEP_BIN_START: usize = 4;
 pub const SWEEP_BIN_END: usize = 59;
 
 /// Gaussian kernel sigma (in bin-units) for multi-bin blending during the sweep.
-pub const SWEEP_GAUSSIAN_SIGMA: f64 = 0.55;
+pub const SWEEP_GAUSSIAN_SIGMA: f64 = 0.42;
 
 /// Gaussian bloom blur radius (pixels) applied to each sweep frame.
 pub const SWEEP_BLOOM_RADIUS: usize = 0;
@@ -404,6 +404,24 @@ pub const SWEEP_PRISM_DISPLACEMENT_PX: f64 = 4.8;
 
 /// Absolute minimum Rec.709 luminance enforced before sweep color grading.
 pub const SWEEP_MIN_FRAME_LUMINANCE: f64 = 0.022;
+
+/// Maximum deterministic wavelength-center vibrato, in spectral bins.
+pub const SWEEP_CENTER_VIBRATO_BINS: f64 = 0.16;
+
+/// Number of vibrato cycles across the full ping-pong sweep.
+pub const SWEEP_CENTER_VIBRATO_CYCLES: f64 = 7.0;
+
+/// Strength of extra spectral drama near the ping-pong turnaround.
+pub const SWEEP_TURNAROUND_FLARE_STRENGTH: f64 = 0.85;
+
+/// Width of the turnaround flare, as a fraction of the full video.
+pub const SWEEP_TURNAROUND_FLARE_WIDTH: f64 = 0.055;
+
+/// Extra radial prism displacement added toward image edges.
+pub const SWEEP_RADIAL_PRISM_BURST: f64 = 0.85;
+
+/// Additional prism displacement driven by local spectral luminance.
+pub const SWEEP_LUMINANCE_DISPERSION: f64 = 0.55;
 
 // ========== Simulation Constants ==========
 
