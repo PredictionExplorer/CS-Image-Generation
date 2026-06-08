@@ -6,6 +6,7 @@
 
 use super::constants;
 use super::context::PixelBuffer;
+use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use super::save_image_as_png_16bit;
 use super::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
@@ -94,7 +95,6 @@ impl BinBuffers {
     }
 
     /// Average all bin images into a single full-spectrum composite `PixelBuffer`.
-    #[cfg(test)]
     fn composite(&self) -> PixelBuffer {
         let pixel_count = self.pixel_count();
         let inv_bins = 1.0 / NUM_BINS as f64;
@@ -209,8 +209,35 @@ impl BlendWeights {
     }
 }
 
+/// Precomputed visual layers for the cinematic sweep compositor.
+struct SweepLook {
+    ambient: PixelBuffer,
+    ambient_halo: PixelBuffer,
+    atmosphere_mask: Vec<f32>,
+    width: usize,
+    height: usize,
+}
+
+impl SweepLook {
+    fn new(bin_buffers: &BinBuffers) -> Self {
+        let width = bin_buffers.width;
+        let height = bin_buffers.height;
+        let ambient = bin_buffers.composite();
+        let mut ambient_halo = ambient.clone();
+        parallel_blur_2d_rgba(&mut ambient_halo, width, height, sweep_halo_radius(width, height));
+        Self {
+            ambient,
+            ambient_halo,
+            atmosphere_mask: build_sweep_atmosphere_mask(width, height),
+            width,
+            height,
+        }
+    }
+}
+
 /// Blend multiple bin images with a Gaussian kernel centred at `center`,
 /// producing a `PixelBuffer` (f64 RGBA, alpha = 1.0) suitable for post-effects.
+#[cfg(test)]
 fn gaussian_blend_to_pixelbuffer(
     bin_buffers: &BinBuffers,
     center: f64,
@@ -232,6 +259,202 @@ fn gaussian_blend_to_pixelbuffer(
         }
         *pixel = (f64::from(r), f64::from(g), f64::from(b_ch), 1.0);
     });
+}
+
+/// Compose the production sweep frame: current bin, spectral echoes, faint
+/// full-spectrum structure, and a wavelength-tinted atmosphere floor.
+fn compose_cinematic_sweep_frame(
+    bin_buffers: &BinBuffers,
+    look: &SweepLook,
+    center: f64,
+    direction: f64,
+    sigma: f64,
+    output: &mut PixelBuffer,
+) {
+    let pixel_count = bin_buffers.pixel_count();
+    debug_assert_eq!(look.width, bin_buffers.width);
+    debug_assert_eq!(look.height, bin_buffers.height);
+    output.resize(pixel_count, (0.0, 0.0, 0.0, 1.0));
+
+    let weights = cinematic_sweep_weights(center, direction, sigma);
+    let tint = interpolated_wavelength_tint(center);
+    let background_tint = [0.065 + tint[0] * 0.92, 0.075 + tint[1] * 0.88, 0.115 + tint[2] * 0.94];
+    let phase = center / (NUM_BINS - 1) as f64 * std::f64::consts::TAU;
+    let axis_x = phase.cos() * 0.82 + phase.sin() * 0.18;
+    let axis_y = phase.sin() * 0.82 - phase.cos() * 0.18;
+    let prism_scale = sweep_prism_scale(look.width, look.height);
+
+    output.par_iter_mut().enumerate().for_each(|(i, pixel)| {
+        let x = i % look.width;
+        let y = i / look.width;
+        let nx = normalized_axis(x, look.width);
+        let ny = normalized_axis(y, look.height);
+
+        let mut r = 0.0f64;
+        let mut g = 0.0f64;
+        let mut b = 0.0f64;
+
+        for &(bin, weight) in &weights {
+            let spectral_offset = bin as f64 / (NUM_BINS - 1) as f64 - 0.5;
+            let radial_x = nx * 0.32;
+            let radial_y = ny * 0.32;
+            let dx = spectral_offset * prism_scale * (axis_x + radial_x);
+            let dy = spectral_offset * prism_scale * (axis_y + radial_y);
+            let sampled = sample_bin_bilinear(
+                &bin_buffers.buffers[bin],
+                look.width,
+                look.height,
+                x as f64 - dx,
+                y as f64 - dy,
+            );
+            let w = f64::from(weight);
+            r += f64::from(sampled[0]) * w;
+            g += f64::from(sampled[1]) * w;
+            b += f64::from(sampled[2]) * w;
+        }
+
+        let (ambient_r, ambient_g, ambient_b, _) = look.ambient[i];
+        r += ambient_r * constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH;
+        g += ambient_g * constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH;
+        b += ambient_b * constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH;
+
+        let (halo_r, halo_g, halo_b, _) = look.ambient_halo[i];
+        r += halo_r * constants::SWEEP_AMBIENT_HALO_STRENGTH;
+        g += halo_g * constants::SWEEP_AMBIENT_HALO_STRENGTH;
+        b += halo_b * constants::SWEEP_AMBIENT_HALO_STRENGTH;
+
+        let atmosphere = f64::from(look.atmosphere_mask[i]);
+        r += background_tint[0] * atmosphere;
+        g += background_tint[1] * atmosphere;
+        b += background_tint[2] * atmosphere;
+
+        let lum = constants::rec709_luminance(r, g, b);
+        if lum < constants::SWEEP_MIN_FRAME_LUMINANCE {
+            let floor_tint = [0.40 + tint[0] * 0.60, 0.40 + tint[1] * 0.60, 0.46 + tint[2] * 0.60];
+            let floor_luma =
+                constants::rec709_luminance(floor_tint[0], floor_tint[1], floor_tint[2]).max(1e-6);
+            let scale = (constants::SWEEP_MIN_FRAME_LUMINANCE - lum) / floor_luma;
+            r += floor_tint[0] * scale;
+            g += floor_tint[1] * scale;
+            b += floor_tint[2] * scale;
+        }
+
+        *pixel = (r, g, b, 1.0);
+    });
+}
+
+fn cinematic_sweep_weights(center: f64, direction: f64, sigma: f64) -> Vec<(usize, f32)> {
+    let mut weights = [0.0f32; NUM_BINS];
+    add_weighted_gaussian(&mut weights, center, sigma, 1.0);
+
+    let trail = direction.signum() * constants::SWEEP_AFTERGLOW_OFFSET_BINS;
+    add_weighted_gaussian(
+        &mut weights,
+        center - trail,
+        sigma * 1.25,
+        constants::SWEEP_AFTERGLOW_STRENGTH,
+    );
+    add_weighted_gaussian(
+        &mut weights,
+        center - trail * 2.0,
+        sigma * 1.65,
+        constants::SWEEP_AFTERGLOW_SECONDARY_STRENGTH,
+    );
+
+    weights
+        .iter()
+        .enumerate()
+        .filter_map(|(bin, &weight)| (weight > 0.0).then_some((bin, weight)))
+        .collect()
+}
+
+fn add_weighted_gaussian(weights: &mut [f32; NUM_BINS], center: f64, sigma: f64, strength: f64) {
+    let center = center.clamp(0.0, (NUM_BINS - 1) as f64);
+    let bw = BlendWeights::compute(center, sigma);
+    for (j, bin) in (bw.lo..=bw.hi).enumerate() {
+        weights[bin] += bw.weights[j] * strength as f32;
+    }
+}
+
+fn build_sweep_atmosphere_mask(width: usize, height: usize) -> Vec<f32> {
+    let center_x = (width as f64 - 1.0) * 0.5;
+    let center_y = (height as f64 - 1.0) * 0.5;
+    let inv_radius = 1.0 / center_x.max(center_y).max(1.0);
+
+    (0..width * height)
+        .into_par_iter()
+        .map(|i| {
+            let x = i % width;
+            let y = i / width;
+            let nx = (x as f64 - center_x) * inv_radius;
+            let ny = (y as f64 - center_y) * inv_radius;
+            let r2 = (nx * nx + ny * ny).min(1.0);
+            let core = (1.0 - r2).powf(1.55);
+            let caustic =
+                ((nx * 17.0 + ny * 11.0 + (nx * 8.0 - ny * 13.0).sin() * 0.75).sin() * 0.5 + 0.5)
+                    .powf(2.0);
+            let filament =
+                ((nx * 31.0 - ny * 19.0 + (nx * ny * 23.0).sin()).cos() * 0.5 + 0.5).powf(5.0);
+            let diagonal = (1.0 - (nx * 0.72 - ny * 0.42).abs()).clamp(0.0, 1.0).powf(3.0);
+            let field = (0.36 + 0.42 * core + 0.22 * caustic + 0.16 * filament + 0.14 * diagonal)
+                .clamp(0.0, 1.0);
+            (constants::SWEEP_BACKGROUND_LUMINANCE_FLOOR
+                + constants::SWEEP_BACKGROUND_AURA_STRENGTH * field) as f32
+        })
+        .collect()
+}
+
+fn interpolated_wavelength_tint(center: f64) -> [f64; 3] {
+    let center = center.clamp(0.0, (NUM_BINS - 1) as f64);
+    let lo = center.floor() as usize;
+    let hi = (lo + 1).min(NUM_BINS - 1);
+    let t = center - lo as f64;
+    let (lr, lg, lb) = wavelength_to_rgb(wavelength_nm_for_bin(lo));
+    let (hr, hg, hb) = wavelength_to_rgb(wavelength_nm_for_bin(hi));
+    [lr + (hr - lr) * t, lg + (hg - lg) * t, lb + (hb - lb) * t]
+}
+
+#[inline]
+fn normalized_axis(value: usize, size: usize) -> f64 {
+    if size <= 1 { 0.0 } else { value as f64 / (size - 1) as f64 * 2.0 - 1.0 }
+}
+
+#[inline]
+fn sweep_prism_scale(width: usize, height: usize) -> f64 {
+    let short_edge = width.min(height).max(1) as f64;
+    constants::SWEEP_PRISM_DISPLACEMENT_PX * (short_edge / 1080.0).sqrt().clamp(0.65, 2.2)
+}
+
+#[inline]
+fn sweep_halo_radius(width: usize, height: usize) -> usize {
+    let short_edge = width.min(height).max(1) as f64;
+    (constants::SWEEP_AMBIENT_HALO_RADIUS_PX * (short_edge / 1080.0).sqrt())
+        .round()
+        .clamp(2.0, 48.0) as usize
+}
+
+fn sample_bin_bilinear(buf: &[[f32; 3]], width: usize, height: usize, x: f64, y: f64) -> [f32; 3] {
+    let x = x.clamp(0.0, (width - 1) as f64);
+    let y = y.clamp(0.0, (height - 1) as f64);
+    let x0 = x.floor() as usize;
+    let y0 = y.floor() as usize;
+    let x1 = (x0 + 1).min(width - 1);
+    let y1 = (y0 + 1).min(height - 1);
+    let tx = (x - x0 as f64) as f32;
+    let ty = (y - y0 as f64) as f32;
+
+    let p00 = buf[y0 * width + x0];
+    let p10 = buf[y0 * width + x1];
+    let p01 = buf[y1 * width + x0];
+    let p11 = buf[y1 * width + x1];
+
+    let mut out = [0.0f32; 3];
+    for c in 0..3 {
+        let top = p00[c] * (1.0 - tx) + p10[c] * tx;
+        let bottom = p01[c] * (1.0 - tx) + p11[c] * tx;
+        out[c] = top * (1.0 - ty) + bottom * ty;
+    }
+    out
 }
 
 /// Convert a `PixelBuffer` to packed 16-bit RGB for the ffmpeg `rgb48le` pipe.
@@ -261,6 +484,7 @@ pub fn generate_spectral_sweep_video(
 ) -> Result<()> {
     info!("Building BinBuffers for spectral sweep ({NUM_BINS} bins)...");
     let bin_buffers = BinBuffers::new(accum_spd, width as usize, height as usize);
+    let sweep_look = SweepLook::new(&bin_buffers);
 
     let (active_start, active_end) = bin_buffers.active_bin_range();
     info!("   Active bin range: {active_start}..={active_end}");
@@ -305,7 +529,15 @@ pub fn generate_spectral_sweep_video(
             for frame in 0..total_frames {
                 let bin_f = spectral_sweep_bin_f(frame, total_frames, start, end);
 
-                gaussian_blend_to_pixelbuffer(&bin_buffers, bin_f, sigma, &mut frame_buf);
+                let direction = spectral_sweep_direction(frame, total_frames);
+                compose_cinematic_sweep_frame(
+                    &bin_buffers,
+                    &sweep_look,
+                    bin_f,
+                    direction,
+                    sigma,
+                    &mut frame_buf,
+                );
 
                 let processed = apply_sweep_effects(bloom.as_ref(), &color_grade, &frame_buf, w, h)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -343,6 +575,10 @@ fn spectral_sweep_bin_f(frame: u32, total_frames: u32, start: f64, end: f64) -> 
     start + eased * (end - start)
 }
 
+fn spectral_sweep_direction(frame: u32, total_frames: u32) -> f64 {
+    if total_frames <= 2 || frame < total_frames / 2 { 1.0 } else { -1.0 }
+}
+
 /// Run bloom then colour-grade on a single `PixelBuffer`.
 fn apply_sweep_effects(
     bloom: Option<&GaussianBloom>,
@@ -358,10 +594,27 @@ fn apply_sweep_effects(
         })?,
         None => buf.clone(),
     };
-    color_grade.process(&bloomed, w, h).map_err(|e| RenderError::EffectChain {
+    let mut graded = color_grade.process(&bloomed, w, h).map_err(|e| RenderError::EffectChain {
         effect_name: "color_grade".into(),
         reason: e.to_string(),
-    })
+    })?;
+    enforce_sweep_luminance_floor(&mut graded);
+    Ok(graded)
+}
+
+fn enforce_sweep_luminance_floor(buf: &mut PixelBuffer) {
+    const FLOOR_TINT: [f64; 3] = [0.42, 0.48, 0.72];
+    let floor_luma =
+        constants::rec709_luminance(FLOOR_TINT[0], FLOOR_TINT[1], FLOOR_TINT[2]).max(1e-6);
+    buf.par_iter_mut().for_each(|pixel| {
+        let lum = constants::rec709_luminance(pixel.0, pixel.1, pixel.2);
+        if lum < constants::SWEEP_MIN_FRAME_LUMINANCE {
+            let scale = (constants::SWEEP_MIN_FRAME_LUMINANCE - lum) / floor_luma;
+            pixel.0 += FLOOR_TINT[0] * scale;
+            pixel.1 += FLOOR_TINT[1] * scale;
+            pixel.2 += FLOOR_TINT[2] * scale;
+        }
+    });
 }
 
 #[cfg(test)]
@@ -973,6 +1226,126 @@ mod tests {
         }
     }
 
+    // -- Cinematic sweep compositor -----------------------------------------
+
+    fn minimum_luminance(pixels: &PixelBuffer) -> f64 {
+        pixels
+            .iter()
+            .map(|&(r, g, b, _)| constants::rec709_luminance(r, g, b))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn test_cinematic_sweep_frame_lifts_empty_bin_above_black() {
+        let spd = make_single_bin_spd(20, 1.0);
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let look = SweepLook::new(&bb);
+        let mut output: PixelBuffer = Vec::new();
+
+        compose_cinematic_sweep_frame(
+            &bb,
+            &look,
+            50.0,
+            1.0,
+            constants::SWEEP_GAUSSIAN_SIGMA,
+            &mut output,
+        );
+
+        assert_eq!(output.len(), TEST_W * TEST_H);
+        assert!(
+            minimum_luminance(&output) >= constants::SWEEP_MIN_FRAME_LUMINANCE - 1e-9,
+            "empty spectral bins should retain the sweep luminance floor"
+        );
+    }
+
+    #[test]
+    fn test_cinematic_sweep_frame_zero_energy_still_has_atmosphere() {
+        let spd = vec![[0.0f64; NUM_BINS]; TEST_W * TEST_H];
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let look = SweepLook::new(&bb);
+        let mut output: PixelBuffer = Vec::new();
+
+        compose_cinematic_sweep_frame(
+            &bb,
+            &look,
+            30.0,
+            -1.0,
+            constants::SWEEP_GAUSSIAN_SIGMA,
+            &mut output,
+        );
+
+        assert!(
+            output.iter().all(|&(r, g, b, a)| {
+                a == 1.0
+                    && r.is_finite()
+                    && g.is_finite()
+                    && b.is_finite()
+                    && constants::rec709_luminance(r, g, b)
+                        >= constants::SWEEP_MIN_FRAME_LUMINANCE - 1e-9
+            }),
+            "zero-energy input should render as quiet atmosphere, not black"
+        );
+    }
+
+    #[test]
+    fn test_cinematic_sweep_frame_is_deterministic() {
+        let spd = make_test_spd();
+        let bb = BinBuffers::new(&spd, TEST_W, TEST_H);
+        let look = SweepLook::new(&bb);
+        let mut out_a: PixelBuffer = Vec::new();
+        let mut out_b: PixelBuffer = Vec::new();
+
+        compose_cinematic_sweep_frame(
+            &bb,
+            &look,
+            17.25,
+            1.0,
+            constants::SWEEP_GAUSSIAN_SIGMA,
+            &mut out_a,
+        );
+        compose_cinematic_sweep_frame(
+            &bb,
+            &look,
+            17.25,
+            1.0,
+            constants::SWEEP_GAUSSIAN_SIGMA,
+            &mut out_b,
+        );
+
+        assert_eq!(out_a.len(), out_b.len());
+        for (i, (a, b)) in out_a.iter().zip(out_b.iter()).enumerate() {
+            assert_eq!(a.0.to_bits(), b.0.to_bits(), "pixel {i} red differs");
+            assert_eq!(a.1.to_bits(), b.1.to_bits(), "pixel {i} green differs");
+            assert_eq!(a.2.to_bits(), b.2.to_bits(), "pixel {i} blue differs");
+            assert_eq!(a.3.to_bits(), b.3.to_bits(), "pixel {i} alpha differs");
+        }
+    }
+
+    #[test]
+    fn test_sweep_post_effects_keep_black_input_visible() {
+        let color_grade = CinematicColorGrade::new(ColorGradeParams {
+            strength: 1.0,
+            vignette_strength: constants::SWEEP_VIGNETTE_STRENGTH,
+            vignette_softness: constants::SWEEP_VIGNETTE_SOFTNESS,
+            vibrance: constants::SWEEP_VIBRANCE,
+            clarity_strength: 0.0,
+            clarity_radius: 1,
+            tone_curve: 0.0,
+            shadow_tint: [0.0; 3],
+            highlight_tint: [0.0; 3],
+            palette_wave_strength: 0.0,
+        });
+        let input = vec![(0.0, 0.0, 0.0, 1.0); TEST_W * TEST_H];
+
+        let output = apply_sweep_effects(None, &color_grade, &input, TEST_W, TEST_H)
+            .expect("sweep post effects should process black input");
+
+        assert!(
+            minimum_luminance(&output) >= constants::SWEEP_MIN_FRAME_LUMINANCE - 1e-9,
+            "final post-effected sweep frames should keep a visible luminance floor"
+        );
+    }
+
     // -- Constants ----------------------------------------------------------
 
     #[test]
@@ -1033,6 +1406,22 @@ mod tests {
     #[test]
     fn test_sweep_vibrance_above_one() {
         const { assert!(constants::SWEEP_VIBRANCE >= 1.0) };
+    }
+
+    #[test]
+    fn test_cinematic_sweep_constants_are_bounded() {
+        const { assert!(constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_AMBIENT_COMPOSITE_STRENGTH < 0.5) };
+        const { assert!(constants::SWEEP_AMBIENT_HALO_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_AMBIENT_HALO_RADIUS_PX > 0.0) };
+        const { assert!(constants::SWEEP_BACKGROUND_LUMINANCE_FLOOR > 0.0) };
+        const { assert!(constants::SWEEP_BACKGROUND_AURA_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_AFTERGLOW_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_AFTERGLOW_SECONDARY_STRENGTH > 0.0) };
+        const { assert!(constants::SWEEP_AFTERGLOW_OFFSET_BINS > 0.0) };
+        const { assert!(constants::SWEEP_PRISM_DISPLACEMENT_PX > 0.0) };
+        const { assert!(constants::SWEEP_MIN_FRAME_LUMINANCE > 0.0) };
+        const { assert!(constants::SWEEP_MIN_FRAME_LUMINANCE < 0.05) };
     }
 
     // -- BlendWeights -------------------------------------------------------

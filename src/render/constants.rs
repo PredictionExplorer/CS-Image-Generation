@@ -375,6 +375,36 @@ pub const SWEEP_VIGNETTE_SOFTNESS: f64 = 2.6;
 /// Vibrance boost factor for sweep color grading.
 pub const SWEEP_VIBRANCE: f64 = 1.08;
 
+/// Faint full-spectrum structure blended beneath every sweep frame.
+pub const SWEEP_AMBIENT_COMPOSITE_STRENGTH: f64 = 0.32;
+
+/// Soft blurred full-spectrum halo blended around the sweep structure.
+pub const SWEEP_AMBIENT_HALO_STRENGTH: f64 = 1.65;
+
+/// Blur radius, in pixels at reference sweep size, for the full-spectrum halo.
+pub const SWEEP_AMBIENT_HALO_RADIUS_PX: f64 = 14.0;
+
+/// Minimum spectral atmosphere added before grading so frames never collapse to black.
+pub const SWEEP_BACKGROUND_LUMINANCE_FLOOR: f64 = 0.018;
+
+/// Strength of the precomputed spectral atmosphere mask around the composition.
+pub const SWEEP_BACKGROUND_AURA_STRENGTH: f64 = 0.095;
+
+/// Primary spectral afterglow mixed behind the moving wavelength center.
+pub const SWEEP_AFTERGLOW_STRENGTH: f64 = 0.55;
+
+/// Secondary, longer afterglow mixed behind the moving wavelength center.
+pub const SWEEP_AFTERGLOW_SECONDARY_STRENGTH: f64 = 0.24;
+
+/// Distance, in spectral bins, between the sweep center and afterglow echoes.
+pub const SWEEP_AFTERGLOW_OFFSET_BINS: f64 = 2.15;
+
+/// Small per-wavelength image displacement, in pixels at reference sweep size.
+pub const SWEEP_PRISM_DISPLACEMENT_PX: f64 = 4.8;
+
+/// Absolute minimum Rec.709 luminance enforced before sweep color grading.
+pub const SWEEP_MIN_FRAME_LUMINANCE: f64 = 0.022;
+
 // ========== Simulation Constants ==========
 
 /// Default simulation timestep

@@ -24,7 +24,7 @@ from pathlib import Path
 
 from _utils import check_ffmpeg, fmt_duration, resolve_binary
 
-CONCURRENT_SIMS = 2
+CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
 LOG_FILE = "run.log"
 SIM_TIMEOUT = 86400  # seconds per simulation (24 hours)
