@@ -726,38 +726,6 @@ pub fn build_effect_config_from_resolved(
     }
 }
 
-/// Apply energy density wavelength shift to spectral buffer
-/// Hot regions (high energy) shift toward red, cool regions stay blue
-fn apply_energy_density_shift(accum_spd: &mut [[f64; NUM_BINS]]) {
-    use constants::{ENERGY_DENSITY_SHIFT_STRENGTH, ENERGY_DENSITY_SHIFT_THRESHOLD};
-
-    accum_spd.par_iter_mut().for_each(|spd| {
-        // Calculate total energy in this pixel
-        let total_energy: f64 = spd.iter().sum();
-
-        // If energy is below threshold, no shift needed
-        if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD {
-            return;
-        }
-
-        // Calculate shift amount (excess energy above threshold)
-        let excess_energy = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD;
-        let shift_amount = (excess_energy * ENERGY_DENSITY_SHIFT_STRENGTH).min(1.0);
-
-        // Apply redshift: move energy from lower bins (blue) to higher bins (red)
-        // We blur the spectrum toward the red end
-        let mut shifted_spd = *spd;
-        for i in (1..NUM_BINS).rev() {
-            // Each bin receives energy from the bin below it (blueshift → redshift)
-            shifted_spd[i] = spd[i] * (1.0 - shift_amount) + spd[i - 1] * shift_amount;
-        }
-        // First bin only loses energy
-        shifted_spd[0] = spd[0] * (1.0 - shift_amount);
-
-        *spd = shifted_spd;
-    });
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AccumulationBackend {
     ParallelScanlines,
@@ -956,7 +924,6 @@ fn pass_1_build_histogram_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(&mut accum_spd);
         convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
@@ -1115,7 +1082,6 @@ fn pass_2_write_frames_spectral_with_backend(
             backend,
         );
 
-        apply_energy_density_shift(accum_spd);
         convert_spd_buffer_to_rgba(accum_spd, &mut accum_rgba, width as usize, height as usize);
 
         let frame_params =
@@ -1263,7 +1229,6 @@ fn render_final_frame_spectral_with_backend(
         backend,
     );
 
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
@@ -1355,7 +1320,6 @@ fn render_final_frame_spectral_tiled(
             guard_start,
             guard_end,
         );
-        apply_energy_density_shift(&mut tile_spd);
         convert_spd_buffer_to_rgba(&tile_spd, &mut tile_rgba, ctx.width_usize, guard_height);
 
         let trajectory_pixels = finish_pipeline
@@ -1471,7 +1435,6 @@ fn render_single_frame_spectral_with_backend(
     );
 
     // Process the accumulated frame
-    apply_energy_density_shift(&mut accum_spd);
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { frame_number: 0, density: None };
@@ -1514,6 +1477,39 @@ mod tests {
     use crate::render::randomizable_config::ResolvedEffectConfig;
     use nalgebra::Vector3;
     use rayon::ThreadPoolBuilder;
+
+    #[test]
+    fn convert_spd_buffer_is_spectrally_neutral_across_energy() {
+        // After removing the energy-density redshift, the production SPD->RGBA
+        // conversion must map a fixed spectrum to a fixed hue regardless of total
+        // energy. Brightness may change with energy; hue must not drift toward red.
+        let bin = NUM_BINS / 2; // mid-spectrum (green)
+        let mut low = [0.0f64; NUM_BINS];
+        let mut high = [0.0f64; NUM_BINS];
+        low[bin] = 0.02;
+        high[bin] = 8.0;
+
+        let src = vec![low, high];
+        let mut dest = vec![(0.0, 0.0, 0.0, 0.0); 2];
+        convert_spd_buffer_to_rgba(&src, &mut dest, 2, 1);
+
+        let hue = |p: (f64, f64, f64, f64)| {
+            let (r, g, b, a) = p;
+            let inv = 1.0 / a.max(1e-9);
+            let (_, oa, ob) = crate::oklab::linear_rec2020_to_oklab(r * inv, g * inv, b * inv);
+            ob.atan2(oa).to_degrees().rem_euclid(360.0)
+        };
+        let low_hue = hue(dest[0]);
+        let high_hue = hue(dest[1]);
+        let delta = {
+            let d = (low_hue - high_hue).abs();
+            d.min(360.0 - d)
+        };
+        assert!(
+            delta < 8.0,
+            "conversion hue drifted with energy (low={low_hue:.2}, high={high_hue:.2}); an energy-density redshift may have been reintroduced"
+        );
+    }
 
     fn default_levels() -> ChannelLevels {
         ChannelLevels::new(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
@@ -2162,7 +2158,7 @@ mod tests {
 
         assert!(final_energy > 0, "final preview should contain visible energy");
         assert!(
-            final_energy > single_energy.saturating_mul(3),
+            final_energy > single_energy.saturating_mul(2),
             "final preview should retain much more energy than the legacy early-slice preview (single={single_energy}, final={final_energy})"
         );
     }

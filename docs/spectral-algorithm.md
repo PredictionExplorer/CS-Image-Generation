@@ -12,7 +12,7 @@ full resolution.
 1. [Inputs](#1-inputs)
 2. [The SPD Buffer](#2-the-spd-buffer)
 3. [Spectral Accumulation (Triangle Rasterization)](#3-spectral-accumulation)
-4. [Energy-Density Redshift](#4-energy-density-redshift)
+4. [Energy-Density Redshift (Removed)](#4-energy-density-redshift-removed)
 5. [SPD-to-RGBA Conversion](#5-spd-to-rgba-conversion)
 6. [Post-Processing Pipeline](#6-post-processing-pipeline)
 7. [Still Image Output](#7-still-image-output)
@@ -97,25 +97,25 @@ triangle formed by the three bodies into the SPD buffer.
 ### 3.0 Procedural OkLab Palette Synthesis
 
 Before rasterization, each body receives an OKLCh color sequence. The generator
-is deterministic for a seed, but it no longer chooses only one fixed mood and one
-fixed harmony template. It blends between curated mood anchors, jitters the
-result inside safe OKLCh bounds, and then perturbs harmony offsets around
-beautiful base structures such as analogous, complementary, triadic,
-golden-angle, luminous-arc, and opal-cross palettes.
+is deterministic for a seed and is built from a few continuous, uniformly drawn
+knobs - no modes, scoring, or rejection sampling. A uniform `anchor` hue sets the
+palette center, and a `spread` scalar scales two independently drawn inter-body
+hue gaps. Because the gaps are randomized rather than pinned to a fixed angle,
+palettes range continuously and without bias from near-monochrome through
+analogous, split, complementary, and widely separated relationships. No fixed
+angular structure (such as a 120-degree triad) and no warm/cool axis is
+privileged.
 
 ```
-mood_position = rng * mood_anchor_count
-primary_mood = floor(mood_position)
-secondary_mood = primary_mood + 1
-blend = smoothstep(fract(mood_position))
-
-mood = interpolate_oklch_envelope(primary_mood, secondary_mood, blend)
-harmony_offsets = jitter_harmony_template(rng, palette_phase)
-base_hue = mood.center_hue + random_span + phase_bias
+anchor = rng * 360
+spread = rng
+gap1   = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng) * spread
+gap2   = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng) * spread
+base_hues = [anchor, anchor + gap1, anchor + gap1 + gap2]
 ```
 
 The resolved `palette_phase` from the `CosmicSignature` visual profile modulates
-the hue rhythm and secondary accent wave:
+the per-trail hue rhythm and secondary accent wave:
 
 ```
 hue = base_hue
@@ -124,9 +124,11 @@ hue = base_hue
     + accent_wave * hue_accent_strength
 ```
 
-Chroma and lightness are also wave-modulated, then clamped to curated bounds.
-This keeps seed-to-seed variety high while avoiding muddy low-chroma colors,
-overexposed lightness, and hard gamut clipping.
+Chroma and lightness are wave-modulated and then clamped to curated bounds, and
+each body keeps a distinct lightness/chroma rank. Beauty is guaranteed by
+construction via that hierarchy plus Display-P3 gamut-relative chroma, so even
+tight or unusual hue relationships stay tasteful while seed-to-seed variety
+stays high.
 
 ### 3.1 Overview
 
@@ -363,42 +365,13 @@ the partial buffers are merged by element-wise addition into the main buffer.
 
 ---
 
-## 4. Energy-Density Redshift
+## 4. Energy-Density Redshift (Removed)
 
-After accumulation, high-energy pixels undergo a spectral shift toward red
-(longer wavelengths). This simulates a "heat" effect where intense regions
-appear warmer.
-
-### Algorithm
-
-For each pixel (parallelized):
-
-```
-total_energy = sum(spd[0..64])
-
-if total_energy < ENERGY_DENSITY_SHIFT_THRESHOLD:
-    return    // no shift for dim pixels
-
-excess = total_energy - ENERGY_DENSITY_SHIFT_THRESHOLD
-shift_amount = min(excess * ENERGY_DENSITY_SHIFT_STRENGTH, 1.0)
-
-// Shift spectrum toward red (higher bin indices)
-shifted_spd = copy of spd
-for i in (1..64).rev():
-    shifted_spd[i] = spd[i] * (1 - shift_amount) + spd[i-1] * shift_amount
-shifted_spd[0] = spd[0] * (1 - shift_amount)
-
-spd = shifted_spd
-```
-
-| Constant | Value |
-|----------|-------|
-| `ENERGY_DENSITY_SHIFT_THRESHOLD` | 0.08 |
-| `ENERGY_DENSITY_SHIFT_STRENGTH` | 0.75 |
-
-Each bin blends with its blue-side neighbor proportional to `shift_amount`.
-Bin 0 (most violet) loses energy with no replacement. The net effect pushes the
-spectral distribution toward the red end.
+Earlier builds warmed high-energy pixels by shifting their spectral power toward
+longer (redder) wavelengths to simulate a "heat" effect. This biased bright
+cores, overlaps, and fast-trail flares toward orange/red and reduced color
+variety, so it has been removed from the production pipeline. Accumulated SPD
+energy now flows directly into SPD-to-RGBA conversion with no wavelength shift.
 
 ---
 
@@ -455,18 +428,11 @@ for bin in 0..64:
 
 In production, the branch is skipped and `local_spd = src_spd[pixel]`.
 
-### 5.2 Fused Energy-Density Redshift
+### 5.2 Energy-Density Redshift (Removed)
 
-The same redshift algorithm from Section 4 is applied per-pixel to `local_spd`
-after dispersion sampling. This ensures the shift operates on the
-dispersion-adjusted spectrum.
-
-```
-total_energy = sum(local_spd)
-if total_energy >= 0.08:
-    // Apply the same shift as Section 4
-    ...
-```
+The energy-density redshift described in Section 4 has been removed, so no
+per-pixel wavelength shift is applied here. `local_spd` passes directly to the
+SPD-to-linear-RGBA step below.
 
 ### 5.3 SPD to Linear RGBA
 
@@ -672,7 +638,7 @@ bin. These reveal which parts of the image contain energy at each wavelength.
 
 ### Per-Bin Image Algorithm
 
-After full accumulation and energy-density redshift:
+After full accumulation:
 
 ```
 for bin in 0..64:
@@ -734,7 +700,7 @@ skipped.
 ### 10.1 Shared setup: `BinBuffers`
 
 The same per-bin float RGB images as in Section 9 are built from the fully
-accumulated SPD buffer (after energy-density redshift): for each bin, normalize
+accumulated SPD buffer: for each bin, normalize
 that bin's energy across all pixels, tint by `wavelength_to_rgb`, and apply
 display gamma. The result is 64 parallel buffers of `[f32; 3]` per pixel.
 
@@ -816,8 +782,6 @@ main trajectory video (default quality vs `--fast-encode`).
 | `DEFAULT_HDR_SCALE` | 1.0 | Base HDR scale (usually overridden to ~3.0) |
 | `VELOCITY_HDR_BOOST_FACTOR` | 8.0 | Maximum velocity brightness multiplier |
 | `VELOCITY_HDR_BOOST_THRESHOLD` | 0.15 | Velocity at which max boost is reached |
-| `ENERGY_DENSITY_SHIFT_THRESHOLD` | 0.08 | Minimum energy for redshift |
-| `ENERGY_DENSITY_SHIFT_STRENGTH` | 0.75 | How strongly high energy shifts to red |
 | `CRISP_DISPERSION_STRENGTH` | 0.0 | Production chromatic dispersion strength (disabled) |
 | `SPECTRAL_DISPERSION_STRENGTH` | 0.0 | Base chromatic aberration strength in crisp mode |
 | `SPECTRAL_DISPERSION_STRENGTH_BOOSTED` | 0.0 | Boosted chromatic aberration in crisp mode |

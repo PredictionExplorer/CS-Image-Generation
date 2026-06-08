@@ -4,7 +4,7 @@ use crate::oklab::{max_display_p3_chroma_for_lh, oklch_to_oklab};
 use crate::render::constants::{
     BASE_HUE_DRIFT, HUE_DRIFT_SCALE, HUE_FULL_CIRCLE, HUE_WAVE_AMPLITUDE,
 };
-use crate::{sim::Sha3RandomByteStream, spectrum};
+use crate::sim::Sha3RandomByteStream;
 use std::sync::{LazyLock, Mutex};
 use tracing::info;
 
@@ -16,6 +16,14 @@ const HUE_DRIFT_JITTER: f64 = 0.1;
 const COLOR_RNG_DOMAIN: &[u8] = b"cosmic-color/v2";
 const GLOW_LIGHTNESS_FLOOR: f64 = 0.62;
 const DOMINANT_CHROMA_FRACTION_FLOOR: f64 = 0.62;
+
+/// Minimum inter-body hue gap (degrees) at full spread. Scaling by `spread`
+/// still allows near-monochrome palettes at low spread, while this floor keeps
+/// two bodies from landing on a near-identical hue when the palette is wide.
+const MIN_BODY_HUE_GAP_DEG: f64 = 10.0;
+/// Maximum inter-body hue gap (degrees) at full spread, large enough to reach
+/// complementary and widely separated relationships.
+const MAX_BODY_HUE_GAP_DEG: f64 = 175.0;
 
 static LAST_PALETTE_METADATA: LazyLock<Mutex<(String, String)>> =
     LazyLock::new(|| Mutex::new(("unresolved".to_string(), "unresolved".to_string())));
@@ -64,24 +72,6 @@ fn smoothstep(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
-#[inline]
-fn signed_hue_delta(from: f64, to: f64) -> f64 {
-    (to - from + 540.0).rem_euclid(HUE_FULL_CIRCLE) - 180.0
-}
-
-/// Move `from` a fraction `t` along the shortest arc toward `to`.
-#[inline]
-fn nudge_hue(from: f64, to: f64, t: f64) -> f64 {
-    (from + signed_hue_delta(from, to) * t).rem_euclid(HUE_FULL_CIRCLE)
-}
-
-/// `OKLab` hue (degrees) of a black-body temperature, the natural-axis target.
-#[inline]
-fn blackbody_hue(kelvin: f64) -> f64 {
-    let (_, a, b) = spectrum::blackbody_temperature_to_oklab(kelvin, 0.68, 0.7);
-    b.atan2(a).to_degrees().rem_euclid(HUE_FULL_CIRCLE)
-}
-
 fn shuffle3(rng: &mut Sha3RandomByteStream, values: &mut [usize; 3]) {
     for i in (1..3).rev() {
         let j = (rng.next_f64() * (i + 1) as f64).floor() as usize;
@@ -89,26 +79,18 @@ fn shuffle3(rng: &mut Sha3RandomByteStream, values: &mut [usize; 3]) {
     }
 }
 
-/// Three body hues from a single continuous dispersion knob.
+/// Three body hues from an anchor and a continuous `spread` scalar.
 ///
-/// `dispersion` slides the spacing from monochrome (0) through analogous and
-/// triadic toward fully spread (1) with no privileged angle; `naturalness`
-/// blends every hue toward a sampled black-body (star) temperature, so palettes
-/// range continuously from free spectral colour to natural warm/cool.
-fn body_hues(
-    rng: &mut Sha3RandomByteStream,
-    anchor: f64,
-    dispersion: f64,
-    naturalness: f64,
-) -> [f64; 3] {
-    let jitter = lerp(4.0, 26.0, dispersion);
-    let target = blackbody_hue(lerp(1_800.0, 16_000.0, rng.next_f64()));
-    let pull = naturalness * 0.55;
-
-    std::array::from_fn(|i| {
-        let spaced = anchor + dispersion * 120.0 * i as f64 + (rng.next_f64() - 0.5) * jitter;
-        nudge_hue(spaced.rem_euclid(HUE_FULL_CIRCLE), target, pull)
-    })
+/// The two inter-body hue gaps are drawn independently and scaled by `spread`,
+/// so palettes range continuously and without bias from near-monochrome (small
+/// spread) through analogous, split, complementary, and widely separated
+/// relationships. No fixed angular structure (such as a 120-degree triad) and
+/// no warm/cool axis is privileged; the downstream lightness/chroma hierarchy
+/// and gamut-relative chroma keep every relationship tasteful.
+fn body_hues(rng: &mut Sha3RandomByteStream, anchor: f64, spread: f64) -> [f64; 3] {
+    let gap1 = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng.next_f64()) * spread;
+    let gap2 = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng.next_f64()) * spread;
+    [anchor, anchor + gap1, anchor + gap1 + gap2].map(|hue| hue.rem_euclid(HUE_FULL_CIRCLE))
 }
 
 fn assign_body_plans(
@@ -116,7 +98,7 @@ fn assign_body_plans(
     hues: [f64; 3],
     chroma_boost: bool,
     key: f64,
-    dispersion: f64,
+    spread: f64,
 ) -> [BodyColorPlan; 3] {
     let mut lightness_order = [0, 1, 2];
     let mut chroma_order = [0, 1, 2];
@@ -144,7 +126,7 @@ fn assign_body_plans(
         ]
     };
 
-    let journey_max = lerp(30.0, 96.0, dispersion);
+    let journey_max = lerp(30.0, 96.0, spread);
 
     let mut plans = [BodyColorPlan {
         base_hue: 0.0,
@@ -193,20 +175,20 @@ fn resolve_palette_spec(
     let palette_phase = palette_phase.clamp(0.0, 1.0);
 
     // A few continuous knobs, each a plain uniform draw, define the whole palette
-    // - no modes, no scoring, no rejection sampling. Every hue is equally likely
-    // (uniform anchor), and beauty is guaranteed by construction downstream via
-    // gamut-relative chroma and the lightness/chroma hierarchy.
+    // - no modes, no scoring, no rejection sampling. The hue anchor is uniform
+    // and the inter-body spacing is randomized (see `body_hues`), so no colour or
+    // relationship is privileged. Beauty is guaranteed by construction downstream
+    // via gamut-relative chroma and the lightness/chroma hierarchy.
     let anchor = rng.next_f64() * HUE_FULL_CIRCLE;
-    let dispersion = rng.next_f64();
-    let naturalness = rng.next_f64();
+    let spread = rng.next_f64();
     let key = rng.next_f64();
 
-    let hues = body_hues(rng, anchor, dispersion, naturalness);
-    let bodies = assign_body_plans(rng, hues, chroma_boost, key, dispersion);
+    let hues = body_hues(rng, anchor, spread);
+    let bodies = assign_body_plans(rng, hues, chroma_boost, key, spread);
 
     PaletteSpec {
-        harmony: format!("continuous_dispersion_{dispersion:.2}"),
-        mood_label: format!("natural_{naturalness:.2}"),
+        harmony: format!("randomized_spread_{spread:.2}"),
+        mood_label: "hue_neutral".to_string(),
         bodies,
         palette_phase,
         hue_accent_strength: lerp(8.0, 34.0, rng.next_f64()),
@@ -594,5 +576,50 @@ mod tests {
             );
             assert!(max_c > 0.05, "palette should stay vivid for seed {seed}: {mean_c:?}");
         }
+    }
+
+    #[test]
+    fn test_body_hue_relationships_are_varied_not_triadic() {
+        fn circular_gap(a: f64, b: f64) -> f64 {
+            let d = (a - b).rem_euclid(HUE_FULL_CIRCLE);
+            d.min(HUE_FULL_CIRCLE - d)
+        }
+
+        let total = 256usize;
+        let mut near_triadic = 0usize;
+        // Track the smallest and largest "widest pairwise gap" across seeds, so we
+        // can confirm both tight (analogous/monochrome) and wide (complementary)
+        // relationships occur rather than a single fixed structure.
+        let mut tightest_max_gap = HUE_FULL_CIRCLE;
+        let mut widest_max_gap = 0.0f64;
+
+        for s in 0..total as u32 {
+            let seed = [(s & 0xff) as u8, (s >> 8) as u8, 0x5a, 0xa5];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let palette = resolve_palette_spec(&mut rng, true, f64::from(s % 97) / 97.0);
+            let hues: Vec<f64> = palette.bodies.iter().map(|body| body.base_hue).collect();
+            let gaps = [
+                circular_gap(hues[0], hues[1]),
+                circular_gap(hues[1], hues[2]),
+                circular_gap(hues[0], hues[2]),
+            ];
+            let max_gap = gaps.iter().copied().fold(0.0, f64::max);
+            tightest_max_gap = tightest_max_gap.min(max_gap);
+            widest_max_gap = widest_max_gap.max(max_gap);
+            if gaps.iter().all(|g| (g - 120.0).abs() < 15.0) {
+                near_triadic += 1;
+            }
+        }
+
+        // The previous generator pinned nearly every palette to a 120-degree triad.
+        assert!(near_triadic * 4 < total, "too many near-triadic palettes: {near_triadic}/{total}");
+        assert!(
+            tightest_max_gap < 45.0,
+            "expected at least one tight palette, smallest widest-gap={tightest_max_gap:.1}"
+        );
+        assert!(
+            widest_max_gap > 150.0,
+            "expected at least one wide palette, largest widest-gap={widest_max_gap:.1}"
+        );
     }
 }

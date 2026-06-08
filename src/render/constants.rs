@@ -315,14 +315,6 @@ pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 8.0; // Increased from 2.5 for dramat
 /// Velocities above this get maximum boost
 pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15; // Lowered from 0.3 to activate earlier
 
-/// Energy density threshold for wavelength shift (normalized energy)
-/// Pixels above this threshold shift toward red (heat)
-pub const ENERGY_DENSITY_SHIFT_THRESHOLD: f64 = 0.16;
-
-/// Wavelength shift strength (fraction of bin to shift per density unit)
-/// Higher values create stronger red-shift in high-energy regions
-pub const ENERGY_DENSITY_SHIFT_STRENGTH: f64 = 0.28;
-
 // ========== Video Encoding Constants ==========
 
 /// Default video framerate
