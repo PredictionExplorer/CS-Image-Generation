@@ -19,9 +19,12 @@ use crate::render::{
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use image::{ImageBuffer, Rgb};
-use nalgebra::Vector3;
+use nalgebra::{Matrix3, Vector3};
 use std::fs;
 use tracing::{info, warn};
+
+/// RNG fork domain for the seeded viewing orientation.
+const VIEW_RNG_DOMAIN: &[u8] = b"cosmic-view/v1";
 
 /// Core `CosmicSignature` enhancement flags.
 #[derive(Clone, Debug)]
@@ -182,6 +185,61 @@ pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<
     sim_result.positions
 }
 
+/// Rotate the whole trajectory by a seeded, uniformly random 3D orientation.
+///
+/// The simulation produces fully three-dimensional structures, but the
+/// renderer projects onto the fixed x/y plane. Without this step every seed
+/// is photographed from the same axis; with it, the same orbit family yields
+/// dramatically different compositions depending on the viewing angle.
+///
+/// Positions are already expressed in the centre-of-mass frame, so rotating
+/// about the origin is rotation about the COM. Uses a forked RNG domain so it
+/// does not perturb the main seed stream consumed by drift and colors.
+pub fn apply_view_orientation(
+    positions: &mut [Vec<Vector3<f64>>],
+    rng: &Sha3RandomByteStream,
+) -> (f64, f64, f64) {
+    info!("STAGE 2.25/7: Applying seeded viewing orientation...");
+    let mut view_rng = rng.fork(VIEW_RNG_DOMAIN);
+
+    // Shoemake's method: uniform random rotation on SO(3) from three uniforms.
+    let u1 = view_rng.next_f64();
+    let u2 = view_rng.next_f64();
+    let u3 = view_rng.next_f64();
+    let two_pi = crate::render::constants::TWO_PI;
+    let (qx, qy) =
+        ((1.0 - u1).sqrt() * (two_pi * u2).sin(), (1.0 - u1).sqrt() * (two_pi * u2).cos());
+    let (qz, qw) = (u1.sqrt() * (two_pi * u3).sin(), u1.sqrt() * (two_pi * u3).cos());
+
+    let rotation = quaternion_to_matrix(qw, qx, qy, qz);
+    for body_positions in positions.iter_mut() {
+        for position in body_positions.iter_mut() {
+            *position = rotation * *position;
+        }
+    }
+
+    info!("   => View quaternion components: ({u1:.3}, {u2:.3}, {u3:.3})");
+    (u1, u2, u3)
+}
+
+fn quaternion_to_matrix(w: f64, x: f64, y: f64, z: f64) -> Matrix3<f64> {
+    let (xx, yy, zz) = (x * x, y * y, z * z);
+    let (xy, xz, yz) = (x * y, x * z, y * z);
+    let (wx, wy, wz) = (w * x, w * y, w * z);
+
+    Matrix3::new(
+        1.0 - 2.0 * (yy + zz),
+        2.0 * (xy - wz),
+        2.0 * (xz + wy),
+        2.0 * (xy + wz),
+        1.0 - 2.0 * (xx + zz),
+        2.0 * (yz - wx),
+        2.0 * (xz - wy),
+        2.0 * (yz + wx),
+        1.0 - 2.0 * (xx + yy),
+    )
+}
+
 /// Apply drift transformation to positions
 pub fn apply_drift_transformation(
     positions: &mut [Vec<Vector3<f64>>],
@@ -232,7 +290,12 @@ pub fn generate_colors(
     )
 }
 
-/// Build histogram and determine color levels
+/// Build histogram and determine color levels.
+///
+/// `profile` supplies the seed's scene traits (the histogram must sample the
+/// same structure mode that pass 2 renders) and the display exposure key:
+/// values below 1 produce darker, ember-like seeds and values above 1
+/// brighter, airier seeds.
 pub fn build_histogram_and_levels(
     positions: &[Vec<Vector3<f64>>],
     colors: &[Vec<render::OklabColor>],
@@ -241,6 +304,7 @@ pub fn build_histogram_and_levels(
     noise_seed: i32,
     render_config: &RenderConfig,
     aspect_correction: bool,
+    profile: &render::visual_profile::CosmicSignatureParameters,
 ) -> Result<ChannelLevels> {
     info!("STAGE 5/7: PASS 1 => building global histogram...");
 
@@ -250,7 +314,8 @@ pub fn build_histogram_and_levels(
     let histogram = pass_1_build_histogram_spectral(
         SpectralScene::new(positions, colors, body_alphas),
         frame_interval,
-        SpectralRenderSettings::new(resolved_config, render_config, noise_seed, aspect_correction),
+        SpectralRenderSettings::new(resolved_config, render_config, noise_seed, aspect_correction)
+            .with_traits(profile.scene_traits()),
     );
 
     info!("STAGE 6/7: Determine global black/white/gamma...");
@@ -260,15 +325,18 @@ pub fn build_histogram_and_levels(
         resolved_config.clip_white,
     );
 
+    let exposure_key = profile.exposure_key;
+    let keyed_exposure = analysis.exposure_scale * exposure_key.clamp(0.5, 1.5);
     info!(
-        "   => R:[{:.3e},{:.3e}] G:[{:.3e},{:.3e}] B:[{:.3e},{:.3e}] exposure={:.3} near_clip={:.3}%",
+        "   => R:[{:.3e},{:.3e}] G:[{:.3e},{:.3e}] B:[{:.3e},{:.3e}] exposure={:.3} key={:.3} near_clip={:.3}%",
         analysis.black_r,
         analysis.white_r,
         analysis.black_g,
         analysis.white_g,
         analysis.black_b,
         analysis.white_b,
-        analysis.exposure_scale,
+        keyed_exposure,
+        exposure_key,
         analysis.near_clip_ratio * constants::PERCENT_FACTOR
     );
 
@@ -280,7 +348,7 @@ pub fn build_histogram_and_levels(
         analysis.black_b,
         analysis.white_b,
         ToneMappingControls {
-            exposure_scale: analysis.exposure_scale,
+            exposure_scale: keyed_exposure,
             paper_white: constants::DEFAULT_TONEMAP_PAPER_WHITE,
             highlight_rolloff: constants::DEFAULT_TONEMAP_HIGHLIGHT_ROLLOFF,
         },
@@ -713,6 +781,50 @@ mod tests {
         fn proptest_parse_seed_never_panics(input in "\\PC*") {
             let _ = parse_seed(&input);
         }
+    }
+
+    #[test]
+    fn test_view_orientation_is_deterministic_and_rigid() {
+        let make_positions = || -> Vec<Vec<Vector3<f64>>> {
+            vec![
+                vec![Vector3::new(1.0, 2.0, 3.0), Vector3::new(4.0, 5.0, 6.0)],
+                vec![Vector3::new(-1.0, 0.5, 2.0), Vector3::new(0.0, -3.0, 1.0)],
+                vec![Vector3::new(7.0, -2.0, 0.0), Vector3::new(-4.0, 1.0, -1.0)],
+            ]
+        };
+
+        let rng = Sha3RandomByteStream::new(&[0xAB, 0xCD], 100.0, 300.0, 300.0, 1.0);
+        let mut a = make_positions();
+        let mut b = make_positions();
+        let original = make_positions();
+
+        apply_view_orientation(&mut a, &rng);
+        apply_view_orientation(&mut b, &rng);
+
+        for body in 0..3 {
+            for step in 0..2 {
+                // Deterministic: identical results across calls with the same seed.
+                assert_eq!(a[body][step], b[body][step], "body {body} step {step} diverged");
+                // Rigid: rotation preserves distance from the origin (COM).
+                let norm_before = original[body][step].norm();
+                let norm_after = a[body][step].norm();
+                assert!(
+                    (norm_before - norm_after).abs() < 1e-9,
+                    "rotation must preserve norms: {norm_before} vs {norm_after}"
+                );
+            }
+        }
+
+        // The orientation should actually rotate (not be the identity).
+        let moved = (0..3).any(|body| (a[body][0] - original[body][0]).norm() > 1e-6);
+        assert!(moved, "seeded view orientation should differ from identity");
+
+        // A different seed must produce a different orientation.
+        let rng2 = Sha3RandomByteStream::new(&[0x11, 0x22], 100.0, 300.0, 300.0, 1.0);
+        let mut c = make_positions();
+        apply_view_orientation(&mut c, &rng2);
+        let differs = (0..3).any(|body| (a[body][0] - c[body][0]).norm() > 1e-6);
+        assert!(differs, "different seeds should view from different angles");
     }
 
     #[test]

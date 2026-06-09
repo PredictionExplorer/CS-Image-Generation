@@ -4,8 +4,10 @@ use super::color::OklabColor;
 use super::constants::{
     CRISP_DEPTH_BROADENING_FACTOR, CRISP_LINE_BASE_THICKNESS, CRISP_LINE_ENERGY_CUTOFF,
     CRISP_LINE_FALLOFF_EXPONENT, CRISP_LINE_MAX_THICKNESS, CRISP_LINE_MIN_THICKNESS,
-    CRISP_LINE_SUBPIXEL_GRID, CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
-    CRISP_SPECTRAL_SIGMA_MIN_BINS, crisp_line_resolution_scale,
+    CRISP_LINE_PROXIMITY_OFFSET, CRISP_LINE_PROXIMITY_SLOPE, CRISP_LINE_SUBPIXEL_GRID,
+    CRISP_SPECTRAL_KERNEL_RADIUS_BINS, CRISP_SPECTRAL_SIGMA_MAX_BINS,
+    CRISP_SPECTRAL_SIGMA_MIN_BINS, LIGHTNESS_ENERGY_FLOOR, LIGHTNESS_ENERGY_GAMMA,
+    LIGHTNESS_ENERGY_SPAN, crisp_line_resolution_scale,
 };
 use crate::{spectral_constants, spectrum::NUM_BINS, utils::build_gaussian_kernel};
 use rayon::prelude::*;
@@ -40,6 +42,8 @@ pub struct SpectralLineSegment {
     pub end: LineVertex,
     /// Multiplier for deposited spectral energy (HDR / velocity boost).
     pub hdr_scale: f64,
+    /// Stroke width multiplier (seed line weight x velocity dynamics).
+    pub thickness_factor: f64,
 }
 
 /// `OKLab` hue angle in degrees, normalized to `[0, 360)`.
@@ -180,8 +184,20 @@ fn add_gaussian_lobe(
     }
 }
 
+/// Energy multiplier derived from `OKLab` lightness.
+///
+/// The palette engine assigns each body a deliberate lightness rank, but the
+/// spectral kernel itself only encodes hue and chroma. Scaling deposited
+/// energy by lightness makes that hierarchy (and the per-step lightness
+/// waves) actually visible: bright bodies radiate, dark bodies recede.
+#[inline]
+fn lightness_energy_factor(lightness: f64) -> f64 {
+    let t = ((lightness - 0.30) / 0.64).clamp(0.0, 1.0);
+    LIGHTNESS_ENERGY_FLOOR + LIGHTNESS_ENERGY_SPAN * t.powf(LIGHTNESS_ENERGY_GAMMA)
+}
+
 fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
-    let (_l, a, b) = color;
+    let (l, a, b) = color;
     let chroma = (a * a + b * b).sqrt();
     let purity = (chroma / 0.34).clamp(0.0, 1.0);
     let sigma_nm = 8.0 - 5.5 * purity;
@@ -195,8 +211,9 @@ fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
 
     let sum: f64 = kernel.iter().map(|(_, w)| *w).sum();
     if sum > 0.0 {
+        let energy = lightness_energy_factor(l);
         for (_, weight) in &mut kernel {
-            *weight /= sum;
+            *weight *= energy / sum;
         }
     }
     kernel
@@ -313,12 +330,20 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let len_sq = dx * dx + dy * dy;
     let len_3d = (dx * dx + dy * dy + dz * dz).sqrt();
 
-    // Dynamic line width: scale the crisp footprint with output resolution while
-    // keeping the motion attenuation comparable to the default render size.
+    // Dynamic line width. Three responses combine, all resolution-aware:
+    //   1. Proximity: short segments (close encounters, per-step ribbon strokes)
+    //      draw bold, long inter-body spans draw fine.
+    //   2. Seed line weight + velocity dynamics, via `segment.thickness_factor`.
+    //   3. Clamp to the crisp production range.
     let resolution_scale = crisp_line_resolution_scale(width, height);
     let normalized_len_3d = len_3d / resolution_scale;
-    let thickness =
-        ((CRISP_LINE_BASE_THICKNESS * resolution_scale) / (0.1 + normalized_len_3d * 0.5)).clamp(
+    let proximity =
+        1.0 / (CRISP_LINE_PROXIMITY_OFFSET + normalized_len_3d * CRISP_LINE_PROXIMITY_SLOPE);
+    let thickness = (CRISP_LINE_BASE_THICKNESS
+        * resolution_scale
+        * (segment.thickness_factor as f32)
+        * proximity)
+        .clamp(
             CRISP_LINE_MIN_THICKNESS * resolution_scale,
             CRISP_LINE_MAX_THICKNESS * resolution_scale,
         );
@@ -452,6 +477,7 @@ mod tests {
                 alpha: 0.55,
             },
             hdr_scale,
+            thickness_factor: 1.0,
         }
     }
 
@@ -601,6 +627,49 @@ mod tests {
         eprintln!(
             "normalized entropy = {:.4} (1.0 = perfectly uniform)",
             normalized_entropy(&hist)
+        );
+    }
+
+    #[test]
+    fn test_lightness_scales_deposited_energy() {
+        let bright = wavelength_to_oklab(550.0, 0.9);
+        let dark = (0.40, bright.1, bright.2);
+        let bright_kernel = spectral_kernel_for_oklab((0.90, bright.1, bright.2));
+        let dark_kernel = spectral_kernel_for_oklab(dark);
+
+        let bright_sum: f64 = bright_kernel.iter().map(|(_, w)| *w).sum();
+        let dark_sum: f64 = dark_kernel.iter().map(|(_, w)| *w).sum();
+
+        assert!(
+            bright_sum > dark_sum * 1.5,
+            "high-lightness colors should deposit more energy: bright={bright_sum} dark={dark_sum}"
+        );
+        assert!(dark_sum > 0.0, "dark colors must still deposit energy (floor)");
+    }
+
+    #[test]
+    fn test_thickness_factor_widens_stroke_footprint() {
+        let width = 32usize;
+        let height = 32usize;
+        let thin_segment = SpectralLineSegment {
+            thickness_factor: 0.6,
+            ..make_segment((4.0, 16.0, 0.0), (28.0, 16.0, 0.0), 1.0)
+        };
+        let thick_segment = SpectralLineSegment { thickness_factor: 2.0, ..thin_segment };
+
+        let mut thin = vec![[0.0; NUM_BINS]; width * height];
+        let mut thick = vec![[0.0; NUM_BINS]; width * height];
+        draw_line_segment_aa_spectral(&mut thin, width as u32, height as u32, thin_segment);
+        draw_line_segment_aa_spectral(&mut thick, width as u32, height as u32, thick_segment);
+
+        let active = |buf: &[[f64; NUM_BINS]]| {
+            buf.iter().filter(|bins| bins.iter().sum::<f64>() > 1e-12).count()
+        };
+        assert!(
+            active(&thick) > active(&thin),
+            "higher thickness_factor should cover more pixels: thick={} thin={}",
+            active(&thick),
+            active(&thin)
         );
     }
 

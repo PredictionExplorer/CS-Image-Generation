@@ -1003,8 +1003,16 @@ impl ResolvedEffectConfig {
     /// Return true when any legacy post-processing effect is active.
     #[must_use]
     pub fn any_legacy_effect_enabled(&self) -> bool {
-        self.enable_bloom
-            || self.enable_glow
+        self.enable_bloom || self.any_effect_beyond_halation_enabled()
+    }
+
+    /// Return true when any effect other than the seed-gated halation bloom is active.
+    ///
+    /// The `CosmicSignature` profile may enable a subtle `DoG` bloom (halation)
+    /// for a minority of seeds; every other legacy effect must stay disabled.
+    #[must_use]
+    pub fn any_effect_beyond_halation_enabled(&self) -> bool {
+        self.enable_glow
             || self.enable_chromatic_bloom
             || self.enable_perceptual_blur
             || self.enable_micro_contrast

@@ -40,7 +40,8 @@ pub mod visual_profile;
 
 // Import from our submodules
 use self::batch_drawing::{
-    BatchDrawParams, draw_triangle_batch_spectral_rows, interpolate_triangle_vertices,
+    BatchDrawParams, draw_body_ribbon_segment_rows, draw_spoke_segments_rows,
+    draw_triangle_batch_spectral_rows, interpolate_triangle_vertices,
     max_triangle_vertex_motion_px, prepare_triangle_vertices,
 };
 use self::context::{PixelBuffer, RenderContext};
@@ -56,6 +57,7 @@ pub use drawing::{
 pub use effects::{DogBloomConfig, apply_dog_bloom};
 pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
+pub use visual_profile::{SceneTraits, StructureMode};
 
 // Re-export types from dependencies used in public API
 pub use image::{DynamicImage, ImageBuffer, Rgb};
@@ -177,6 +179,8 @@ pub struct SpectralRenderSettings<'a> {
     pub noise_seed: i32,
     /// Whether to correct for non-square pixel aspect ratios.
     pub aspect_correction: bool,
+    /// Seed-resolved scene traits (structure mode, line weight, age ramp).
+    pub traits: SceneTraits,
 }
 
 impl std::fmt::Debug for SpectralRenderSettings<'_> {
@@ -191,6 +195,9 @@ impl std::fmt::Debug for SpectralRenderSettings<'_> {
 
 impl<'a> SpectralRenderSettings<'a> {
     /// Bundle all spectral render inputs into a single settings struct.
+    ///
+    /// Uses the classic [`SceneTraits::default`] (triangle web, unit line
+    /// weight); call [`Self::with_traits`] to attach seed-resolved traits.
     #[must_use]
     pub fn new(
         resolved_config: &'a randomizable_config::ResolvedEffectConfig,
@@ -198,7 +205,20 @@ impl<'a> SpectralRenderSettings<'a> {
         noise_seed: i32,
         aspect_correction: bool,
     ) -> Self {
-        Self { resolved_config, render_config, noise_seed, aspect_correction }
+        Self {
+            resolved_config,
+            render_config,
+            noise_seed,
+            aspect_correction,
+            traits: SceneTraits::default(),
+        }
+    }
+
+    /// Attach seed-resolved scene traits (structure mode, line weight, age ramp).
+    #[must_use]
+    pub fn with_traits(mut self, traits: SceneTraits) -> Self {
+        self.traits = traits;
+        self
     }
 }
 
@@ -767,6 +787,136 @@ struct AccumulationParams<'a> {
     step_start: usize,
     step_end: usize,
     hdr_scale: f64,
+    traits: SceneTraits,
+}
+
+impl AccumulationParams<'_> {
+    /// Trail-age exposure factor for `step`; positive ramps brighten late steps.
+    #[inline]
+    fn age_factor(&self, step: usize) -> f64 {
+        let total = self.scene.step_count().max(1);
+        let t = step as f64 / total as f64;
+        1.0 + self.traits.age_ramp * (t - 0.5) * 2.0
+    }
+
+    /// Per-edge alpha weights for triangle-web style modes.
+    #[inline]
+    fn edge_weights(&self) -> [f64; 3] {
+        match self.traits.structure {
+            StructureMode::Duet { dropped_edge } => {
+                let mut weights = [1.0; 3];
+                weights[usize::from(dropped_edge.min(2))] = 0.0;
+                weights
+            }
+            StructureMode::WebRibbonHybrid => [constants::HYBRID_WEB_ALPHA_SCALE; 3],
+            _ => [1.0; 3],
+        }
+    }
+}
+
+/// Draw the triangle-web stroke set for one step, with motion interpolation.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_web_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    next_vertices: Option<[batch_drawing::TriangleVertex; 3]>,
+    edge_weights: [f64; 3],
+) {
+    let edge_dynamics = [
+        params.velocity_calc.segment_dynamics(step, 0, 1),
+        params.velocity_calc.segment_dynamics(step, 1, 2),
+        params.velocity_calc.segment_dynamics(step, 2, 0),
+    ];
+
+    let Some(next_vertices) = next_vertices else {
+        draw_triangle_batch_spectral_rows(
+            accum_spd,
+            &BatchDrawParams {
+                width: params.ctx.width,
+                height: params.ctx.height,
+                row_start,
+                row_end,
+                vertices,
+                edge_dynamics,
+                edge_weights,
+                line_weight: params.traits.line_weight,
+                hdr_scale: step_hdr_scale,
+            },
+        );
+        return;
+    };
+
+    let max_motion_px = max_triangle_vertex_motion_px(vertices, next_vertices);
+    let substeps = constants::crisp_line_interpolation_substeps(
+        params.ctx.width,
+        params.ctx.height,
+        max_motion_px,
+    );
+    let substep_hdr_scale = step_hdr_scale / substeps as f64;
+
+    for substep in 0..substeps {
+        let sample_vertices = if substep == 0 {
+            vertices
+        } else {
+            let t = substep as f32 / substeps as f32;
+            interpolate_triangle_vertices(vertices, next_vertices, t)
+        };
+        draw_triangle_batch_spectral_rows(
+            accum_spd,
+            &BatchDrawParams {
+                width: params.ctx.width,
+                height: params.ctx.height,
+                row_start,
+                row_end,
+                vertices: sample_vertices,
+                edge_dynamics,
+                edge_weights,
+                line_weight: params.traits.line_weight,
+                hdr_scale: substep_hdr_scale,
+            },
+        );
+    }
+}
+
+/// Draw the three per-body trail strokes (`step -> step + 1`) for ribbon modes.
+fn accumulate_ribbon_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    next_vertices: Option<[batch_drawing::TriangleVertex; 3]>,
+) {
+    let Some(next_vertices) = next_vertices else {
+        return;
+    };
+
+    let body_dynamics = [
+        params.velocity_calc.body_dynamics(step, 0),
+        params.velocity_calc.body_dynamics(step, 1),
+        params.velocity_calc.body_dynamics(step, 2),
+    ];
+    let draw_params = BatchDrawParams {
+        width: params.ctx.width,
+        height: params.ctx.height,
+        row_start,
+        row_end,
+        vertices,
+        edge_dynamics: body_dynamics,
+        edge_weights: [1.0; 3],
+        line_weight: params.traits.line_weight,
+        hdr_scale: step_hdr_scale,
+    };
+    for body in 0..3 {
+        draw_body_ribbon_segment_rows(accum_spd, &draw_params, body, next_vertices);
+    }
 }
 
 fn accumulate_spectral_steps_into_rows(
@@ -780,6 +930,7 @@ fn accumulate_spectral_steps_into_rows(
     }
 
     let triangle_alphas = params.scene.triangle_alphas();
+    let edge_weights = params.edge_weights();
     for step in params.step_start..params.step_end {
         let vertices = prepare_triangle_vertices(
             params.scene.positions,
@@ -789,61 +940,95 @@ fn accumulate_spectral_steps_into_rows(
             params.ctx,
         );
 
-        let hdr_mult_01 = params.velocity_calc.compute_segment_multiplier(step, 0, 1);
-        let hdr_mult_12 = params.velocity_calc.compute_segment_multiplier(step, 1, 2);
-        let hdr_mult_20 = params.velocity_calc.compute_segment_multiplier(step, 2, 0);
-        let hdr_multipliers = [hdr_mult_01, hdr_mult_12, hdr_mult_20];
+        // Next-step vertices exist whenever the simulation continues. The web
+        // path additionally restricts interpolation to the current chunk so
+        // video frames never leak future motion; ribbon trails must cross the
+        // chunk boundary or every checkpoint would leave a one-step gap.
+        let next_vertices = if step + 1 < params.scene.step_count() {
+            Some(prepare_triangle_vertices(
+                params.scene.positions,
+                params.scene.colors,
+                &triangle_alphas,
+                step + 1,
+                params.ctx,
+            ))
+        } else {
+            None
+        };
+        let next_in_chunk = if step + 1 < params.step_end { next_vertices } else { None };
 
-        if step + 1 >= params.step_end || step + 1 >= params.scene.step_count() {
-            draw_triangle_batch_spectral_rows(
-                accum_spd,
-                &BatchDrawParams {
-                    width: params.ctx.width,
-                    height: params.ctx.height,
+        let step_hdr_scale = params.hdr_scale * params.age_factor(step);
+
+        match params.traits.structure {
+            StructureMode::TriangleWeb | StructureMode::Duet { .. } => {
+                accumulate_web_step(
+                    accum_spd,
+                    params,
                     row_start,
                     row_end,
+                    step,
+                    step_hdr_scale,
                     vertices,
-                    hdr_multipliers,
-                    hdr_scale: params.hdr_scale,
-                },
-            );
-            continue;
-        }
-
-        let next_vertices = prepare_triangle_vertices(
-            params.scene.positions,
-            params.scene.colors,
-            &triangle_alphas,
-            step + 1,
-            params.ctx,
-        );
-        let max_motion_px = max_triangle_vertex_motion_px(vertices, next_vertices);
-        let substeps = constants::crisp_line_interpolation_substeps(
-            params.ctx.width,
-            params.ctx.height,
-            max_motion_px,
-        );
-        let substep_hdr_scale = params.hdr_scale / substeps as f64;
-
-        for substep in 0..substeps {
-            let sample_vertices = if substep == 0 {
-                vertices
-            } else {
-                let t = substep as f32 / substeps as f32;
-                interpolate_triangle_vertices(vertices, next_vertices, t)
-            };
-            draw_triangle_batch_spectral_rows(
-                accum_spd,
-                &BatchDrawParams {
-                    width: params.ctx.width,
-                    height: params.ctx.height,
+                    next_in_chunk,
+                    edge_weights,
+                );
+            }
+            StructureMode::OrbitRibbons => {
+                accumulate_ribbon_step(
+                    accum_spd,
+                    params,
                     row_start,
                     row_end,
-                    vertices: sample_vertices,
-                    hdr_multipliers,
-                    hdr_scale: substep_hdr_scale,
-                },
-            );
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_vertices,
+                );
+            }
+            StructureMode::WebRibbonHybrid => {
+                accumulate_web_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_in_chunk,
+                    edge_weights,
+                );
+                accumulate_ribbon_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_vertices,
+                );
+            }
+            StructureMode::Spokes => {
+                let body_dynamics = [
+                    params.velocity_calc.body_dynamics(step, 0),
+                    params.velocity_calc.body_dynamics(step, 1),
+                    params.velocity_calc.body_dynamics(step, 2),
+                ];
+                draw_spoke_segments_rows(
+                    accum_spd,
+                    &BatchDrawParams {
+                        width: params.ctx.width,
+                        height: params.ctx.height,
+                        row_start,
+                        row_end,
+                        vertices,
+                        edge_dynamics: body_dynamics,
+                        edge_weights: [1.0; 3],
+                        line_weight: params.traits.line_weight,
+                        hdr_scale: step_hdr_scale,
+                    },
+                );
+            }
         }
     }
 }
@@ -920,6 +1105,7 @@ fn pass_1_build_histogram_spectral_with_backend(
                 step_start,
                 step_end: checkpoint_step + 1,
                 hdr_scale: render_config.hdr_scale,
+                traits: settings.traits,
             },
             backend,
         );
@@ -1028,8 +1214,13 @@ fn pass_2_write_frames_spectral_with_backend(
         enable_temporal_smoothing,
         accum_spd,
     } = params;
-    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
-        settings;
+    let SpectralRenderSettings {
+        resolved_config,
+        render_config,
+        noise_seed,
+        aspect_correction,
+        ..
+    } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
@@ -1078,6 +1269,7 @@ fn pass_2_write_frames_spectral_with_backend(
                 step_start,
                 step_end: checkpoint_step + 1,
                 hdr_scale: render_config.hdr_scale,
+                traits: settings.traits,
             },
             backend,
         );
@@ -1187,8 +1379,13 @@ fn render_final_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
-        settings;
+    let SpectralRenderSettings {
+        resolved_config,
+        render_config,
+        noise_seed,
+        aspect_correction,
+        ..
+    } = settings;
     info!("   Rendering final accumulated frame (preview mode)...");
 
     let width = resolved_config.width;
@@ -1225,6 +1422,7 @@ fn render_final_frame_spectral_with_backend(
             step_start: 0,
             step_end: total_steps,
             hdr_scale: render_config.hdr_scale,
+            traits: settings.traits,
         },
         backend,
     );
@@ -1278,6 +1476,7 @@ fn render_final_frame_spectral_tiled(
         render_config,
         noise_seed: _,
         aspect_correction: _,
+        ..
     } = settings;
     let full_spd_gib =
         estimate_full_spd_bytes(ctx.width, ctx.height) as f64 / (1024.0 * 1024.0 * 1024.0);
@@ -1316,6 +1515,7 @@ fn render_final_frame_spectral_tiled(
                 step_start: 0,
                 step_end: total_steps,
                 hdr_scale: render_config.hdr_scale,
+                traits: settings.traits,
             },
             guard_start,
             guard_end,
@@ -1390,8 +1590,13 @@ fn render_single_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    let SpectralRenderSettings { resolved_config, render_config, noise_seed, aspect_correction } =
-        settings;
+    let SpectralRenderSettings {
+        resolved_config,
+        render_config,
+        noise_seed,
+        aspect_correction,
+        ..
+    } = settings;
     info!("   Rendering first timeline slice only (legacy test mode)...");
 
     let width = resolved_config.width;
@@ -1430,6 +1635,7 @@ fn render_single_frame_spectral_with_backend(
             step_start: 0,
             step_end: first_frame_step + 1,
             hdr_scale: render_config.hdr_scale,
+            traits: settings.traits,
         },
         backend,
     );
@@ -2010,6 +2216,7 @@ mod tests {
             step_start: 0,
             step_end: scene.step_count(),
             hdr_scale: render_config.hdr_scale,
+            traits: SceneTraits::default(),
         };
 
         let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];

@@ -17,6 +17,11 @@ const COLOR_RNG_DOMAIN: &[u8] = b"cosmic-color/v2";
 const GLOW_LIGHTNESS_FLOOR: f64 = 0.62;
 const DOMINANT_CHROMA_FRACTION_FLOOR: f64 = 0.62;
 
+/// Lower bound of the continuous per-body alpha multiplier (log-uniform).
+const ALPHA_VARIATION_MIN: f64 = 0.55;
+/// Upper bound of the continuous per-body alpha multiplier (log-uniform).
+const ALPHA_VARIATION_MAX: f64 = 1.80;
+
 /// Minimum inter-body hue gap (degrees) at full spread. Scaling by `spread`
 /// still allows near-monochrome palettes at low spread, while this floor keeps
 /// two bodies from landing on a near-identical hue when the palette is wide.
@@ -356,12 +361,14 @@ pub fn generate_body_color_sequences(
     );
 
     let body_alphas = if alpha_variation {
-        let mut denoms = [13_000_000.0_f64, 15_000_000.0, 17_000_000.0];
-        for i in (1..3).rev() {
-            let j = (rng.next_f64() * (i + 1) as f64).floor() as usize;
-            denoms.swap(i, j);
-        }
-        let alphas = vec![1.0 / denoms[0], 1.0 / denoms[1], 1.0 / denoms[2]];
+        // Continuous log-uniform multipliers (was: 6 permutations of three fixed
+        // denominators, a 1.3:1 spread). The wider, continuous range lets one
+        // body genuinely dominate while another recedes, which combines with
+        // the lightness/chroma hierarchy to give each seed a clear protagonist.
+        let base = 1.0 / alpha_denom as f64;
+        let (ln_min, ln_max) = (ALPHA_VARIATION_MIN.ln(), ALPHA_VARIATION_MAX.ln());
+        let alphas: Vec<f64> =
+            (0..3).map(|_| base * (ln_min + rng.next_f64() * (ln_max - ln_min)).exp()).collect();
         info!(
             "   => Per-body alpha variation: {:.3e}, {:.3e}, {:.3e}",
             alphas[0], alphas[1], alphas[2]
@@ -434,6 +441,32 @@ mod tests {
         assert_eq!(alphas.len(), 3);
         let unique: std::collections::HashSet<u64> = alphas.iter().map(|a| a.to_bits()).collect();
         assert!(unique.len() > 1, "alpha_variation should produce different per-body alphas");
+
+        let base = 1.0 / 15_000_000.0;
+        for &alpha in &alphas {
+            let multiplier = alpha / base;
+            assert!(
+                (ALPHA_VARIATION_MIN..=ALPHA_VARIATION_MAX).contains(&multiplier),
+                "alpha multiplier {multiplier} outside curated range"
+            );
+        }
+    }
+
+    #[test]
+    fn test_alpha_variation_reaches_wide_spread_across_seeds() {
+        let mut widest_ratio = 1.0f64;
+        for seed in 0u8..48 {
+            let mut rng = Sha3RandomByteStream::new(&[seed, 0x12, 0x9A], 1.0, 1.0, 1.0, 1.0);
+            let (_, alphas) =
+                generate_body_color_sequences(&mut rng, 16, 15_000_000, false, true, 0.5);
+            let max = alphas.iter().copied().fold(0.0f64, f64::max);
+            let min = alphas.iter().copied().fold(f64::INFINITY, f64::min);
+            widest_ratio = widest_ratio.max(max / min);
+        }
+        assert!(
+            widest_ratio > 1.8,
+            "continuous alpha variation should produce strong hierarchies, widest={widest_ratio}"
+        );
     }
 
     #[test]

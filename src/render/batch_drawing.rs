@@ -5,6 +5,7 @@
 
 use super::color::OklabColor;
 use super::drawing::{LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral_rows};
+use super::velocity_hdr::SegmentDynamics;
 use crate::spectrum::NUM_BINS;
 use nalgebra::Vector3;
 
@@ -17,7 +18,11 @@ pub(crate) struct BatchDrawParams {
     pub(crate) row_start: usize,
     pub(crate) row_end: usize,
     pub(crate) vertices: [TriangleVertex; 3],
-    pub(crate) hdr_multipliers: [f64; 3],
+    pub(crate) edge_dynamics: [SegmentDynamics; 3],
+    /// Per-edge alpha weight; 0 skips the edge entirely (duet / hybrid modes).
+    pub(crate) edge_weights: [f64; 3],
+    /// Seed-level global line weight multiplier.
+    pub(crate) line_weight: f64,
     pub(crate) hdr_scale: f64,
 }
 
@@ -39,7 +44,10 @@ pub fn draw_triangle_batch_spectral(
             row_start: 0,
             row_end: height as usize,
             vertices,
-            hdr_multipliers,
+            edge_dynamics: hdr_multipliers
+                .map(|m| SegmentDynamics { hdr_multiplier: m, thickness_factor: 1.0 }),
+            edge_weights: [1.0; 3],
+            line_weight: 1.0,
             hdr_scale,
         },
     );
@@ -51,34 +59,86 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
     params: &BatchDrawParams,
 ) {
     let [v0, v1, v2] = params.vertices;
-    let [hdr_mult_01, hdr_mult_12, hdr_mult_20] = params.hdr_multipliers;
+    let edges = [(v0, v1), (v1, v2), (v2, v0)];
 
+    for (edge_idx, (start, end)) in edges.into_iter().enumerate() {
+        let weight = params.edge_weights[edge_idx];
+        if weight <= 0.0 {
+            continue;
+        }
+        let dynamics = params.edge_dynamics[edge_idx];
+        draw_line_segment_aa_spectral_rows(
+            accum,
+            params.width,
+            params.height,
+            params.row_start,
+            params.row_end,
+            SpectralLineSegment {
+                start,
+                end,
+                hdr_scale: params.hdr_scale * dynamics.hdr_multiplier * weight,
+                thickness_factor: dynamics.thickness_factor * params.line_weight,
+            },
+        );
+    }
+}
+
+/// Draw one per-body trail stroke (`step -> step + 1`) for the ribbon modes.
+#[inline]
+pub(crate) fn draw_body_ribbon_segment_rows(
+    accum: &mut [[f64; NUM_BINS]],
+    params: &BatchDrawParams,
+    body: usize,
+    next_vertices: [TriangleVertex; 3],
+) {
+    let dynamics = params.edge_dynamics[body];
     draw_line_segment_aa_spectral_rows(
         accum,
         params.width,
         params.height,
         params.row_start,
         params.row_end,
-        SpectralLineSegment { start: v0, end: v1, hdr_scale: params.hdr_scale * hdr_mult_01 },
+        SpectralLineSegment {
+            start: params.vertices[body],
+            end: next_vertices[body],
+            hdr_scale: params.hdr_scale * dynamics.hdr_multiplier,
+            thickness_factor: dynamics.thickness_factor * params.line_weight,
+        },
     );
+}
 
-    draw_line_segment_aa_spectral_rows(
-        accum,
-        params.width,
-        params.height,
-        params.row_start,
-        params.row_end,
-        SpectralLineSegment { start: v1, end: v2, hdr_scale: params.hdr_scale * hdr_mult_12 },
-    );
+/// Draw the three body-to-centroid spokes for the current step.
+#[inline]
+pub(crate) fn draw_spoke_segments_rows(accum: &mut [[f64; NUM_BINS]], params: &BatchDrawParams) {
+    let [v0, v1, v2] = params.vertices;
+    let centroid_x = (v0.x + v1.x + v2.x) / 3.0;
+    let centroid_y = (v0.y + v1.y + v2.y) / 3.0;
+    let centroid_z = (v0.z + v1.z + v2.z) / 3.0;
 
-    draw_line_segment_aa_spectral_rows(
-        accum,
-        params.width,
-        params.height,
-        params.row_start,
-        params.row_end,
-        SpectralLineSegment { start: v2, end: v0, hdr_scale: params.hdr_scale * hdr_mult_20 },
-    );
+    for body in 0..3 {
+        let vertex = params.vertices[body];
+        let centroid = TriangleVertex {
+            x: centroid_x,
+            y: centroid_y,
+            z: centroid_z,
+            color: vertex.color,
+            alpha: vertex.alpha,
+        };
+        let dynamics = params.edge_dynamics[body];
+        draw_line_segment_aa_spectral_rows(
+            accum,
+            params.width,
+            params.height,
+            params.row_start,
+            params.row_end,
+            SpectralLineSegment {
+                start: vertex,
+                end: centroid,
+                hdr_scale: params.hdr_scale * dynamics.hdr_multiplier,
+                thickness_factor: dynamics.thickness_factor * params.line_weight,
+            },
+        );
+    }
 }
 
 /// Return the maximum 2D pixel motion between two triangle samples.

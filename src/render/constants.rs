@@ -198,7 +198,19 @@ pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.82;
 pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.30;
 
 /// Maximum production line thickness in pixels.
-pub const CRISP_LINE_MAX_THICKNESS: f32 = 1.55;
+///
+/// Raised from 1.55 so that bold seeds (high `line_weight`) and slow, close
+/// passages can render genuinely weighty strokes.
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 2.40;
+
+/// Offset term of the proximity response in the line width model.
+///
+/// `width ∝ 1 / (offset + segment_length_px * slope)`: short segments (close
+/// encounters, per-step ribbon strokes) draw bold, long spans draw fine.
+pub const CRISP_LINE_PROXIMITY_OFFSET: f32 = 0.55;
+
+/// Slope term of the proximity response in the line width model (per pixel).
+pub const CRISP_LINE_PROXIMITY_SLOPE: f32 = 0.0125;
 
 /// Z-depth broadening factor for production stills; zero means no depth-of-field blur.
 pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
@@ -311,9 +323,33 @@ pub const SPECTRAL_DISPERSION_STRENGTH_BOOSTED: f64 = CRISP_DISPERSION_STRENGTH;
 /// 1.0 = no boost, 2.0 = double brightness at max velocity
 pub const VELOCITY_HDR_BOOST_FACTOR: f64 = 8.0; // Increased from 2.5 for dramatic flares
 
-/// Velocity threshold for HDR boost (normalized units per timestep)
-/// Velocities above this get maximum boost
-pub const VELOCITY_HDR_BOOST_THRESHOLD: f64 = 0.15; // Lowered from 0.3 to activate earlier
+/// Quantile of the orbit's own speed distribution mapped to "slow" (norm 0).
+pub const VELOCITY_NORM_LOW_QUANTILE: f64 = 0.15;
+
+/// Quantile of the orbit's own speed distribution mapped to "fast" (norm 1).
+pub const VELOCITY_NORM_HIGH_QUANTILE: f64 = 0.97;
+
+/// Exponent shaping the flare response curve; > 1 reserves the brightest
+/// flares for genuinely fast passages instead of the orbit's median speed.
+pub const VELOCITY_FLARE_GAMMA: f64 = 1.35;
+
+/// Line thickness multiplier for the slowest arcs (bold, contemplative strokes).
+pub const VELOCITY_THICKNESS_SLOW: f64 = 1.30;
+
+/// Line thickness multiplier for the fastest whips (hairline flares).
+pub const VELOCITY_THICKNESS_FAST: f64 = 0.62;
+
+/// Alpha multiplier for the faint triangle web layered under hybrid ribbons.
+pub const HYBRID_WEB_ALPHA_SCALE: f64 = 0.30;
+
+/// Floor of the lightness-to-energy response (keeps dark bodies visible).
+pub const LIGHTNESS_ENERGY_FLOOR: f64 = 0.30;
+
+/// Span of the lightness-to-energy response above the floor.
+pub const LIGHTNESS_ENERGY_SPAN: f64 = 1.10;
+
+/// Exponent of the lightness-to-energy response.
+pub const LIGHTNESS_ENERGY_GAMMA: f64 = 1.6;
 
 // ========== Video Encoding Constants ==========
 

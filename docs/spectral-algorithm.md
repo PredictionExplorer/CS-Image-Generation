@@ -159,34 +159,65 @@ for body in 0..3:
     }
 ```
 
-### 3.3 Velocity HDR Multiplier
+### 3.3 Orbit-Relative Velocity Dynamics
 
-Each triangle edge receives a brightness boost proportional to how fast the
-bodies at its endpoints are moving. This makes fast-moving regions flare
-dramatically.
+Each stroke receives brightness and width modulation derived from how fast the
+relevant bodies move **relative to this orbit's own speed distribution**. (An
+older build compared speeds against a fixed absolute threshold; bound orbits
+move so much faster than that threshold that every segment saturated to the
+maximum boost and the contrast was lost.)
 
-For a single body at timestep `step`:
-
-```
-velocity = |positions[body][step+1] - positions[body][step]| / dt
-normalized_velocity = min(velocity / VELOCITY_HDR_BOOST_THRESHOLD, 1.0)
-multiplier = 1.0 + normalized_velocity * (VELOCITY_HDR_BOOST_FACTOR - 1.0)
-```
-
-For an edge between body A and body B:
+At calculator construction, body speeds are sampled (strided, deterministic)
+across the whole trajectory and sorted. The low/high quantiles define the
+normalization window:
 
 ```
-edge_multiplier = (multiplier_A + multiplier_B) / 2.0
+v_low  = quantile(VELOCITY_NORM_LOW_QUANTILE)    // 0.15
+v_high = quantile(VELOCITY_NORM_HIGH_QUANTILE)   // 0.97
+norm(v) = clamp((v - v_low) / (v_high - v_low), 0, 1)
+```
+
+Per segment (edge uses the mean of its endpoint body norms; ribbons and spokes
+use the body's own norm):
+
+```
+s = smoothstep(norm)
+hdr_multiplier   = 1 + s^VELOCITY_FLARE_GAMMA * (VELOCITY_HDR_BOOST_FACTOR - 1)
+thickness_factor = lerp(VELOCITY_THICKNESS_SLOW, VELOCITY_THICKNESS_FAST, s)
 ```
 
 | Constant | Value |
 |----------|-------|
 | `VELOCITY_HDR_BOOST_FACTOR` | 8.0 |
-| `VELOCITY_HDR_BOOST_THRESHOLD` | 0.15 |
+| `VELOCITY_NORM_LOW_QUANTILE` / `HIGH` | 0.15 / 0.97 |
+| `VELOCITY_FLARE_GAMMA` | 1.35 |
+| `VELOCITY_THICKNESS_SLOW` / `FAST` | 1.30 / 0.62 |
 | `dt` (simulation timestep) | 0.001 |
 
-A stationary body gets multiplier 1.0. A body at or above the threshold velocity
-gets multiplier 8.0.
+Slow apoapsis arcs render bold and quiet near 1x energy; periapsis whips render
+as thin flares approaching 8x. Because the window adapts per orbit, every seed
+exhibits the full dynamic range.
+
+### 3.3b Scene Traits (Structure Mode, Line Weight, Age Ramp)
+
+The `CosmicSignature` profile resolves seed-varying scene traits consumed by
+the accumulator:
+
+- **Structure mode** (seeded weighted choice): `triangle_web` (40%),
+  `orbit_ribbons` (20%, each body paints its own trajectory),
+  `web_ribbon_hybrid` (16%, faint web + full ribbons), `duet` (14%, one edge
+  omitted), `spokes` (10%, body-to-centroid lines).
+- **Line weight** in [0.85, 1.45]: global stroke width multiplier.
+- **Age ramp** in [-0.35, 0.35]: linear exposure ramp across simulation time,
+  encoding the arrow of time into the accumulated image.
+- **Exposure key** in [0.85, 1.12]: multiplies the histogram-derived exposure
+  for darker/ember or brighter/airier seeds.
+- **Halation** (~30% of seeds): subtle tight DoG bloom (strength 0.05-0.14)
+  as a film-style highlight halo; all other legacy effects stay disabled.
+
+A seeded uniform 3D rotation (Shoemake quaternion method, forked RNG domain
+`cosmic-view/v1`) is applied to the trajectory before rendering, so the same
+orbit family is photographed from a different angle every seed.
 
 ### 3.4 OkLab Hue to Spectral Emission Lobes
 
@@ -781,7 +812,11 @@ main trajectory video (default quality vs `--fast-encode`).
 |----------|-------|-------------|
 | `DEFAULT_HDR_SCALE` | 1.0 | Base HDR scale (usually overridden to ~3.0) |
 | `VELOCITY_HDR_BOOST_FACTOR` | 8.0 | Maximum velocity brightness multiplier |
-| `VELOCITY_HDR_BOOST_THRESHOLD` | 0.15 | Velocity at which max boost is reached |
+| `VELOCITY_NORM_LOW_QUANTILE` | 0.15 | Orbit speed quantile mapped to "slow" |
+| `VELOCITY_NORM_HIGH_QUANTILE` | 0.97 | Orbit speed quantile mapped to "fast" |
+| `VELOCITY_FLARE_GAMMA` | 1.35 | Flare response exponent |
+| `VELOCITY_THICKNESS_SLOW` / `FAST` | 1.30 / 0.62 | Width multipliers across the speed range |
+| `LIGHTNESS_ENERGY_FLOOR` / `SPAN` / `GAMMA` | 0.30 / 1.10 / 1.6 | OKLab lightness to deposited-energy response |
 | `CRISP_DISPERSION_STRENGTH` | 0.0 | Production chromatic dispersion strength (disabled) |
 | `SPECTRAL_DISPERSION_STRENGTH` | 0.0 | Base chromatic aberration strength in crisp mode |
 | `SPECTRAL_DISPERSION_STRENGTH_BOOSTED` | 0.0 | Boosted chromatic aberration in crisp mode |

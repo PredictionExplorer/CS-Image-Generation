@@ -305,6 +305,9 @@ fn main() -> Result<()> {
 
     let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
 
+    // Seeded viewing orientation: photograph the 3D orbit from a random angle.
+    app::apply_view_orientation(&mut positions, &rng);
+
     let drift_config = if args.drift == DriftModeArg::None {
         info!("STAGE 2.5/7: Drift disabled");
         None
@@ -350,6 +353,16 @@ fn main() -> Result<()> {
         bloom_mode: render::BloomMode::Dog,
     };
 
+    let scene_traits = visual_profile.parameters.scene_traits();
+    info!(
+        "   => Scene traits: structure={} line_weight={:.3} age_ramp={:+.3} exposure_key={:.3} halation={:.3}",
+        scene_traits.structure.label(),
+        scene_traits.line_weight,
+        scene_traits.age_ramp,
+        visual_profile.parameters.exposure_key,
+        visual_profile.parameters.halation_strength,
+    );
+
     let levels = app::build_histogram_and_levels(
         &positions,
         &colors,
@@ -358,6 +371,7 @@ fn main() -> Result<()> {
         noise_seed,
         &render_config,
         enhancements.aspect_correction,
+        &visual_profile.parameters,
     )?;
 
     let output_png = format!("{seed_dir}/image.png");
@@ -371,7 +385,8 @@ fn main() -> Result<()> {
             &render_config,
             noise_seed,
             enhancements.aspect_correction,
-        ),
+        )
+        .with_traits(scene_traits),
         &output_vid,
         &output_png,
         args.fast_encode,

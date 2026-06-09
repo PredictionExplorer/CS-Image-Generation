@@ -157,9 +157,16 @@ fn cosmic_signature_distinct_seeds_keep_no_effects_invariant() {
     for seed in [[0x01, 0x02], [0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
         let mut rng = make_rng(&seed);
         let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 640, 360);
+        // Only the seed-gated halation bloom may ever be enabled; every other
+        // legacy effect must stay off for all seeds.
         assert!(
-            !profile.effect_config.any_legacy_effect_enabled(),
-            "seed {seed:02X?} enabled a legacy effect"
+            !profile.effect_config.any_effect_beyond_halation_enabled(),
+            "seed {seed:02X?} enabled a non-halation legacy effect"
+        );
+        assert_eq!(
+            profile.effect_config.enable_bloom,
+            profile.parameters.halation_strength > 0.0,
+            "seed {seed:02X?} bloom flag must mirror the halation trait"
         );
     }
 }
@@ -170,7 +177,10 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
     let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 1024, 576);
     let config = profile.effect_config;
 
-    assert!(!config.any_legacy_effect_enabled(), "legacy post-effects must stay disabled");
+    assert!(
+        !config.any_effect_beyond_halation_enabled(),
+        "non-halation post-effects must stay disabled"
+    );
     assert_eq!(config.blur_strength, 0.0);
     assert_eq!(config.glow_strength, 0.0);
     assert_eq!(config.chromatic_bloom_strength, 0.0);
