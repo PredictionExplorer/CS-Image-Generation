@@ -4,6 +4,6 @@
     "height": 288,
     "num_steps": 100000,
     "drift_mode": "brownian",
-    "timestamp": "2026-06-10T19:57:54Z",
-    "sha256": "10076aed7a45f9238fe787b3d1bc42d8ab797645cd17cca72ab68460c0d8ffc8"
+    "timestamp": "2026-06-10T22:00:44Z",
+    "sha256": "2e600f1052f10a9d779c8e52acddf8513fd5c471a53a0792b305e25fc1dc78f2"
 }

@@ -13,6 +13,8 @@ use tracing::info;
 
 /// Gravitational constant
 pub const G: f64 = 9.8;
+/// Small Borda weight for spatially rich trajectories (loops and sweeping travel).
+const SPATIAL_INTEREST_WEIGHT: f64 = 0.15;
 
 /// A custom RNG based on repeated Sha3 hashing
 pub struct Sha3RandomByteStream {
@@ -359,11 +361,15 @@ pub struct TrajectoryResult {
     pub chaos: f64,
     /// Equilateralness score (higher = more triangular).
     pub equilateralness: f64,
+    /// Spatial-interest proxy: path length relative to occupied volume.
+    pub spatial_interest: f64,
     /// Borda points awarded for non-chaoticness rank.
     pub chaos_pts: usize,
     /// Borda points awarded for equilateralness rank.
     pub equil_pts: usize,
-    /// Sum of `chaos_pts` and `equil_pts`.
+    /// Borda points awarded for spatial-interest rank.
+    pub spatial_pts: usize,
+    /// Sum of `chaos_pts`, `equil_pts`, and `spatial_pts`.
     pub total_score: usize,
     /// Weighted combination of Borda points used for final ranking.
     pub total_score_weighted: f64,
@@ -420,21 +426,71 @@ fn rank_trajectories(
 
     let mut cv = Vec::with_capacity(iv.len());
     let mut ev = Vec::with_capacity(iv.len());
+    let mut sv = Vec::with_capacity(iv.len());
     for (i, (t, _)) in iv.iter().enumerate() {
         cv.push((t.chaos, i));
         ev.push((t.equilateralness, i));
+        sv.push((t.spatial_interest, i));
     }
     let cps = assign(&mut cv, false);
     let eps = assign(&mut ev, true);
+    let sps = assign(&mut sv, true);
     for (i, (t, _)) in iv.iter_mut().enumerate() {
         t.chaos_pts = cps[i];
         t.equil_pts = eps[i];
-        t.total_score = t.chaos_pts + t.equil_pts;
+        t.spatial_pts = sps[i];
+        t.total_score = t.chaos_pts + t.equil_pts + t.spatial_pts;
         // usize→f64: chaos_pts/equil_pts are bounded by the number of valid trajectories
-        t.total_score_weighted = cw * (t.chaos_pts as f64) + ew * (t.equil_pts as f64);
+        t.total_score_weighted = cw * (t.chaos_pts as f64)
+            + ew * (t.equil_pts as f64)
+            + SPATIAL_INTEREST_WEIGHT * (t.spatial_pts as f64);
     }
     iv.sort_by(|a, b| b.0.total_score_weighted.total_cmp(&a.0.total_score_weighted));
     iv
+}
+
+fn spatial_interest_score(positions: &[Vec<Vector3<f64>>]) -> f64 {
+    let mut min = Vector3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut max = Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut path_length = 0.0f64;
+    let mut samples = 0usize;
+
+    for body in positions {
+        for window in body.windows(2) {
+            let a = window[0];
+            let b = window[1];
+            if !(a[0].is_finite()
+                && a[1].is_finite()
+                && a[2].is_finite()
+                && b[0].is_finite()
+                && b[1].is_finite()
+                && b[2].is_finite())
+            {
+                continue;
+            }
+            min.x = min.x.min(a.x).min(b.x);
+            min.y = min.y.min(a.y).min(b.y);
+            min.z = min.z.min(a.z).min(b.z);
+            max.x = max.x.max(a.x).max(b.x);
+            max.y = max.y.max(a.y).max(b.y);
+            max.z = max.z.max(a.z).max(b.z);
+            path_length += (b - a).norm();
+            samples += 1;
+        }
+    }
+
+    if samples == 0 || !path_length.is_finite() {
+        return 0.0;
+    }
+    let span = max - min;
+    let diagonal = span.norm().max(1e-9);
+    let dimensionality = {
+        let spans = [span.x.abs(), span.y.abs(), span.z.abs()];
+        let max_span = spans.iter().copied().fold(0.0, f64::max).max(1e-9);
+        let occupied_axes = spans.iter().filter(|&&axis| axis / max_span > 0.08).count();
+        occupied_axes as f64 / 3.0
+    };
+    ((path_length / diagonal).ln_1p() * dimensionality).max(0.0)
 }
 
 /// Run `num_sims` random orbits in parallel and retain the top Borda candidates.
@@ -496,6 +552,7 @@ pub fn select_best_trajectory_shortlist(
             // Compute quality metrics
             let c = non_chaoticness(m1, m2, m3, &pos);
             let eq = equilateralness_score(&pos);
+            let spatial = spatial_interest_score(&pos);
 
             // Early rejection: if both metrics are terrible, skip
             // This saves time on Borda ranking for clearly unsuitable candidates
@@ -511,8 +568,10 @@ pub fn select_best_trajectory_shortlist(
                 TrajectoryResult {
                     chaos: c,
                     equilateralness: eq,
+                    spatial_interest: spatial,
                     chaos_pts: 0,
                     equil_pts: 0,
+                    spatial_pts: 0,
                     total_score: 0,
                     total_score_weighted: 0.0,
                     selected_index: 0,

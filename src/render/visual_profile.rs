@@ -170,6 +170,35 @@ pub struct CosmicSignatureParameters {
     pub mirror: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ModeIndependentParameters {
+    hdr_scale: f64,
+    clip_black: f64,
+    clip_white: f64,
+    palette_phase: f64,
+    edge_energy: f64,
+    exposure_key: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ModeDependentRolls {
+    line_weight: f64,
+    age_ramp: f64,
+    chord_lag_fraction: f64,
+    ribbon_echo_gate: f64,
+    ribbon_echo_alpha: f64,
+    halation_gate: f64,
+    halation_strength: f64,
+    halation_radius: f64,
+    halation_softness: f64,
+    prism_gate: f64,
+    prism_strength: f64,
+    prism_radius: f64,
+    prism_separation: f64,
+    prism_threshold: f64,
+    mirror_gate: f64,
+}
+
 /// Mode-aware line weight range: ribbon-style modes draw bolder strokes so the
 /// sparse per-body trails read as luminous bands instead of hairlines.
 fn line_weight_range(structure: StructureMode) -> (f64, f64) {
@@ -184,83 +213,75 @@ fn line_weight_range(structure: StructureMode) -> (f64, f64) {
     }
 }
 
-/// Mode-aware halation gate: sparse modes always glow, dense webs rarely do.
+/// Mode-aware halation gate: sparse modes always glow, dense webs less often.
 fn halation_profile(structure: StructureMode) -> (f64, (f64, f64)) {
     match structure {
         StructureMode::OrbitRibbons | StructureMode::CometRibbons => (1.0, (0.10, 0.18)),
         StructureMode::TimeChords => (0.60, (0.06, 0.15)),
         StructureMode::Spokes | StructureMode::WebSpokesLace => (0.50, (0.05, 0.14)),
         StructureMode::WebRibbonHybrid => (0.45, (0.05, 0.14)),
-        StructureMode::TriangleWeb | StructureMode::Duet { .. } => (0.25, (0.05, 0.14)),
+        StructureMode::TriangleWeb | StructureMode::Duet { .. } => (0.40, (0.05, 0.14)),
     }
 }
 
 impl CosmicSignatureParameters {
-    fn resolve(rng: &mut Sha3RandomByteStream) -> Self {
-        let hdr_scale = sample_range(rng, 0.155, 0.215);
-        let clip_black = sample_range(rng, 0.0045, 0.0085);
-        let clip_white = sample_range(rng, 0.9935, 0.9985);
-        let palette_phase = sample_range(rng, 0.0, 1.0);
-        let edge_energy = sample_range(rng, 0.92, 1.18);
-        let exposure_key = sample_range(rng, 0.85, 1.12);
-
-        let structure = resolve_structure_mode(rng);
+    fn resolve(
+        base: ModeIndependentParameters,
+        rolls: ModeDependentRolls,
+        structure: StructureMode,
+    ) -> Self {
         let (lw_min, lw_max) = line_weight_range(structure);
-        let line_weight = sample_range(rng, lw_min, lw_max);
-        let age_ramp = sample_range(rng, -0.6, 0.6);
-        let chord_lag_fraction = sample_range(rng, 0.004, 0.020);
+        let line_weight = lerp(lw_min, lw_max, rolls.line_weight);
+        let age_ramp = lerp(-0.6, 0.6, rolls.age_ramp);
+        let chord_lag_fraction = lerp(0.004, 0.020, rolls.chord_lag_fraction);
 
         let ribbon_echo_alpha = match structure {
             StructureMode::OrbitRibbons => {
-                if rng.next_f64() < RIBBON_ECHO_PROBABILITY {
-                    sample_range(rng, 0.18, 0.35)
+                if rolls.ribbon_echo_gate < RIBBON_ECHO_PROBABILITY {
+                    lerp(0.18, 0.35, rolls.ribbon_echo_alpha)
                 } else {
                     0.0
                 }
             }
-            StructureMode::CometRibbons => sample_range(rng, 0.30, 0.50),
+            StructureMode::CometRibbons => lerp(0.30, 0.50, rolls.ribbon_echo_alpha),
             _ => 0.0,
         };
 
         let (halation_probability, (hal_min, hal_max)) = halation_profile(structure);
-        let halation_roll = rng.next_f64();
         let (halation_strength, halation_radius_scale, halation_softness) =
-            if halation_roll < halation_probability {
+            if rolls.halation_gate < halation_probability {
                 let radius_range =
                     if structure.is_ribbon_like() { (0.0030, 0.0050) } else { (0.0026, 0.0046) };
                 (
-                    sample_range(rng, hal_min, hal_max),
-                    sample_range(rng, radius_range.0, radius_range.1),
-                    sample_range(rng, 2.8, 4.0),
+                    lerp(hal_min, hal_max, rolls.halation_strength),
+                    lerp(radius_range.0, radius_range.1, rolls.halation_radius),
+                    lerp(2.8, 4.0, rolls.halation_softness),
                 )
             } else {
                 (0.0, 0.0035, 3.2)
             };
 
-        // Rare seed-gated traits. Each is deterministic per seed and logged so
-        // rarity is auditable from generation metadata.
-        let prism_roll = rng.next_f64();
         let (prism_strength, prism_radius_scale, prism_separation_scale, prism_threshold) =
-            if prism_roll < PRISM_PROBABILITY {
+            if rolls.prism_gate < PRISM_PROBABILITY {
                 (
-                    sample_range(rng, 0.16, 0.30),
-                    sample_range(rng, 0.0035, 0.0050),
-                    sample_range(rng, 0.0008, 0.0014),
-                    sample_range(rng, 0.20, 0.26),
+                    lerp(0.16, 0.30, rolls.prism_strength),
+                    lerp(0.0035, 0.0050, rolls.prism_radius),
+                    lerp(0.0008, 0.0014, rolls.prism_separation),
+                    lerp(0.20, 0.26, rolls.prism_threshold),
                 )
             } else {
                 (0.0, 0.0042, 0.0011, 0.23)
             };
 
-        let mirror = rng.next_f64() < MIRROR_PROBABILITY;
+        let mirror = rolls.mirror_gate < MIRROR_PROBABILITY;
 
         Self {
-            hdr_scale,
-            clip_black,
-            clip_white,
-            palette_phase,
-            edge_energy,
-            exposure_key,
+            hdr_scale: base.hdr_scale,
+            clip_black: base.clip_black,
+            clip_white: base.clip_white,
+            palette_phase: base.palette_phase,
+            edge_energy: base.edge_energy,
+            exposure_key: base.exposure_key,
             structure,
             line_weight,
             age_ramp,
@@ -289,6 +310,37 @@ impl CosmicSignatureParameters {
             ribbon_echo_alpha: self.ribbon_echo_alpha,
             mirror: self.mirror,
         }
+    }
+}
+
+fn resolve_base_parameters(rng: &mut Sha3RandomByteStream) -> ModeIndependentParameters {
+    ModeIndependentParameters {
+        hdr_scale: sample_range(rng, 0.155, 0.215),
+        clip_black: sample_range(rng, 0.0045, 0.0085),
+        clip_white: sample_range(rng, 0.9935, 0.9985),
+        palette_phase: sample_range(rng, 0.0, 1.0),
+        edge_energy: sample_range(rng, 0.92, 1.18),
+        exposure_key: sample_range(rng, 0.85, 1.12),
+    }
+}
+
+fn resolve_mode_rolls(rng: &mut Sha3RandomByteStream) -> ModeDependentRolls {
+    ModeDependentRolls {
+        line_weight: rng.next_f64(),
+        age_ramp: rng.next_f64(),
+        chord_lag_fraction: rng.next_f64(),
+        ribbon_echo_gate: rng.next_f64(),
+        ribbon_echo_alpha: rng.next_f64(),
+        halation_gate: rng.next_f64(),
+        halation_strength: rng.next_f64(),
+        halation_radius: rng.next_f64(),
+        halation_softness: rng.next_f64(),
+        prism_gate: rng.next_f64(),
+        prism_strength: rng.next_f64(),
+        prism_radius: rng.next_f64(),
+        prism_separation: rng.next_f64(),
+        prism_threshold: rng.next_f64(),
+        mirror_gate: rng.next_f64(),
     }
 }
 
@@ -330,98 +382,160 @@ pub struct ResolvedVisualProfile {
     pub effect_config: ResolvedEffectConfig,
     /// Metadata describing deterministic profile randomization.
     pub randomization_log: RandomizationLog,
+    base_parameters: ModeIndependentParameters,
+    mode_rolls: ModeDependentRolls,
+    preferred_structure: StructureMode,
 }
 
 impl ResolvedVisualProfile {
     /// Resolve the default `CosmicSignature` profile for the output dimensions.
     pub fn cosmic_signature(rng: &mut Sha3RandomByteStream, width: u32, height: u32) -> Self {
-        let parameters = CosmicSignatureParameters::resolve(rng);
-        let effect_config = ResolvedEffectConfig {
-            width,
-            height,
-            enable_bloom: parameters.halation_strength > 0.0,
-            enable_glow: false,
-            enable_chromatic_bloom: parameters.prism_strength > 0.0,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
-            enable_opalescence: false,
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
-            blur_strength: 0.0,
-            blur_radius_scale: 0.0,
-            blur_core_brightness: 1.0,
-            dog_strength: parameters.halation_strength,
-            dog_sigma_scale: parameters.halation_radius_scale,
-            dog_ratio: parameters.halation_softness,
-            glow_strength: 0.0,
-            glow_threshold: 1.0,
-            glow_radius_scale: 0.0,
-            glow_sharpness: 1.0,
-            glow_saturation_boost: 0.0,
-            chromatic_bloom_strength: parameters.prism_strength,
-            chromatic_bloom_radius_scale: parameters.prism_radius_scale,
-            chromatic_bloom_separation_scale: parameters.prism_separation_scale,
-            chromatic_bloom_threshold: parameters.prism_threshold,
-            perceptual_blur_strength: 0.0,
-            color_grade_strength: 0.0,
-            vignette_strength: 0.0,
-            vignette_softness: 1.0,
-            vibrance: 1.0,
-            clarity_strength: 0.0,
-            tone_curve_strength: 0.0,
-            gradient_map_strength: 0.0,
-            gradient_map_hue_preservation: 1.0,
-            gradient_map_palette: 0,
-            opalescence_strength: 0.0,
-            opalescence_scale: 0.0,
-            opalescence_layers: 1,
-            champleve_flow_alignment: 0.0,
-            champleve_interference_amplitude: 0.0,
-            champleve_rim_intensity: 0.0,
-            champleve_rim_warmth: 0.0,
-            champleve_interior_lift: 0.0,
-            aether_flow_alignment: 0.0,
-            aether_scattering_strength: 0.0,
-            aether_iridescence_amplitude: 0.0,
-            aether_caustic_strength: 0.0,
-            micro_contrast_strength: 0.0,
-            micro_contrast_radius: 1,
-            edge_luminance_strength: 0.0,
-            edge_luminance_threshold: 1.0,
-            edge_luminance_brightness_boost: 0.0,
-            atmospheric_depth_strength: 0.0,
-            atmospheric_desaturation: 0.0,
-            atmospheric_darkening: 0.0,
-            atmospheric_fog_color_r: 0.0,
-            atmospheric_fog_color_g: 0.0,
-            atmospheric_fog_color_b: 0.0,
-            fine_texture_strength: 0.0,
-            fine_texture_scale: 0.0,
-            fine_texture_contrast: 0.0,
-            hdr_scale: parameters.hdr_scale,
-            clip_black: parameters.clip_black,
-            clip_white: parameters.clip_white,
-        };
+        let base_parameters = resolve_base_parameters(rng);
+        let preferred_structure = resolve_structure_mode(rng);
+        let mode_rolls = resolve_mode_rolls(rng);
+        Self::from_resolved_parts(width, height, base_parameters, mode_rolls, preferred_structure)
+    }
+
+    fn from_resolved_parts(
+        width: u32,
+        height: u32,
+        base_parameters: ModeIndependentParameters,
+        mode_rolls: ModeDependentRolls,
+        structure: StructureMode,
+    ) -> Self {
+        let parameters = CosmicSignatureParameters::resolve(base_parameters, mode_rolls, structure);
+        let effect_config = effect_config_from_parameters(width, height, &parameters);
 
         Self {
             name: COSMIC_SIGNATURE_PROFILE_NAME,
             parameters,
             effect_config,
-            randomization_log: build_profile_log(parameters),
+            randomization_log: build_profile_log(parameters, structure),
+            base_parameters,
+            mode_rolls,
+            preferred_structure: structure,
         }
+    }
+
+    /// Return a copy of this profile retargeted to the mode selected by adaptive scoring.
+    #[must_use]
+    pub fn with_structure(&self, structure: StructureMode) -> Self {
+        let parameters =
+            CosmicSignatureParameters::resolve(self.base_parameters, self.mode_rolls, structure);
+        let effect_config = effect_config_from_parameters(
+            self.effect_config.width,
+            self.effect_config.height,
+            &parameters,
+        );
+
+        Self {
+            name: COSMIC_SIGNATURE_PROFILE_NAME,
+            parameters,
+            effect_config,
+            randomization_log: build_profile_log(parameters, self.preferred_structure),
+            base_parameters: self.base_parameters,
+            mode_rolls: self.mode_rolls,
+            preferred_structure: self.preferred_structure,
+        }
+    }
+
+    /// Structure mode originally rolled by the seed before adaptive selection.
+    #[must_use]
+    pub fn preferred_structure(&self) -> StructureMode {
+        self.preferred_structure
+    }
+}
+
+fn effect_config_from_parameters(
+    width: u32,
+    height: u32,
+    parameters: &CosmicSignatureParameters,
+) -> ResolvedEffectConfig {
+    ResolvedEffectConfig {
+        width,
+        height,
+        enable_bloom: parameters.halation_strength > 0.0,
+        enable_glow: false,
+        enable_chromatic_bloom: parameters.prism_strength > 0.0,
+        enable_perceptual_blur: false,
+        enable_micro_contrast: false,
+        enable_gradient_map: false,
+        enable_color_grade: false,
+        enable_champleve: false,
+        enable_aether: false,
+        enable_opalescence: false,
+        enable_edge_luminance: false,
+        enable_atmospheric_depth: false,
+        enable_fine_texture: false,
+        blur_strength: 0.0,
+        blur_radius_scale: 0.0,
+        blur_core_brightness: 1.0,
+        dog_strength: parameters.halation_strength,
+        dog_sigma_scale: parameters.halation_radius_scale,
+        dog_ratio: parameters.halation_softness,
+        glow_strength: 0.0,
+        glow_threshold: 1.0,
+        glow_radius_scale: 0.0,
+        glow_sharpness: 1.0,
+        glow_saturation_boost: 0.0,
+        chromatic_bloom_strength: parameters.prism_strength,
+        chromatic_bloom_radius_scale: parameters.prism_radius_scale,
+        chromatic_bloom_separation_scale: parameters.prism_separation_scale,
+        chromatic_bloom_threshold: parameters.prism_threshold,
+        perceptual_blur_strength: 0.0,
+        color_grade_strength: 0.0,
+        vignette_strength: 0.0,
+        vignette_softness: 1.0,
+        vibrance: 1.0,
+        clarity_strength: 0.0,
+        tone_curve_strength: 0.0,
+        gradient_map_strength: 0.0,
+        gradient_map_hue_preservation: 1.0,
+        gradient_map_palette: 0,
+        opalescence_strength: 0.0,
+        opalescence_scale: 0.0,
+        opalescence_layers: 1,
+        champleve_flow_alignment: 0.0,
+        champleve_interference_amplitude: 0.0,
+        champleve_rim_intensity: 0.0,
+        champleve_rim_warmth: 0.0,
+        champleve_interior_lift: 0.0,
+        aether_flow_alignment: 0.0,
+        aether_scattering_strength: 0.0,
+        aether_iridescence_amplitude: 0.0,
+        aether_caustic_strength: 0.0,
+        micro_contrast_strength: 0.0,
+        micro_contrast_radius: 1,
+        edge_luminance_strength: 0.0,
+        edge_luminance_threshold: 1.0,
+        edge_luminance_brightness_boost: 0.0,
+        atmospheric_depth_strength: 0.0,
+        atmospheric_desaturation: 0.0,
+        atmospheric_darkening: 0.0,
+        atmospheric_fog_color_r: 0.0,
+        atmospheric_fog_color_g: 0.0,
+        atmospheric_fog_color_b: 0.0,
+        fine_texture_strength: 0.0,
+        fine_texture_scale: 0.0,
+        fine_texture_contrast: 0.0,
+        hdr_scale: parameters.hdr_scale,
+        clip_black: parameters.clip_black,
+        clip_white: parameters.clip_white,
     }
 }
 
 fn sample_range(rng: &mut Sha3RandomByteStream, min: f64, max: f64) -> f64 {
-    min + rng.next_f64() * (max - min)
+    lerp(min, max, rng.next_f64())
 }
 
-fn build_profile_log(parameters: CosmicSignatureParameters) -> RandomizationLog {
+fn lerp(min: f64, max: f64, t: f64) -> f64 {
+    min + (max - min) * t
+}
+
+fn build_profile_log(
+    parameters: CosmicSignatureParameters,
+    preferred_structure: StructureMode,
+) -> RandomizationLog {
     let mut record = RandomizationRecord::new(COSMIC_SIGNATURE_PROFILE_NAME, true, true);
     record.add_float("hdr_scale", parameters.hdr_scale, true, (0.155, 0.215));
     record.add_float("clip_black", parameters.clip_black, true, (0.0045, 0.0085));
@@ -429,6 +543,8 @@ fn build_profile_log(parameters: CosmicSignatureParameters) -> RandomizationLog 
     record.add_float("palette_phase", parameters.palette_phase, true, (0.0, 1.0));
     record.add_float("edge_energy", parameters.edge_energy, true, (0.92, 1.18));
     record.add_float("exposure_key", parameters.exposure_key, true, (0.85, 1.12));
+    record.add_int("preferred_structure_mode", preferred_structure.log_index(), true, (0, 7));
+    record.add_int("chosen_structure_mode", parameters.structure.log_index(), true, (0, 7));
     record.add_int("structure_mode", parameters.structure.log_index(), true, (0, 7));
     record.add_float("line_weight", parameters.line_weight, true, (0.75, 2.20));
     record.add_float("age_ramp", parameters.age_ramp, true, (-0.6, 0.6));
@@ -669,7 +785,7 @@ mod tests {
         assert_eq!(profile.name, COSMIC_SIGNATURE_PROFILE_NAME);
         assert_eq!(profile.randomization_log.effects.len(), 1);
         assert_eq!(profile.randomization_log.effects[0].effect_name, COSMIC_SIGNATURE_PROFILE_NAME);
-        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 14);
+        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 16);
     }
 
     #[test]

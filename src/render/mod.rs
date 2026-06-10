@@ -723,13 +723,30 @@ struct AccumulationParams<'a> {
     traits: SceneTraits,
 }
 
+fn sheet_taper_for_structure(structure: StructureMode, t: f64) -> f64 {
+    let is_sheet_prone = matches!(
+        structure,
+        StructureMode::TriangleWeb
+            | StructureMode::Duet { .. }
+            | StructureMode::Spokes
+            | StructureMode::TimeChords
+            | StructureMode::WebSpokesLace
+    );
+    if !is_sheet_prone {
+        return 1.0;
+    }
+    let middle_emphasis = (std::f64::consts::PI * t.clamp(0.0, 1.0)).sin().max(0.0).powf(0.65);
+    0.58 + 0.42 * middle_emphasis
+}
+
 impl AccumulationParams<'_> {
     /// Trail-age exposure factor for `step`; positive ramps brighten late steps.
     #[inline]
     fn age_factor(&self, step: usize) -> f64 {
         let total = self.scene.step_count().max(1);
         let t = step as f64 / total as f64;
-        1.0 + self.traits.age_ramp * (t - 0.5) * 2.0
+        (1.0 + self.traits.age_ramp * (t - 0.5) * 2.0)
+            * sheet_taper_for_structure(self.traits.structure, t)
     }
 
     /// Per-edge alpha weights for triangle-web style modes.
@@ -1819,6 +1836,17 @@ mod tests {
             delta < 8.0,
             "conversion hue drifted with energy (low={low_hue:.2}, high={high_hue:.2}); an energy-density redshift may have been reintroduced"
         );
+    }
+
+    #[test]
+    fn sheet_taper_reduces_fill_modes_at_timeline_edges() {
+        let early = sheet_taper_for_structure(StructureMode::Spokes, 0.0);
+        let mid = sheet_taper_for_structure(StructureMode::Spokes, 0.5);
+        let ribbon = sheet_taper_for_structure(StructureMode::OrbitRibbons, 0.0);
+
+        assert!(early < mid, "sheet-prone modes should taper at timeline edges");
+        assert!((mid - 1.0).abs() < 1e-12, "middle of sheet taper should preserve energy");
+        assert_eq!(ribbon, 1.0, "ribbon modes should not use sheet taper");
     }
 
     fn default_levels() -> ChannelLevels {

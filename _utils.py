@@ -66,6 +66,8 @@ class AestheticMetrics(typing.NamedTuple):
     colorfulness: float
     hue_entropy: float
     luminance_spread: float
+    veil_fraction: float
+    crispness: float
     score: float
 
 
@@ -113,8 +115,9 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
 
     Decodes a small proxy frame with ffmpeg (already a hard dependency of the
     generator) and measures ink coverage, Hasler-Suesstrunk colorfulness, hue
-    entropy, and luminance spread. Returns ``None`` when the image is missing
-    or cannot be decoded. Stdlib + ffmpeg only.
+    entropy, luminance spread, low-gradient veil fraction, and crisp line
+    energy. Returns ``None`` when the image is missing or cannot be decoded.
+    Stdlib + ffmpeg only.
     """
     if not image_path.exists():
         return None
@@ -122,7 +125,9 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
     if raw is None:
         return None
 
+    total_pixels = ANALYSIS_SIZE * ANALYSIS_SIZE
     lit_lumas: list[float] = []
+    luma_grid = [0.0] * total_pixels
     rg_values: list[float] = []
     yb_values: list[float] = []
     hue_histogram = [0] * HUE_BINS
@@ -130,6 +135,8 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
     for offset in range(0, len(raw), 3):
         r, g, b = raw[offset], raw[offset + 1], raw[offset + 2]
         luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+        pixel_idx = offset // 3
+        luma_grid[pixel_idx] = luma
         if luma <= LIT_LUMA_THRESHOLD:
             continue
         lit_lumas.append(luma)
@@ -141,10 +148,9 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
             bin_idx = int((hue + math.pi) / (2.0 * math.pi) * HUE_BINS) % HUE_BINS
             hue_histogram[bin_idx] += 1
 
-    total_pixels = ANALYSIS_SIZE * ANALYSIS_SIZE
     coverage = len(lit_lumas) / total_pixels
     if not lit_lumas:
-        return AestheticMetrics(0.0, 0.0, 0.0, 0.0, 0.0)
+        return AestheticMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     # Hasler-Suesstrunk colorfulness over lit pixels, normalized to ~[0, 1].
     if len(rg_values) > 1:
@@ -170,10 +176,48 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
     p95 = sorted_lumas[int(0.95 * (len(sorted_lumas) - 1))]
     luminance_spread = max(0.0, p95 - p50)
 
+    veiled = 0
+    crisp = 0
+    lit = 0
+    for idx, luma in enumerate(luma_grid):
+        if luma <= LIT_LUMA_THRESHOLD:
+            continue
+        x = idx % ANALYSIS_SIZE
+        y = idx // ANALYSIS_SIZE
+        gradient = 0.0
+        if x > 0:
+            gradient = max(gradient, abs(luma - luma_grid[idx - 1]))
+        if x + 1 < ANALYSIS_SIZE:
+            gradient = max(gradient, abs(luma - luma_grid[idx + 1]))
+        if y > 0:
+            gradient = max(gradient, abs(luma - luma_grid[idx - ANALYSIS_SIZE]))
+        if y + 1 < ANALYSIS_SIZE:
+            gradient = max(gradient, abs(luma - luma_grid[idx + ANALYSIS_SIZE]))
+        lit += 1
+        if gradient < 6.0 / 255.0:
+            veiled += 1
+        if gradient > 25.0 / 255.0:
+            crisp += 1
+
+    veil_fraction = veiled / lit if lit else 0.0
+    crispness = crisp / lit if lit else 0.0
+    veil_penalty = max(veil_fraction - 0.12, 0.0) / 0.88
+
     score = 100.0 * (
-        0.35 * _coverage_band_score(coverage)
-        + 0.25 * colorfulness
-        + 0.20 * hue_entropy
-        + 0.20 * min(luminance_spread / 0.45, 1.0)
+        0.25 * _coverage_band_score(coverage)
+        + 0.20 * colorfulness
+        + 0.16 * hue_entropy
+        + 0.14 * min(luminance_spread / 0.45, 1.0)
+        + 0.20 * crispness
+        + 0.05 * (1.0 - veil_fraction)
     )
-    return AestheticMetrics(coverage, colorfulness, hue_entropy, luminance_spread, score)
+    score = max(0.0, score - 40.0 * veil_penalty)
+    return AestheticMetrics(
+        coverage,
+        colorfulness,
+        hue_entropy,
+        luminance_spread,
+        veil_fraction,
+        crispness,
+        score,
+    )

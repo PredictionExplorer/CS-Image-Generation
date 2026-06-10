@@ -274,22 +274,6 @@ fn main() -> Result<()> {
         args.resolution.width,
         args.resolution.height,
     );
-    let resolved_effect_config = visual_profile.effect_config.clone();
-    let randomization_log = visual_profile.randomization_log.clone();
-
-    let num_randomized = randomization_log
-        .effects
-        .iter()
-        .map(|effect| effect.parameters.iter().filter(|param| param.was_randomized).count())
-        .sum::<usize>();
-
-    info!(
-        "   => Resolved {} visual profile record(s) ({} parameters randomized, {} explicit)",
-        randomization_log.effects.len(),
-        num_randomized,
-        randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
-            - num_randomized
-    );
 
     let borda_weights = resolve_borda_weights(args.chaos_weight, args.equil_weight, &mut rng);
 
@@ -305,12 +289,30 @@ fn main() -> Result<()> {
         DEFAULT_ESCAPE_THRESHOLD,
         visual_profile.parameters.structure,
     )?;
-    let best_info = selection.result.clone();
-    let mut positions = selection.positions;
+    let mut positions = selection.positions.clone();
+    let visual_profile = visual_profile.with_structure(selection.structure);
+    let resolved_effect_config = visual_profile.effect_config.clone();
+    let randomization_log = visual_profile.randomization_log.clone();
+
+    let num_randomized = randomization_log
+        .effects
+        .iter()
+        .map(|effect| effect.parameters.iter().filter(|param| param.was_randomized).count())
+        .sum::<usize>();
+
+    info!(
+        "   => Resolved {} visual profile record(s) ({} parameters randomized, {} explicit); preferred mode={} chosen mode={}",
+        randomization_log.effects.len(),
+        num_randomized,
+        randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
+            - num_randomized,
+        visual_profile.preferred_structure().label(),
+        visual_profile.parameters.structure.label(),
+    );
 
     // Seeded viewing orientation: photograph the 3D orbit from the
     // best-composed of several candidate angles.
-    app::apply_view_orientation(&mut positions, &rng, visual_profile.parameters.structure);
+    app::apply_view_orientation(&mut positions, &rng, selection.structure);
 
     let drift_config = if args.drift == DriftModeArg::None {
         info!("STAGE 2.5/7: Drift disabled");
@@ -415,7 +417,7 @@ fn main() -> Result<()> {
 
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",
-        best_info.total_score_weighted
+        selection.result.total_score_weighted
     );
 
     let generation_log_config =
@@ -426,7 +428,7 @@ fn main() -> Result<()> {
         hex_seed,
         &drift_config,
         args.sims,
-        &best_info,
+        &selection,
         Some(&randomization_log),
     ) {
         warn!("Generation logging failed (non-fatal): {e}");
@@ -499,7 +501,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 1.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.2..=50.0).contains(&ratio), "ratio {ratio} outside [0.2, 50.0]");
     }
 
     #[test]
@@ -518,7 +520,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.chaos_weight, 0.5);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.2..=50.0).contains(&ratio), "ratio {ratio} outside [0.2, 50.0]");
     }
 
     #[test]
@@ -528,7 +530,7 @@ mod tests {
         assert!(w.was_randomized);
         assert_eq!(w.equil_weight, 5.0);
         let ratio = w.equil_weight / w.chaos_weight;
-        assert!((0.2..=125.0).contains(&ratio), "ratio {ratio} outside [0.2, 125.0]");
+        assert!((0.2..=50.0).contains(&ratio), "ratio {ratio} outside [0.2, 50.0]");
     }
 
     #[test]
@@ -540,8 +542,8 @@ mod tests {
             assert_eq!(w.chaos_weight, 1.0);
             let ratio = w.equil_weight / w.chaos_weight;
             assert!(
-                (0.2..=125.0).contains(&ratio),
-                "seed {seed_byte} produced ratio {ratio} outside [0.2, 125.0]"
+                (0.2..=50.0).contains(&ratio),
+                "seed {seed_byte} produced ratio {ratio} outside [0.2, 50.0]"
             );
         }
     }

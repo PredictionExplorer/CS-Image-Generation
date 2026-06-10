@@ -180,19 +180,128 @@ pub struct AestheticSelection {
     pub positions: Vec<Vec<Vector3<f64>>>,
     /// Proxy-render aesthetic score of the winning candidate.
     pub aesthetic: render::aesthetic_score::AestheticScore,
+    /// Aesthetic score plus the small prior bonus used for tie-breaking.
+    pub selection_score: f64,
+    /// Structure mode chosen by adaptive orbit × mode scoring.
+    pub structure: render::StructureMode,
+    /// Structure mode originally rolled by the seed.
+    pub preferred_structure: render::StructureMode,
+    /// Number of bounded retry searches used before accepting this candidate.
+    pub retry_count: usize,
 }
 
 /// Number of top Borda candidates proxy-rendered for aesthetic selection.
-pub const AESTHETIC_SHORTLIST_LEN: usize = 10;
+pub const AESTHETIC_SHORTLIST_LEN: usize = 24;
+/// Minimum proxy aesthetic score accepted before bounded retry searches.
+pub const AESTHETIC_QUALITY_FLOOR: f64 = 0.82;
+/// Maximum deterministic retry searches when the best proxy score is below the floor.
+pub const AESTHETIC_MAX_RETRIES: usize = 3;
+/// RNG fork domain prefix for bounded aesthetic retry searches.
+const AESTHETIC_RETRY_RNG_DOMAIN_PREFIX: &str = "cosmic-retry/v1/";
 
-/// Run Borda selection, then pick the most paintable candidate by proxy render.
+fn adaptive_structure_modes(preferred: render::StructureMode) -> Vec<render::StructureMode> {
+    let mut modes = vec![preferred];
+    for mode in [
+        render::StructureMode::CometRibbons,
+        render::StructureMode::TimeChords,
+        render::StructureMode::WebRibbonHybrid,
+        render::StructureMode::OrbitRibbons,
+    ] {
+        if !modes.contains(&mode) {
+            modes.push(mode);
+        }
+    }
+    modes
+}
+
+fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f64, f64) {
+    let descriptor = render::parameter_descriptors::EQUIL_CHAOS_RATIO;
+    let log_min = descriptor.min.ln();
+    let log_max = descriptor.max.ln();
+    let ratio = (log_min + rng.next_f64() * (log_max - log_min)).exp();
+    (chaos_weight, chaos_weight * ratio)
+}
+
+fn mode_selection_prior(structure: render::StructureMode, preferred: render::StructureMode) -> f64 {
+    if structure == preferred {
+        return match preferred {
+            render::StructureMode::OrbitRibbons
+            | render::StructureMode::TimeChords
+            | render::StructureMode::CometRibbons => 0.20,
+            render::StructureMode::WebRibbonHybrid => 0.08,
+            _ => 0.03,
+        };
+    }
+    match structure {
+        render::StructureMode::CometRibbons => 0.025,
+        render::StructureMode::TimeChords => 0.020,
+        render::StructureMode::OrbitRibbons => 0.015,
+        render::StructureMode::WebRibbonHybrid => -0.07,
+        _ => 0.0,
+    }
+}
+
+fn best_aesthetic_selection_from_shortlist(
+    shortlist: Vec<sim::ShortlistedTrajectory>,
+    num_steps_sim: usize,
+    preferred_structure: render::StructureMode,
+    retry_count: usize,
+) -> AestheticSelection {
+    let modes = adaptive_structure_modes(preferred_structure);
+    let mut best: Option<AestheticSelection> = None;
+
+    for (rank, candidate) in shortlist.into_iter().enumerate() {
+        let positions = sim::get_positions(candidate.bodies.clone(), num_steps_sim).positions;
+        for &structure in &modes {
+            let proxy_params =
+                render::aesthetic_score::ProxyRenderParams::for_candidates(structure);
+            let score = render::aesthetic_score::score_trajectory(&positions, proxy_params);
+            let prior_bonus = mode_selection_prior(structure, preferred_structure);
+            let selection_score = (score.total + prior_bonus).clamp(0.0, 1.0);
+            info!(
+                "   candidate {rank}: orbit idx {} mode={} borda {:.1} aesthetic {:.4} select {:.4} \
+                 (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3}, veil {:.3}, crisp {:.3}, void {:.3})",
+                candidate.result.selected_index,
+                structure.label(),
+                candidate.result.total_score_weighted,
+                score.total,
+                selection_score,
+                score.coverage,
+                score.balance,
+                score.contrast,
+                score.body_mix,
+                score.mush_fraction,
+                score.veil_fraction,
+                score.crispness,
+                score.negative_space,
+            );
+
+            let improves = best.as_ref().is_none_or(|cur| selection_score > cur.selection_score);
+            if improves {
+                best = Some(AestheticSelection {
+                    bodies: candidate.bodies.clone(),
+                    result: candidate.result.clone(),
+                    positions: positions.clone(),
+                    aesthetic: score,
+                    selection_score,
+                    structure,
+                    preferred_structure,
+                    retry_count,
+                });
+            }
+        }
+    }
+
+    best.expect("shortlist is non-empty by construction")
+}
+
+/// Run Borda selection, then pick the most paintable candidate and structure mode by proxy render.
 ///
 /// The Borda search ranks orbits on physics proxies only; this pass re-simulates
 /// the top [`AESTHETIC_SHORTLIST_LEN`] candidates (a negligible cost next to the
-/// search itself), scores each one in image space with the seed's structure
-/// mode ([`render::aesthetic_score`]), and returns the highest-scoring orbit
-/// together with its full trajectory. Ties keep Borda order, so a single-entry
-/// shortlist reproduces the legacy selection exactly.
+/// search itself), scores each one in image space under the seed's preferred
+/// structure plus a curated set of high-yield alternatives, and returns the
+/// highest-scoring `(orbit, structure)` pair together with its full trajectory.
 pub fn run_borda_selection_with_aesthetics(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
@@ -200,59 +309,94 @@ pub fn run_borda_selection_with_aesthetics(
     chaos_weight: f64,
     equil_weight: f64,
     escape_threshold: f64,
-    structure: render::StructureMode,
+    preferred_structure: render::StructureMode,
 ) -> Result<AestheticSelection> {
-    info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
-    let shortlist = sim::select_best_trajectory_shortlist(
-        rng,
-        num_sims,
-        num_steps_sim,
-        chaos_weight,
-        equil_weight,
-        escape_threshold,
-        AESTHETIC_SHORTLIST_LEN,
-    )?;
+    let modes = adaptive_structure_modes(preferred_structure);
+    let mut global_best: Option<AestheticSelection> = None;
 
-    info!(
-        "STAGE 1.5/7: Aesthetic scoring of {} shortlisted candidate(s) ({} structure)...",
-        shortlist.len(),
-        structure.label()
-    );
-    let proxy_params = render::aesthetic_score::ProxyRenderParams::for_candidates(structure);
+    for attempt in 0..=AESTHETIC_MAX_RETRIES {
+        let (attempt_cw, attempt_ew, shortlist) = if attempt == 0 {
+            info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
+            (
+                chaos_weight,
+                equil_weight,
+                sim::select_best_trajectory_shortlist(
+                    rng,
+                    num_sims,
+                    num_steps_sim,
+                    chaos_weight,
+                    equil_weight,
+                    escape_threshold,
+                    AESTHETIC_SHORTLIST_LEN,
+                )?,
+            )
+        } else {
+            let domain = format!("{AESTHETIC_RETRY_RNG_DOMAIN_PREFIX}{attempt}");
+            let mut retry_rng = rng.fork(domain.as_bytes());
+            let (retry_cw, retry_ew) = retry_borda_weights(chaos_weight, &mut retry_rng);
+            info!(
+                "STAGE 1/7: Retry {attempt}/{AESTHETIC_MAX_RETRIES} over {num_sims} random orbits \
+                 (chaos={retry_cw:.3}, equil={retry_ew:.3})..."
+            );
+            let shortlist = match sim::select_best_trajectory_shortlist(
+                &mut retry_rng,
+                num_sims,
+                num_steps_sim,
+                retry_cw,
+                retry_ew,
+                escape_threshold,
+                AESTHETIC_SHORTLIST_LEN,
+            ) {
+                Ok(shortlist) => shortlist,
+                Err(e) if global_best.is_some() => {
+                    warn!("Aesthetic retry {attempt} produced no valid orbits: {e}");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            (retry_cw, retry_ew, shortlist)
+        };
 
-    let mut best: Option<AestheticSelection> = None;
-    for (rank, candidate) in shortlist.into_iter().enumerate() {
-        let positions = sim::get_positions(candidate.bodies.clone(), num_steps_sim).positions;
-        let score = render::aesthetic_score::score_trajectory(&positions, proxy_params);
         info!(
-            "   candidate {rank}: orbit idx {} borda {:.1} aesthetic {:.4} \
-             (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3})",
-            candidate.result.selected_index,
-            candidate.result.total_score_weighted,
-            score.total,
-            score.coverage,
-            score.balance,
-            score.contrast,
-            score.body_mix,
-            score.mush_fraction,
+            "STAGE 1.5/7: Aesthetic scoring of {} shortlisted candidate(s) across {} mode(s): {}",
+            shortlist.len(),
+            modes.len(),
+            modes.iter().map(|mode| mode.label()).collect::<Vec<_>>().join(", ")
+        );
+        let attempt_best = best_aesthetic_selection_from_shortlist(
+            shortlist,
+            num_steps_sim,
+            preferred_structure,
+            attempt,
+        );
+        info!(
+            "   => Attempt {attempt} winner: orbit idx {} mode={} score {:.4} (select {:.4}, chaos={attempt_cw:.3}, equil={attempt_ew:.3})",
+            attempt_best.result.selected_index,
+            attempt_best.structure.label(),
+            attempt_best.aesthetic.total,
+            attempt_best.selection_score,
         );
 
-        // Strict comparison keeps Borda (shortlist) order on ties.
-        let improves = best.as_ref().is_none_or(|cur| score.total > cur.aesthetic.total);
+        let improves = global_best
+            .as_ref()
+            .is_none_or(|cur| attempt_best.selection_score > cur.selection_score);
         if improves {
-            best = Some(AestheticSelection {
-                bodies: candidate.bodies,
-                result: candidate.result,
-                positions,
-                aesthetic: score,
-            });
+            global_best = Some(attempt_best);
+        }
+        if global_best.as_ref().is_some_and(|best| best.aesthetic.total >= AESTHETIC_QUALITY_FLOOR)
+        {
+            break;
         }
     }
 
-    let selection = best.expect("shortlist is non-empty by construction");
+    let selection = global_best.expect("at least one Borda attempt must return candidates");
     info!(
-        "   => Aesthetic winner: orbit idx {} with score {:.4}",
-        selection.result.selected_index, selection.aesthetic.total
+        "   => Aesthetic winner: orbit idx {} mode={} preferred={} score {:.4} retries={}",
+        selection.result.selected_index,
+        selection.structure.label(),
+        selection.preferred_structure.label(),
+        selection.aesthetic.total,
+        selection.retry_count,
     );
     Ok(selection)
 }
@@ -581,7 +725,7 @@ pub fn log_generation(
     seed: &str,
     drift_config: &Option<ResolvedDriftConfig>,
     num_sims: usize,
-    best_info: &TrajectoryResult,
+    selection: &AestheticSelection,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
 ) -> Result<()> {
     let logger = GenerationLogger::new();
@@ -639,11 +783,26 @@ pub fn log_generation(
         weights_randomized: config.weights_randomized,
     };
 
+    let best_info = &selection.result;
+    let score = selection.aesthetic;
     record.orbit_info = OrbitInfo {
         selected_index: best_info.selected_index,
         weighted_score: best_info.total_score_weighted,
-        total_candidates: num_sims,
+        total_candidates: num_sims * (selection.retry_count + 1),
         discarded_count: best_info.discarded_count,
+        preferred_structure: selection.preferred_structure.label().to_string(),
+        chosen_structure: selection.structure.label().to_string(),
+        retry_count: selection.retry_count,
+        aesthetic_score: score.total,
+        selection_score: selection.selection_score,
+        coverage: score.coverage,
+        balance: score.balance,
+        contrast: score.contrast,
+        body_mix: score.body_mix,
+        mush_fraction: score.mush_fraction,
+        veil_fraction: score.veil_fraction,
+        crispness: score.crispness,
+        negative_space: score.negative_space,
     };
 
     // Include randomization log if provided

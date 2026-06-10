@@ -36,13 +36,13 @@ pub struct IntParamDescriptor {
 /// Equilateralness-to-chaos Borda weight ratio descriptor.
 ///
 /// Sampled log-uniformly with a moderate bias toward equilateralness.
-/// Ratio range: 1/5 to 125 (median ~5.0).
+/// Ratio range: 1/5 to 50 (median ~3.16).
 /// At ratio < 1 chaos dominates; at ratio > 1 equilateralness dominates.
 pub const EQUIL_CHAOS_RATIO: FloatParamDescriptor = FloatParamDescriptor {
     name: "equil_chaos_ratio",
     min: 0.2,
-    max: 125.0,
-    description: "Equilateralness-to-chaos Borda weight ratio (log-uniform, 1/5x to 125x)",
+    max: 50.0,
+    description: "Equilateralness-to-chaos Borda weight ratio (log-uniform, 1/5x to 50x)",
 };
 
 // ---------------------------------------------------------------------------

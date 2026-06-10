@@ -5,9 +5,9 @@
 //! gap with a cheap proxy render: sampled trajectory geometry is splatted onto
 //! a small per-body ink grid using the seed's structure mode, then scored on
 //! image-space qualities (ink coverage, spatial balance, structural contrast,
-//! per-body colour separation, and a grey-mush penalty for dense regions where
-//! all three bodies pile up). Scores are deterministic functions of geometry,
-//! so candidate selection stays reproducible per seed.
+//! crisp line energy, interior negative space, per-body colour separation, and
+//! penalties for dense mush or low-gradient veils. Scores are deterministic
+//! functions of geometry, so candidate selection stays reproducible per seed.
 
 use super::visual_profile::StructureMode;
 use nalgebra::Vector3;
@@ -35,6 +35,14 @@ const BALANCE_CELLS: usize = 4;
 const BODY_PRESENCE_FLOOR: f64 = 0.06;
 /// Fraction of bright pixels allowed to be three-body mush before penalties.
 const MUSH_TOLERANCE: f64 = 0.35;
+/// Local normalized density gradient below which lit pixels read as a flat veil.
+const VEIL_GRADIENT_THRESHOLD: f64 = 0.050;
+/// Local normalized density gradient above which lit pixels read as crisp line work.
+const CRISP_GRADIENT_THRESHOLD: f64 = 0.180;
+/// Flat-fill fraction tolerated before the score starts dropping hard.
+const VEIL_TOLERANCE: f64 = 0.12;
+/// Cells per axis for the negative-space occupancy grid.
+const NEGATIVE_SPACE_CELLS: usize = 8;
 /// Time-lag fraction used to proxy chord-style modes during scoring.
 const PROXY_CHORD_LAG_FRACTION: f64 = 0.012;
 
@@ -55,6 +63,12 @@ pub struct AestheticScore {
     pub body_mix: f64,
     /// Fraction of bright pixels where all three bodies overlap heavily.
     pub mush_fraction: f64,
+    /// Fraction of lit pixels whose neighbourhood has very low gradient.
+    pub veil_fraction: f64,
+    /// Fraction of lit pixels with strong local edge energy.
+    pub crispness: f64,
+    /// Coarse interior dark-space score in `[0, 1]`.
+    pub negative_space: f64,
 }
 
 impl AestheticScore {
@@ -67,6 +81,9 @@ impl AestheticScore {
             contrast: 0.0,
             body_mix: 0.0,
             mush_fraction: 0.0,
+            veil_fraction: 0.0,
+            crispness: 0.0,
+            negative_space: 0.0,
         }
     }
 }
@@ -118,6 +135,89 @@ fn coverage_band_score(coverage: f64) -> f64 {
         return smoothstep((COVERAGE_CEIL - coverage) / (COVERAGE_CEIL - COVERAGE_BAND_HIGH));
     }
     1.0
+}
+
+fn negative_space_score(density_map: &[f64], size: usize) -> f64 {
+    let mut min_x = size;
+    let mut min_y = size;
+    let mut max_x = 0usize;
+    let mut max_y = 0usize;
+    let mut found = false;
+    for (idx, &density) in density_map.iter().enumerate() {
+        if density <= 0.0 {
+            continue;
+        }
+        found = true;
+        let x = idx % size;
+        let y = idx / size;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    if !found || max_x <= min_x + 2 || max_y <= min_y + 2 {
+        return 0.0;
+    }
+
+    let mut occupied = [false; NEGATIVE_SPACE_CELLS * NEGATIVE_SPACE_CELLS];
+    for (idx, &density) in density_map.iter().enumerate() {
+        if density <= 0.0 {
+            continue;
+        }
+        let x = idx % size;
+        let y = idx / size;
+        if x < min_x || x > max_x || y < min_y || y > max_y {
+            continue;
+        }
+        let nx = (x - min_x) as f64 / (max_x - min_x).max(1) as f64;
+        let ny = (y - min_y) as f64 / (max_y - min_y).max(1) as f64;
+        let cell_x = (nx * NEGATIVE_SPACE_CELLS as f64).floor() as usize;
+        let cell_y = (ny * NEGATIVE_SPACE_CELLS as f64).floor() as usize;
+        let cell_x = cell_x.min(NEGATIVE_SPACE_CELLS - 1);
+        let cell_y = cell_y.min(NEGATIVE_SPACE_CELLS - 1);
+        occupied[cell_y * NEGATIVE_SPACE_CELLS + cell_x] = true;
+    }
+
+    let mut interior = 0usize;
+    let mut dark = 0usize;
+    for y in 1..NEGATIVE_SPACE_CELLS - 1 {
+        for x in 1..NEGATIVE_SPACE_CELLS - 1 {
+            interior += 1;
+            if !occupied[y * NEGATIVE_SPACE_CELLS + x] {
+                dark += 1;
+            }
+        }
+    }
+    if interior == 0 {
+        return 0.0;
+    }
+
+    let dark_ratio = dark as f64 / interior as f64;
+    let enough_void = smoothstep(dark_ratio / 0.22);
+    let not_empty_frame = smoothstep((0.70 - dark_ratio) / 0.35);
+    let center = (NEGATIVE_SPACE_CELLS / 2) * NEGATIVE_SPACE_CELLS + (NEGATIVE_SPACE_CELLS / 2);
+    let center_void_bonus = if occupied[center] { 0.0 } else { 0.65 };
+    (enough_void * not_empty_frame).max(center_void_bonus).clamp(0.0, 1.0)
+}
+
+fn local_gradient(density_map: &[f64], size: usize, idx: usize) -> f64 {
+    let x = idx % size;
+    let y = idx / size;
+    let center = density_map[idx];
+    let mut gradient = 0.0f64;
+    if x > 0 {
+        gradient = gradient.max((center - density_map[idx - 1]).abs());
+    }
+    if x + 1 < size {
+        gradient = gradient.max((center - density_map[idx + 1]).abs());
+    }
+    if y > 0 {
+        gradient = gradient.max((center - density_map[idx - size]).abs());
+    }
+    if y + 1 < size {
+        gradient = gradient.max((center - density_map[idx + size]).abs());
+    }
+    gradient
 }
 
 /// Per-body ink accumulation grid used by the proxy renderer.
@@ -322,12 +422,14 @@ fn score_grid(grid: &InkGrid) -> AestheticScore {
 
     let mut total_ink = [0.0f64; 3];
     let mut inked_pixels = 0usize;
+    let mut density_map = vec![0.0f64; pixel_count];
     let mut densities: Vec<f64> = Vec::new();
     let mut cell_occupancy = [0.0f64; BALANCE_CELLS * BALANCE_CELLS];
     let cell_span = (grid.size as f64 / BALANCE_CELLS as f64).max(1.0);
 
     for (idx, ink) in grid.ink.iter().enumerate() {
         let density = ink[0] + ink[1] + ink[2];
+        density_map[idx] = density;
         if density <= 0.0 {
             continue;
         }
@@ -376,6 +478,7 @@ fn score_grid(grid: &InkGrid) -> AestheticScore {
     let p95 = percentile(0.95).max(1e-12);
     let log_spread = (p95 / p50).ln();
     let contrast = smoothstep(log_spread / 2.3);
+    let density_scale = p95.max(p50).max(1e-12);
 
     // Per-body presence: every body should own a visible share of the ink.
     let ink_sum: f64 = total_ink.iter().sum();
@@ -401,10 +504,47 @@ fn score_grid(grid: &InkGrid) -> AestheticScore {
     let mush_fraction = if bright > 0 { mush as f64 / bright as f64 } else { 0.0 };
     let mush_penalty = ((mush_fraction - MUSH_TOLERANCE).max(0.0) / (1.0 - MUSH_TOLERANCE)) * 0.30;
 
-    let weighted = 0.40 * coverage_score + 0.25 * balance + 0.20 * contrast + 0.15 * body_mix;
-    let total = (weighted - mush_penalty).clamp(0.0, 1.0);
+    let mut lit_for_edges = 0usize;
+    let mut veiled = 0usize;
+    let mut crisp = 0usize;
+    for (idx, &density) in density_map.iter().enumerate() {
+        if density <= 0.0 {
+            continue;
+        }
+        lit_for_edges += 1;
+        let normalized_gradient = local_gradient(&density_map, grid.size, idx) / density_scale;
+        if normalized_gradient < VEIL_GRADIENT_THRESHOLD {
+            veiled += 1;
+        }
+        if normalized_gradient > CRISP_GRADIENT_THRESHOLD {
+            crisp += 1;
+        }
+    }
+    let veil_fraction = if lit_for_edges > 0 { veiled as f64 / lit_for_edges as f64 } else { 0.0 };
+    let crispness = if lit_for_edges > 0 { crisp as f64 / lit_for_edges as f64 } else { 0.0 };
+    let negative_space = negative_space_score(&density_map, grid.size);
+    let veil_penalty = ((veil_fraction - VEIL_TOLERANCE).max(0.0) / (1.0 - VEIL_TOLERANCE)) * 0.40;
 
-    AestheticScore { total, coverage, coverage_score, balance, contrast, body_mix, mush_fraction }
+    let weighted = 0.28 * coverage_score
+        + 0.18 * balance
+        + 0.14 * contrast
+        + 0.10 * body_mix
+        + 0.30 * crispness
+        + 0.10 * negative_space;
+    let total = (weighted - mush_penalty - veil_penalty).clamp(0.0, 1.0);
+
+    AestheticScore {
+        total,
+        coverage,
+        coverage_score,
+        balance,
+        contrast,
+        body_mix,
+        mush_fraction,
+        veil_fraction,
+        crispness,
+        negative_space,
+    }
 }
 
 /// Proxy-render `positions` with the seed's structure mode and score the result.
@@ -461,11 +601,48 @@ mod tests {
             .collect()
     }
 
+    fn flat_disc_grid(size: usize) -> InkGrid {
+        let mut grid = InkGrid::new(size);
+        let center = (size as f64 - 1.0) * 0.5;
+        let radius = size as f64 * 0.28;
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f64 - center;
+                let dy = y as f64 - center;
+                if (dx * dx + dy * dy).sqrt() <= radius {
+                    let idx = y * size + x;
+                    grid.ink[idx] = [1.0, 0.8, 0.7];
+                }
+            }
+        }
+        grid
+    }
+
+    fn ring_grid(size: usize) -> InkGrid {
+        let mut grid = InkGrid::new(size);
+        let center = (size as f64 - 1.0) * 0.5;
+        let radius = size as f64 * 0.30;
+        for body in 0..3 {
+            let phase = f64::from(body as u32) * std::f64::consts::TAU / 3.0;
+            let mut prev = None;
+            for i in 0..360 {
+                let t = f64::from(i) / 360.0 * std::f64::consts::TAU;
+                let wobble = radius * (1.0 + 0.08 * (3.0 * t + phase).sin());
+                let point = (center + wobble * t.cos(), center + wobble * t.sin());
+                if let Some((x0, y0)) = prev {
+                    grid.draw_segment(x0, y0, point.0, point.1, body, 1.0);
+                }
+                prev = Some(point);
+            }
+        }
+        grid
+    }
+
     #[test]
     fn rich_tangle_outscores_degenerate_line() {
         let rich = looping_positions(4_000, 7.0);
         let dull = linear_positions(4_000);
-        let params = ProxyRenderParams::for_candidates(StructureMode::TriangleWeb);
+        let params = ProxyRenderParams::for_candidates(StructureMode::CometRibbons);
 
         let rich_score = score_trajectory(&rich, params);
         let dull_score = score_trajectory(&dull, params);
@@ -520,7 +697,40 @@ mod tests {
                 "mode {mode:?} produced invalid score {score:?}"
             );
             assert!(score.coverage > 0.0, "mode {mode:?} deposited no ink");
+            assert!((0.0..=1.0).contains(&score.veil_fraction));
+            assert!((0.0..=1.0).contains(&score.crispness));
+            assert!((0.0..=1.0).contains(&score.negative_space));
         }
+    }
+
+    #[test]
+    fn veil_metric_penalizes_flat_fills() {
+        let flat = score_grid(&flat_disc_grid(96));
+        let ring = score_grid(&ring_grid(96));
+
+        assert!(
+            flat.veil_fraction > ring.veil_fraction,
+            "flat fill should have more veil: flat={flat:?} ring={ring:?}"
+        );
+        assert!(
+            ring.crispness > flat.crispness,
+            "ring should have more crisp line energy: flat={flat:?} ring={ring:?}"
+        );
+        assert!(
+            ring.total > flat.total,
+            "line/ring structure should beat flat translucent film: flat={flat:?} ring={ring:?}"
+        );
+    }
+
+    #[test]
+    fn negative_space_rewards_open_interior_structure() {
+        let flat = score_grid(&flat_disc_grid(96));
+        let ring = score_grid(&ring_grid(96));
+
+        assert!(
+            ring.negative_space > flat.negative_space,
+            "open ring should carry more negative-space score: flat={flat:?} ring={ring:?}"
+        );
     }
 
     #[test]

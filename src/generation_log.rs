@@ -122,6 +122,7 @@ pub struct SimulationConfig {
 
 /// Borda selection outcome for the orbit used in this generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OrbitInfo {
     /// Index of the chosen candidate in the ranking list.
     pub selected_index: usize,
@@ -131,6 +132,32 @@ pub struct OrbitInfo {
     pub total_candidates: usize,
     /// Candidates removed before ranking (e.g. failed filters).
     pub discarded_count: usize,
+    /// Structure mode originally rolled by the seed before adaptive selection.
+    pub preferred_structure: String,
+    /// Structure mode chosen by adaptive orbit × mode scoring.
+    pub chosen_structure: String,
+    /// Number of bounded retry searches needed to reach the quality floor.
+    pub retry_count: usize,
+    /// Raw proxy aesthetic score of the accepted output.
+    pub aesthetic_score: f64,
+    /// Proxy score plus the seed-mode prior used during adaptive selection.
+    pub selection_score: f64,
+    /// Proxy ink coverage metric.
+    pub coverage: f64,
+    /// Proxy spatial-balance metric.
+    pub balance: f64,
+    /// Proxy structural-contrast metric.
+    pub contrast: f64,
+    /// Proxy per-body presence metric.
+    pub body_mix: f64,
+    /// Proxy three-body mush fraction.
+    pub mush_fraction: f64,
+    /// Proxy low-gradient veil fraction.
+    pub veil_fraction: f64,
+    /// Proxy crisp line-energy fraction.
+    pub crispness: f64,
+    /// Proxy interior negative-space score.
+    pub negative_space: f64,
 }
 
 impl GenerationRecord {
@@ -206,7 +233,25 @@ impl Default for SimulationConfig {
 
 impl Default for OrbitInfo {
     fn default() -> Self {
-        Self { selected_index: 0, weighted_score: 0.0, total_candidates: 0, discarded_count: 0 }
+        Self {
+            selected_index: 0,
+            weighted_score: 0.0,
+            total_candidates: 0,
+            discarded_count: 0,
+            preferred_structure: "triangle_web".to_string(),
+            chosen_structure: "triangle_web".to_string(),
+            retry_count: 0,
+            aesthetic_score: 0.0,
+            selection_score: 0.0,
+            coverage: 0.0,
+            balance: 0.0,
+            contrast: 0.0,
+            body_mix: 0.0,
+            mush_fraction: 0.0,
+            veil_fraction: 0.0,
+            crispness: 0.0,
+            negative_space: 0.0,
+        }
     }
 }
 

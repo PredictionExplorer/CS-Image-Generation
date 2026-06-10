@@ -126,7 +126,7 @@ fn raw_bin_xyz(bin: usize) -> (f64, f64, f64) {
 #[inline]
 fn tone_k_for_wavelength(lambda: f64) -> f64 {
     let normalized = ((lambda - LAMBDA_START) / (LAMBDA_END - LAMBDA_START)).clamp(0.0, 1.0);
-    2.05 - 0.68 * normalized
+    1.78 - 0.18 * normalized
 }
 
 /// Convert D65-relative CIE XYZ to linear sRGB.
@@ -437,12 +437,16 @@ mod tests {
     }
 
     #[test]
-    fn test_lut_blue_bins_have_higher_k_than_red_bins() {
-        let k_blue = BIN_COMBINED_LUT[5].3;
-        let k_red = BIN_COMBINED_LUT[NUM_BINS - 5].3;
+    fn test_lut_tone_k_is_nearly_hue_neutral() {
+        let (min_k, max_k) = BIN_COMBINED_LUT
+            .iter()
+            .map(|&(_, _, _, k)| k)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_k, max_k), k| {
+                (min_k.min(k), max_k.max(k))
+            });
         assert!(
-            k_blue > k_red,
-            "blue bins should have higher k than red: blue={k_blue}, red={k_red}"
+            max_k - min_k <= 0.20,
+            "tone_k should stay close to hue-neutral: min={min_k}, max={max_k}"
         );
     }
 

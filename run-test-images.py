@@ -86,9 +86,9 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
     """Score a render with real image-space metrics (see `_utils`).
 
     Decodes a small proxy frame via ffmpeg and measures ink coverage,
-    colorfulness, hue entropy, and luminance spread, replacing the old
-    PNG-file-size heuristic. Returns ``None`` when the image is missing or
-    undecodable.
+    colorfulness, hue entropy, luminance spread, flat-veil fraction, and
+    crisp line energy, replacing the old PNG-file-size heuristic. Returns
+    ``None`` when the image is missing or undecodable.
     """
     image_path = Path("output") / seed / "image.png"
     metrics = compute_aesthetic_metrics(image_path)
@@ -96,13 +96,16 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
         return None
 
     logger.debug(
-        "[%d] QA    %s  coverage=%.3f colorfulness=%.3f hue_entropy=%.3f spread=%.3f",
+        "[%d] QA    %s  coverage=%.3f colorfulness=%.3f hue_entropy=%.3f "
+        "spread=%.3f veil=%.3f crisp=%.3f",
         run_id,
         seed,
         metrics.coverage,
         metrics.colorfulness,
         metrics.hue_entropy,
         metrics.luminance_spread,
+        metrics.veil_fraction,
+        metrics.crispness,
     )
     return metrics.score
 

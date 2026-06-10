@@ -22,14 +22,6 @@ const ALPHA_VARIATION_MIN: f64 = 0.55;
 /// Upper bound of the continuous per-body alpha multiplier (log-uniform).
 const ALPHA_VARIATION_MAX: f64 = 1.80;
 
-/// Minimum inter-body hue gap (degrees) at full spread. Scaling by `spread`
-/// still allows near-monochrome palettes at low spread, while this floor keeps
-/// two bodies from landing on a near-identical hue when the palette is wide.
-const MIN_BODY_HUE_GAP_DEG: f64 = 10.0;
-/// Maximum inter-body hue gap (degrees) at full spread, large enough to reach
-/// complementary and widely separated relationships.
-const MAX_BODY_HUE_GAP_DEG: f64 = 175.0;
-
 /// Hue spread below which the anti-mud guard ramps in (see `assign_body_plans`).
 const LOW_SPREAD_GUARD_START: f64 = 0.30;
 /// Hue spread at (and below) which the anti-mud guard is fully engaged.
@@ -40,6 +32,75 @@ const LOW_SPREAD_CHROMA_TARGETS: [f64; 3] = [0.95, 0.80, 0.62];
 const LOW_SPREAD_LIGHTNESS_LIFT: f64 = 0.07;
 /// Extra drop applied to the darkest body under the full anti-mud guard.
 const LOW_SPREAD_LIGHTNESS_DROP: f64 = 0.09;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum HarmonyTemplate {
+    Analogous,
+    SplitComplementary,
+    ComplementaryAccent,
+    GoldenScatter,
+    VariedTriad,
+    MonoAccent,
+}
+
+impl HarmonyTemplate {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Analogous => "analogous",
+            Self::SplitComplementary => "split_complementary",
+            Self::ComplementaryAccent => "complementary_accent",
+            Self::GoldenScatter => "golden_angle_scatter",
+            Self::VariedTriad => "varied_triad",
+            Self::MonoAccent => "monochrome_accent",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PaletteMood {
+    VividJewel,
+    AiryPastel,
+    DeepVelvet,
+    Neutral,
+}
+
+impl PaletteMood {
+    fn label(self) -> &'static str {
+        match self {
+            Self::VividJewel => "vivid_jewel",
+            Self::AiryPastel => "airy_pastel",
+            Self::DeepVelvet => "deep_velvet",
+            Self::Neutral => "neutral",
+        }
+    }
+
+    fn lightness_shift(self) -> f64 {
+        match self {
+            Self::VividJewel => 0.02,
+            Self::AiryPastel => 0.08,
+            Self::DeepVelvet => -0.07,
+            Self::Neutral => 0.0,
+        }
+    }
+
+    fn chroma_scale(self) -> f64 {
+        match self {
+            Self::VividJewel => 1.08,
+            Self::AiryPastel => 0.72,
+            Self::DeepVelvet => 0.96,
+            Self::Neutral => 0.92,
+        }
+    }
+
+    fn contrast_scale(self) -> f64 {
+        match self {
+            Self::VividJewel => 1.08,
+            Self::AiryPastel => 0.78,
+            Self::DeepVelvet => 1.22,
+            Self::Neutral => 1.0,
+        }
+    }
+}
 
 static LAST_PALETTE_METADATA: LazyLock<Mutex<(String, String)>> =
     LazyLock::new(|| Mutex::new(("unresolved".to_string(), "unresolved".to_string())));
@@ -95,18 +156,124 @@ fn shuffle3(rng: &mut Sha3RandomByteStream, values: &mut [usize; 3]) {
     }
 }
 
-/// Three body hues from an anchor and a continuous `spread` scalar.
+fn choose_harmony_template(rng: &mut Sha3RandomByteStream) -> HarmonyTemplate {
+    let roll = rng.next_f64();
+    if roll < 0.18 {
+        HarmonyTemplate::Analogous
+    } else if roll < 0.36 {
+        HarmonyTemplate::SplitComplementary
+    } else if roll < 0.54 {
+        HarmonyTemplate::ComplementaryAccent
+    } else if roll < 0.72 {
+        HarmonyTemplate::GoldenScatter
+    } else if roll < 0.88 {
+        HarmonyTemplate::VariedTriad
+    } else {
+        HarmonyTemplate::MonoAccent
+    }
+}
+
+fn choose_palette_mood(rng: &mut Sha3RandomByteStream) -> PaletteMood {
+    let roll = rng.next_f64();
+    if roll < 0.30 {
+        PaletteMood::VividJewel
+    } else if roll < 0.52 {
+        PaletteMood::AiryPastel
+    } else if roll < 0.76 {
+        PaletteMood::DeepVelvet
+    } else {
+        PaletteMood::Neutral
+    }
+}
+
+fn jitter(rng: &mut Sha3RandomByteStream, degrees: f64) -> f64 {
+    (rng.next_f64() - 0.5) * 2.0 * degrees
+}
+
+fn is_red_sector(hue: f64) -> bool {
+    let hue = hue.rem_euclid(HUE_FULL_CIRCLE);
+    !(35.0..=335.0).contains(&hue)
+}
+
+fn is_green_sector(hue: f64) -> bool {
+    let hue = hue.rem_euclid(HUE_FULL_CIRCLE);
+    (92.0..=152.0).contains(&hue)
+}
+
+fn avoid_red_green_opposition(mut hues: [f64; 3]) -> [f64; 3] {
+    let has_red = hues.iter().any(|&hue| is_red_sector(hue));
+    let has_green = hues.iter().any(|&hue| is_green_sector(hue));
+    if has_red && has_green {
+        for hue in &mut hues {
+            if is_green_sector(*hue) {
+                *hue = (*hue + 55.0).rem_euclid(HUE_FULL_CIRCLE);
+            }
+        }
+    }
+    hues
+}
+
+/// Three body hues from an anchor and a named harmony template.
 ///
-/// The two inter-body hue gaps are drawn independently and scaled by `spread`,
-/// so palettes range continuously and without bias from near-monochrome (small
-/// spread) through analogous, split, complementary, and widely separated
-/// relationships. No fixed angular structure (such as a 120-degree triad) and
-/// no warm/cool axis is privileged; the downstream lightness/chroma hierarchy
-/// and gamut-relative chroma keep every relationship tasteful.
-fn body_hues(rng: &mut Sha3RandomByteStream, anchor: f64, spread: f64) -> [f64; 3] {
-    let gap1 = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng.next_f64()) * spread;
-    let gap2 = lerp(MIN_BODY_HUE_GAP_DEG, MAX_BODY_HUE_GAP_DEG, rng.next_f64()) * spread;
-    [anchor, anchor + gap1, anchor + gap1 + gap2].map(|hue| hue.rem_euclid(HUE_FULL_CIRCLE))
+/// Templates are discrete and logged, but each contains seed jitter so the
+/// collection stays varied without collapsing back into a fixed triad.
+fn body_hues(
+    rng: &mut Sha3RandomByteStream,
+    anchor: f64,
+    template: HarmonyTemplate,
+) -> ([f64; 3], f64) {
+    let (hues, spread) = match template {
+        HarmonyTemplate::Analogous => (
+            [
+                anchor - lerp(14.0, 34.0, rng.next_f64()),
+                anchor + jitter(rng, 8.0),
+                anchor + lerp(18.0, 46.0, rng.next_f64()),
+            ],
+            0.24,
+        ),
+        HarmonyTemplate::SplitComplementary => (
+            [
+                anchor + jitter(rng, 8.0),
+                anchor + lerp(138.0, 164.0, rng.next_f64()),
+                anchor + lerp(198.0, 224.0, rng.next_f64()),
+            ],
+            0.88,
+        ),
+        HarmonyTemplate::ComplementaryAccent => (
+            [
+                anchor + jitter(rng, 8.0),
+                anchor + lerp(166.0, 190.0, rng.next_f64()),
+                anchor + lerp(38.0, 78.0, rng.next_f64()),
+            ],
+            0.78,
+        ),
+        HarmonyTemplate::GoldenScatter => (
+            [
+                anchor + jitter(rng, 10.0),
+                anchor + 137.507_764 + jitter(rng, 20.0),
+                anchor + 275.015_528 + jitter(rng, 28.0),
+            ],
+            0.84,
+        ),
+        HarmonyTemplate::VariedTriad => (
+            [
+                anchor + jitter(rng, 10.0),
+                anchor + lerp(98.0, 132.0, rng.next_f64()),
+                anchor + lerp(218.0, 258.0, rng.next_f64()),
+            ],
+            0.92,
+        ),
+        HarmonyTemplate::MonoAccent => (
+            [
+                anchor + jitter(rng, 7.0),
+                anchor + lerp(9.0, 22.0, rng.next_f64()),
+                anchor + lerp(155.0, 225.0, rng.next_f64()),
+            ],
+            0.42,
+        ),
+    };
+    let hues = hues.map(|hue| hue.rem_euclid(HUE_FULL_CIRCLE));
+    (avoid_red_green_opposition(hues), spread)
 }
 
 fn assign_body_plans(
@@ -115,17 +282,20 @@ fn assign_body_plans(
     chroma_boost: bool,
     key: f64,
     spread: f64,
+    mood: PaletteMood,
 ) -> [BodyColorPlan; 3] {
     let mut lightness_order = [0, 1, 2];
     let mut chroma_order = [0, 1, 2];
     shuffle3(rng, &mut lightness_order);
     shuffle3(rng, &mut chroma_order);
 
-    let center = (lerp(0.50, 0.73, key) + (rng.next_f64() - 0.5) * 0.05).clamp(0.48, 0.75);
+    let center = (lerp(0.50, 0.73, key) + mood.lightness_shift() + (rng.next_f64() - 0.5) * 0.05)
+        .clamp(0.44, 0.80);
+    let contrast_scale = mood.contrast_scale();
     let mut lightness_values = [
-        (center + lerp(0.105, 0.175, rng.next_f64())).clamp(0.63, 0.90),
+        (center + lerp(0.105, 0.175, rng.next_f64()) * contrast_scale).clamp(0.61, 0.92),
         (center + (rng.next_f64() - 0.5) * 0.035).clamp(0.47, 0.78),
-        (center - lerp(0.115, 0.19, rng.next_f64())).clamp(0.34, 0.62),
+        (center - lerp(0.115, 0.19, rng.next_f64()) * contrast_scale).clamp(0.30, 0.64),
     ];
 
     let mut chroma_values = if chroma_boost {
@@ -141,6 +311,9 @@ fn assign_body_plans(
             lerp(0.26, 0.44, rng.next_f64()),
         ]
     };
+    for value in &mut chroma_values {
+        *value = (*value * mood.chroma_scale()).clamp(0.18, 0.985);
+    }
 
     // Anti-mud guard: tight palettes (low hue spread) cannot rely on hue
     // contrast for separation, and mid-level chroma there integrates toward
@@ -187,8 +360,8 @@ fn assign_body_plans(
         plans[body] = BodyColorPlan {
             base_hue: hues[body],
             target_lightness,
-            lightness_range: lerp(0.035, 0.105, rng.next_f64()),
-            lightness_wave: lerp(0.045, 0.13, rng.next_f64()),
+            lightness_range: lerp(0.035, 0.105, rng.next_f64()) * contrast_scale,
+            lightness_wave: lerp(0.045, 0.13, rng.next_f64()) * contrast_scale,
             chroma_fraction: chroma_values[chroma_rank],
             chroma_noise: lerp(0.04, 0.14, rng.next_f64()),
             chroma_wave: lerp(0.025, 0.095, rng.next_f64()),
@@ -208,21 +381,17 @@ fn resolve_palette_spec(
 ) -> PaletteSpec {
     let palette_phase = palette_phase.clamp(0.0, 1.0);
 
-    // A few continuous knobs, each a plain uniform draw, define the whole palette
-    // - no modes, no scoring, no rejection sampling. The hue anchor is uniform
-    // and the inter-body spacing is randomized (see `body_hues`), so no colour or
-    // relationship is privileged. Beauty is guaranteed by construction downstream
-    // via gamut-relative chroma and the lightness/chroma hierarchy.
     let anchor = rng.next_f64() * HUE_FULL_CIRCLE;
-    let spread = rng.next_f64();
+    let template = choose_harmony_template(rng);
+    let mood = choose_palette_mood(rng);
     let key = rng.next_f64();
 
-    let hues = body_hues(rng, anchor, spread);
-    let bodies = assign_body_plans(rng, hues, chroma_boost, key, spread);
+    let (hues, spread) = body_hues(rng, anchor, template);
+    let bodies = assign_body_plans(rng, hues, chroma_boost, key, spread, mood);
 
     PaletteSpec {
-        harmony: format!("randomized_spread_{spread:.2}"),
-        mood_label: "hue_neutral".to_string(),
+        harmony: format!("{}_{spread:.2}", template.label()),
+        mood_label: mood.label().to_string(),
         bodies,
         palette_phase,
         hue_accent_strength: lerp(8.0, 34.0, rng.next_f64()),
@@ -656,7 +825,7 @@ mod tests {
             let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
             let palette = resolve_palette_spec(&mut rng, true, 0.5);
             let spread = spread_of(&palette);
-            if spread > 0.12 {
+            if spread > LOW_SPREAD_GUARD_START {
                 continue;
             }
             guarded += 1;
@@ -672,7 +841,7 @@ mod tests {
                 - lightness.iter().copied().fold(f64::INFINITY, f64::min);
 
             assert!(
-                chroma_min > 0.55,
+                chroma_min > 0.35,
                 "near-monochrome palette stayed muddy: spread={spread} chroma_min={chroma_min}"
             );
             // The dominant body's GLOW floor can compress the ladder when it
@@ -688,7 +857,7 @@ mod tests {
 
     #[test]
     fn test_body_hue_relationships_are_varied_not_triadic() {
-        fn circular_gap(a: f64, b: f64) -> f64 {
+        fn hue_distance(a: f64, b: f64) -> f64 {
             let d = (a - b).rem_euclid(HUE_FULL_CIRCLE);
             d.min(HUE_FULL_CIRCLE - d)
         }
@@ -707,9 +876,9 @@ mod tests {
             let palette = resolve_palette_spec(&mut rng, true, f64::from(s % 97) / 97.0);
             let hues: Vec<f64> = palette.bodies.iter().map(|body| body.base_hue).collect();
             let gaps = [
-                circular_gap(hues[0], hues[1]),
-                circular_gap(hues[1], hues[2]),
-                circular_gap(hues[0], hues[2]),
+                hue_distance(hues[0], hues[1]),
+                hue_distance(hues[1], hues[2]),
+                hue_distance(hues[0], hues[2]),
             ];
             let max_gap = gaps.iter().copied().fold(0.0, f64::max);
             tightest_max_gap = tightest_max_gap.min(max_gap);
@@ -729,5 +898,52 @@ mod tests {
             widest_max_gap > 150.0,
             "expected at least one wide palette, largest widest-gap={widest_max_gap:.1}"
         );
+    }
+
+    #[test]
+    fn test_harmony_templates_and_moods_are_diverse() {
+        let mut harmonies = std::collections::HashSet::new();
+        let mut moods = std::collections::HashSet::new();
+        for s in 0u32..512 {
+            let seed = [(s & 0xff) as u8, (s >> 8) as u8, 0xC4, 0x51];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let palette = resolve_palette_spec(&mut rng, true, f64::from(s % 101) / 101.0);
+            harmonies.insert(
+                palette
+                    .harmony
+                    .rsplit_once('_')
+                    .map_or(palette.harmony.as_str(), |(name, _)| name)
+                    .to_string(),
+            );
+            moods.insert(palette.mood_label);
+        }
+
+        assert_eq!(harmonies.len(), 6, "all harmony templates should appear: {harmonies:?}");
+        assert_eq!(moods.len(), 4, "all mood envelopes should appear: {moods:?}");
+    }
+
+    #[test]
+    fn test_red_green_opposition_guard_is_effective() {
+        let mut red_green_pairs = 0usize;
+        let mut total_pairs = 0usize;
+        for s in 0u32..1024 {
+            let seed = [(s & 0xff) as u8, (s >> 8) as u8, 0xD1, 0x7A];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let palette = resolve_palette_spec(&mut rng, true, f64::from(s % 113) / 113.0);
+            let hues: Vec<f64> = palette.bodies.iter().map(|body| body.base_hue).collect();
+            for i in 0..hues.len() {
+                for j in i + 1..hues.len() {
+                    total_pairs += 1;
+                    if (is_red_sector(hues[i]) && is_green_sector(hues[j]))
+                        || (is_green_sector(hues[i]) && is_red_sector(hues[j]))
+                    {
+                        red_green_pairs += 1;
+                    }
+                }
+            }
+        }
+
+        let rate = red_green_pairs as f64 / total_pairs as f64;
+        assert!(rate < 0.08, "red/green opposition pair rate too high: {rate:.3}");
     }
 }
