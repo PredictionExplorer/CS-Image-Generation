@@ -6,7 +6,7 @@
 use crate::post_effects::{
     AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
     EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
-    NebulaCloudConfig, NebulaClouds, OpalescenceConfig, PerceptualBlurConfig,
+    OpalescenceConfig, PerceptualBlurConfig,
 };
 use crate::spectrum::{NUM_BINS, linear_rec2020_to_display_p3};
 use crate::utils::f64_to_usize_saturating;
@@ -168,15 +168,13 @@ impl<'a> SpectralScene<'a> {
     }
 }
 
-/// Aggregated settings for a spectral render pass (effect config + render config + seeds).
+/// Aggregated settings for a spectral render pass (effect config + render config).
 #[derive(Clone, Copy)]
 pub struct SpectralRenderSettings<'a> {
     /// Fully-resolved effect parameters (randomised values already picked).
     pub resolved_config: &'a randomizable_config::ResolvedEffectConfig,
     /// Core render parameters (HDR scale, bloom mode).
     pub render_config: &'a RenderConfig,
-    /// Seed for procedural noise (nebula clouds, textures).
-    pub noise_seed: i32,
     /// Whether to correct for non-square pixel aspect ratios.
     pub aspect_correction: bool,
     /// Seed-resolved scene traits (structure mode, line weight, age ramp).
@@ -187,7 +185,6 @@ impl std::fmt::Debug for SpectralRenderSettings<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpectralRenderSettings")
             .field("render_config", &self.render_config)
-            .field("noise_seed", &self.noise_seed)
             .field("aspect_correction", &self.aspect_correction)
             .finish_non_exhaustive()
     }
@@ -202,16 +199,9 @@ impl<'a> SpectralRenderSettings<'a> {
     pub fn new(
         resolved_config: &'a randomizable_config::ResolvedEffectConfig,
         render_config: &'a RenderConfig,
-        noise_seed: i32,
         aspect_correction: bool,
     ) -> Self {
-        Self {
-            resolved_config,
-            render_config,
-            noise_seed,
-            aspect_correction,
-            traits: SceneTraits::default(),
-        }
+        Self { resolved_config, render_config, aspect_correction, traits: SceneTraits::default() }
     }
 
     /// Attach seed-resolved scene traits (structure mode, line weight, age ramp).
@@ -410,63 +400,6 @@ pub fn estimate_full_spd_bytes(width: u32, height: u32) -> u128 {
 }
 
 // ====================== HELPER FUNCTIONS ===========================
-
-/// Generate nebula background buffer (separate from trajectories)
-fn generate_nebula_background(
-    width: usize,
-    height: usize,
-    frame_number: usize,
-    config: &NebulaCloudConfig,
-) -> Result<PixelBuffer> {
-    let background = vec![(0.0, 0.0, 0.0, 0.0); width * height];
-    let nebula = NebulaClouds::new(config.clone());
-    nebula.process_with_time(&background, width, height, frame_number).map_err(|e| {
-        RenderError::EffectChain { effect_name: "nebula_clouds".into(), reason: e.to_string() }
-    })
-}
-
-fn build_nebula_config(
-    resolved_config: &randomizable_config::ResolvedEffectConfig,
-    noise_seed: i32,
-) -> NebulaCloudConfig {
-    NebulaCloudConfig {
-        strength: resolved_config.nebula_strength,
-        octaves: resolved_config.nebula_octaves,
-        base_frequency: resolved_config.nebula_base_frequency,
-        lacunarity: 2.0,
-        persistence: 0.5,
-        noise_seed: i64::from(noise_seed),
-        colors: [[0.08, 0.12, 0.22], [0.15, 0.08, 0.25], [0.25, 0.12, 0.18], [0.12, 0.15, 0.28]],
-        time_scale: 1.0,
-        edge_fade: 0.3,
-    }
-}
-
-/// Composite background and foreground buffers using a standard premultiplied "over" operator.
-/// Background goes first (underneath), then foreground on top
-/// Note: Background is in straight alpha format (RGB + coverage alpha)
-///       Foreground is in premultiplied alpha format (RGB * alpha + alpha)
-fn composite_buffers(background: &PixelBuffer, foreground: &PixelBuffer) -> PixelBuffer {
-    background
-        .par_iter()
-        .zip(foreground.par_iter())
-        .map(|(&(br, bg, bb, ba), &(fr, fg, fb, fa))| {
-            if fa >= 1.0 {
-                (fr, fg, fb, fa)
-            } else if fa <= 0.0 {
-                (br * ba, bg * ba, bb * ba, ba)
-            } else {
-                let alpha_out = fa + ba * (1.0 - fa);
-                (
-                    fr + (br * ba) * (1.0 - fa),
-                    fg + (bg * ba) * (1.0 - fa),
-                    fb + (bb * ba) * (1.0 - fa),
-                    alpha_out,
-                )
-            }
-        })
-        .collect()
-}
 
 /// Derive the perceptual-blur radius (in pixels) after accounting for the combined
 /// softness of all enabled blur/bloom effects. Returns `None` when blur is disabled.
@@ -1452,13 +1385,7 @@ fn pass_2_write_frames_spectral_with_backend(
         enable_temporal_smoothing,
         accum_spd,
     } = params;
-    let SpectralRenderSettings {
-        resolved_config,
-        render_config,
-        noise_seed,
-        aspect_correction,
-        ..
-    } = settings;
+    let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
     let ctx = RenderContext::new(width, height, scene.positions, aspect_correction);
@@ -1472,14 +1399,11 @@ fn pass_2_write_frames_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Video);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let nebula_config = build_nebula_config(resolved_config, noise_seed);
-
     let total_steps = scene.step_count();
     let checkpoints = checkpoint_steps(total_steps, frame_interval);
     let chunk_line = (total_steps / 10).max(1);
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-    let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     use crate::post_effects::{TemporalSmoothing, TemporalSmoothingConfig};
     let temporal_smoother = if enable_temporal_smoothing {
@@ -1524,20 +1448,7 @@ fn pass_2_write_frames_spectral_with_backend(
                 reason: e.to_string(),
             })?;
 
-        let generated_nebula;
-        let nebula_ref = if resolved_config.nebula_strength > 0.0 {
-            generated_nebula = generate_nebula_background(
-                width as usize,
-                height as usize,
-                checkpoint_step / frame_interval,
-                &nebula_config,
-            )?;
-            &generated_nebula
-        } else {
-            &empty_background
-        };
-
-        let composited = composite_buffers(nebula_ref, &trajectory_pixels);
+        let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
 
         // Reclaim the trajectory buffer's allocation back into accum_rgba.
         // It will be fully overwritten by convert_spd_buffer_to_rgba next iteration,
@@ -1545,7 +1456,6 @@ fn pass_2_write_frames_spectral_with_backend(
         trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
         accum_rgba = trajectory_pixels;
 
-        let display_buffer = tonemap_to_display_buffer(&composited, levels);
         let smoothed_display = match &temporal_smoother {
             Some(smoother) => smoother.process_frame(display_buffer),
             None => display_buffer,
@@ -1617,13 +1527,7 @@ fn render_final_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    let SpectralRenderSettings {
-        resolved_config,
-        render_config,
-        noise_seed,
-        aspect_correction,
-        ..
-    } = settings;
+    let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     info!("   Rendering final accumulated frame (preview mode)...");
 
     let width = resolved_config.width;
@@ -1644,12 +1548,9 @@ fn render_final_frame_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let nebula_config = build_nebula_config(resolved_config, noise_seed);
-
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-    let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     accumulate_spectral_steps(
         &mut accum_spd,
@@ -1677,19 +1578,7 @@ fn render_final_frame_spectral_with_backend(
             reason: e.to_string(),
         })?;
 
-    let nebula_background = if resolved_config.nebula_strength > 0.0 {
-        generate_nebula_background(
-            width as usize,
-            height as usize,
-            preview_frame_number,
-            &nebula_config,
-        )?
-    } else {
-        empty_background
-    };
-
-    let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-    let display_buffer = tonemap_to_display_buffer(&composited, levels);
+    let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
@@ -1709,13 +1598,8 @@ fn render_final_frame_spectral_tiled(
     settings: SpectralRenderSettings<'_>,
     ctx: &RenderContext,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    let SpectralRenderSettings {
-        resolved_config,
-        render_config,
-        noise_seed: _,
-        aspect_correction: _,
-        ..
-    } = settings;
+    let SpectralRenderSettings { resolved_config, render_config, aspect_correction: _, .. } =
+        settings;
     let full_spd_gib =
         estimate_full_spd_bytes(ctx.width, ctx.height) as f64 / (1024.0 * 1024.0 * 1024.0);
     info!(
@@ -1828,13 +1712,7 @@ fn render_single_frame_spectral_with_backend(
     settings: SpectralRenderSettings<'_>,
     backend: AccumulationBackend,
 ) -> Result<ImageBuffer<Rgb<u16>, Vec<u16>>> {
-    let SpectralRenderSettings {
-        resolved_config,
-        render_config,
-        noise_seed,
-        aspect_correction,
-        ..
-    } = settings;
+    let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     info!("   Rendering first timeline slice only (legacy test mode)...");
 
     let width = resolved_config.width;
@@ -1849,16 +1727,11 @@ fn render_single_frame_spectral_with_backend(
         build_effect_config_from_resolved(resolved_config, render_config, FinishOutputMode::Still);
     let finish_pipeline = FinishEffectPipeline::new(effect_config);
 
-    let nebula_config = build_nebula_config(resolved_config, noise_seed);
-
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
 
     // Create velocity HDR calculator for efficient multiplier computation
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-
-    // Pre-allocate empty background buffer for reuse (optimization)
-    let empty_background = vec![(0.0, 0.0, 0.0, 0.0); ctx.pixel_count()];
 
     // Render all trajectory steps up to and including the first output frame interval
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
@@ -1889,14 +1762,7 @@ fn render_single_frame_spectral_with_backend(
             reason: e.to_string(),
         })?;
 
-    let nebula_background = if resolved_config.nebula_strength > 0.0 {
-        generate_nebula_background(width as usize, height as usize, 0, &nebula_config)?
-    } else {
-        empty_background
-    };
-
-    let composited = composite_buffers(&nebula_background, &trajectory_pixels);
-    let display_buffer = tonemap_to_display_buffer(&composited, levels);
+    let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
         .process_image(display_buffer, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
@@ -2030,9 +1896,6 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
         }
     }
 
@@ -2162,7 +2025,6 @@ mod tests {
             enable_edge_luminance: true,
             enable_atmospheric_depth: true,
             enable_fine_texture: false,
-            nebula_strength: 0.25,
             ..baseline_resolved_config(width, height)
         }
     }
@@ -2511,20 +2373,19 @@ mod tests {
             enable_edge_luminance: true,
             enable_atmospheric_depth: true,
             enable_fine_texture: true,
-            nebula_strength: 0.25,
             ..baseline_resolved_config(48, 48)
         };
 
         let clean_hist = pass_1_build_histogram_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             1,
-            SpectralRenderSettings::new(&clean, &render_config, 17, false),
+            SpectralRenderSettings::new(&clean, &render_config, false),
         );
 
         let styled_hist = pass_1_build_histogram_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             1,
-            SpectralRenderSettings::new(&stylized, &render_config, 999, false),
+            SpectralRenderSettings::new(&stylized, &render_config, false),
         );
 
         assert_ne!(clean_hist.data(), styled_hist.data());
@@ -2536,7 +2397,7 @@ mod tests {
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
         let render_config = RenderConfig { hdr_scale: 2.8, bloom_mode: BloomMode::Dog };
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, 19, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let serial = pass_1_build_histogram_spectral_serial_reference(scene, 2, settings);
 
         for thread_count in [1usize, 2, 3, resolved.height as usize] {
@@ -2588,13 +2449,13 @@ mod tests {
         let single_frame = render_single_frame_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             &levels,
-            SpectralRenderSettings::new(&resolved, &render_config, 7, false),
+            SpectralRenderSettings::new(&resolved, &render_config, false),
         )
         .expect("legacy single-frame preview should render");
         let final_frame = render_final_frame_spectral(
             SpectralScene::new(&positions, &colors, &body_alphas),
             &levels,
-            SpectralRenderSettings::new(&resolved, &render_config, 7, false),
+            SpectralRenderSettings::new(&resolved, &render_config, false),
         )
         .expect("final preview should render");
 
@@ -2614,7 +2475,7 @@ mod tests {
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
         let render_config = RenderConfig { hdr_scale: 3.2, bloom_mode: BloomMode::None };
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, 29, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let levels = ChannelLevels::new(0.0, 0.12, 0.0, 0.12, 0.0, 0.12);
 
         let serial_single = render_single_frame_spectral_serial_reference(scene, &levels, settings)
@@ -2654,7 +2515,7 @@ mod tests {
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = baseline_resolved_config(64, 40);
         let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None };
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, 31, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let frame_interval = 1usize;
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
 
@@ -2693,7 +2554,7 @@ mod tests {
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
         let resolved = stylized_resolved_config(96, 72);
         let render_config = RenderConfig { hdr_scale: 4.2, bloom_mode: BloomMode::Dog };
-        let settings = SpectralRenderSettings::new(&resolved, &render_config, 57, false);
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
         let frame_interval = 2usize;
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
 

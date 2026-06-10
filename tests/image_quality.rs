@@ -118,8 +118,7 @@ fn clean_profile(width: u32, height: u32) -> ResolvedVisualProfile {
         let mut rng = make_rng(&[seed, 0x00, 0x33]);
         let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, width, height);
         let p = profile.parameters;
-        if p.halation_strength == 0.0 && p.prism_strength == 0.0 && p.nebula_whisper_strength == 0.0
-        {
+        if p.halation_strength == 0.0 && p.prism_strength == 0.0 {
             return profile;
         }
     }
@@ -171,9 +170,9 @@ fn cosmic_signature_distinct_seeds_keep_no_effects_invariant() {
     for seed in [[0x01, 0x02], [0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
         let mut rng = make_rng(&seed);
         let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 640, 360);
-        // Only the curated signature finishes (halation plus the rare prism /
-        // nebula-whisper traits) may ever be enabled; every other legacy
-        // effect must stay off for all seeds.
+        // Only the curated signature finishes (halation plus the rare prism
+        // trait) may ever be enabled; every other legacy effect must stay
+        // off for all seeds.
         assert!(
             !profile.effect_config.any_effect_beyond_signature_traits_enabled(),
             "seed {seed:02X?} enabled a legacy effect outside the signature trait set"
@@ -187,10 +186,6 @@ fn cosmic_signature_distinct_seeds_keep_no_effects_invariant() {
             profile.effect_config.enable_chromatic_bloom,
             profile.parameters.prism_strength > 0.0,
             "seed {seed:02X?} chromatic bloom flag must mirror the prism trait"
-        );
-        assert_eq!(
-            profile.effect_config.nebula_strength, profile.parameters.nebula_whisper_strength,
-            "seed {seed:02X?} nebula strength must mirror the whisper trait"
         );
     }
 }
@@ -254,7 +249,7 @@ fn crisp_render_edge_score_survives_resolution_scaling() {
         render::render_final_frame_spectral(
             SpectralScene::new(&positions, &colors, &alphas),
             &levels,
-            SpectralRenderSettings::new(&profile.effect_config, &render_config, 0, false),
+            SpectralRenderSettings::new(&profile.effect_config, &render_config, false),
         )
         .expect("crisp fixture should render")
     };

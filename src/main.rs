@@ -259,7 +259,6 @@ fn main() -> Result<()> {
     let hex_seed = if args.seed.starts_with("0x") { &args.seed[2..] } else { &args.seed };
 
     let seed_dir = app::setup_seed_directory(&args.output)?;
-    let noise_seed = app::derive_noise_seed(&seed_bytes);
 
     let mut rng = Sha3RandomByteStream::new(
         &seed_bytes,
@@ -373,7 +372,6 @@ fn main() -> Result<()> {
         &colors,
         &body_alphas,
         &resolved_effect_config,
-        noise_seed,
         &render_config,
         enhancements.aspect_correction,
         &visual_profile.parameters,
@@ -388,7 +386,6 @@ fn main() -> Result<()> {
         render::SpectralRenderSettings::new(
             &resolved_effect_config,
             &render_config,
-            noise_seed,
             enhancements.aspect_correction,
         )
         .with_traits(scene_traits),

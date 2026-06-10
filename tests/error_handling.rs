@@ -35,19 +35,6 @@ fn parse_seed_rejects_odd_length_hex() {
 }
 
 #[test]
-fn derive_noise_seed_handles_empty_seed() {
-    let noise = app::derive_noise_seed(&[]);
-    assert_eq!(noise, 0, "empty seed should yield zero noise seed");
-}
-
-#[test]
-fn derive_noise_seed_handles_short_seed() {
-    let noise = app::derive_noise_seed(&[0xFF, 0x01]);
-    let expected = i32::from_le_bytes([0xFF, 0x01, 0, 0]);
-    assert_eq!(noise, expected);
-}
-
-#[test]
 fn error_types_implement_display() {
     let err =
         AppError::Config(ConfigError::InvalidResolution { reason: "test reason".to_string() });

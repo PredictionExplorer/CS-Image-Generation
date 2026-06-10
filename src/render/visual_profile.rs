@@ -8,8 +8,8 @@
 //! three-body geometry becomes strokes), mode-aware stroke tuning (ribbon-style
 //! modes draw bolder and always receive halation so they read as luminous
 //! bands rather than sparse hairlines), and a small set of rare, seed-gated
-//! traits (prism dispersion, nebula whisper, mirrored composition) that give a
-//! minority of outputs a collectible twist without breaking the family look.
+//! traits (prism dispersion, mirrored composition) that give a minority of
+//! outputs a collectible twist without breaking the family look.
 
 use super::effect_randomizer::{RandomizationLog, RandomizationRecord};
 use super::randomizable_config::ResolvedEffectConfig;
@@ -20,9 +20,6 @@ pub const COSMIC_SIGNATURE_PROFILE_NAME: &str = "cosmic_signature";
 
 /// Probability that a seed receives the rare prism (chromatic bloom) trait.
 pub const PRISM_PROBABILITY: f64 = 0.05;
-
-/// Probability that a seed receives the rare nebula-whisper background trait.
-pub const NEBULA_WHISPER_PROBABILITY: f64 = 0.05;
 
 /// Probability that a seed receives the rare mirrored composition trait.
 pub const MIRROR_PROBABILITY: f64 = 0.03;
@@ -169,12 +166,6 @@ pub struct CosmicSignatureParameters {
     pub prism_separation_scale: f64,
     /// Prism luminance activation threshold.
     pub prism_threshold: f64,
-    /// Rare nebula-whisper trait: faint procedural background strength (0 disables).
-    pub nebula_whisper_strength: f64,
-    /// Nebula noise octaves used when the whisper trait is active.
-    pub nebula_octaves: usize,
-    /// Nebula noise base frequency used when the whisper trait is active.
-    pub nebula_base_frequency: f64,
     /// Rare trait: mirrored (kaleidoscopic) composition.
     pub mirror: bool,
 }
@@ -261,16 +252,6 @@ impl CosmicSignatureParameters {
                 (0.0, 0.0042, 0.0011, 0.23)
             };
 
-        let nebula_roll = rng.next_f64();
-        let (nebula_whisper_strength, nebula_octaves, nebula_base_frequency) =
-            if nebula_roll < NEBULA_WHISPER_PROBABILITY {
-                let strength = sample_range(rng, 0.04, 0.09);
-                let octaves = if rng.next_f64() < 0.5 { 3 } else { 4 };
-                (strength, octaves, sample_range(rng, 0.0010, 0.0018))
-            } else {
-                (0.0, 4, 0.0015)
-            };
-
         let mirror = rng.next_f64() < MIRROR_PROBABILITY;
 
         Self {
@@ -292,9 +273,6 @@ impl CosmicSignatureParameters {
             prism_radius_scale,
             prism_separation_scale,
             prism_threshold,
-            nebula_whisper_strength,
-            nebula_octaves,
-            nebula_base_frequency,
             mirror,
         }
     }
@@ -428,9 +406,6 @@ impl ResolvedVisualProfile {
             hdr_scale: parameters.hdr_scale,
             clip_black: parameters.clip_black,
             clip_white: parameters.clip_white,
-            nebula_strength: parameters.nebula_whisper_strength,
-            nebula_octaves: parameters.nebula_octaves,
-            nebula_base_frequency: parameters.nebula_base_frequency,
         };
 
         Self {
@@ -461,12 +436,6 @@ fn build_profile_log(parameters: CosmicSignatureParameters) -> RandomizationLog 
     record.add_float("ribbon_echo_alpha", parameters.ribbon_echo_alpha, true, (0.0, 0.50));
     record.add_float("halation_strength", parameters.halation_strength, true, (0.0, 0.18));
     record.add_float("prism_strength", parameters.prism_strength, true, (0.0, 0.30));
-    record.add_float(
-        "nebula_whisper_strength",
-        parameters.nebula_whisper_strength,
-        true,
-        (0.0, 0.09),
-    );
     record.add_int("mirror", usize::from(parameters.mirror), true, (0, 1));
 
     let mut log = RandomizationLog::new();
@@ -488,11 +457,10 @@ mod tests {
         let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 1920, 1080);
         let c = profile.effect_config;
 
-        // Halation, prism and nebula whisper are the only seed-gated finishes;
-        // every other legacy effect must stay off for all seeds.
+        // Halation and prism are the only seed-gated finishes; every other
+        // legacy effect must stay off for all seeds.
         assert_eq!(c.enable_bloom, profile.parameters.halation_strength > 0.0);
         assert_eq!(c.enable_chromatic_bloom, profile.parameters.prism_strength > 0.0);
-        assert_eq!(c.nebula_strength, profile.parameters.nebula_whisper_strength);
         assert!(!c.enable_glow);
         assert!(!c.enable_perceptual_blur);
         assert!(!c.enable_gradient_map);
@@ -613,7 +581,6 @@ mod tests {
     fn rare_traits_are_gated_and_curated() {
         let total = 2048usize;
         let mut prism = 0usize;
-        let mut nebula = 0usize;
         let mut mirrored = 0usize;
         for seed in 0..total {
             let mut rng = make_rng(&[(seed & 0xff) as u8, (seed >> 8) as u8, 0xE7]);
@@ -631,23 +598,13 @@ mod tests {
                 assert!(!profile.effect_config.enable_chromatic_bloom);
             }
 
-            if p.nebula_whisper_strength > 0.0 {
-                nebula += 1;
-                assert!((0.04..=0.09).contains(&p.nebula_whisper_strength));
-                assert!((3..=4).contains(&p.nebula_octaves));
-                assert!((0.0010..=0.0018).contains(&p.nebula_base_frequency));
-            }
-            assert_eq!(profile.effect_config.nebula_strength, p.nebula_whisper_strength);
-
             if p.mirror {
                 mirrored += 1;
             }
         }
 
         // Each rare trait should appear, but stay a small minority (loose bounds).
-        for (name, count, max_fraction) in
-            [("prism", prism, 0.15), ("nebula", nebula, 0.15), ("mirror", mirrored, 0.10)]
-        {
+        for (name, count, max_fraction) in [("prism", prism, 0.15), ("mirror", mirrored, 0.10)] {
             assert!(count > 0, "{name} trait never appeared in {total} seeds");
             // usize→f64: counts are bounded by `total`.
             let fraction = count as f64 / total as f64;
@@ -693,7 +650,6 @@ mod tests {
             assert!((0.0..=0.50).contains(&p.ribbon_echo_alpha));
             assert!((0.0..=0.18).contains(&p.halation_strength));
             assert!((0.0..=0.30).contains(&p.prism_strength));
-            assert!((0.0..=0.09).contains(&p.nebula_whisper_strength));
 
             let (lw_min, lw_max) = line_weight_range(p.structure);
             assert!(
@@ -713,7 +669,7 @@ mod tests {
         assert_eq!(profile.name, COSMIC_SIGNATURE_PROFILE_NAME);
         assert_eq!(profile.randomization_log.effects.len(), 1);
         assert_eq!(profile.randomization_log.effects[0].effect_name, COSMIC_SIGNATURE_PROFILE_NAME);
-        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 15);
+        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 14);
     }
 
     #[test]

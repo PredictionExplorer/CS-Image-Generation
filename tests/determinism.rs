@@ -57,14 +57,6 @@ fn same_seed_produces_identical_simulation() {
 }
 
 #[test]
-fn derive_noise_seed_is_deterministic() {
-    let seed_bytes = app::parse_seed(TEST_SEED).expect("seed should parse");
-    let noise1 = app::derive_noise_seed(&seed_bytes);
-    let noise2 = app::derive_noise_seed(&seed_bytes);
-    assert_eq!(noise1, noise2);
-}
-
-#[test]
 fn different_seeds_produce_different_orbits() {
     let seed_a = app::parse_seed("0xdeadbeef").expect("seed should parse");
     let seed_b = app::parse_seed("0xcafebabe").expect("seed should parse");

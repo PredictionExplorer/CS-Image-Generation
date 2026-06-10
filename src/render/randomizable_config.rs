@@ -158,13 +158,6 @@ pub struct RandomizableEffectConfig {
     pub clip_black: Option<f64>,
     /// White point clipping threshold.
     pub clip_white: Option<f64>,
-
-    /// Nebula overlay strength.
-    pub nebula_strength: Option<f64>,
-    /// Number of noise octaves for nebula generation.
-    pub nebula_octaves: Option<usize>,
-    /// Base frequency for nebula noise.
-    pub nebula_base_frequency: Option<f64>,
 }
 
 impl RandomizableEffectConfig {
@@ -188,7 +181,7 @@ impl RandomizableEffectConfig {
         self.resolve_material_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_detail_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_atmospheric_params(&mut resolved, &mut randomizer, &mut log);
-        self.resolve_hdr_nebula_params(&mut resolved, &mut randomizer, &mut log);
+        self.resolve_hdr_params(&mut resolved, &mut randomizer, &mut log);
         self.resolve_clip_params(&mut resolved, &mut randomizer, &mut log);
 
         let resolved = apply_conflict_detection(resolved, &mut log);
@@ -679,7 +672,7 @@ impl RandomizableEffectConfig {
         );
     }
 
-    fn resolve_hdr_nebula_params(
+    fn resolve_hdr_params(
         &self,
         resolved: &mut ResolvedEffectConfig,
         randomizer: &mut EffectRandomizer,
@@ -687,27 +680,6 @@ impl RandomizableEffectConfig {
     ) {
         resolved.hdr_scale =
             self.resolve_float("hdr_scale", self.hdr_scale, &pd::HDR_SCALE, randomizer, log);
-        resolved.nebula_strength = self.resolve_float(
-            "nebula_strength",
-            self.nebula_strength,
-            &pd::NEBULA_STRENGTH,
-            randomizer,
-            log,
-        );
-        resolved.nebula_octaves = self.resolve_int(
-            "nebula_octaves",
-            self.nebula_octaves,
-            &pd::NEBULA_OCTAVES,
-            randomizer,
-            log,
-        );
-        resolved.nebula_base_frequency = self.resolve_float(
-            "nebula_base_frequency",
-            self.nebula_base_frequency,
-            &pd::NEBULA_BASE_FREQUENCY,
-            randomizer,
-            log,
-        );
     }
 
     fn resolve_clip_params(
@@ -837,7 +809,6 @@ impl RandomizableEffectConfig {
             "edge_luminance",
             "color_grade",
             "tone_curve",
-            "nebula_base",
         ];
         for prefix in MULTI_WORD_PREFIXES {
             if param_name.starts_with(prefix) {
@@ -991,12 +962,6 @@ pub struct ResolvedEffectConfig {
     pub clip_black: f64,
     /// Resolved white point clipping threshold.
     pub clip_white: f64,
-    /// Resolved nebula overlay strength.
-    pub nebula_strength: f64,
-    /// Resolved number of nebula noise octaves.
-    pub nebula_octaves: usize,
-    /// Resolved nebula base frequency.
-    pub nebula_base_frequency: f64,
 }
 
 impl ResolvedEffectConfig {
@@ -1024,16 +989,14 @@ impl ResolvedEffectConfig {
             || self.enable_edge_luminance
             || self.enable_atmospheric_depth
             || self.enable_fine_texture
-            || self.nebula_strength > 0.0
     }
 
     /// Return true when any effect outside the curated `CosmicSignature` trait
     /// set is active.
     ///
-    /// The profile gates exactly three finishes per seed: halation (`DoG`
-    /// bloom), the rare prism trait (chromatic bloom), and the rare
-    /// nebula-whisper background. Everything else in the legacy stack must
-    /// stay disabled for every seed.
+    /// The profile gates exactly two finishes per seed: halation (`DoG`
+    /// bloom) and the rare prism trait (chromatic bloom). Everything else in
+    /// the legacy stack must stay disabled for every seed.
     #[must_use]
     pub fn any_effect_beyond_signature_traits_enabled(&self) -> bool {
         self.enable_glow
@@ -1362,9 +1325,6 @@ mod tests {
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
-            nebula_strength: 0.0,
-            nebula_octaves: 4,
-            nebula_base_frequency: 0.0015,
         }
     }
 
