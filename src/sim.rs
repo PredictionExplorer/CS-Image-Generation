@@ -353,7 +353,7 @@ pub fn is_definitely_escaping(b: &[Body], th: f64) -> bool {
 }
 
 /// Outcome of a Borda-count trajectory search over many random orbits.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrajectoryResult {
     /// Non-chaoticness score (higher = more regular orbit).
     pub chaos: f64,
@@ -371,6 +371,15 @@ pub struct TrajectoryResult {
     pub selected_index: usize,
     /// Number of orbits discarded by quality filters.
     pub discarded_count: usize,
+}
+
+/// Candidate retained from the top of the Borda ranking for downstream visual scoring.
+#[derive(Clone, Debug)]
+pub struct ShortlistedTrajectory {
+    /// Initial body states for the candidate orbit.
+    pub bodies: Vec<Body>,
+    /// Borda/physics metrics for the candidate.
+    pub result: TrajectoryResult,
 }
 
 fn random_body(rng: &mut Sha3RandomByteStream) -> Body {
@@ -428,17 +437,19 @@ fn rank_trajectories(
     iv
 }
 
-/// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
+/// Run `num_sims` random orbits in parallel and retain the top Borda candidates.
 ///
-/// Returns the winning initial conditions together with their [`TrajectoryResult`] scores.
-pub fn select_best_trajectory(
+/// The shortlist lets the renderer apply visual quality scoring without widening the
+/// expensive search space. The first returned item is identical to the legacy Borda winner.
+pub fn select_best_trajectory_shortlist(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
     steps: usize,
     cw: f64,
     ew: f64,
     th: f64,
-) -> Result<(Vec<Body>, TrajectoryResult)> {
+    shortlist_len: usize,
+) -> Result<Vec<ShortlistedTrajectory>> {
     // Generate random triples and immediately transform them to the COM frame so
     // the total linear momentum and the COM position are exactly zero.
     let many: Vec<Vec<Body>> = (0..num_sims)
@@ -529,12 +540,45 @@ pub fn select_best_trajectory(
         }
         .into());
     }
-    let bi = iv[0].1;
-    let mut bt = iv[0].0.clone();
-    bt.selected_index = bi;
-    bt.discarded_count = dtot;
-    info!("\n   => Chosen orbit idx {bi} with weighted score {:.3}", bt.total_score_weighted);
-    Ok((many[bi].clone(), bt))
+
+    let keep = shortlist_len.max(1).min(iv.len());
+    let shortlist: Vec<ShortlistedTrajectory> = iv
+        .iter()
+        .take(keep)
+        .map(|(trajectory, original_index)| {
+            let mut result = trajectory.clone();
+            result.selected_index = *original_index;
+            result.discarded_count = dtot;
+            ShortlistedTrajectory { bodies: many[*original_index].clone(), result }
+        })
+        .collect();
+
+    let winner = &shortlist[0].result;
+    info!(
+        "\n   => Borda shortlist: {keep} candidate(s); top orbit idx {} score {:.3}",
+        winner.selected_index, winner.total_score_weighted
+    );
+    Ok(shortlist)
+}
+
+/// Run `num_sims` random orbits in parallel and pick the best via weighted Borda count.
+///
+/// Returns the winning initial conditions together with their [`TrajectoryResult`] scores.
+pub fn select_best_trajectory(
+    rng: &mut Sha3RandomByteStream,
+    num_sims: usize,
+    steps: usize,
+    cw: f64,
+    ew: f64,
+    th: f64,
+) -> Result<(Vec<Body>, TrajectoryResult)> {
+    let shortlist = select_best_trajectory_shortlist(rng, num_sims, steps, cw, ew, th, 1)?;
+    let winner = shortlist.into_iter().next().expect("shortlist_len is clamped to at least one");
+    info!(
+        "\n   => Chosen orbit idx {} with weighted score {:.3}",
+        winner.result.selected_index, winner.result.total_score_weighted
+    );
+    Ok((winner.bodies, winner.result))
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ import time
 import typing
 from pathlib import Path
 
-from _utils import check_ffmpeg, fmt_duration, resolve_binary
+from _utils import check_ffmpeg, compute_aesthetic_metrics, fmt_duration, resolve_binary
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
@@ -82,18 +82,29 @@ def random_seed() -> str:
     return "0x" + secrets.token_hex(6)
 
 
-def estimate_aesthetic_score(seed: str) -> float | None:
-    """Estimate whether a render has enough visual density to review.
+def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
+    """Score a render with real image-space metrics (see `_utils`).
 
-    This deliberately stays stdlib-only: very small compressed PNGs usually
-    indicate too much empty black field, missing output, or a weak seed.
+    Decodes a small proxy frame via ffmpeg and measures ink coverage,
+    colorfulness, hue entropy, and luminance spread, replacing the old
+    PNG-file-size heuristic. Returns ``None`` when the image is missing or
+    undecodable.
     """
     image_path = Path("output") / seed / "image.png"
-    if not image_path.exists():
+    metrics = compute_aesthetic_metrics(image_path)
+    if metrics is None:
         return None
 
-    compressed_kib = image_path.stat().st_size / 1024.0
-    return max(0.0, min(100.0, (compressed_kib - 128.0) / 24.0))
+    logger.debug(
+        "[%d] QA    %s  coverage=%.3f colorfulness=%.3f hue_entropy=%.3f spread=%.3f",
+        run_id,
+        seed,
+        metrics.coverage,
+        metrics.colorfulness,
+        metrics.hue_entropy,
+        metrics.luminance_spread,
+    )
+    return metrics.score
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +135,7 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
             logger.debug("[%d] stderr:\n%s", run_id, proc.stderr.rstrip())
 
         if proc.returncode == 0:
-            aesthetic_score = estimate_aesthetic_score(seed)
+            aesthetic_score = estimate_aesthetic_score(seed, run_id)
             if aesthetic_score is None:
                 logger.warning("[%d] QA    %s  image.png missing", run_id, seed)
             elif aesthetic_score < 25.0:

@@ -23,6 +23,14 @@ test:
 bench:
     cargo bench
 
+# Render a random-seed contact sheet for fast visual curation
+contact-sheet count="24":
+    python3 contact_sheet.py --count {{count}}
+
+# Re-render the fixed golden seed set into golden_gallery.png for look regression
+golden-gallery:
+    python3 contact_sheet.py --golden
+
 # Build release binary
 build:
     cargo build --release

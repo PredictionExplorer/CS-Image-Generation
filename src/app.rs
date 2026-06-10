@@ -177,6 +177,93 @@ pub fn run_borda_selection(
     )
 }
 
+/// Winning orbit of the combined Borda + aesthetic selection.
+pub struct AestheticSelection {
+    /// Initial body states of the winning candidate.
+    pub bodies: Vec<Body>,
+    /// Borda/physics metrics of the winning candidate.
+    pub result: TrajectoryResult,
+    /// Full trajectory of the winning candidate (no re-simulation needed).
+    pub positions: Vec<Vec<Vector3<f64>>>,
+    /// Proxy-render aesthetic score of the winning candidate.
+    pub aesthetic: render::aesthetic_score::AestheticScore,
+}
+
+/// Number of top Borda candidates proxy-rendered for aesthetic selection.
+pub const AESTHETIC_SHORTLIST_LEN: usize = 10;
+
+/// Run Borda selection, then pick the most paintable candidate by proxy render.
+///
+/// The Borda search ranks orbits on physics proxies only; this pass re-simulates
+/// the top [`AESTHETIC_SHORTLIST_LEN`] candidates (a negligible cost next to the
+/// search itself), scores each one in image space with the seed's structure
+/// mode ([`render::aesthetic_score`]), and returns the highest-scoring orbit
+/// together with its full trajectory. Ties keep Borda order, so a single-entry
+/// shortlist reproduces the legacy selection exactly.
+pub fn run_borda_selection_with_aesthetics(
+    rng: &mut Sha3RandomByteStream,
+    num_sims: usize,
+    num_steps_sim: usize,
+    chaos_weight: f64,
+    equil_weight: f64,
+    escape_threshold: f64,
+    structure: render::StructureMode,
+) -> Result<AestheticSelection> {
+    info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
+    let shortlist = sim::select_best_trajectory_shortlist(
+        rng,
+        num_sims,
+        num_steps_sim,
+        chaos_weight,
+        equil_weight,
+        escape_threshold,
+        AESTHETIC_SHORTLIST_LEN,
+    )?;
+
+    info!(
+        "STAGE 1.5/7: Aesthetic scoring of {} shortlisted candidate(s) ({} structure)...",
+        shortlist.len(),
+        structure.label()
+    );
+    let proxy_params = render::aesthetic_score::ProxyRenderParams::for_candidates(structure);
+
+    let mut best: Option<AestheticSelection> = None;
+    for (rank, candidate) in shortlist.into_iter().enumerate() {
+        let positions = sim::get_positions(candidate.bodies.clone(), num_steps_sim).positions;
+        let score = render::aesthetic_score::score_trajectory(&positions, proxy_params);
+        info!(
+            "   candidate {rank}: orbit idx {} borda {:.1} aesthetic {:.4} \
+             (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3})",
+            candidate.result.selected_index,
+            candidate.result.total_score_weighted,
+            score.total,
+            score.coverage,
+            score.balance,
+            score.contrast,
+            score.body_mix,
+            score.mush_fraction,
+        );
+
+        // Strict comparison keeps Borda (shortlist) order on ties.
+        let improves = best.as_ref().is_none_or(|cur| score.total > cur.aesthetic.total);
+        if improves {
+            best = Some(AestheticSelection {
+                bodies: candidate.bodies,
+                result: candidate.result,
+                positions,
+                aesthetic: score,
+            });
+        }
+    }
+
+    let selection = best.expect("shortlist is non-empty by construction");
+    info!(
+        "   => Aesthetic winner: orbit idx {} with score {:.4}",
+        selection.result.selected_index, selection.aesthetic.total
+    );
+    Ok(selection)
+}
+
 /// Re-run the best orbit to get full trajectory
 pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<Vec<Vector3<f64>>> {
     info!("STAGE 2/7: Re-running best orbit for {} steps...", num_steps_sim);
@@ -185,12 +272,42 @@ pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<
     sim_result.positions
 }
 
-/// Rotate the whole trajectory by a seeded, uniformly random 3D orientation.
+/// Number of seeded candidate viewing orientations evaluated per seed.
+pub const VIEW_CANDIDATE_COUNT: usize = 4;
+
+/// Build the rotation matrix for one Shoemake-uniform quaternion triple.
+fn shoemake_rotation(u1: f64, u2: f64, u3: f64) -> Matrix3<f64> {
+    let two_pi = crate::render::constants::TWO_PI;
+    let (qx, qy) =
+        ((1.0 - u1).sqrt() * (two_pi * u2).sin(), (1.0 - u1).sqrt() * (two_pi * u2).cos());
+    let (qz, qw) = (u1.sqrt() * (two_pi * u3).sin(), u1.sqrt() * (two_pi * u3).cos());
+    quaternion_to_matrix(qw, qx, qy, qz)
+}
+
+/// Rotate a strided sample of the trajectory (cheap copy for view scoring).
+fn rotated_sample(
+    positions: &[Vec<Vector3<f64>>],
+    rotation: &Matrix3<f64>,
+    samples_per_body: usize,
+) -> Vec<Vec<Vector3<f64>>> {
+    positions
+        .iter()
+        .map(|body| {
+            let stride = (body.len() / samples_per_body.max(1)).max(1);
+            body.iter().step_by(stride).map(|position| rotation * *position).collect()
+        })
+        .collect()
+}
+
+/// Rotate the whole trajectory by the best of several seeded 3D orientations.
 ///
 /// The simulation produces fully three-dimensional structures, but the
 /// renderer projects onto the fixed x/y plane. Without this step every seed
-/// is photographed from the same axis; with it, the same orbit family yields
-/// dramatically different compositions depending on the viewing angle.
+/// is photographed from the same axis. Instead of committing to a single
+/// random angle, [`VIEW_CANDIDATE_COUNT`] Shoemake-uniform rotations are drawn
+/// from the forked view RNG and each is scored on its projected 2D occupancy
+/// (coverage / balance via [`render::aesthetic_score`]); the best-composed
+/// viewpoint wins. Deterministic per seed.
 ///
 /// Positions are already expressed in the centre-of-mass frame, so rotating
 /// about the origin is rotation about the COM. Uses a forked RNG domain so it
@@ -198,28 +315,44 @@ pub fn simulate_best_orbit(best_bodies: Vec<Body>, num_steps_sim: usize) -> Vec<
 pub fn apply_view_orientation(
     positions: &mut [Vec<Vector3<f64>>],
     rng: &Sha3RandomByteStream,
+    structure: render::StructureMode,
 ) -> (f64, f64, f64) {
-    info!("STAGE 2.25/7: Applying seeded viewing orientation...");
+    info!(
+        "STAGE 2.25/7: Selecting best of {} seeded viewing orientations...",
+        VIEW_CANDIDATE_COUNT
+    );
     let mut view_rng = rng.fork(VIEW_RNG_DOMAIN);
+    let proxy_params = render::aesthetic_score::ProxyRenderParams::for_view_selection(structure);
 
-    // Shoemake's method: uniform random rotation on SO(3) from three uniforms.
-    let u1 = view_rng.next_f64();
-    let u2 = view_rng.next_f64();
-    let u3 = view_rng.next_f64();
-    let two_pi = crate::render::constants::TWO_PI;
-    let (qx, qy) =
-        ((1.0 - u1).sqrt() * (two_pi * u2).sin(), (1.0 - u1).sqrt() * (two_pi * u2).cos());
-    let (qz, qw) = (u1.sqrt() * (two_pi * u3).sin(), u1.sqrt() * (two_pi * u3).cos());
+    let mut best_triple = (0.0, 0.0, 0.0);
+    let mut best_score = f64::NEG_INFINITY;
+    for candidate in 0..VIEW_CANDIDATE_COUNT {
+        let triple = (view_rng.next_f64(), view_rng.next_f64(), view_rng.next_f64());
+        let rotation = shoemake_rotation(triple.0, triple.1, triple.2);
+        let sample = rotated_sample(positions, &rotation, proxy_params.samples_per_body);
+        let score = render::aesthetic_score::score_trajectory(&sample, proxy_params).total;
+        info!(
+            "   view candidate {candidate}: ({:.3}, {:.3}, {:.3}) occupancy score {score:.4}",
+            triple.0, triple.1, triple.2
+        );
+        if score > best_score {
+            best_score = score;
+            best_triple = triple;
+        }
+    }
 
-    let rotation = quaternion_to_matrix(qw, qx, qy, qz);
+    let rotation = shoemake_rotation(best_triple.0, best_triple.1, best_triple.2);
     for body_positions in positions.iter_mut() {
         for position in body_positions.iter_mut() {
             *position = rotation * *position;
         }
     }
 
-    info!("   => View quaternion components: ({u1:.3}, {u2:.3}, {u3:.3})");
-    (u1, u2, u3)
+    info!(
+        "   => View quaternion components: ({:.3}, {:.3}, {:.3}) score {best_score:.4}",
+        best_triple.0, best_triple.1, best_triple.2
+    );
+    best_triple
 }
 
 fn quaternion_to_matrix(w: f64, x: f64, y: f64, z: f64) -> Matrix3<f64> {
@@ -798,8 +931,8 @@ mod tests {
         let mut b = make_positions();
         let original = make_positions();
 
-        apply_view_orientation(&mut a, &rng);
-        apply_view_orientation(&mut b, &rng);
+        apply_view_orientation(&mut a, &rng, render::StructureMode::TriangleWeb);
+        apply_view_orientation(&mut b, &rng, render::StructureMode::TriangleWeb);
 
         for body in 0..3 {
             for step in 0..2 {
@@ -822,7 +955,7 @@ mod tests {
         // A different seed must produce a different orientation.
         let rng2 = Sha3RandomByteStream::new(&[0x11, 0x22], 100.0, 300.0, 300.0, 1.0);
         let mut c = make_positions();
-        apply_view_orientation(&mut c, &rng2);
+        apply_view_orientation(&mut c, &rng2, render::StructureMode::TriangleWeb);
         let differs = (0..3).any(|body| (a[body][0] - c[body][0]).norm() > 1e-6);
         assert!(differs, "different seeds should view from different angles");
     }

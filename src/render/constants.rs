@@ -199,9 +199,10 @@ pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.30;
 
 /// Maximum production line thickness in pixels.
 ///
-/// Raised from 1.55 so that bold seeds (high `line_weight`) and slow, close
-/// passages can render genuinely weighty strokes.
-pub const CRISP_LINE_MAX_THICKNESS: f32 = 2.40;
+/// Raised from 2.40 so that bold ribbon seeds (mode-aware `line_weight` up to
+/// 2.2) and slow, close passages can render genuinely weighty strokes instead
+/// of being clamped flat.
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 3.20;
 
 /// Offset term of the proximity response in the line width model.
 ///
@@ -341,6 +342,19 @@ pub const VELOCITY_THICKNESS_FAST: f64 = 0.62;
 
 /// Alpha multiplier for the faint triangle web layered under hybrid ribbons.
 pub const HYBRID_WEB_ALPHA_SCALE: f64 = 0.30;
+
+/// Alpha multiplier for the reduced web layer in the web+spokes lace mode.
+pub const LACE_WEB_ALPHA_SCALE: f64 = 0.55;
+
+/// Alpha multiplier for the spoke layer in the web+spokes lace mode.
+pub const LACE_SPOKE_ALPHA_SCALE: f64 = 0.45;
+
+/// Alpha multiplier for the faint ribbon underlay beneath time-lagged chords.
+pub const CHORD_RIBBON_UNDERLAY_ALPHA: f64 = 0.30;
+
+/// Per-echo decay multipliers for the comet-ribbons trailing bands
+/// (applied on top of the seed's `ribbon_echo_alpha` at lags 1x, 2x, 3x).
+pub const COMET_ECHO_DECAY: [f64; 3] = [1.0, 0.55, 0.30];
 
 /// Floor of the lightness-to-energy response (keeps dark bodies visible).
 pub const LIGHTNESS_ENERGY_FLOOR: f64 = 0.30;

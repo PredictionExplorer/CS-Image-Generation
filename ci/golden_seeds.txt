@@ -1,0 +1,18 @@
+# Golden seed set for look-regression galleries.
+#
+# Re-render with `just golden-gallery` (or `python3 contact_sheet.py --golden`)
+# after any tuning change and compare the resulting golden_gallery.png against
+# the previous one side by side. Seeds are fixed on purpose: do not edit this
+# list casually, or historical comparisons lose their meaning.
+0x2468
+0x5E5E
+0xA1B2
+0xC0DE
+0x0001
+0x1357
+0x77A8
+0x99F1
+0xBEEF
+0xCAFE
+0xD00D
+0xFACE

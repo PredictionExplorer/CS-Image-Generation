@@ -1026,6 +1026,28 @@ impl ResolvedEffectConfig {
             || self.enable_fine_texture
             || self.nebula_strength > 0.0
     }
+
+    /// Return true when any effect outside the curated `CosmicSignature` trait
+    /// set is active.
+    ///
+    /// The profile gates exactly three finishes per seed: halation (`DoG`
+    /// bloom), the rare prism trait (chromatic bloom), and the rare
+    /// nebula-whisper background. Everything else in the legacy stack must
+    /// stay disabled for every seed.
+    #[must_use]
+    pub fn any_effect_beyond_signature_traits_enabled(&self) -> bool {
+        self.enable_glow
+            || self.enable_perceptual_blur
+            || self.enable_micro_contrast
+            || self.enable_gradient_map
+            || self.enable_color_grade
+            || self.enable_champleve
+            || self.enable_aether
+            || self.enable_opalescence
+            || self.enable_edge_luminance
+            || self.enable_atmospheric_depth
+            || self.enable_fine_texture
+    }
 }
 
 /// Apply render constraints to prevent pathological runtime and low-quality effect combinations.

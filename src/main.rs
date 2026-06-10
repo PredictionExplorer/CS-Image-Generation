@@ -294,19 +294,24 @@ fn main() -> Result<()> {
 
     let borda_weights = resolve_borda_weights(args.chaos_weight, args.equil_weight, &mut rng);
 
-    let (best_bodies, best_info) = app::run_borda_selection(
+    // Borda search ranks physics quality; the aesthetic pass proxy-renders the
+    // top candidates with this seed's structure mode and keeps the most
+    // paintable orbit (with its trajectory, so no re-simulation is needed).
+    let selection = app::run_borda_selection_with_aesthetics(
         &mut rng,
         args.sims,
         args.steps,
         borda_weights.chaos_weight,
         borda_weights.equil_weight,
         DEFAULT_ESCAPE_THRESHOLD,
+        visual_profile.parameters.structure,
     )?;
+    let best_info = selection.result.clone();
+    let mut positions = selection.positions;
 
-    let mut positions = app::simulate_best_orbit(best_bodies, args.steps);
-
-    // Seeded viewing orientation: photograph the 3D orbit from a random angle.
-    app::apply_view_orientation(&mut positions, &rng);
+    // Seeded viewing orientation: photograph the 3D orbit from the
+    // best-composed of several candidate angles.
+    app::apply_view_orientation(&mut positions, &rng, visual_profile.parameters.structure);
 
     let drift_config = if args.drift == DriftModeArg::None {
         info!("STAGE 2.5/7: Drift disabled");

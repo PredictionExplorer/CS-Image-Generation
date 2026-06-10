@@ -24,6 +24,44 @@ pub(crate) struct BatchDrawParams {
     /// Seed-level global line weight multiplier.
     pub(crate) line_weight: f64,
     pub(crate) hdr_scale: f64,
+    /// Rare kaleidoscope trait: also draw every stroke mirrored across the
+    /// vertical frame axis.
+    pub(crate) mirror: bool,
+}
+
+/// Reflect a segment across the vertical axis of the frame.
+#[inline]
+fn mirrored_segment(segment: SpectralLineSegment, width: u32) -> SpectralLineSegment {
+    // u32→f32 precision loss is irrelevant at raster scale.
+    let frame_width = width as f32;
+    let mut mirrored = segment;
+    mirrored.start.x = frame_width - segment.start.x;
+    mirrored.end.x = frame_width - segment.end.x;
+    mirrored
+}
+
+/// Draw a segment, plus its vertical-axis mirror when the trait is active.
+#[inline]
+pub(crate) fn draw_segment_rows_maybe_mirrored(
+    accum: &mut [[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    row_start: usize,
+    row_end: usize,
+    segment: SpectralLineSegment,
+    mirror: bool,
+) {
+    draw_line_segment_aa_spectral_rows(accum, width, height, row_start, row_end, segment);
+    if mirror {
+        draw_line_segment_aa_spectral_rows(
+            accum,
+            width,
+            height,
+            row_start,
+            row_end,
+            mirrored_segment(segment, width),
+        );
+    }
 }
 
 /// Draw a complete triangle (3 line segments) in a batch for better performance
@@ -49,6 +87,7 @@ pub fn draw_triangle_batch_spectral(
             edge_weights: [1.0; 3],
             line_weight: 1.0,
             hdr_scale,
+            mirror: false,
         },
     );
 }
@@ -67,7 +106,7 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
             continue;
         }
         let dynamics = params.edge_dynamics[edge_idx];
-        draw_line_segment_aa_spectral_rows(
+        draw_segment_rows_maybe_mirrored(
             accum,
             params.width,
             params.height,
@@ -79,20 +118,26 @@ pub(crate) fn draw_triangle_batch_spectral_rows(
                 hdr_scale: params.hdr_scale * dynamics.hdr_multiplier * weight,
                 thickness_factor: dynamics.thickness_factor * params.line_weight,
             },
+            params.mirror,
         );
     }
 }
 
-/// Draw one per-body trail stroke (`step -> step + 1`) for the ribbon modes.
+/// Draw one per-body trail stroke from the current vertex to `target_vertices`,
+/// with the deposited energy scaled by `energy_scale`.
+///
+/// Used for ribbon strokes (`step -> step + 1`, scale 1) and for time-lagged
+/// chord/echo strokes (`step -> step + lag`, reduced scale).
 #[inline]
-pub(crate) fn draw_body_ribbon_segment_rows(
+pub(crate) fn draw_body_trail_segment_rows(
     accum: &mut [[f64; NUM_BINS]],
     params: &BatchDrawParams,
     body: usize,
-    next_vertices: [TriangleVertex; 3],
+    target_vertices: [TriangleVertex; 3],
+    energy_scale: f64,
 ) {
     let dynamics = params.edge_dynamics[body];
-    draw_line_segment_aa_spectral_rows(
+    draw_segment_rows_maybe_mirrored(
         accum,
         params.width,
         params.height,
@@ -100,10 +145,11 @@ pub(crate) fn draw_body_ribbon_segment_rows(
         params.row_end,
         SpectralLineSegment {
             start: params.vertices[body],
-            end: next_vertices[body],
-            hdr_scale: params.hdr_scale * dynamics.hdr_multiplier,
+            end: target_vertices[body],
+            hdr_scale: params.hdr_scale * dynamics.hdr_multiplier * energy_scale,
             thickness_factor: dynamics.thickness_factor * params.line_weight,
         },
+        params.mirror,
     );
 }
 
@@ -125,7 +171,7 @@ pub(crate) fn draw_spoke_segments_rows(accum: &mut [[f64; NUM_BINS]], params: &B
             alpha: vertex.alpha,
         };
         let dynamics = params.edge_dynamics[body];
-        draw_line_segment_aa_spectral_rows(
+        draw_segment_rows_maybe_mirrored(
             accum,
             params.width,
             params.height,
@@ -137,6 +183,7 @@ pub(crate) fn draw_spoke_segments_rows(accum: &mut [[f64; NUM_BINS]], params: &B
                 hdr_scale: params.hdr_scale * dynamics.hdr_multiplier,
                 thickness_factor: dynamics.thickness_factor * params.line_weight,
             },
+            params.mirror,
         );
     }
 }

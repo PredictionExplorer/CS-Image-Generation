@@ -10,12 +10,19 @@ pub trait DriftTransform {
     fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64);
 }
 
+/// Maximum supported drift sweep, in fractions of a full rotation.
+///
+/// Values above 1 sweep more than a complete loop, producing long smeary
+/// camera arcs; the cap keeps explicit user values from degenerating into
+/// many indistinct revolutions.
+pub const MAX_ARC_FRACTION: f64 = 1.5;
+
 /// Shared configuration for every drift strategy.
 #[derive(Clone, Copy, Debug)]
 pub struct DriftParameters {
     /// Non-negative multiplier for drift magnitude and elliptical orbit size.
     pub scale: f64,
-    /// Fraction of one full rotation (0–1) swept during elliptical drift.
+    /// Fraction of one full rotation (0–[`MAX_ARC_FRACTION`]) swept during elliptical drift.
     pub arc_fraction: f64,
     /// Orbital eccentricity for elliptical drift (0 is circular; clamped below 1).
     pub eccentricity: f64,
@@ -26,14 +33,14 @@ impl DriftParameters {
     #[must_use]
     pub fn new(scale: f64, arc_fraction: f64, eccentricity: f64) -> Self {
         let clamped_scale = scale.max(0.0);
-        let clamped_arc = arc_fraction.clamp(0.0, 1.0);
+        let clamped_arc = arc_fraction.clamp(0.0, MAX_ARC_FRACTION);
         let clamped_ecc = eccentricity.clamp(0.0, 0.95);
 
         if (arc_fraction - clamped_arc).abs() > f64::EPSILON {
             warn!(
                 original = arc_fraction,
                 clamped = clamped_arc,
-                "drift_arc_fraction out of range [0, 1]; clamping"
+                "drift_arc_fraction out of range [0, MAX_ARC_FRACTION]; clamping"
             );
         }
         if (eccentricity - clamped_ecc).abs() > f64::EPSILON {
@@ -441,8 +448,14 @@ mod tests {
     fn test_drift_parameters_clamping() {
         let p = DriftParameters::new(-5.0, 2.0, 1.0);
         assert_eq!(p.scale, 0.0, "Negative scale should clamp to 0");
-        assert_eq!(p.arc_fraction, 1.0, "arc_fraction > 1 should clamp to 1");
+        assert_eq!(
+            p.arc_fraction, MAX_ARC_FRACTION,
+            "arc_fraction beyond the cap should clamp to MAX_ARC_FRACTION"
+        );
         assert_eq!(p.eccentricity, 0.95, "eccentricity > 0.95 should clamp to 0.95");
+
+        let multi_loop = DriftParameters::new(1.0, 1.35, 0.45);
+        assert_eq!(multi_loop.arc_fraction, 1.35, "sweeps beyond one loop must be preserved");
     }
 
     #[test]

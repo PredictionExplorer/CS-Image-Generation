@@ -30,6 +30,17 @@ const MIN_BODY_HUE_GAP_DEG: f64 = 10.0;
 /// complementary and widely separated relationships.
 const MAX_BODY_HUE_GAP_DEG: f64 = 175.0;
 
+/// Hue spread below which the anti-mud guard ramps in (see `assign_body_plans`).
+const LOW_SPREAD_GUARD_START: f64 = 0.30;
+/// Hue spread at (and below) which the anti-mud guard is fully engaged.
+const LOW_SPREAD_GUARD_FULL: f64 = 0.15;
+/// Chroma-fraction targets enforced (proportionally) on near-monochrome palettes.
+const LOW_SPREAD_CHROMA_TARGETS: [f64; 3] = [0.95, 0.80, 0.62];
+/// Extra lift applied to the brightest body under the full anti-mud guard.
+const LOW_SPREAD_LIGHTNESS_LIFT: f64 = 0.07;
+/// Extra drop applied to the darkest body under the full anti-mud guard.
+const LOW_SPREAD_LIGHTNESS_DROP: f64 = 0.09;
+
 static LAST_PALETTE_METADATA: LazyLock<Mutex<(String, String)>> =
     LazyLock::new(|| Mutex::new(("unresolved".to_string(), "unresolved".to_string())));
 
@@ -111,13 +122,13 @@ fn assign_body_plans(
     shuffle3(rng, &mut chroma_order);
 
     let center = (lerp(0.50, 0.73, key) + (rng.next_f64() - 0.5) * 0.05).clamp(0.48, 0.75);
-    let lightness_values = [
+    let mut lightness_values = [
         (center + lerp(0.105, 0.175, rng.next_f64())).clamp(0.63, 0.90),
         (center + (rng.next_f64() - 0.5) * 0.035).clamp(0.47, 0.78),
         (center - lerp(0.115, 0.19, rng.next_f64())).clamp(0.34, 0.62),
     ];
 
-    let chroma_values = if chroma_boost {
+    let mut chroma_values = if chroma_boost {
         [
             lerp(0.82, 0.97, rng.next_f64()),
             lerp(0.58, 0.76, rng.next_f64()),
@@ -130,6 +141,24 @@ fn assign_body_plans(
             lerp(0.26, 0.44, rng.next_f64()),
         ]
     };
+
+    // Anti-mud guard: tight palettes (low hue spread) cannot rely on hue
+    // contrast for separation, and mid-level chroma there integrates toward
+    // beige/grey. As spread drops below `LOW_SPREAD_GUARD_START` the palette
+    // is pushed toward deliberate monochrome elegance — vivid chroma plus a
+    // wider lightness ladder — reaching full strength at `LOW_SPREAD_GUARD_FULL`.
+    let mud_guard = smoothstep(
+        (LOW_SPREAD_GUARD_START - spread) / (LOW_SPREAD_GUARD_START - LOW_SPREAD_GUARD_FULL),
+    );
+    if mud_guard > 0.0 {
+        for (value, target) in chroma_values.iter_mut().zip(LOW_SPREAD_CHROMA_TARGETS) {
+            *value = lerp(*value, value.max(target), mud_guard);
+        }
+        lightness_values[0] =
+            (lightness_values[0] + LOW_SPREAD_LIGHTNESS_LIFT * mud_guard).clamp(0.63, 0.92);
+        lightness_values[2] =
+            (lightness_values[2] - LOW_SPREAD_LIGHTNESS_DROP * mud_guard).clamp(0.32, 0.62);
+    }
 
     let journey_max = lerp(30.0, 96.0, spread);
 
@@ -609,6 +638,52 @@ mod tests {
             );
             assert!(max_c > 0.05, "palette should stay vivid for seed {seed}: {mean_c:?}");
         }
+    }
+
+    #[test]
+    fn test_low_spread_palettes_get_vivid_chroma_and_wide_lightness() {
+        let spread_of = |spec: &PaletteSpec| -> f64 {
+            spec.harmony
+                .rsplit('_')
+                .next()
+                .and_then(|token| token.parse::<f64>().ok())
+                .expect("harmony label should encode the spread")
+        };
+
+        let mut guarded = 0usize;
+        for s in 0u32..512 {
+            let seed = [(s & 0xff) as u8, (s >> 8) as u8, 0x3D, 0x91];
+            let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+            let palette = resolve_palette_spec(&mut rng, true, 0.5);
+            let spread = spread_of(&palette);
+            if spread > 0.12 {
+                continue;
+            }
+            guarded += 1;
+
+            let chroma_min = palette
+                .bodies
+                .iter()
+                .map(|body| body.chroma_fraction)
+                .fold(f64::INFINITY, f64::min);
+            let lightness: Vec<f64> =
+                palette.bodies.iter().map(|body| body.target_lightness).collect();
+            let span = lightness.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                - lightness.iter().copied().fold(f64::INFINITY, f64::min);
+
+            assert!(
+                chroma_min > 0.55,
+                "near-monochrome palette stayed muddy: spread={spread} chroma_min={chroma_min}"
+            );
+            // The dominant body's GLOW floor can compress the ladder when it
+            // lands on the darkest rank, so the span bound is conservative;
+            // vivid chroma above is the primary anti-mud guarantee.
+            assert!(
+                span > 0.14,
+                "near-monochrome palette lost lightness contrast: spread={spread} span={span}"
+            );
+        }
+        assert!(guarded > 0, "expected at least one low-spread palette in the sample");
     }
 
     #[test]

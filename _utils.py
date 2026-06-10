@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
+import statistics
+import subprocess
 import sys
+import typing
 from pathlib import Path
 
 GENERATOR_CANDIDATES: list[str] = [
     "./target/release/three_body_problem",
     "./three_body_problem",
 ]
+
+# Edge length of the downscaled analysis frame used for aesthetic metrics.
+ANALYSIS_SIZE = 96
+# Rec. 709 luma threshold above which a pixel counts as "lit".
+LIT_LUMA_THRESHOLD = 0.02
+# Minimum channel spread (0-255) for a pixel to contribute to hue statistics.
+CHROMATIC_SPREAD_THRESHOLD = 12
+# Number of hue histogram bins for the hue-entropy metric.
+HUE_BINS = 12
 
 
 def fmt_duration(seconds: float) -> str:
@@ -44,3 +57,123 @@ def resolve_binary(path: str | Path) -> Path:
         print(f"Error: {p} is not executable", file=sys.stderr)
         sys.exit(1)
     return p
+
+
+class AestheticMetrics(typing.NamedTuple):
+    """Image-space quality metrics for one rendered frame (all in [0, 1] except score)."""
+
+    coverage: float
+    colorfulness: float
+    hue_entropy: float
+    luminance_spread: float
+    score: float
+
+
+def _decode_rgb_frame(image_path: Path, size: int) -> bytes | None:
+    """Decode *image_path* to a size x size raw RGB24 frame via ffmpeg."""
+    cmd = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-i",
+        str(image_path),
+        "-vf",
+        f"scale={size}:{size}",
+        "-frames:v",
+        "1",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=120, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or len(proc.stdout) != size * size * 3:
+        return None
+    return proc.stdout
+
+
+def _coverage_band_score(coverage: float) -> float:
+    """Map an ink-coverage fraction onto [0, 1] with a flat ideal band."""
+    floor, band_low, band_high, ceil = 0.02, 0.06, 0.45, 0.85
+    if coverage <= floor or coverage >= ceil:
+        return 0.0
+    if coverage < band_low:
+        return (coverage - floor) / (band_low - floor)
+    if coverage > band_high:
+        return (ceil - coverage) / (ceil - band_high)
+    return 1.0
+
+
+def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
+    """Compute real image-space aesthetic metrics for a rendered PNG.
+
+    Decodes a small proxy frame with ffmpeg (already a hard dependency of the
+    generator) and measures ink coverage, Hasler-Suesstrunk colorfulness, hue
+    entropy, and luminance spread. Returns ``None`` when the image is missing
+    or cannot be decoded. Stdlib + ffmpeg only.
+    """
+    if not image_path.exists():
+        return None
+    raw = _decode_rgb_frame(image_path, ANALYSIS_SIZE)
+    if raw is None:
+        return None
+
+    lit_lumas: list[float] = []
+    rg_values: list[float] = []
+    yb_values: list[float] = []
+    hue_histogram = [0] * HUE_BINS
+
+    for offset in range(0, len(raw), 3):
+        r, g, b = raw[offset], raw[offset + 1], raw[offset + 2]
+        luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+        if luma <= LIT_LUMA_THRESHOLD:
+            continue
+        lit_lumas.append(luma)
+        rg_values.append(float(r - g))
+        yb_values.append(0.5 * (r + g) - b)
+
+        if max(r, g, b) - min(r, g, b) >= CHROMATIC_SPREAD_THRESHOLD:
+            hue = math.atan2(math.sqrt(3.0) * (g - b), 2.0 * r - g - b)
+            bin_idx = int((hue + math.pi) / (2.0 * math.pi) * HUE_BINS) % HUE_BINS
+            hue_histogram[bin_idx] += 1
+
+    total_pixels = ANALYSIS_SIZE * ANALYSIS_SIZE
+    coverage = len(lit_lumas) / total_pixels
+    if not lit_lumas:
+        return AestheticMetrics(0.0, 0.0, 0.0, 0.0, 0.0)
+
+    # Hasler-Suesstrunk colorfulness over lit pixels, normalized to ~[0, 1].
+    if len(rg_values) > 1:
+        std_term = math.hypot(statistics.pstdev(rg_values), statistics.pstdev(yb_values))
+        mean_term = math.hypot(statistics.fmean(rg_values), statistics.fmean(yb_values))
+        colorfulness = min((std_term + 0.3 * mean_term) / 255.0 * 2.4, 1.0)
+    else:
+        colorfulness = 0.0
+
+    chromatic_total = sum(hue_histogram)
+    if chromatic_total > 0:
+        entropy = -sum(
+            (count / chromatic_total) * math.log(count / chromatic_total)
+            for count in hue_histogram
+            if count > 0
+        )
+        hue_entropy = entropy / math.log(HUE_BINS)
+    else:
+        hue_entropy = 0.0
+
+    sorted_lumas = sorted(lit_lumas)
+    p50 = sorted_lumas[int(0.50 * (len(sorted_lumas) - 1))]
+    p95 = sorted_lumas[int(0.95 * (len(sorted_lumas) - 1))]
+    luminance_spread = max(0.0, p95 - p50)
+
+    score = 100.0 * (
+        0.35 * _coverage_band_score(coverage)
+        + 0.25 * colorfulness
+        + 0.20 * hue_entropy
+        + 0.20 * min(luminance_spread / 0.45, 1.0)
+    )
+    return AestheticMetrics(coverage, colorfulness, hue_entropy, luminance_spread, score)

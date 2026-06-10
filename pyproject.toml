@@ -56,4 +56,10 @@ python_version = "3.10"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
-files = ["_utils.py", "run.py", "run-test-images.py", "ci/verify_reference.py"]
+files = [
+    "_utils.py",
+    "contact_sheet.py",
+    "run.py",
+    "run-test-images.py",
+    "ci/verify_reference.py",
+]

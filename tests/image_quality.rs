@@ -111,10 +111,24 @@ fn crisp_scene(
     (positions, colors, alphas)
 }
 
+/// Find a seed whose profile resolves with no finish passes at all
+/// (no halation, no rare traits), so the pipeline must be a strict no-op.
+fn clean_profile(width: u32, height: u32) -> ResolvedVisualProfile {
+    for seed in 0u8..=255 {
+        let mut rng = make_rng(&[seed, 0x00, 0x33]);
+        let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, width, height);
+        let p = profile.parameters;
+        if p.halation_strength == 0.0 && p.prism_strength == 0.0 && p.nebula_whisper_strength == 0.0
+        {
+            return profile;
+        }
+    }
+    panic!("no finish-free seed found in 256 candidates");
+}
+
 #[test]
 fn cosmic_signature_pipeline_preserves_sharp_line_without_haze() {
-    let mut rng = make_rng(&[0x10, 0x00, 0x33]);
-    let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, WIDTH as u32, HEIGHT as u32);
+    let profile = clean_profile(WIDTH as u32, HEIGHT as u32);
     let render_config =
         RenderConfig { hdr_scale: profile.effect_config.hdr_scale, bloom_mode: BloomMode::Dog };
     let effect_config = render::build_effect_config_from_resolved(
@@ -157,16 +171,26 @@ fn cosmic_signature_distinct_seeds_keep_no_effects_invariant() {
     for seed in [[0x01, 0x02], [0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
         let mut rng = make_rng(&seed);
         let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, 640, 360);
-        // Only the seed-gated halation bloom may ever be enabled; every other
-        // legacy effect must stay off for all seeds.
+        // Only the curated signature finishes (halation plus the rare prism /
+        // nebula-whisper traits) may ever be enabled; every other legacy
+        // effect must stay off for all seeds.
         assert!(
-            !profile.effect_config.any_effect_beyond_halation_enabled(),
-            "seed {seed:02X?} enabled a non-halation legacy effect"
+            !profile.effect_config.any_effect_beyond_signature_traits_enabled(),
+            "seed {seed:02X?} enabled a legacy effect outside the signature trait set"
         );
         assert_eq!(
             profile.effect_config.enable_bloom,
             profile.parameters.halation_strength > 0.0,
             "seed {seed:02X?} bloom flag must mirror the halation trait"
+        );
+        assert_eq!(
+            profile.effect_config.enable_chromatic_bloom,
+            profile.parameters.prism_strength > 0.0,
+            "seed {seed:02X?} chromatic bloom flag must mirror the prism trait"
+        );
+        assert_eq!(
+            profile.effect_config.nebula_strength, profile.parameters.nebula_whisper_strength,
+            "seed {seed:02X?} nebula strength must mirror the whisper trait"
         );
     }
 }
@@ -178,12 +202,12 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
     let config = profile.effect_config;
 
     assert!(
-        !config.any_effect_beyond_halation_enabled(),
-        "non-halation post-effects must stay disabled"
+        !config.any_effect_beyond_signature_traits_enabled(),
+        "post-effects outside the signature trait set must stay disabled"
     );
     assert_eq!(config.blur_strength, 0.0);
     assert_eq!(config.glow_strength, 0.0);
-    assert_eq!(config.chromatic_bloom_strength, 0.0);
+    assert_eq!(config.chromatic_bloom_strength, profile.parameters.prism_strength);
     assert_eq!(config.perceptual_blur_strength, 0.0);
     assert_eq!(constants::CRISP_DISPERSION_STRENGTH, 0.0);
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH, 0.0);
@@ -224,8 +248,9 @@ fn crisp_render_edge_score_survives_resolution_scaling() {
     let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None };
 
     let render_at = |width: u32, height: u32| {
-        let mut rng = make_rng(&[0xC0, width as u8, height as u8]);
-        let profile = ResolvedVisualProfile::cosmic_signature(&mut rng, width, height);
+        // A finish-free profile keeps this a pure crisp-line scaling test
+        // (halation / rare traits are covered elsewhere).
+        let profile = clean_profile(width, height);
         render::render_final_frame_spectral(
             SpectralScene::new(&positions, &colors, &alphas),
             &levels,

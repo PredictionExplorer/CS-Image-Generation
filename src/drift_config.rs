@@ -10,7 +10,9 @@ use tracing::info;
 
 const DRIFT_SCALE_MIN: f64 = 0.8;
 const DRIFT_SCALE_RANGE: f64 = 1.2;
-const DRIFT_ARC_FRACTION_RANGE: f64 = 0.8;
+/// Sweeps may now exceed one full orbit (up to 1.35 loops) so long, smeary
+/// camera arcs become part of the population alongside static-ish framings.
+const DRIFT_ARC_FRACTION_RANGE: f64 = 1.35;
 const DRIFT_ECCENTRICITY_MIN: f64 = 0.4;
 const DRIFT_ECCENTRICITY_RANGE: f64 = 0.1;
 
@@ -37,7 +39,7 @@ impl ResolvedDriftConfig {
     /// Generate random drift configuration with curated ranges.
     pub fn generate_random(rng: &mut Sha3RandomByteStream) -> Self {
         let scale = DRIFT_SCALE_MIN + rng.next_f64() * DRIFT_SCALE_RANGE; // 0.8 to 2.0
-        let arc_fraction = rng.next_f64() * DRIFT_ARC_FRACTION_RANGE; // 0.0 to 0.8
+        let arc_fraction = rng.next_f64() * DRIFT_ARC_FRACTION_RANGE; // 0.0 to 1.35
         let orbit_eccentricity = DRIFT_ECCENTRICITY_MIN + rng.next_f64() * DRIFT_ECCENTRICITY_RANGE; // 0.4 to 0.5
 
         info!("Generated random drift parameters:");
@@ -111,7 +113,7 @@ mod tests {
             "drift_scale {} outside [0.8, 2.0]",
             config.scale
         );
-        assert!(config.arc_fraction >= 0.0 && config.arc_fraction <= 0.8);
+        assert!(config.arc_fraction >= 0.0 && config.arc_fraction <= 1.35);
         assert!(config.orbit_eccentricity >= 0.4 && config.orbit_eccentricity <= 0.5);
         assert!(config.was_randomized);
     }

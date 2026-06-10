@@ -21,6 +21,7 @@ use tracing::{debug, info};
 pub static ACES_TWEAK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Module declarations
+pub mod aesthetic_score;
 pub mod batch_drawing;
 pub mod color;
 pub mod constants;
@@ -40,9 +41,8 @@ pub mod visual_profile;
 
 // Import from our submodules
 use self::batch_drawing::{
-    BatchDrawParams, draw_body_ribbon_segment_rows, draw_spoke_segments_rows,
-    draw_triangle_batch_spectral_rows, interpolate_triangle_vertices,
-    max_triangle_vertex_motion_px, prepare_triangle_vertices,
+    BatchDrawParams, draw_spoke_segments_rows, draw_triangle_batch_spectral_rows,
+    interpolate_triangle_vertices, max_triangle_vertex_motion_px, prepare_triangle_vertices,
 };
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
@@ -800,17 +800,36 @@ impl AccumulationParams<'_> {
     }
 
     /// Per-edge alpha weights for triangle-web style modes.
+    ///
+    /// Combines the mode's base layer weight (duet edge mask, hybrid/lace
+    /// underlay scales) with the seed's `edge_energy` asymmetry, which gently
+    /// emphasises one edge of the triangle over its opposite.
     #[inline]
     fn edge_weights(&self) -> [f64; 3] {
-        match self.traits.structure {
+        let base = match self.traits.structure {
             StructureMode::Duet { dropped_edge } => {
                 let mut weights = [1.0; 3];
                 weights[usize::from(dropped_edge.min(2))] = 0.0;
                 weights
             }
             StructureMode::WebRibbonHybrid => [constants::HYBRID_WEB_ALPHA_SCALE; 3],
+            StructureMode::WebSpokesLace => [constants::LACE_WEB_ALPHA_SCALE; 3],
             _ => [1.0; 3],
+        };
+        let energy = self.traits.edge_energy;
+        let asymmetry = [energy, 1.0, 2.0 - energy];
+        [base[0] * asymmetry[0], base[1] * asymmetry[1], base[2] * asymmetry[2]]
+    }
+
+    /// Time lag, in simulation steps, used by chord and echo strokes.
+    #[inline]
+    fn chord_lag_steps(&self) -> usize {
+        let total = self.scene.step_count();
+        if total < 2 {
+            return 1;
         }
+        // usize→f64 precision loss is irrelevant for lag computation.
+        ((total as f64 * self.traits.chord_lag_fraction).round() as usize).clamp(1, total - 1)
     }
 }
 
@@ -846,6 +865,7 @@ fn accumulate_web_step(
                 edge_weights,
                 line_weight: params.traits.line_weight,
                 hdr_scale: step_hdr_scale,
+                mirror: params.traits.mirror,
             },
         );
         return;
@@ -878,12 +898,30 @@ fn accumulate_web_step(
                 edge_weights,
                 line_weight: params.traits.line_weight,
                 hdr_scale: substep_hdr_scale,
+                mirror: params.traits.mirror,
             },
         );
     }
 }
 
+/// Velocity dynamics for each body's own trail at `step`.
+#[inline]
+fn body_dynamics_at(
+    params: &AccumulationParams<'_>,
+    step: usize,
+) -> [velocity_hdr::SegmentDynamics; 3] {
+    [
+        params.velocity_calc.body_dynamics(step, 0),
+        params.velocity_calc.body_dynamics(step, 1),
+        params.velocity_calc.body_dynamics(step, 2),
+    ]
+}
+
 /// Draw the three per-body trail strokes (`step -> step + 1`) for ribbon modes.
+///
+/// `energy_scale` lets callers layer the ribbon as a reduced-alpha underlay
+/// (chord modes) without a separate drawing path.
+#[allow(clippy::too_many_arguments)]
 fn accumulate_ribbon_step(
     accum_spd: &mut [[f64; NUM_BINS]],
     params: &AccumulationParams<'_>,
@@ -893,29 +931,147 @@ fn accumulate_ribbon_step(
     step_hdr_scale: f64,
     vertices: [batch_drawing::TriangleVertex; 3],
     next_vertices: Option<[batch_drawing::TriangleVertex; 3]>,
+    energy_scale: f64,
 ) {
     let Some(next_vertices) = next_vertices else {
         return;
     };
 
-    let body_dynamics = [
-        params.velocity_calc.body_dynamics(step, 0),
-        params.velocity_calc.body_dynamics(step, 1),
-        params.velocity_calc.body_dynamics(step, 2),
-    ];
     let draw_params = BatchDrawParams {
         width: params.ctx.width,
         height: params.ctx.height,
         row_start,
         row_end,
         vertices,
-        edge_dynamics: body_dynamics,
+        edge_dynamics: body_dynamics_at(params, step),
         edge_weights: [1.0; 3],
         line_weight: params.traits.line_weight,
         hdr_scale: step_hdr_scale,
+        mirror: params.traits.mirror,
     };
     for body in 0..3 {
-        draw_body_ribbon_segment_rows(accum_spd, &draw_params, body, next_vertices);
+        batch_drawing::draw_body_trail_segment_rows(
+            accum_spd,
+            &draw_params,
+            body,
+            next_vertices,
+            energy_scale,
+        );
+    }
+}
+
+/// Draw three time-lagged chord strokes (`step -> step + lag`), one per body.
+///
+/// Chords connect each body to its own future position, ruling luminous sheets
+/// between successive loop windings (string-art bands). Like ribbon trails,
+/// chords intentionally reference geometry beyond the current video chunk so
+/// the accumulated still is seamless across checkpoints.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_chord_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    lag_steps: usize,
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 {
+        return;
+    }
+    let target_step = step + lag_steps;
+    if target_step >= params.scene.step_count() {
+        return;
+    }
+
+    let triangle_alphas = params.scene.triangle_alphas();
+    let lagged_vertices = prepare_triangle_vertices(
+        params.scene.positions,
+        params.scene.colors,
+        &triangle_alphas,
+        target_step,
+        params.ctx,
+    );
+    let draw_params = BatchDrawParams {
+        width: params.ctx.width,
+        height: params.ctx.height,
+        row_start,
+        row_end,
+        vertices,
+        edge_dynamics: body_dynamics_at(params, step),
+        edge_weights: [1.0; 3],
+        line_weight: params.traits.line_weight,
+        hdr_scale: step_hdr_scale,
+        mirror: params.traits.mirror,
+    };
+    for body in 0..3 {
+        batch_drawing::draw_body_trail_segment_rows(
+            accum_spd,
+            &draw_params,
+            body,
+            lagged_vertices,
+            energy_scale,
+        );
+    }
+}
+
+/// Draw the body-to-centroid spokes for one step, with motion interpolation.
+///
+/// Spokes are instantaneous geometry like the web edges, so they use the same
+/// substep interpolation; without it, fast passages leave visible striping
+/// between consecutive spoke fans.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_spokes_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    next_vertices: Option<[batch_drawing::TriangleVertex; 3]>,
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 {
+        return;
+    }
+    let body_dynamics = body_dynamics_at(params, step);
+    let make_params = |sample_vertices, hdr_scale| BatchDrawParams {
+        width: params.ctx.width,
+        height: params.ctx.height,
+        row_start,
+        row_end,
+        vertices: sample_vertices,
+        edge_dynamics: body_dynamics,
+        edge_weights: [1.0; 3],
+        line_weight: params.traits.line_weight,
+        hdr_scale,
+        mirror: params.traits.mirror,
+    };
+
+    let Some(next_vertices) = next_vertices else {
+        draw_spoke_segments_rows(accum_spd, &make_params(vertices, step_hdr_scale * energy_scale));
+        return;
+    };
+
+    let max_motion_px = max_triangle_vertex_motion_px(vertices, next_vertices);
+    let substeps = constants::crisp_line_interpolation_substeps(
+        params.ctx.width,
+        params.ctx.height,
+        max_motion_px,
+    );
+    let substep_hdr_scale = step_hdr_scale * energy_scale / substeps as f64;
+
+    for substep in 0..substeps {
+        let sample_vertices = if substep == 0 {
+            vertices
+        } else {
+            let t = substep as f32 / substeps as f32;
+            interpolate_triangle_vertices(vertices, next_vertices, t)
+        };
+        draw_spoke_segments_rows(accum_spd, &make_params(sample_vertices, substep_hdr_scale));
     }
 }
 
@@ -983,6 +1139,20 @@ fn accumulate_spectral_steps_into_rows(
                     step_hdr_scale,
                     vertices,
                     next_vertices,
+                    1.0,
+                );
+                // Optional time-lagged echo: rules a soft band between loop
+                // windings so sparse trails read as luminous ribbons.
+                accumulate_chord_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    params.chord_lag_steps(),
+                    params.traits.ribbon_echo_alpha,
                 );
             }
             StructureMode::WebRibbonHybrid => {
@@ -1006,27 +1176,95 @@ fn accumulate_spectral_steps_into_rows(
                     step_hdr_scale,
                     vertices,
                     next_vertices,
+                    1.0,
                 );
             }
             StructureMode::Spokes => {
-                let body_dynamics = [
-                    params.velocity_calc.body_dynamics(step, 0),
-                    params.velocity_calc.body_dynamics(step, 1),
-                    params.velocity_calc.body_dynamics(step, 2),
-                ];
-                draw_spoke_segments_rows(
+                accumulate_spokes_step(
                     accum_spd,
-                    &BatchDrawParams {
-                        width: params.ctx.width,
-                        height: params.ctx.height,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_in_chunk,
+                    1.0,
+                );
+            }
+            StructureMode::TimeChords => {
+                accumulate_ribbon_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_vertices,
+                    constants::CHORD_RIBBON_UNDERLAY_ALPHA,
+                );
+                accumulate_chord_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    params.chord_lag_steps(),
+                    1.0,
+                );
+            }
+            StructureMode::CometRibbons => {
+                accumulate_ribbon_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_vertices,
+                    1.0,
+                );
+                let lag = params.chord_lag_steps();
+                for (echo_idx, decay) in constants::COMET_ECHO_DECAY.iter().enumerate() {
+                    accumulate_chord_step(
+                        accum_spd,
+                        params,
                         row_start,
                         row_end,
+                        step,
+                        step_hdr_scale,
                         vertices,
-                        edge_dynamics: body_dynamics,
-                        edge_weights: [1.0; 3],
-                        line_weight: params.traits.line_weight,
-                        hdr_scale: step_hdr_scale,
-                    },
+                        lag * (echo_idx + 1),
+                        params.traits.ribbon_echo_alpha * decay,
+                    );
+                }
+            }
+            StructureMode::WebSpokesLace => {
+                accumulate_web_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_in_chunk,
+                    edge_weights,
+                );
+                accumulate_spokes_step(
+                    accum_spd,
+                    params,
+                    row_start,
+                    row_end,
+                    step,
+                    step_hdr_scale,
+                    vertices,
+                    next_in_chunk,
+                    constants::LACE_SPOKE_ALPHA_SCALE,
                 );
             }
         }

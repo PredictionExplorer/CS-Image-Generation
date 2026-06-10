@@ -247,13 +247,24 @@ sudo systemctl disable --now cosmicsig-sync.timer
 
 ## Batch Testing
 
-`run-test-images.py` continuously generates images with random seeds, useful for visual QA and stress testing. It keeps 3 concurrent jobs running and logs progress to `run.log`.
+`run-test-images.py` continuously generates images with random seeds, useful for visual QA and stress testing. It keeps 3 concurrent jobs running and logs progress to `run.log`. Each finished render is scored with image-space aesthetic metrics (ink coverage, colorfulness, hue entropy, luminance spread — computed from a small ffmpeg-decoded proxy frame); low scores are flagged in the log.
 
 ```bash
 python3 run-test-images.py
 ```
 
 Press Ctrl+C to stop gracefully after the current jobs finish. Output lands in `output/<seed>/`.
+
+## Contact Sheets and the Golden Gallery
+
+`contact_sheet.py` renders a batch of seeds at preview quality, scores each still with the same aesthetic metrics, and tiles everything into a single PNG for fast visual curation:
+
+```bash
+python3 contact_sheet.py --count 24        # random seeds -> contact_sheet.png
+python3 contact_sheet.py --golden          # fixed seed set -> golden_gallery.png
+```
+
+The golden gallery re-renders the fixed seed list in [`ci/golden_seeds.txt`](ci/golden_seeds.txt); regenerate it after any tuning change and compare against the previous gallery side by side to catch look regressions. With `just` installed: `just contact-sheet` / `just golden-gallery`.
 
 ## Reference Image Verification
 
