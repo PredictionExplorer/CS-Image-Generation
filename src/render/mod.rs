@@ -12,6 +12,7 @@ use crate::spectrum::{NUM_BINS, linear_rec2020_to_display_p3};
 use crate::utils::f64_to_usize_saturating;
 use nalgebra::Vector3;
 use rayon::prelude::*;
+use smallvec::SmallVec;
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,8 +42,9 @@ pub mod visual_profile;
 
 // Import from our submodules
 use self::batch_drawing::{
-    BatchDrawParams, draw_spoke_segments_rows, draw_triangle_batch_spectral_rows,
-    interpolate_triangle_vertices, max_triangle_vertex_motion_px, prepare_triangle_vertices,
+    BatchDrawParams, draw_segment_rows_symmetric, draw_spoke_segments_rows,
+    draw_triangle_batch_spectral_rows, interpolate_triangle_vertices, interpolate_vertex,
+    max_triangle_vertex_motion_px, prepare_triangle_vertices,
 };
 use self::context::{PixelBuffer, RenderContext};
 use self::effects::{EffectConfig, FinishEffectPipeline, FrameParams, convert_spd_buffer_to_rgba};
@@ -54,10 +56,12 @@ pub use color::{OklabColor, generate_body_color_sequences};
 pub use drawing::{
     LineVertex, SpectralLineSegment, draw_line_segment_aa_spectral, parallel_blur_2d_rgba,
 };
-pub use effects::{DogBloomConfig, apply_dog_bloom};
+pub use effects::{DogBloomConfig, apply_diffraction_spikes, apply_dog_bloom};
 pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{VideoEncodingOptions, create_video_from_frames_singlepass};
-pub use visual_profile::{SceneTraits, StructureMode};
+pub use visual_profile::{
+    LayerStack, ProjectionMode, SceneTraits, StackLayer, StructureMode, SymmetryOp,
+};
 
 // Re-export types from dependencies used in public API
 pub use image::{DynamicImage, ImageBuffer, Rgb};
@@ -723,14 +727,29 @@ struct AccumulationParams<'a> {
     traits: SceneTraits,
 }
 
-fn sheet_taper_for_structure(structure: StructureMode, t: f64) -> f64 {
+/// Apply the rare diffraction-spike finish to a trajectory buffer in place.
+///
+/// Runs after the trajectory effect chain in every render path (histogram,
+/// video frames, final stills) so exposure analysis sees the spiked image.
+#[inline]
+fn apply_spike_finish(buffer: &mut PixelBuffer, width: usize, height: usize, traits: &SceneTraits) {
+    if traits.spikes.enabled() {
+        effects::apply_diffraction_spikes(buffer, width, height, &traits.spikes);
+    }
+}
+
+/// Timeline taper for vocabularies that rule sheets between instantaneous
+/// geometry (webs, spokes, chords, veils, weaves): without it the first and
+/// last fans burn in as hard sheet edges.
+fn sheet_taper_for_vocabulary(vocabulary: StructureMode, t: f64) -> f64 {
     let is_sheet_prone = matches!(
-        structure,
+        vocabulary,
         StructureMode::TriangleWeb
             | StructureMode::Duet { .. }
             | StructureMode::Spokes
             | StructureMode::TimeChords
-            | StructureMode::WebSpokesLace
+            | StructureMode::NebulaVeil
+            | StructureMode::HarmonicWeave
     );
     if !is_sheet_prone {
         return 1.0;
@@ -745,25 +764,28 @@ impl AccumulationParams<'_> {
     fn age_factor(&self, step: usize) -> f64 {
         let total = self.scene.step_count().max(1);
         let t = step as f64 / total as f64;
-        (1.0 + self.traits.age_ramp * (t - 0.5) * 2.0)
-            * sheet_taper_for_structure(self.traits.structure, t)
+        1.0 + self.traits.age_ramp * (t - 0.5) * 2.0
     }
 
-    /// Per-edge alpha weights for triangle-web style modes.
-    ///
-    /// Combines the mode's base layer weight (duet edge mask, hybrid/lace
-    /// underlay scales) with the seed's `edge_energy` asymmetry, which gently
-    /// emphasises one edge of the triangle over its opposite.
+    /// Normalized timeline position of `step` in [0, 1].
     #[inline]
-    fn edge_weights(&self) -> [f64; 3] {
-        let base = match self.traits.structure {
+    fn timeline_t(&self, step: usize) -> f64 {
+        let total = self.scene.step_count().max(1);
+        step as f64 / total as f64
+    }
+
+    /// Per-edge alpha weights for a web-style layer.
+    ///
+    /// Combines the duet edge mask with the seed's `edge_energy` asymmetry,
+    /// which gently emphasises one edge of the triangle over its opposite.
+    #[inline]
+    fn layer_edge_weights(&self, vocabulary: StructureMode) -> [f64; 3] {
+        let base = match vocabulary {
             StructureMode::Duet { dropped_edge } => {
                 let mut weights = [1.0; 3];
                 weights[usize::from(dropped_edge.min(2))] = 0.0;
                 weights
             }
-            StructureMode::WebRibbonHybrid => [constants::HYBRID_WEB_ALPHA_SCALE; 3],
-            StructureMode::WebSpokesLace => [constants::LACE_WEB_ALPHA_SCALE; 3],
             _ => [1.0; 3],
         };
         let energy = self.traits.edge_energy;
@@ -780,6 +802,15 @@ impl AccumulationParams<'_> {
         }
         // usize→f64 precision loss is irrelevant for lag computation.
         ((total as f64 * self.traits.chord_lag_fraction).round() as usize).clamp(1, total - 1)
+    }
+
+    /// Time pitch, in simulation steps, between stipple dots.
+    #[inline]
+    fn stipple_pitch_steps(&self) -> usize {
+        let total = self.scene.step_count();
+        // usize→f64 precision loss is irrelevant for pitch computation.
+        ((total as f64 * self.traits.stipple_pitch_fraction).round() as usize)
+            .max(constants::STIPPLE_MIN_PITCH_STEPS)
     }
 }
 
@@ -815,7 +846,7 @@ fn accumulate_web_step(
                 edge_weights,
                 line_weight: params.traits.line_weight,
                 hdr_scale: step_hdr_scale,
-                mirror: params.traits.mirror,
+                symmetry: params.traits.symmetry,
             },
         );
         return;
@@ -848,7 +879,7 @@ fn accumulate_web_step(
                 edge_weights,
                 line_weight: params.traits.line_weight,
                 hdr_scale: substep_hdr_scale,
-                mirror: params.traits.mirror,
+                symmetry: params.traits.symmetry,
             },
         );
     }
@@ -897,7 +928,7 @@ fn accumulate_ribbon_step(
         edge_weights: [1.0; 3],
         line_weight: params.traits.line_weight,
         hdr_scale: step_hdr_scale,
-        mirror: params.traits.mirror,
+        symmetry: params.traits.symmetry,
     };
     for body in 0..3 {
         batch_drawing::draw_body_trail_segment_rows(
@@ -954,7 +985,7 @@ fn accumulate_chord_step(
         edge_weights: [1.0; 3],
         line_weight: params.traits.line_weight,
         hdr_scale: step_hdr_scale,
-        mirror: params.traits.mirror,
+        symmetry: params.traits.symmetry,
     };
     for body in 0..3 {
         batch_drawing::draw_body_trail_segment_rows(
@@ -998,7 +1029,7 @@ fn accumulate_spokes_step(
         edge_weights: [1.0; 3],
         line_weight: params.traits.line_weight,
         hdr_scale,
-        mirror: params.traits.mirror,
+        symmetry: params.traits.symmetry,
     };
 
     let Some(next_vertices) = next_vertices else {
@@ -1025,6 +1056,386 @@ fn accumulate_spokes_step(
     }
 }
 
+/// Sweep the triangle interior with interpolated fill lines (`NebulaVeil`).
+///
+/// Each fill line connects matching parametric points on the two edges that
+/// share the pivot vertex, so colors blend smoothly across the gauze. The
+/// pivot rotates with the absolute step index to avoid directional bias, and
+/// the per-line energy is normalized by the fill count and stride so a veil
+/// layer deposits ink comparable to a single web edge per step.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_veil_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 || !step.is_multiple_of(constants::VEIL_STEP_STRIDE) {
+        return;
+    }
+    let fill_lines = usize::from(params.traits.veil_fill_lines.max(2));
+    let pivot = step % 3;
+    let a = vertices[pivot];
+    let b = vertices[(pivot + 1) % 3];
+    let c = vertices[(pivot + 2) % 3];
+    let dynamics = params.velocity_calc.body_dynamics(step, pivot);
+
+    // usize→f64: stride and fill counts are tiny.
+    let line_energy = step_hdr_scale * energy_scale * constants::VEIL_STEP_STRIDE as f64
+        / fill_lines as f64
+        * dynamics.hdr_multiplier;
+
+    for k in 1..=fill_lines {
+        // usize→f32: parametric position along the edges.
+        let t = k as f32 / (fill_lines + 1) as f32;
+        let start = interpolate_vertex(a, b, t);
+        let end = interpolate_vertex(a, c, t);
+        draw_segment_rows_symmetric(
+            accum_spd,
+            params.ctx.width,
+            params.ctx.height,
+            row_start,
+            row_end,
+            SpectralLineSegment {
+                start,
+                end,
+                hdr_scale: line_energy,
+                thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+            },
+            params.traits.symmetry,
+        );
+    }
+}
+
+/// Evaluate a quadratic Bezier between two triangle vertices in pixel space.
+#[inline]
+fn weave_bezier_point(
+    from: batch_drawing::TriangleVertex,
+    control: (f32, f32, f32),
+    to: batch_drawing::TriangleVertex,
+    t: f32,
+) -> batch_drawing::TriangleVertex {
+    let u = 1.0 - t;
+    let mut point = interpolate_vertex(from, to, t);
+    point.x = u * u * from.x + 2.0 * u * t * control.0 + t * t * to.x;
+    point.y = u * u * from.y + 2.0 * u * t * control.1 + t * t * to.y;
+    point.z = u * u * from.z + 2.0 * u * t * control.2 + t * t * to.z;
+    point
+}
+
+/// Draw curved Bezier chords between bodies (`HarmonicWeave`).
+///
+/// Each inter-body chord bows toward or away from the third body with a
+/// seeded bow factor that breathes slowly over the timeline, tessellated into
+/// short straight segments fed through the standard spectral splatter.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_weave_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    edge_weights: [f64; 3],
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 || !step.is_multiple_of(constants::WEAVE_STEP_STRIDE) {
+        return;
+    }
+    let centroid = (
+        (vertices[0].x + vertices[1].x + vertices[2].x) / 3.0,
+        (vertices[0].y + vertices[1].y + vertices[2].y) / 3.0,
+        (vertices[0].z + vertices[1].z + vertices[2].z) / 3.0,
+    );
+    let t_norm = params.timeline_t(step);
+    let edge_dynamics = [
+        params.velocity_calc.segment_dynamics(step, 0, 1),
+        params.velocity_calc.segment_dynamics(step, 1, 2),
+        params.velocity_calc.segment_dynamics(step, 2, 0),
+    ];
+
+    // usize→f64: stride and tessellation counts are tiny.
+    let segment_energy = step_hdr_scale * energy_scale * constants::WEAVE_STEP_STRIDE as f64
+        / constants::WEAVE_SEGMENTS as f64;
+
+    for (edge_idx, (i, j, third)) in
+        [(0usize, 1usize, 2usize), (1, 2, 0), (2, 0, 1)].into_iter().enumerate()
+    {
+        let weight = edge_weights[edge_idx];
+        if weight <= 0.0 {
+            continue;
+        }
+        // The bow breathes over the timeline with a per-edge phase so the
+        // three curve families interleave instead of moving in lockstep.
+        let wobble = 1.0 - constants::WEAVE_BOW_WOBBLE
+            + constants::WEAVE_BOW_WOBBLE
+                * (std::f64::consts::TAU * (t_norm * 2.0 + edge_idx as f64 / 3.0)).sin();
+        // f64→f32 precision loss is irrelevant at raster scale.
+        let bow = (params.traits.weave_bow * wobble) as f32;
+        let control = (
+            centroid.0 + (centroid.0 - vertices[third].x) * bow,
+            centroid.1 + (centroid.1 - vertices[third].y) * bow,
+            centroid.2 + (centroid.2 - vertices[third].z) * bow,
+        );
+
+        let dynamics = edge_dynamics[edge_idx];
+        let mut prev = vertices[i];
+        for s in 1..=constants::WEAVE_SEGMENTS {
+            // usize→f32: tessellation parameter.
+            let t = s as f32 / constants::WEAVE_SEGMENTS as f32;
+            let point = weave_bezier_point(vertices[i], control, vertices[j], t);
+            draw_segment_rows_symmetric(
+                accum_spd,
+                params.ctx.width,
+                params.ctx.height,
+                row_start,
+                row_end,
+                SpectralLineSegment {
+                    start: prev,
+                    end: point,
+                    hdr_scale: segment_energy * dynamics.hdr_multiplier * weight,
+                    thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+                },
+                params.traits.symmetry,
+            );
+            prev = point;
+        }
+    }
+}
+
+/// Splat pointillist dots at a fixed time pitch (`StippleConstellation`).
+///
+/// Time-uniform sampling makes orbital speed visible: slow passages cluster
+/// into dense bead curtains while fast whips scatter sparse sparks. Every Nth
+/// dot is a brighter, larger pearl. Dot energy compensates for the skipped
+/// steps so a stipple layer deposits ink comparable to a ribbon layer.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_stipple_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 {
+        return;
+    }
+    let pitch = params.stipple_pitch_steps();
+    if !step.is_multiple_of(pitch) {
+        return;
+    }
+    let dot_index = step / pitch;
+    let pearl = dot_index.is_multiple_of(usize::from(params.traits.stipple_pearl_every.max(2)));
+    let (thickness, energy_mult) = if pearl {
+        (constants::STIPPLE_PEARL_THICKNESS, constants::STIPPLE_PEARL_ENERGY)
+    } else {
+        (constants::STIPPLE_DOT_THICKNESS, 1.0)
+    };
+
+    // usize→f64: pitch is bounded by the step count.
+    let dot_energy = step_hdr_scale
+        * energy_scale
+        * pitch as f64
+        * constants::STIPPLE_ENERGY_FACTOR
+        * energy_mult;
+
+    for (body, vertex) in vertices.into_iter().enumerate() {
+        let dynamics = params.velocity_calc.body_dynamics(step, body);
+        draw_segment_rows_symmetric(
+            accum_spd,
+            params.ctx.width,
+            params.ctx.height,
+            row_start,
+            row_end,
+            SpectralLineSegment {
+                start: vertex,
+                end: vertex,
+                hdr_scale: dot_energy * dynamics.hdr_multiplier,
+                thickness_factor: thickness * params.traits.line_weight,
+            },
+            params.traits.symmetry,
+        );
+    }
+}
+
+/// Draw velocity tangent segments centered on each body (`TangentCaustics`).
+///
+/// The orbit is never traced directly; it emerges as the envelope of its own
+/// tangents. Per-segment energy is normalized by the realized length so long
+/// fast tangents do not flood the frame.
+#[allow(clippy::too_many_arguments)]
+fn accumulate_tangent_step(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+    step: usize,
+    step_hdr_scale: f64,
+    vertices: [batch_drawing::TriangleVertex; 3],
+    next_vertices: Option<[batch_drawing::TriangleVertex; 3]>,
+    energy_scale: f64,
+) {
+    if energy_scale <= 0.0 {
+        return;
+    }
+    let Some(next_vertices) = next_vertices else {
+        return;
+    };
+    // u32→f32 precision loss is irrelevant at raster scale.
+    let min_dim = params.ctx.width.min(params.ctx.height) as f32;
+
+    for body in 0..3 {
+        let vertex = vertices[body];
+        let next = next_vertices[body];
+        let dx = next.x - vertex.x;
+        let dy = next.y - vertex.y;
+        let speed_px = (dx * dx + dy * dy).sqrt();
+        if speed_px < 1e-6 || !speed_px.is_finite() {
+            continue;
+        }
+        // f64→f32 precision loss is irrelevant at raster scale.
+        let half_length = (speed_px * constants::TANGENT_VELOCITY_GAIN as f32).clamp(
+            min_dim * constants::TANGENT_MIN_LEN_FRAC as f32,
+            min_dim * constants::TANGENT_MAX_LEN_FRAC as f32,
+        ) * params.traits.tangent_length as f32
+            * 0.5;
+        let ux = dx / speed_px;
+        let uy = dy / speed_px;
+
+        let mut start = vertex;
+        start.x = vertex.x - ux * half_length;
+        start.y = vertex.y - uy * half_length;
+        let mut end = vertex;
+        end.x = vertex.x + ux * half_length;
+        end.y = vertex.y + uy * half_length;
+
+        // Length normalization keeps total per-step ink stable as tangents
+        // stretch with speed.
+        let reference_len = f64::from(min_dim) * constants::TANGENT_REFERENCE_LEN_FRAC;
+        let length_norm = (reference_len / f64::from(half_length * 2.0)).clamp(0.2, 3.0);
+        let dynamics = params.velocity_calc.body_dynamics(step, body);
+        draw_segment_rows_symmetric(
+            accum_spd,
+            params.ctx.width,
+            params.ctx.height,
+            row_start,
+            row_end,
+            SpectralLineSegment {
+                start,
+                end,
+                hdr_scale: step_hdr_scale * energy_scale * length_norm * dynamics.hdr_multiplier,
+                thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+            },
+            params.traits.symmetry,
+        );
+    }
+}
+
+/// `SplitMix64`: tiny deterministic stream for stardust placement.
+#[inline]
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+#[inline]
+fn splitmix_unit(state: &mut u64) -> f64 {
+    // u64→f64 may lose precision for large values; acceptable for placement jitter.
+    splitmix64(state) as f64 / u64::MAX as f64
+}
+
+/// Splat the faint seeded stardust field once per accumulation pass.
+///
+/// Dot placement is a pure function of the trait seed, and the row-banded
+/// line splatter clips each dot to the owned band, so parallel scanline
+/// accumulation stays bit-identical to the serial reference.
+fn splat_stardust_rows(
+    accum_spd: &mut [[f64; NUM_BINS]],
+    params: &AccumulationParams<'_>,
+    row_start: usize,
+    row_end: usize,
+) {
+    let dust = params.traits.stardust;
+    if !dust.enabled() {
+        return;
+    }
+
+    let body_alphas = params.scene.body_alphas;
+    // usize→f64: body counts and step counts are well within f64 precision.
+    let mean_alpha = body_alphas.iter().sum::<f64>() / body_alphas.len().max(1) as f64;
+    let base_energy = dust.brightness
+        * mean_alpha
+        * params.scene.step_count() as f64
+        * params.hdr_scale
+        * constants::STARDUST_ENERGY_FACTOR;
+    if base_energy <= 0.0 {
+        return;
+    }
+
+    // u32→f32/f64 precision loss is irrelevant at raster scale.
+    let width = f64::from(params.ctx.width);
+    let height = f64::from(params.ctx.height);
+    let mut state = dust.seed | 1;
+
+    for _ in 0..dust.count {
+        let x = splitmix_unit(&mut state) * width;
+        let y = splitmix_unit(&mut state) * height;
+        let size = 0.45 + splitmix_unit(&mut state) * 1.15;
+        let glow = splitmix_unit(&mut state);
+        let hue = splitmix_unit(&mut state) * 360.0;
+        let twinkle = if splitmix_unit(&mut state) < 0.06 { 3.0 } else { 1.0 };
+
+        let lightness = (dust.lightness + (glow - 0.5) * 0.12).clamp(0.30, 0.92);
+        let color = crate::oklab::oklch_to_oklab(lightness, dust.chroma, hue);
+        let vertex = LineVertex {
+            // f64→f32 precision loss is irrelevant at raster scale.
+            x: x as f32,
+            y: y as f32,
+            z: 0.0,
+            color,
+            alpha: base_energy * (0.4 + 0.6 * glow) * twinkle,
+        };
+        draw_line_segment_aa_spectral_rows_local(
+            accum_spd,
+            params.ctx.width,
+            params.ctx.height,
+            row_start,
+            row_end,
+            SpectralLineSegment {
+                start: vertex,
+                end: vertex,
+                hdr_scale: 1.0,
+                thickness_factor: size,
+            },
+        );
+    }
+}
+
+/// Thin local alias so stardust uses the row-banded splatter directly
+/// (stardust is a uniform field: symmetry replication would be invisible).
+#[inline]
+fn draw_line_segment_aa_spectral_rows_local(
+    accum: &mut [[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    row_start: usize,
+    row_end: usize,
+    segment: SpectralLineSegment,
+) {
+    drawing::draw_line_segment_aa_spectral_rows(accum, width, height, row_start, row_end, segment);
+}
+
 fn accumulate_spectral_steps_into_rows(
     accum_spd: &mut [[f64; NUM_BINS]],
     params: &AccumulationParams<'_>,
@@ -1035,8 +1446,17 @@ fn accumulate_spectral_steps_into_rows(
         return;
     }
 
+    // The stardust field belongs to the scene, not the timeline: splat it
+    // exactly once per accumulation pass, with the first step chunk.
+    if params.step_start == 0 {
+        splat_stardust_rows(accum_spd, params, row_start, row_end);
+    }
+
     let triangle_alphas = params.scene.triangle_alphas();
-    let edge_weights = params.edge_weights();
+    let layers = params.traits.stack.layers();
+    let layer_edge_weights: SmallVec<[[f64; 3]; 3]> =
+        layers.iter().map(|layer| params.layer_edge_weights(layer.vocabulary)).collect();
+
     for step in params.step_start..params.step_end {
         let vertices = prepare_triangle_vertices(
             params.scene.positions,
@@ -1063,123 +1483,86 @@ fn accumulate_spectral_steps_into_rows(
         };
         let next_in_chunk = if step + 1 < params.step_end { next_vertices } else { None };
 
-        let step_hdr_scale = params.hdr_scale * params.age_factor(step);
+        let age_hdr_scale = params.hdr_scale * params.age_factor(step);
+        let t_norm = params.timeline_t(step);
 
-        match params.traits.structure {
-            StructureMode::TriangleWeb | StructureMode::Duet { .. } => {
-                accumulate_web_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_in_chunk,
-                    edge_weights,
-                );
-            }
-            StructureMode::OrbitRibbons => {
-                accumulate_ribbon_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_vertices,
-                    1.0,
-                );
-                // Optional time-lagged echo: rules a soft band between loop
-                // windings so sparse trails read as luminous ribbons.
-                accumulate_chord_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    params.chord_lag_steps(),
-                    params.traits.ribbon_echo_alpha,
-                );
-            }
-            StructureMode::WebRibbonHybrid => {
-                accumulate_web_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_in_chunk,
-                    edge_weights,
-                );
-                accumulate_ribbon_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_vertices,
-                    1.0,
-                );
-            }
-            StructureMode::Spokes => {
-                accumulate_spokes_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_in_chunk,
-                    1.0,
-                );
-            }
-            StructureMode::TimeChords => {
-                accumulate_ribbon_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_vertices,
-                    constants::CHORD_RIBBON_UNDERLAY_ALPHA,
-                );
-                accumulate_chord_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    params.chord_lag_steps(),
-                    1.0,
-                );
-            }
-            StructureMode::CometRibbons => {
-                accumulate_ribbon_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_vertices,
-                    1.0,
-                );
-                let lag = params.chord_lag_steps();
-                for (echo_idx, decay) in constants::COMET_ECHO_DECAY.iter().enumerate() {
+        for (layer, edge_weights) in layers.iter().zip(layer_edge_weights.iter()) {
+            let step_hdr_scale =
+                age_hdr_scale * layer.alpha * sheet_taper_for_vocabulary(layer.vocabulary, t_norm);
+
+            match layer.vocabulary {
+                StructureMode::TriangleWeb | StructureMode::Duet { .. } => {
+                    accumulate_web_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        next_in_chunk,
+                        *edge_weights,
+                    );
+                }
+                StructureMode::OrbitRibbons => {
+                    accumulate_ribbon_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        next_vertices,
+                        1.0,
+                    );
+                    // Optional decaying time-lagged echoes: rule soft bands
+                    // between loop windings (comet tails at higher counts).
+                    if params.traits.ribbon_echo_alpha > 0.0 {
+                        let lag = params.chord_lag_steps();
+                        let echo_layers = usize::from(params.traits.echo_layers.clamp(1, 3));
+                        for (echo_idx, decay) in
+                            constants::COMET_ECHO_DECAY.iter().take(echo_layers).enumerate()
+                        {
+                            accumulate_chord_step(
+                                accum_spd,
+                                params,
+                                row_start,
+                                row_end,
+                                step,
+                                step_hdr_scale,
+                                vertices,
+                                lag * (echo_idx + 1),
+                                params.traits.ribbon_echo_alpha * decay,
+                            );
+                        }
+                    }
+                }
+                StructureMode::Spokes => {
+                    accumulate_spokes_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        next_in_chunk,
+                        1.0,
+                    );
+                }
+                StructureMode::TimeChords => {
+                    accumulate_ribbon_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        next_vertices,
+                        constants::CHORD_RIBBON_UNDERLAY_ALPHA,
+                    );
                     accumulate_chord_step(
                         accum_spd,
                         params,
@@ -1188,34 +1571,60 @@ fn accumulate_spectral_steps_into_rows(
                         step,
                         step_hdr_scale,
                         vertices,
-                        lag * (echo_idx + 1),
-                        params.traits.ribbon_echo_alpha * decay,
+                        params.chord_lag_steps(),
+                        1.0,
                     );
                 }
-            }
-            StructureMode::WebSpokesLace => {
-                accumulate_web_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_in_chunk,
-                    edge_weights,
-                );
-                accumulate_spokes_step(
-                    accum_spd,
-                    params,
-                    row_start,
-                    row_end,
-                    step,
-                    step_hdr_scale,
-                    vertices,
-                    next_in_chunk,
-                    constants::LACE_SPOKE_ALPHA_SCALE,
-                );
+                StructureMode::NebulaVeil => {
+                    accumulate_veil_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        1.0,
+                    );
+                }
+                StructureMode::HarmonicWeave => {
+                    accumulate_weave_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        *edge_weights,
+                        1.0,
+                    );
+                }
+                StructureMode::StippleConstellation => {
+                    accumulate_stipple_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        1.0,
+                    );
+                }
+                StructureMode::TangentCaustics => {
+                    accumulate_tangent_step(
+                        accum_spd,
+                        params,
+                        row_start,
+                        row_end,
+                        step,
+                        step_hdr_scale,
+                        vertices,
+                        next_vertices,
+                        1.0,
+                    );
+                }
             }
         }
     }
@@ -1303,9 +1712,15 @@ fn pass_1_build_histogram_spectral_with_backend(
         let frame_params =
             FrameParams { frame_number: checkpoint_step / frame_interval, density: None };
         let rgba_buffer = std::mem::take(&mut accum_rgba);
-        let trajectory_proxy = finish_pipeline
+        let mut trajectory_proxy = finish_pipeline
             .process_trajectory(rgba_buffer, width as usize, height as usize, &frame_params)
             .expect("effect chain invariant: histogram-pass trajectory processing must not fail");
+        apply_spike_finish(
+            &mut trajectory_proxy,
+            width as usize,
+            height as usize,
+            &settings.traits,
+        );
         accum_rgba.clear();
         accum_rgba.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
 
@@ -1464,6 +1879,12 @@ fn pass_2_write_frames_spectral_with_backend(
                 effect_name: "trajectory_chain".into(),
                 reason: e.to_string(),
             })?;
+        apply_spike_finish(
+            &mut trajectory_pixels,
+            width as usize,
+            height as usize,
+            &settings.traits,
+        );
 
         let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
 
@@ -1588,12 +2009,13 @@ fn render_final_frame_spectral_with_backend(
     let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
-    let trajectory_pixels = finish_pipeline
+    let mut trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "trajectory_chain".into(),
             reason: e.to_string(),
         })?;
+    apply_spike_finish(&mut trajectory_pixels, width as usize, height as usize, &settings.traits);
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
@@ -1661,12 +2083,15 @@ fn render_final_frame_spectral_tiled(
         );
         convert_spd_buffer_to_rgba(&tile_spd, &mut tile_rgba, ctx.width_usize, guard_height);
 
-        let trajectory_pixels = finish_pipeline
+        let mut trajectory_pixels = finish_pipeline
             .process_trajectory(tile_rgba, ctx.width_usize, guard_height, &frame_params)
             .map_err(|e| RenderError::EffectChain {
                 effect_name: "trajectory_chain".into(),
                 reason: e.to_string(),
             })?;
+        // Spikes run band-locally in tiled mode (sources outside the guard
+        // rows cannot contribute); production resolutions never tile.
+        apply_spike_finish(&mut trajectory_pixels, ctx.width_usize, guard_height, &settings.traits);
         let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
         let final_display = finish_pipeline
             .process_image(display_buffer, ctx.width_usize, guard_height, &frame_params)
@@ -1772,12 +2197,13 @@ fn render_single_frame_spectral_with_backend(
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
     let frame_params = FrameParams { frame_number: 0, density: None };
-    let trajectory_pixels = finish_pipeline
+    let mut trajectory_pixels = finish_pipeline
         .process_trajectory(accum_rgba, width as usize, height as usize, &frame_params)
         .map_err(|e| RenderError::EffectChain {
             effect_name: "trajectory_chain".into(),
             reason: e.to_string(),
         })?;
+    apply_spike_finish(&mut trajectory_pixels, width as usize, height as usize, &settings.traits);
 
     let display_buffer = tonemap_to_display_buffer(&trajectory_pixels, levels);
     let final_display = finish_pipeline
@@ -1840,13 +2266,17 @@ mod tests {
 
     #[test]
     fn sheet_taper_reduces_fill_modes_at_timeline_edges() {
-        let early = sheet_taper_for_structure(StructureMode::Spokes, 0.0);
-        let mid = sheet_taper_for_structure(StructureMode::Spokes, 0.5);
-        let ribbon = sheet_taper_for_structure(StructureMode::OrbitRibbons, 0.0);
+        let early = sheet_taper_for_vocabulary(StructureMode::Spokes, 0.0);
+        let mid = sheet_taper_for_vocabulary(StructureMode::Spokes, 0.5);
+        let ribbon = sheet_taper_for_vocabulary(StructureMode::OrbitRibbons, 0.0);
+        let veil = sheet_taper_for_vocabulary(StructureMode::NebulaVeil, 0.0);
+        let stipple = sheet_taper_for_vocabulary(StructureMode::StippleConstellation, 0.0);
 
         assert!(early < mid, "sheet-prone modes should taper at timeline edges");
         assert!((mid - 1.0).abs() < 1e-12, "middle of sheet taper should preserve energy");
         assert_eq!(ribbon, 1.0, "ribbon modes should not use sheet taper");
+        assert!(veil < 1.0, "veil sweeps sheets and should taper");
+        assert_eq!(stipple, 1.0, "stipple dots should not use sheet taper");
     }
 
     fn default_levels() -> ChannelLevels {
@@ -2326,6 +2756,258 @@ mod tests {
             perceptual.radius < (0.0036_f64 * 1080.0).round() as usize,
             "softness stacks should tighten perceptual blur radius"
         );
+    }
+
+    /// Trait variants exercising every vocabulary, stacking, symmetry, and
+    /// the stardust field. Shared by the equivalence and robustness tests.
+    fn trait_variants() -> Vec<(&'static str, SceneTraits)> {
+        use visual_profile::{LayerStack, StackLayer, StardustTraits, SymmetryOp};
+
+        let solo = |vocabulary| SceneTraits {
+            stack: LayerStack::solo(vocabulary),
+            ..SceneTraits::default()
+        };
+        let mut variants = vec![
+            ("web", solo(StructureMode::TriangleWeb)),
+            ("ribbons", solo(StructureMode::OrbitRibbons)),
+            ("duet", solo(StructureMode::Duet { dropped_edge: 1 })),
+            ("spokes", solo(StructureMode::Spokes)),
+            ("chords", solo(StructureMode::TimeChords)),
+            ("veil", solo(StructureMode::NebulaVeil)),
+            ("weave", solo(StructureMode::HarmonicWeave)),
+            ("stipple", solo(StructureMode::StippleConstellation)),
+            ("tangent", solo(StructureMode::TangentCaustics)),
+        ];
+        variants.push((
+            "ribbons_with_echo",
+            SceneTraits {
+                stack: LayerStack::solo(StructureMode::OrbitRibbons),
+                ribbon_echo_alpha: 0.35,
+                echo_layers: 3,
+                ..SceneTraits::default()
+            },
+        ));
+        variants.push((
+            "stacked_web_veil_stipple",
+            SceneTraits {
+                stack: LayerStack {
+                    primary: StructureMode::TriangleWeb,
+                    underlay: Some(StackLayer {
+                        vocabulary: StructureMode::NebulaVeil,
+                        alpha: 0.30,
+                    }),
+                    accent: Some(StackLayer {
+                        vocabulary: StructureMode::StippleConstellation,
+                        alpha: 0.10,
+                    }),
+                },
+                ..SceneTraits::default()
+            },
+        ));
+        variants.push((
+            "rotational_symmetry",
+            SceneTraits { symmetry: SymmetryOp::Rotational { k: 4 }, ..SceneTraits::default() },
+        ));
+        variants.push((
+            "dihedral_symmetry",
+            SceneTraits {
+                stack: LayerStack::solo(StructureMode::HarmonicWeave),
+                symmetry: SymmetryOp::Dihedral { k: 3 },
+                ..SceneTraits::default()
+            },
+        ));
+        variants.push((
+            "stardust",
+            SceneTraits {
+                stardust: StardustTraits {
+                    count: 64,
+                    brightness: 1.0,
+                    seed: 0x5EED_CAFE,
+                    lightness: 0.72,
+                    chroma: 0.03,
+                },
+                ..SceneTraits::default()
+            },
+        ));
+        variants
+    }
+
+    #[test]
+    fn test_all_trait_variants_parallel_match_serial_reference_bits() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(24, 18, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+
+        for (label, traits) in trait_variants() {
+            let accum_params = AccumulationParams {
+                scene,
+                ctx: &ctx,
+                velocity_calc: &velocity_calc,
+                step_start: 0,
+                step_end: scene.step_count(),
+                hdr_scale: 3.5,
+                traits,
+            };
+
+            let mut serial = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+            accumulate_spectral_steps(
+                &mut serial,
+                &accum_params,
+                AccumulationBackend::SerialReference,
+            );
+
+            for thread_count in [2usize, 3] {
+                let mut parallel = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+                ThreadPoolBuilder::new()
+                    .num_threads(thread_count)
+                    .build()
+                    .expect("thread pool should build")
+                    .install(|| {
+                        accumulate_spectral_steps(
+                            &mut parallel,
+                            &accum_params,
+                            AccumulationBackend::ParallelScanlines,
+                        );
+                    });
+                assert_spd_buffers_bits_eq(
+                    &parallel,
+                    &serial,
+                    &format!("variant={label}/threads={thread_count}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_every_vocabulary_deposits_finite_nonzero_energy() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(24, 18, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+
+        for (label, traits) in trait_variants() {
+            let mut accum = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+            accumulate_spectral_steps(
+                &mut accum,
+                &AccumulationParams {
+                    scene,
+                    ctx: &ctx,
+                    velocity_calc: &velocity_calc,
+                    step_start: 0,
+                    step_end: scene.step_count(),
+                    hdr_scale: 3.5,
+                    traits,
+                },
+                AccumulationBackend::SerialReference,
+            );
+
+            let total: f64 = accum.iter().flat_map(|bins| bins.iter()).sum();
+            assert!(
+                total.is_finite() && total > 0.0,
+                "variant {label} deposited invalid energy: {total}"
+            );
+            for (pixel, bins) in accum.iter().enumerate() {
+                for (bin, value) in bins.iter().enumerate() {
+                    assert!(
+                        value.is_finite() && *value >= 0.0,
+                        "variant {label} pixel {pixel} bin {bin} invalid: {value}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_degenerate_collinear_geometry_stays_finite_for_all_vocabularies() {
+        // Three collinear, slowly drifting bodies: degenerate triangles must
+        // not produce NaN energy in any vocabulary (veil fill lines collapse,
+        // tangent directions shrink, weave controls coincide).
+        let steps = 6usize;
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                (0..steps)
+                    .map(|step| {
+                        let t = step as f64 * 0.01;
+                        Vector3::new(f64::from(body as u32) * 0.2 + t, 0.5, 0.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let colors: Vec<Vec<OklabColor>> = (0..3).map(|_| vec![(0.7, 0.1, 0.05); steps]).collect();
+        let body_alphas = vec![0.5, 0.5, 0.5];
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(16, 12, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+
+        for (label, traits) in trait_variants() {
+            let mut accum = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+            accumulate_spectral_steps(
+                &mut accum,
+                &AccumulationParams {
+                    scene,
+                    ctx: &ctx,
+                    velocity_calc: &velocity_calc,
+                    step_start: 0,
+                    step_end: steps,
+                    hdr_scale: 2.0,
+                    traits,
+                },
+                AccumulationBackend::SerialReference,
+            );
+            let total: f64 = accum.iter().flat_map(|bins| bins.iter()).sum();
+            assert!(total.is_finite(), "variant {label} produced non-finite energy");
+        }
+    }
+
+    #[test]
+    fn test_stardust_splats_exactly_once_across_chunked_accumulation() {
+        let (positions, colors, body_alphas) = sample_scene();
+        let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+        let ctx = RenderContext::new(20, 14, &positions, false);
+        let velocity_calc =
+            velocity_hdr::VelocityHdrCalculator::new(&positions, constants::DEFAULT_DT);
+        let traits = trait_variants()
+            .into_iter()
+            .find(|(label, _)| *label == "stardust")
+            .expect("stardust variant exists")
+            .1;
+
+        let make_params = |step_start: usize, step_end: usize| AccumulationParams {
+            scene,
+            ctx: &ctx,
+            velocity_calc: &velocity_calc,
+            step_start,
+            step_end,
+            hdr_scale: 3.0,
+            traits,
+        };
+
+        // Single full-range accumulation.
+        let mut single = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut single,
+            &make_params(0, scene.step_count()),
+            AccumulationBackend::SerialReference,
+        );
+
+        // Chunked accumulation (as the checkpointed video passes run it).
+        let mut chunked = vec![[0.0; NUM_BINS]; ctx.pixel_count()];
+        accumulate_spectral_steps(
+            &mut chunked,
+            &make_params(0, 2),
+            AccumulationBackend::SerialReference,
+        );
+        accumulate_spectral_steps(
+            &mut chunked,
+            &make_params(2, scene.step_count()),
+            AccumulationBackend::SerialReference,
+        );
+
+        assert_spd_buffers_bits_eq(&chunked, &single, "stardust/chunked-vs-single");
     }
 
     #[test]

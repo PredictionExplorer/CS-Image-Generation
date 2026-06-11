@@ -3,13 +3,15 @@
 //! The Borda search ranks orbits by physics proxies (FFT regularity and
 //! triangle balance) but never looks at the picture. This module closes that
 //! gap with a cheap proxy render: sampled trajectory geometry is splatted onto
-//! a small per-body ink grid using the seed's structure mode, then scored on
+//! a small per-body ink grid using the seed's full layer stack, then scored on
 //! image-space qualities (ink coverage, spatial balance, structural contrast,
 //! crisp line energy, interior negative space, per-body colour separation, and
-//! penalties for dense mush or low-gradient veils. Scores are deterministic
-//! functions of geometry, so candidate selection stays reproducible per seed.
+//! penalties for dense mush or low-gradient veils). Stacks that intentionally
+//! sweep translucent veils are scored with a relaxed veil profile so the soft
+//! gauze is not mistaken for a defect. Scores are deterministic functions of
+//! geometry, so candidate selection stays reproducible per seed.
 
-use super::visual_profile::StructureMode;
+use super::visual_profile::{LayerStack, StructureMode, VocabularyFamily};
 use nalgebra::Vector3;
 
 /// Grid edge (pixels) used when scoring shortlisted orbit candidates.
@@ -95,25 +97,67 @@ pub struct ProxyRenderParams {
     pub grid_size: usize,
     /// Maximum trajectory samples drawn per body.
     pub samples_per_body: usize,
-    /// Structure mode used to convert geometry into strokes.
-    pub structure: StructureMode,
+    /// Layer stack used to convert geometry into strokes.
+    pub stack: LayerStack,
 }
 
 impl ProxyRenderParams {
     /// Parameters tuned for scoring shortlisted orbit candidates.
     #[must_use]
-    pub fn for_candidates(structure: StructureMode) -> Self {
-        Self {
-            grid_size: CANDIDATE_GRID_SIZE,
-            samples_per_body: CANDIDATE_SAMPLES_PER_BODY,
-            structure,
-        }
+    pub fn for_candidates(stack: LayerStack) -> Self {
+        Self { grid_size: CANDIDATE_GRID_SIZE, samples_per_body: CANDIDATE_SAMPLES_PER_BODY, stack }
     }
 
     /// Cheaper parameters tuned for ranking candidate view rotations.
     #[must_use]
-    pub fn for_view_selection(structure: StructureMode) -> Self {
-        Self { grid_size: VIEW_GRID_SIZE, samples_per_body: VIEW_SAMPLES_PER_BODY, structure }
+    pub fn for_view_selection(stack: LayerStack) -> Self {
+        Self { grid_size: VIEW_GRID_SIZE, samples_per_body: VIEW_SAMPLES_PER_BODY, stack }
+    }
+}
+
+/// Scoring weights, derived from the stack being evaluated.
+///
+/// Veil-bearing stacks intentionally sweep low-gradient gauze, so the veil
+/// penalty is relaxed and the crispness weight is partially redistributed to
+/// balance/contrast; otherwise soft area glow would be punished as a defect
+/// and veil compositions could never win adaptive selection.
+#[derive(Clone, Copy, Debug)]
+struct ScoreProfile {
+    coverage_weight: f64,
+    balance_weight: f64,
+    contrast_weight: f64,
+    body_mix_weight: f64,
+    crisp_weight: f64,
+    negative_weight: f64,
+    veil_tolerance: f64,
+    veil_penalty_scale: f64,
+}
+
+impl ScoreProfile {
+    fn for_stack(stack: &LayerStack) -> Self {
+        if stack.contains_family(VocabularyFamily::Veil) {
+            Self {
+                coverage_weight: 0.28,
+                balance_weight: 0.22,
+                contrast_weight: 0.18,
+                body_mix_weight: 0.10,
+                crisp_weight: 0.14,
+                negative_weight: 0.08,
+                veil_tolerance: 0.32,
+                veil_penalty_scale: 0.15,
+            }
+        } else {
+            Self {
+                coverage_weight: 0.28,
+                balance_weight: 0.18,
+                contrast_weight: 0.14,
+                body_mix_weight: 0.10,
+                crisp_weight: 0.30,
+                negative_weight: 0.10,
+                veil_tolerance: VEIL_TOLERANCE,
+                veil_penalty_scale: 0.40,
+            }
+        }
     }
 }
 
@@ -330,7 +374,7 @@ fn project_to_grid(
     Some(ProjectedTrajectories { points })
 }
 
-/// Splat the sampled geometry according to the structure mode.
+/// Splat the sampled geometry according to the layer stack.
 fn rasterize(projected: &ProjectedTrajectories, params: ProxyRenderParams) -> InkGrid {
     let mut grid = InkGrid::new(params.grid_size);
     let samples = projected.points[0].len();
@@ -384,29 +428,97 @@ fn rasterize(projected: &ProjectedTrajectories, params: ProxyRenderParams) -> In
             }
         }
     };
+    // Veil proxy: three interior fill lines approximating the swept gauze.
+    let draw_veil = |grid: &mut InkGrid, amount: f64| {
+        const FILL_LINES: usize = 3;
+        let line_amount = amount / FILL_LINES as f64;
+        for step in 0..samples {
+            let pivot = step % 3;
+            let a = projected.points[pivot][step];
+            let b = projected.points[(pivot + 1) % 3][step];
+            let c = projected.points[(pivot + 2) % 3][step];
+            for k in 1..=FILL_LINES {
+                let t = k as f64 / (FILL_LINES + 1) as f64;
+                let x0 = a.0 + (b.0 - a.0) * t;
+                let y0 = a.1 + (b.1 - a.1) * t;
+                let x1 = a.0 + (c.0 - a.0) * t;
+                let y1 = a.1 + (c.1 - a.1) * t;
+                grid.draw_segment(x0, y0, x1, y1, pivot, line_amount);
+            }
+        }
+    };
+    // Weave proxy: bowed Bezier chords tessellated coarsely.
+    let draw_weave = |grid: &mut InkGrid, amount: f64| {
+        const SEGMENTS: usize = 4;
+        const BOW: f64 = 0.5;
+        let segment_amount = amount / SEGMENTS as f64 * 2.0;
+        for step in (0..samples).step_by(2) {
+            let points =
+                [projected.points[0][step], projected.points[1][step], projected.points[2][step]];
+            let cx = (points[0].0 + points[1].0 + points[2].0) / 3.0;
+            let cy = (points[0].1 + points[1].1 + points[2].1) / 3.0;
+            for (i, j, third) in [(0usize, 1usize, 2usize), (1, 2, 0), (2, 0, 1)] {
+                let ctrl = (cx + (cx - points[third].0) * BOW, cy + (cy - points[third].1) * BOW);
+                let mut prev = points[i];
+                for s in 1..=SEGMENTS {
+                    let t = s as f64 / SEGMENTS as f64;
+                    let u = 1.0 - t;
+                    let x = u * u * points[i].0 + 2.0 * u * t * ctrl.0 + t * t * points[j].0;
+                    let y = u * u * points[i].1 + 2.0 * u * t * ctrl.1 + t * t * points[j].1;
+                    grid.draw_segment(prev.0, prev.1, x, y, i, segment_amount);
+                    prev = (x, y);
+                }
+            }
+        }
+    };
+    // Stipple proxy: time-pitched dots (slow passages cluster).
+    let draw_stipple = |grid: &mut InkGrid, amount: f64| {
+        let pitch = (samples / 400).max(1);
+        let dot_amount = amount * pitch as f64 * 0.6;
+        for body in 0..3 {
+            for step in (0..samples).step_by(pitch) {
+                let (x, y) = projected.points[body][step];
+                grid.deposit(x, y, body, dot_amount);
+            }
+        }
+    };
+    // Tangent proxy: velocity-aligned segments centered on each body.
+    let draw_tangent = |grid: &mut InkGrid, amount: f64| {
+        let half = (params.grid_size as f64 * 0.025).max(1.0);
+        for body in 0..3 {
+            for step in 0..samples - 1 {
+                let (x0, y0) = projected.points[body][step];
+                let (x1, y1) = projected.points[body][step + 1];
+                let dx = x1 - x0;
+                let dy = y1 - y0;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-9 || !len.is_finite() {
+                    continue;
+                }
+                let ux = dx / len * half;
+                let uy = dy / len * half;
+                grid.draw_segment(x0 - ux, y0 - uy, x0 + ux, y0 + uy, body, amount);
+            }
+        }
+    };
 
-    match params.structure {
-        StructureMode::TriangleWeb => draw_edges(&mut grid, None, 1.0),
-        StructureMode::Duet { dropped_edge } => {
-            draw_edges(&mut grid, Some(usize::from(dropped_edge.min(2))), 1.0);
-        }
-        StructureMode::OrbitRibbons => draw_ribbons(&mut grid, 1.0),
-        StructureMode::WebRibbonHybrid => {
-            draw_edges(&mut grid, None, 0.30);
-            draw_ribbons(&mut grid, 1.0);
-        }
-        StructureMode::Spokes => draw_spokes(&mut grid, 1.0),
-        StructureMode::TimeChords => {
-            draw_ribbons(&mut grid, 0.30);
-            draw_chords(&mut grid, 1.0);
-        }
-        StructureMode::CometRibbons => {
-            draw_ribbons(&mut grid, 1.0);
-            draw_chords(&mut grid, 0.45);
-        }
-        StructureMode::WebSpokesLace => {
-            draw_edges(&mut grid, None, 0.55);
-            draw_spokes(&mut grid, 0.45);
+    for layer in params.stack.layers() {
+        let amount = layer.alpha;
+        match layer.vocabulary {
+            StructureMode::TriangleWeb => draw_edges(&mut grid, None, amount),
+            StructureMode::Duet { dropped_edge } => {
+                draw_edges(&mut grid, Some(usize::from(dropped_edge.min(2))), amount);
+            }
+            StructureMode::OrbitRibbons => draw_ribbons(&mut grid, amount),
+            StructureMode::Spokes => draw_spokes(&mut grid, amount),
+            StructureMode::TimeChords => {
+                draw_ribbons(&mut grid, amount * 0.30);
+                draw_chords(&mut grid, amount);
+            }
+            StructureMode::NebulaVeil => draw_veil(&mut grid, amount),
+            StructureMode::HarmonicWeave => draw_weave(&mut grid, amount),
+            StructureMode::StippleConstellation => draw_stipple(&mut grid, amount),
+            StructureMode::TangentCaustics => draw_tangent(&mut grid, amount),
         }
     }
 
@@ -414,7 +526,7 @@ fn rasterize(projected: &ProjectedTrajectories, params: ProxyRenderParams) -> In
 }
 
 /// Compute aesthetic metrics from an accumulated ink grid.
-fn score_grid(grid: &InkGrid) -> AestheticScore {
+fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
     let pixel_count = grid.ink.len();
     if pixel_count == 0 {
         return AestheticScore::zero();
@@ -523,14 +635,16 @@ fn score_grid(grid: &InkGrid) -> AestheticScore {
     let veil_fraction = if lit_for_edges > 0 { veiled as f64 / lit_for_edges as f64 } else { 0.0 };
     let crispness = if lit_for_edges > 0 { crisp as f64 / lit_for_edges as f64 } else { 0.0 };
     let negative_space = negative_space_score(&density_map, grid.size);
-    let veil_penalty = ((veil_fraction - VEIL_TOLERANCE).max(0.0) / (1.0 - VEIL_TOLERANCE)) * 0.40;
+    let veil_penalty = ((veil_fraction - profile.veil_tolerance).max(0.0)
+        / (1.0 - profile.veil_tolerance))
+        * profile.veil_penalty_scale;
 
-    let weighted = 0.28 * coverage_score
-        + 0.18 * balance
-        + 0.14 * contrast
-        + 0.10 * body_mix
-        + 0.30 * crispness
-        + 0.10 * negative_space;
+    let weighted = profile.coverage_weight * coverage_score
+        + profile.balance_weight * balance
+        + profile.contrast_weight * contrast
+        + profile.body_mix_weight * body_mix
+        + profile.crisp_weight * crispness
+        + profile.negative_weight * negative_space;
     let total = (weighted - mush_penalty - veil_penalty).clamp(0.0, 1.0);
 
     AestheticScore {
@@ -547,7 +661,7 @@ fn score_grid(grid: &InkGrid) -> AestheticScore {
     }
 }
 
-/// Proxy-render `positions` with the seed's structure mode and score the result.
+/// Proxy-render `positions` with the seed's layer stack and score the result.
 ///
 /// Returns a zero score for degenerate inputs (fewer than two steps, NaN
 /// geometry) so callers can rank without special cases.
@@ -561,7 +675,7 @@ pub fn score_trajectory(
         return AestheticScore::zero();
     };
     let grid = rasterize(&projected, params);
-    score_grid(&grid)
+    score_grid(&grid, ScoreProfile::for_stack(&params.stack))
 }
 
 #[cfg(test)]
@@ -642,7 +756,11 @@ mod tests {
     fn rich_tangle_outscores_degenerate_line() {
         let rich = looping_positions(4_000, 7.0);
         let dull = linear_positions(4_000);
-        let params = ProxyRenderParams::for_candidates(StructureMode::CometRibbons);
+        let params = ProxyRenderParams::for_candidates(LayerStack::with_underlay(
+            StructureMode::OrbitRibbons,
+            StructureMode::TimeChords,
+            0.45,
+        ));
 
         let rich_score = score_trajectory(&rich, params);
         let dull_score = score_trajectory(&dull, params);
@@ -657,7 +775,8 @@ mod tests {
     #[test]
     fn score_is_deterministic() {
         let positions = looping_positions(2_000, 5.0);
-        let params = ProxyRenderParams::for_candidates(StructureMode::OrbitRibbons);
+        let params =
+            ProxyRenderParams::for_candidates(LayerStack::solo(StructureMode::OrbitRibbons));
         let a = score_trajectory(&positions, params);
         let b = score_trajectory(&positions, params);
         assert_eq!(a.total.to_bits(), b.total.to_bits());
@@ -666,7 +785,8 @@ mod tests {
     #[test]
     fn empty_and_degenerate_inputs_score_zero() {
         let empty: Vec<Vec<Vector3<f64>>> = vec![Vec::new(), Vec::new(), Vec::new()];
-        let params = ProxyRenderParams::for_candidates(StructureMode::TriangleWeb);
+        let params =
+            ProxyRenderParams::for_candidates(LayerStack::solo(StructureMode::TriangleWeb));
         assert_eq!(score_trajectory(&empty, params).total, 0.0);
 
         let nan = vec![
@@ -678,25 +798,29 @@ mod tests {
     }
 
     #[test]
-    fn all_structure_modes_produce_finite_scores() {
+    fn all_vocabularies_produce_finite_scores() {
         let positions = looping_positions(3_000, 6.0);
-        let modes = [
+        let vocabularies = [
             StructureMode::TriangleWeb,
             StructureMode::OrbitRibbons,
-            StructureMode::WebRibbonHybrid,
             StructureMode::Duet { dropped_edge: 1 },
             StructureMode::Spokes,
             StructureMode::TimeChords,
-            StructureMode::CometRibbons,
-            StructureMode::WebSpokesLace,
+            StructureMode::NebulaVeil,
+            StructureMode::HarmonicWeave,
+            StructureMode::StippleConstellation,
+            StructureMode::TangentCaustics,
         ];
-        for mode in modes {
-            let score = score_trajectory(&positions, ProxyRenderParams::for_candidates(mode));
+        for vocabulary in vocabularies {
+            let score = score_trajectory(
+                &positions,
+                ProxyRenderParams::for_candidates(LayerStack::solo(vocabulary)),
+            );
             assert!(
                 score.total.is_finite() && (0.0..=1.0).contains(&score.total),
-                "mode {mode:?} produced invalid score {score:?}"
+                "vocabulary {vocabulary:?} produced invalid score {score:?}"
             );
-            assert!(score.coverage > 0.0, "mode {mode:?} deposited no ink");
+            assert!(score.coverage > 0.0, "vocabulary {vocabulary:?} deposited no ink");
             assert!((0.0..=1.0).contains(&score.veil_fraction));
             assert!((0.0..=1.0).contains(&score.crispness));
             assert!((0.0..=1.0).contains(&score.negative_space));
@@ -704,9 +828,33 @@ mod tests {
     }
 
     #[test]
-    fn veil_metric_penalizes_flat_fills() {
-        let flat = score_grid(&flat_disc_grid(96));
-        let ring = score_grid(&ring_grid(96));
+    fn stacked_layers_deposit_more_ink_than_solo_primary() {
+        let positions = looping_positions(3_000, 6.0);
+        let solo = score_trajectory(
+            &positions,
+            ProxyRenderParams::for_candidates(LayerStack::solo(StructureMode::TriangleWeb)),
+        );
+        let stacked = score_trajectory(
+            &positions,
+            ProxyRenderParams::for_candidates(LayerStack::with_underlay(
+                StructureMode::TriangleWeb,
+                StructureMode::NebulaVeil,
+                0.40,
+            )),
+        );
+        assert!(
+            stacked.coverage > solo.coverage,
+            "underlay must add ink: solo={} stacked={}",
+            solo.coverage,
+            stacked.coverage
+        );
+    }
+
+    #[test]
+    fn veil_metric_penalizes_flat_fills_for_line_stacks() {
+        let line_profile = ScoreProfile::for_stack(&LayerStack::solo(StructureMode::TriangleWeb));
+        let flat = score_grid(&flat_disc_grid(96), line_profile);
+        let ring = score_grid(&ring_grid(96), line_profile);
 
         assert!(
             flat.veil_fraction > ring.veil_fraction,
@@ -723,9 +871,27 @@ mod tests {
     }
 
     #[test]
+    fn veil_stacks_score_soft_gauze_more_gently() {
+        let line_profile = ScoreProfile::for_stack(&LayerStack::solo(StructureMode::TriangleWeb));
+        let veil_profile = ScoreProfile::for_stack(&LayerStack::solo(StructureMode::NebulaVeil));
+        let flat = flat_disc_grid(96);
+
+        let as_lines = score_grid(&flat, line_profile);
+        let as_veil = score_grid(&flat, veil_profile);
+        assert!(
+            as_veil.total > as_lines.total,
+            "intentional veil stacks must not be punished for soft gauze: \
+             veil={} lines={}",
+            as_veil.total,
+            as_lines.total
+        );
+    }
+
+    #[test]
     fn negative_space_rewards_open_interior_structure() {
-        let flat = score_grid(&flat_disc_grid(96));
-        let ring = score_grid(&ring_grid(96));
+        let profile = ScoreProfile::for_stack(&LayerStack::solo(StructureMode::TriangleWeb));
+        let flat = score_grid(&flat_disc_grid(96), profile);
+        let ring = score_grid(&ring_grid(96), profile);
 
         assert!(
             ring.negative_space > flat.negative_space,
@@ -743,8 +909,9 @@ mod tests {
 
     #[test]
     fn view_params_are_cheaper_than_candidate_params() {
-        let candidate = ProxyRenderParams::for_candidates(StructureMode::TriangleWeb);
-        let view = ProxyRenderParams::for_view_selection(StructureMode::TriangleWeb);
+        let stack = LayerStack::solo(StructureMode::TriangleWeb);
+        let candidate = ProxyRenderParams::for_candidates(stack);
+        let view = ProxyRenderParams::for_view_selection(stack);
         assert!(view.grid_size < candidate.grid_size);
         assert!(view.samples_per_body < candidate.samples_per_body);
     }

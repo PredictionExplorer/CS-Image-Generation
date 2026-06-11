@@ -72,10 +72,10 @@ pub struct LoggedRenderConfig {
     pub dispersion_strength: f64,
     /// Active spectral dispersion mode.
     pub dispersion_mode: String,
-    /// Seed-selected palette harmony template.
-    pub palette_harmony: String,
-    /// Seed-selected palette mood envelope.
-    pub palette_mood: String,
+    /// Continuous palette genome fingerprint (replaces preset harmony labels).
+    pub palette_fingerprint: String,
+    /// Palette beauty-gate descriptor (attempts / repair flag).
+    pub palette_gate: String,
 }
 
 /// Camera drift parameters used for the logged generation.
@@ -132,9 +132,9 @@ pub struct OrbitInfo {
     pub total_candidates: usize,
     /// Candidates removed before ranking (e.g. failed filters).
     pub discarded_count: usize,
-    /// Structure mode originally rolled by the seed before adaptive selection.
+    /// Layer-stack label originally rolled by the seed before adaptive selection.
     pub preferred_structure: String,
-    /// Structure mode chosen by adaptive orbit × mode scoring.
+    /// Layer-stack label chosen by adaptive orbit × stack scoring.
     pub chosen_structure: String,
     /// Number of bounded retry searches needed to reach the quality floor.
     pub retry_count: usize,
@@ -195,8 +195,8 @@ impl Default for LoggedRenderConfig {
             hdr_scale: 0.18,
             dispersion_strength: crate::render::constants::SPECTRAL_DISPERSION_STRENGTH,
             dispersion_mode: "crisp_off".to_string(),
-            palette_harmony: "unresolved".to_string(),
-            palette_mood: "unresolved".to_string(),
+            palette_fingerprint: "unresolved".to_string(),
+            palette_gate: "unresolved".to_string(),
         }
     }
 }

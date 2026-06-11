@@ -7,9 +7,15 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
 ## What It Does
 
 - Simulates large batches of random three-body systems
-- Selects the strongest orbit with a Borda-style score
+- Selects the strongest orbit with a Borda-style score plus an image-space aesthetic gate
+- Renders the trajectory through a seed-composed **layer stack** of stroke vocabularies
+  (webs, ribbons, chords, spokes, nebula veils, harmonic weaves, stipple constellations,
+  tangent caustics), with rare phase-space projections and k-fold symmetry compositions
+- Samples every palette from a continuous OKLCh genome (no presets) behind a
+  deterministic perceptual beauty gate
 - Renders spectral trails with SIMD acceleration
-- Applies the crisp CosmicSignature visual profile with legacy post-effects off by default
+- Applies the crisp CosmicSignature visual profile with legacy post-effects off by
+  default (seed-gated halation, prism, diffraction spikes, and stardust only)
 - Writes outputs to `output/<name>/`
 
 ## Requirements

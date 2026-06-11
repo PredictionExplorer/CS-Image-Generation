@@ -198,26 +198,50 @@ Slow apoapsis arcs render bold and quiet near 1x energy; periapsis whips render
 as thin flares approaching 8x. Because the window adapts per orbit, every seed
 exhibits the full dynamic range.
 
-### 3.3b Scene Traits (Structure Mode, Line Weight, Age Ramp)
+### 3.3b Scene Traits (Layer Stack, Projection, Symmetry)
 
 The `CosmicSignature` profile resolves seed-varying scene traits consumed by
-the accumulator:
+the accumulator. Structure is a composed **layer stack** rather than a single
+mode:
 
-- **Structure mode** (seeded weighted choice): `triangle_web` (40%),
-  `orbit_ribbons` (20%, each body paints its own trajectory),
-  `web_ribbon_hybrid` (16%, faint web + full ribbons), `duet` (14%, one edge
-  omitted), `spokes` (10%, body-to-centroid lines).
-- **Line weight** in [0.85, 1.45]: global stroke width multiplier.
-- **Age ramp** in [-0.35, 0.35]: linear exposure ramp across simulation time,
-  encoding the arrow of time into the accumulated image.
-- **Exposure key** in [0.85, 1.12]: multiplies the histogram-derived exposure
-  for darker/ember or brighter/airier seeds.
-- **Halation** (~30% of seeds): subtle tight DoG bloom (strength 0.05-0.14)
-  as a film-style highlight halo; all other legacy effects stay disabled.
+- **Primary vocabulary** (seeded weighted choice over nine atoms):
+  `triangle_web`, `orbit_ribbons` (with optional decaying echo bands), `duet`
+  (one edge omitted), `spokes`, `time_chords` (string-art chords over a faint
+  ribbon underlay), `nebula_veil` (the triangle interior swept as translucent
+  gauze), `harmonic_weave` (bowed Bezier chords), `stipple_constellation`
+  (time-pitched pointillist dots and pearls), `tangent_caustics` (velocity
+  tangent envelopes).
+- **Underlay layer** (~40% of seeds): a second vocabulary from a different
+  family at a continuous log-uniform alpha (0.08–0.45); **accent layer**
+  (~10%): a rare third vocabulary at low alpha. Additive accumulation makes
+  layer order irrelevant.
+- **Projection axis** (~8% of seeds): instead of position space, the
+  trajectory is rendered in a phase-space projection (`phase_portrait`,
+  `cross_braid`, or `hodograph`), producing Lissajous-like curve families.
+- **Symmetry op**: `none` (~85%), `mirror_x` (~3%), `rot{k}` k∈2..6 (~7%),
+  `dih{k}` k∈{3,4,6} (~5%) — every stroke is replicated about the frame
+  center with per-copy energy divided by the fold count (mandala/rosette
+  compositions with stable exposure).
+- **Wildcard seeds** (~7%): extended parameter ranges (bolder line weights,
+  deeper veils, stronger halation); the aesthetic quality floor keeps the
+  extremes presentable.
+- **Line weight** (mode-aware range), **age ramp** in [-0.6, 0.6] (±0.85 for
+  wildcards), and **exposure key** in [0.85, 1.12] tune stroke rendering and
+  display exposure per seed.
+- **Finishing traits**: halation (mode-gated tight DoG bloom), prism (~5%,
+  chromatic bloom), diffraction spikes (~4%, astrophoto star crosses marched
+  from the brightest cores), stardust (~10%, a faint seeded micro-dot field
+  splatted once per accumulation pass). All other legacy effects stay
+  disabled.
 
 A seeded uniform 3D rotation (Shoemake quaternion method, forked RNG domain
 `cosmic-view/v1`) is applied to the trajectory before rendering, so the same
-orbit family is photographed from a different angle every seed.
+orbit family is photographed from a different angle every seed. All stack,
+symmetry, projection, and trait rolls come from the forked
+`cosmic-structure/v2` domain; palette genomes come from `cosmic-color/v3` and
+must pass a deterministic perceptual beauty gate (minimum OKLab separation
+between bodies, chroma floor/ceiling, lightness ladder) with bounded
+resampling.
 
 ### 3.4 OkLab Hue to Spectral Emission Lobes
 

@@ -499,6 +499,117 @@ pub fn apply_dog_bloom(
     dog_result
 }
 
+/// Apply the rare diffraction-spike finish: thin astrophoto star-cross streaks
+/// radiating from the brightest cores.
+///
+/// Deterministic and resolution-aware: the brightest pixels (relative to the
+/// frame's own high percentile, so early dim video frames grow spikes as the
+/// accumulation brightens) are marched along `arms` directions with an
+/// exponential falloff. Sources are capped at the brightest
+/// [`constants::SPIKE_MAX_SOURCES`] and processed in stable index order so the
+/// pass is bit-reproducible.
+pub fn apply_diffraction_spikes(
+    buffer: &mut PixelBuffer,
+    width: usize,
+    height: usize,
+    spikes: &crate::render::visual_profile::SpikeTraits,
+) {
+    if !spikes.enabled() || buffer.is_empty() || width == 0 || height == 0 {
+        return;
+    }
+
+    let luminance =
+        |p: &(f64, f64, f64, f64)| -> f64 { LUMA_R * p.0 + LUMA_G * p.1 + LUMA_B * p.2 };
+
+    // Reference brightness: a high percentile of the lit pixels.
+    let mut lit: Vec<f64> = buffer.iter().map(luminance).filter(|&lum| lum > 0.0).collect();
+    if lit.len() < 16 {
+        return;
+    }
+    let percentile_idx = ((lit.len() - 1) as f64 * constants::SPIKE_LUMINANCE_PERCENTILE) as usize;
+    let (_, reference, _) =
+        lit.select_nth_unstable_by(percentile_idx, |a, b| a.partial_cmp(b).expect("finite luma"));
+    let reference = *reference;
+    if reference <= 0.0 {
+        return;
+    }
+    let threshold = reference * spikes.threshold_fraction;
+
+    // Collect sources above threshold; cap at the brightest N, stable order.
+    let mut sources: Vec<(usize, f64)> = buffer
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, p)| {
+            let lum = luminance(p);
+            (lum >= threshold).then_some((idx, lum))
+        })
+        .collect();
+    if sources.is_empty() {
+        return;
+    }
+    if sources.len() > constants::SPIKE_MAX_SOURCES {
+        let cutoff = constants::SPIKE_MAX_SOURCES - 1;
+        sources.select_nth_unstable_by(cutoff, |a, b| {
+            b.1.partial_cmp(&a.1).expect("finite luma").then(a.0.cmp(&b.0))
+        });
+        sources.truncate(constants::SPIKE_MAX_SOURCES);
+        sources.sort_unstable_by_key(|(idx, _)| *idx);
+    }
+
+    let min_dim = width.min(height) as f64;
+    let arm_length = (spikes.length_scale * min_dim).max(2.0);
+    let arms = usize::from(spikes.arms.max(2));
+    let directions: Vec<(f64, f64)> = (0..arms)
+        .map(|arm| {
+            let theta = spikes.angle + std::f64::consts::TAU * arm as f64 / arms as f64;
+            (theta.cos(), theta.sin())
+        })
+        .collect();
+
+    let mut overlay = vec![(0.0f64, 0.0f64, 0.0f64, 0.0f64); buffer.len()];
+    // usize→f64/isize casts: raster coordinates are far below precision limits.
+    let steps = arm_length.ceil() as usize;
+    for &(src_idx, lum) in &sources {
+        let src = buffer[src_idx];
+        // Excess above threshold drives the streak so spikes grow smoothly
+        // with brightness instead of popping in.
+        let drive = ((lum - threshold) / reference).clamp(0.0, 4.0) * spikes.strength;
+        if drive <= 0.0 {
+            continue;
+        }
+        let sx = (src_idx % width) as f64;
+        let sy = (src_idx / width) as f64;
+        for &(dx, dy) in &directions {
+            for t in 1..=steps {
+                let distance = t as f64;
+                let px = sx + dx * distance;
+                let py = sy + dy * distance;
+                if px < 0.0 || py < 0.0 || px >= width as f64 || py >= height as f64 {
+                    break;
+                }
+                let falloff = (-constants::SPIKE_DECAY_AT_TIP * distance / arm_length).exp();
+                let w = drive * falloff;
+                if w < 1e-6 {
+                    break;
+                }
+                let dst = py as usize * width + px as usize;
+                let dest = &mut overlay[dst];
+                dest.0 += src.0 * w;
+                dest.1 += src.1 * w;
+                dest.2 += src.2 * w;
+                dest.3 += src.3 * w;
+            }
+        }
+    }
+
+    buffer.par_iter_mut().zip(overlay.par_iter()).for_each(|(pixel, add)| {
+        pixel.0 += add.0;
+        pixel.1 += add.1;
+        pixel.2 += add.2;
+        pixel.3 = (pixel.3 + add.3).min(1.0);
+    });
+}
+
 /// Convert SPD buffer to RGBA, with post-process radial dispersion (chromatic aberration)
 pub(crate) fn convert_spd_buffer_to_rgba(
     src: &[[f64; NUM_BINS]],
@@ -715,6 +826,116 @@ mod tests {
                 "Upsampled uniform data should stay near original"
             );
         }
+    }
+
+    fn spike_fixture(width: usize, height: usize) -> PixelBuffer {
+        // Faint field plus two bright cores.
+        let mut buffer = vec![(0.002, 0.002, 0.002, 0.01); width * height];
+        buffer[(height / 2) * width + width / 2] = (4.0, 3.5, 3.0, 1.0);
+        buffer[(height / 4) * width + width / 3] = (3.0, 3.2, 4.0, 1.0);
+        buffer
+    }
+
+    fn buffer_energy(buffer: &PixelBuffer) -> f64 {
+        buffer.iter().map(|&(r, g, b, _)| r + g + b).sum()
+    }
+
+    fn enabled_spikes() -> crate::render::visual_profile::SpikeTraits {
+        crate::render::visual_profile::SpikeTraits {
+            strength: 0.25,
+            arms: 4,
+            angle: 0.3,
+            length_scale: 0.04,
+            threshold_fraction: 0.65,
+        }
+    }
+
+    #[test]
+    fn test_diffraction_spikes_disabled_is_a_strict_noop() {
+        let width = 48;
+        let height = 32;
+        let mut buffer = spike_fixture(width, height);
+        let original = buffer.clone();
+        apply_diffraction_spikes(
+            &mut buffer,
+            width,
+            height,
+            &crate::render::visual_profile::SpikeTraits::disabled(),
+        );
+        assert_eq!(buffer, original, "disabled spikes must not touch the buffer");
+    }
+
+    #[test]
+    fn test_diffraction_spikes_add_energy_around_bright_cores() {
+        let width = 48;
+        let height = 32;
+        let mut buffer = spike_fixture(width, height);
+        let before = buffer_energy(&buffer);
+        apply_diffraction_spikes(&mut buffer, width, height, &enabled_spikes());
+        let after = buffer_energy(&buffer);
+
+        assert!(after > before, "spikes must add streak energy: {before} -> {after}");
+        // Streaks stay a finish, not a flood.
+        assert!(after < before * 3.0, "spike energy exploded: {before} -> {after}");
+        for &(r, g, b, a) in &buffer {
+            assert!(
+                r.is_finite() && g.is_finite() && b.is_finite() && a.is_finite(),
+                "spike output must stay finite"
+            );
+        }
+    }
+
+    #[test]
+    fn test_diffraction_spikes_are_deterministic() {
+        let width = 40;
+        let height = 30;
+        let mut a = spike_fixture(width, height);
+        let mut b = spike_fixture(width, height);
+        let spikes = enabled_spikes();
+        apply_diffraction_spikes(&mut a, width, height, &spikes);
+        apply_diffraction_spikes(&mut b, width, height, &spikes);
+        for (idx, (pa, pb)) in a.iter().zip(&b).enumerate() {
+            assert_eq!(pa.0.to_bits(), pb.0.to_bits(), "pixel {idx} R diverged");
+            assert_eq!(pa.1.to_bits(), pb.1.to_bits(), "pixel {idx} G diverged");
+            assert_eq!(pa.2.to_bits(), pb.2.to_bits(), "pixel {idx} B diverged");
+            assert_eq!(pa.3.to_bits(), pb.3.to_bits(), "pixel {idx} A diverged");
+        }
+    }
+
+    #[test]
+    fn test_diffraction_spikes_respect_arm_count_directionality() {
+        let width = 64;
+        let height = 64;
+        // Faint field (so the pass engages) plus one bright core.
+        let mut buffer = vec![(0.0005, 0.0005, 0.0005, 0.01); width * height];
+        buffer[(height / 2) * width + width / 2] = (5.0, 5.0, 5.0, 1.0);
+        let spikes = crate::render::visual_profile::SpikeTraits {
+            strength: 0.3,
+            arms: 4,
+            angle: 0.0,
+            length_scale: 0.2,
+            threshold_fraction: 0.5,
+        };
+        apply_diffraction_spikes(&mut buffer, width, height, &spikes);
+
+        // With angle 0 and 4 arms, axis-aligned neighbors receive streaks
+        // while the diagonals stay dark.
+        let cx = width / 2;
+        let cy = height / 2;
+        let energy = |x: usize, y: usize| {
+            let p = buffer[y * width + x];
+            p.0 + p.1 + p.2
+        };
+        let axis =
+            energy(cx + 5, cy) + energy(cx - 5, cy) + energy(cx, cy + 5) + energy(cx, cy - 5);
+        let diagonal = energy(cx + 5, cy + 5)
+            + energy(cx - 5, cy - 5)
+            + energy(cx + 5, cy - 5)
+            + energy(cx - 5, cy + 5);
+        assert!(
+            axis > diagonal * 10.0,
+            "4-arm spikes at angle 0 must streak along the axes: axis={axis} diag={diagonal}"
+        );
     }
 
     #[test]

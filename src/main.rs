@@ -205,7 +205,7 @@ fn build_generation_log_config(
     } else {
         render::BloomMode::None.as_str()
     };
-    let (palette_harmony, palette_mood) = render::color::current_palette_metadata();
+    let (palette_fingerprint, palette_gate) = render::color::current_palette_metadata();
 
     app::GenerationLogConfig {
         num_steps_sim: args.steps,
@@ -224,8 +224,8 @@ fn build_generation_log_config(
         hdr_scale: render_config.hdr_scale,
         dispersion_strength: render::constants::SPECTRAL_DISPERSION_STRENGTH,
         dispersion_mode: "crisp_off".to_string(),
-        palette_harmony: palette_harmony.clone(),
-        palette_mood: palette_mood.clone(),
+        palette_fingerprint: palette_fingerprint.clone(),
+        palette_gate: palette_gate.clone(),
         min_mass: DEFAULT_MIN_MASS,
         max_mass: DEFAULT_MAX_MASS,
         location: DEFAULT_LOCATION,
@@ -278,8 +278,9 @@ fn main() -> Result<()> {
     let borda_weights = resolve_borda_weights(args.chaos_weight, args.equil_weight, &mut rng);
 
     // Borda search ranks physics quality; the aesthetic pass proxy-renders the
-    // top candidates with this seed's structure mode and keeps the most
-    // paintable orbit (with its trajectory, so no re-simulation is needed).
+    // top candidates with this seed's layer stack (in its projection space)
+    // and keeps the most paintable orbit (with its trajectory, so no
+    // re-simulation is needed).
     let selection = app::run_borda_selection_with_aesthetics(
         &mut rng,
         args.sims,
@@ -287,10 +288,11 @@ fn main() -> Result<()> {
         borda_weights.chaos_weight,
         borda_weights.equil_weight,
         DEFAULT_ESCAPE_THRESHOLD,
-        visual_profile.parameters.structure,
+        visual_profile.parameters.stack,
+        visual_profile.parameters.projection,
     )?;
     let mut positions = selection.positions.clone();
-    let visual_profile = visual_profile.with_structure(selection.structure);
+    let visual_profile = visual_profile.with_stack(selection.stack);
     let resolved_effect_config = visual_profile.effect_config.clone();
     let randomization_log = visual_profile.randomization_log.clone();
 
@@ -301,18 +303,20 @@ fn main() -> Result<()> {
         .sum::<usize>();
 
     info!(
-        "   => Resolved {} visual profile record(s) ({} parameters randomized, {} explicit); preferred mode={} chosen mode={}",
+        "   => Resolved {} visual profile record(s) ({} parameters randomized, {} explicit); preferred stack={} chosen stack={} projection={} symmetry={}",
         randomization_log.effects.len(),
         num_randomized,
         randomization_log.effects.iter().map(|effect| effect.parameters.len()).sum::<usize>()
             - num_randomized,
-        visual_profile.preferred_structure().label(),
-        visual_profile.parameters.structure.label(),
+        visual_profile.preferred_stack().label(),
+        visual_profile.parameters.stack.label(),
+        visual_profile.parameters.projection.label(),
+        visual_profile.parameters.symmetry.label(),
     );
 
     // Seeded viewing orientation: photograph the 3D orbit from the
     // best-composed of several candidate angles.
-    app::apply_view_orientation(&mut positions, &rng, selection.structure);
+    app::apply_view_orientation(&mut positions, &rng, selection.stack);
 
     let drift_config = if args.drift == DriftModeArg::None {
         info!("STAGE 2.5/7: Drift disabled");
@@ -361,12 +365,15 @@ fn main() -> Result<()> {
 
     let scene_traits = visual_profile.parameters.scene_traits();
     info!(
-        "   => Scene traits: structure={} line_weight={:.3} age_ramp={:+.3} exposure_key={:.3} halation={:.3}",
-        scene_traits.structure.label(),
+        "   => Scene traits: stack={} symmetry={} line_weight={:.3} age_ramp={:+.3} exposure_key={:.3} halation={:.3} spikes={:.3} stardust={}",
+        scene_traits.stack.label(),
+        scene_traits.symmetry.label(),
         scene_traits.line_weight,
         scene_traits.age_ramp,
         visual_profile.parameters.exposure_key,
         visual_profile.parameters.halation_strength,
+        scene_traits.spikes.strength,
+        scene_traits.stardust.count,
     );
 
     let levels = app::build_histogram_and_levels(

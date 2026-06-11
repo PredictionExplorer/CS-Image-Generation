@@ -90,10 +90,10 @@ pub struct GenerationLogConfig {
     pub dispersion_strength: f64,
     /// Active spectral dispersion mode.
     pub dispersion_mode: String,
-    /// Seed-selected palette harmony template.
-    pub palette_harmony: String,
-    /// Seed-selected palette mood envelope.
-    pub palette_mood: String,
+    /// Continuous palette genome fingerprint.
+    pub palette_fingerprint: String,
+    /// Palette beauty-gate descriptor (attempts / repair flag).
+    pub palette_gate: String,
     /// Minimum body mass for simulation.
     pub min_mass: f64,
     /// Maximum body mass for simulation.
@@ -176,16 +176,17 @@ pub struct AestheticSelection {
     pub bodies: Vec<Body>,
     /// Borda/physics metrics of the winning candidate.
     pub result: TrajectoryResult,
-    /// Full trajectory of the winning candidate (no re-simulation needed).
+    /// Full trajectory of the winning candidate, already transformed into the
+    /// seed's projection space (no re-simulation needed).
     pub positions: Vec<Vec<Vector3<f64>>>,
     /// Proxy-render aesthetic score of the winning candidate.
     pub aesthetic: render::aesthetic_score::AestheticScore,
     /// Aesthetic score plus the small prior bonus used for tie-breaking.
     pub selection_score: f64,
-    /// Structure mode chosen by adaptive orbit × mode scoring.
-    pub structure: render::StructureMode,
-    /// Structure mode originally rolled by the seed.
-    pub preferred_structure: render::StructureMode,
+    /// Layer stack chosen by adaptive orbit × stack scoring.
+    pub stack: render::LayerStack,
+    /// Layer stack originally rolled by the seed.
+    pub preferred_stack: render::LayerStack,
     /// Number of bounded retry searches used before accepting this candidate.
     pub retry_count: usize,
 }
@@ -199,19 +200,101 @@ pub const AESTHETIC_MAX_RETRIES: usize = 3;
 /// RNG fork domain prefix for bounded aesthetic retry searches.
 const AESTHETIC_RETRY_RNG_DOMAIN_PREFIX: &str = "cosmic-retry/v1/";
 
-fn adaptive_structure_modes(preferred: render::StructureMode) -> Vec<render::StructureMode> {
-    let mut modes = vec![preferred];
-    for mode in [
-        render::StructureMode::CometRibbons,
-        render::StructureMode::TimeChords,
-        render::StructureMode::WebRibbonHybrid,
-        render::StructureMode::OrbitRibbons,
+/// Transform a trajectory into the seed's projection space.
+///
+/// Phase-space projections plot mixed position/velocity coordinates, producing
+/// Lissajous-like curve families impossible in plain position space. Velocity
+/// axes are rescaled to the position extent so mixed-axis projections stay
+/// well-proportioned; the render context refits the bounding box afterwards.
+#[must_use]
+pub fn apply_projection(
+    positions: &[Vec<Vector3<f64>>],
+    projection: render::ProjectionMode,
+) -> Vec<Vec<Vector3<f64>>> {
+    use render::ProjectionMode;
+
+    if projection == ProjectionMode::Position {
+        return positions.to_vec();
+    }
+    let steps = positions.first().map_or(0, Vec::len);
+    if positions.len() < 3 || steps < 2 {
+        return positions.to_vec();
+    }
+
+    // Per-body velocities by forward difference (last step repeats).
+    let dt = constants::DEFAULT_DT;
+    let velocities: Vec<Vec<Vector3<f64>>> = positions
+        .iter()
+        .map(|body| {
+            (0..steps)
+                .map(|step| {
+                    let next = (step + 1).min(steps - 1);
+                    let prev = next.saturating_sub(1);
+                    (body[next] - body[prev]) / dt
+                })
+                .collect()
+        })
+        .collect();
+
+    let extent = |data: &[Vec<Vector3<f64>>], axis: usize| -> f64 {
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for body in data {
+            for p in body {
+                if p[axis].is_finite() {
+                    min = min.min(p[axis]);
+                    max = max.max(p[axis]);
+                }
+            }
+        }
+        (max - min).max(1e-12)
+    };
+    let pos_extent = extent(positions, 0).max(extent(positions, 1));
+    let vel_extent = extent(&velocities, 0).max(extent(&velocities, 1));
+    let velocity_scale = if vel_extent > 1e-12 { pos_extent / vel_extent } else { 1.0 };
+
+    (0..positions.len())
+        .map(|body| {
+            (0..steps)
+                .map(|step| {
+                    let p = positions[body][step];
+                    let v = velocities[body][step] * velocity_scale;
+                    match projection {
+                        ProjectionMode::Position => p,
+                        ProjectionMode::PhasePortrait => Vector3::new(p.x, v.x, p.y),
+                        ProjectionMode::CrossBraid => {
+                            let partner = positions[(body + 1) % 3][step];
+                            Vector3::new(p.x, partner.y, p.z)
+                        }
+                        ProjectionMode::Hodograph => Vector3::new(v.x, v.y, p.z),
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Curated fallback stacks evaluated alongside the seed's own stack.
+///
+/// Keeps adaptive selection bounded while ensuring that if the seed's stack
+/// genuinely does not suit the orbit, a reliable alternative exists.
+fn adaptive_structure_stacks(preferred: render::LayerStack) -> Vec<render::LayerStack> {
+    let mut stacks = vec![preferred];
+    for fallback in [
+        render::LayerStack::solo(preferred.primary),
+        render::LayerStack::solo(render::StructureMode::OrbitRibbons),
+        render::LayerStack::solo(render::StructureMode::TimeChords),
+        render::LayerStack::with_underlay(
+            render::StructureMode::OrbitRibbons,
+            render::StructureMode::TriangleWeb,
+            0.30,
+        ),
     ] {
-        if !modes.contains(&mode) {
-            modes.push(mode);
+        if !stacks.contains(&fallback) {
+            stacks.push(fallback);
         }
     }
-    modes
+    stacks
 }
 
 fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f64, f64) {
@@ -222,21 +305,38 @@ fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f6
     (chaos_weight, chaos_weight * ratio)
 }
 
-fn mode_selection_prior(structure: render::StructureMode, preferred: render::StructureMode) -> f64 {
-    if structure == preferred {
-        return match preferred {
+/// Prior bonus protecting seed identity during adaptive stack selection.
+///
+/// The seed's own stack gets the strongest bonus (larger for the newer
+/// vocabularies so adaptive scoring cannot systematically homogenize the
+/// population back to webs); fallbacks get small nudges.
+fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack) -> f64 {
+    if stack == preferred {
+        return match preferred.primary {
             render::StructureMode::OrbitRibbons
             | render::StructureMode::TimeChords
-            | render::StructureMode::CometRibbons => 0.20,
-            render::StructureMode::WebRibbonHybrid => 0.08,
-            _ => 0.03,
+            | render::StructureMode::NebulaVeil
+            | render::StructureMode::HarmonicWeave
+            | render::StructureMode::StippleConstellation
+            | render::StructureMode::TangentCaustics => 0.20,
+            render::StructureMode::TriangleWeb
+            | render::StructureMode::Duet { .. }
+            | render::StructureMode::Spokes => 0.05,
         };
     }
-    match structure {
-        render::StructureMode::CometRibbons => 0.025,
+    if stack.primary == preferred.primary {
+        // The seed's primary without its secondary layers.
+        return 0.04;
+    }
+    match stack.primary {
         render::StructureMode::TimeChords => 0.020,
-        render::StructureMode::OrbitRibbons => 0.015,
-        render::StructureMode::WebRibbonHybrid => -0.07,
+        render::StructureMode::OrbitRibbons => {
+            if stack.underlay.is_some() {
+                -0.07
+            } else {
+                0.015
+            }
+        }
         _ => 0.0,
     }
 }
@@ -244,25 +344,28 @@ fn mode_selection_prior(structure: render::StructureMode, preferred: render::Str
 fn best_aesthetic_selection_from_shortlist(
     shortlist: Vec<sim::ShortlistedTrajectory>,
     num_steps_sim: usize,
-    preferred_structure: render::StructureMode,
+    preferred_stack: render::LayerStack,
+    projection: render::ProjectionMode,
     retry_count: usize,
 ) -> AestheticSelection {
-    let modes = adaptive_structure_modes(preferred_structure);
+    let stacks = adaptive_structure_stacks(preferred_stack);
     let mut best: Option<AestheticSelection> = None;
 
     for (rank, candidate) in shortlist.into_iter().enumerate() {
-        let positions = sim::get_positions(candidate.bodies.clone(), num_steps_sim).positions;
-        for &structure in &modes {
-            let proxy_params =
-                render::aesthetic_score::ProxyRenderParams::for_candidates(structure);
+        let raw_positions = sim::get_positions(candidate.bodies.clone(), num_steps_sim).positions;
+        // Score candidates in the projection space they will be rendered in,
+        // so the aesthetic gate curates phase-space seeds too.
+        let positions = apply_projection(&raw_positions, projection);
+        for &stack in &stacks {
+            let proxy_params = render::aesthetic_score::ProxyRenderParams::for_candidates(stack);
             let score = render::aesthetic_score::score_trajectory(&positions, proxy_params);
-            let prior_bonus = mode_selection_prior(structure, preferred_structure);
+            let prior_bonus = mode_selection_prior(stack, preferred_stack);
             let selection_score = (score.total + prior_bonus).clamp(0.0, 1.0);
             info!(
-                "   candidate {rank}: orbit idx {} mode={} borda {:.1} aesthetic {:.4} select {:.4} \
+                "   candidate {rank}: orbit idx {} stack={} borda {:.1} aesthetic {:.4} select {:.4} \
                  (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3}, veil {:.3}, crisp {:.3}, void {:.3})",
                 candidate.result.selected_index,
-                structure.label(),
+                stack.label(),
                 candidate.result.total_score_weighted,
                 score.total,
                 selection_score,
@@ -284,8 +387,8 @@ fn best_aesthetic_selection_from_shortlist(
                     positions: positions.clone(),
                     aesthetic: score,
                     selection_score,
-                    structure,
-                    preferred_structure,
+                    stack,
+                    preferred_stack,
                     retry_count,
                 });
             }
@@ -295,13 +398,14 @@ fn best_aesthetic_selection_from_shortlist(
     best.expect("shortlist is non-empty by construction")
 }
 
-/// Run Borda selection, then pick the most paintable candidate and structure mode by proxy render.
+/// Run Borda selection, then pick the most paintable candidate and layer stack by proxy render.
 ///
 /// The Borda search ranks orbits on physics proxies only; this pass re-simulates
 /// the top [`AESTHETIC_SHORTLIST_LEN`] candidates (a negligible cost next to the
 /// search itself), scores each one in image space under the seed's preferred
-/// structure plus a curated set of high-yield alternatives, and returns the
-/// highest-scoring `(orbit, structure)` pair together with its full trajectory.
+/// stack plus a curated set of high-yield alternatives, and returns the
+/// highest-scoring `(orbit, stack)` pair together with its full trajectory in
+/// the seed's projection space.
 pub fn run_borda_selection_with_aesthetics(
     rng: &mut Sha3RandomByteStream,
     num_sims: usize,
@@ -309,9 +413,10 @@ pub fn run_borda_selection_with_aesthetics(
     chaos_weight: f64,
     equil_weight: f64,
     escape_threshold: f64,
-    preferred_structure: render::StructureMode,
+    preferred_stack: render::LayerStack,
+    projection: render::ProjectionMode,
 ) -> Result<AestheticSelection> {
-    let modes = adaptive_structure_modes(preferred_structure);
+    let stacks = adaptive_structure_stacks(preferred_stack);
     let mut global_best: Option<AestheticSelection> = None;
 
     for attempt in 0..=AESTHETIC_MAX_RETRIES {
@@ -358,21 +463,23 @@ pub fn run_borda_selection_with_aesthetics(
         };
 
         info!(
-            "STAGE 1.5/7: Aesthetic scoring of {} shortlisted candidate(s) across {} mode(s): {}",
+            "STAGE 1.5/7: Aesthetic scoring of {} shortlisted candidate(s) across {} stack(s) [projection={}]: {}",
             shortlist.len(),
-            modes.len(),
-            modes.iter().map(|mode| mode.label()).collect::<Vec<_>>().join(", ")
+            stacks.len(),
+            projection.label(),
+            stacks.iter().map(render::LayerStack::label).collect::<Vec<_>>().join(", ")
         );
         let attempt_best = best_aesthetic_selection_from_shortlist(
             shortlist,
             num_steps_sim,
-            preferred_structure,
+            preferred_stack,
+            projection,
             attempt,
         );
         info!(
-            "   => Attempt {attempt} winner: orbit idx {} mode={} score {:.4} (select {:.4}, chaos={attempt_cw:.3}, equil={attempt_ew:.3})",
+            "   => Attempt {attempt} winner: orbit idx {} stack={} score {:.4} (select {:.4}, chaos={attempt_cw:.3}, equil={attempt_ew:.3})",
             attempt_best.result.selected_index,
-            attempt_best.structure.label(),
+            attempt_best.stack.label(),
             attempt_best.aesthetic.total,
             attempt_best.selection_score,
         );
@@ -391,10 +498,10 @@ pub fn run_borda_selection_with_aesthetics(
 
     let selection = global_best.expect("at least one Borda attempt must return candidates");
     info!(
-        "   => Aesthetic winner: orbit idx {} mode={} preferred={} score {:.4} retries={}",
+        "   => Aesthetic winner: orbit idx {} stack={} preferred={} score {:.4} retries={}",
         selection.result.selected_index,
-        selection.structure.label(),
-        selection.preferred_structure.label(),
+        selection.stack.label(),
+        selection.preferred_stack.label(),
         selection.aesthetic.total,
         selection.retry_count,
     );
@@ -452,14 +559,14 @@ fn rotated_sample(
 pub fn apply_view_orientation(
     positions: &mut [Vec<Vector3<f64>>],
     rng: &Sha3RandomByteStream,
-    structure: render::StructureMode,
+    stack: render::LayerStack,
 ) -> (f64, f64, f64) {
     info!(
         "STAGE 2.25/7: Selecting best of {} seeded viewing orientations...",
         VIEW_CANDIDATE_COUNT
     );
     let mut view_rng = rng.fork(VIEW_RNG_DOMAIN);
-    let proxy_params = render::aesthetic_score::ProxyRenderParams::for_view_selection(structure);
+    let proxy_params = render::aesthetic_score::ProxyRenderParams::for_view_selection(stack);
 
     let mut best_triple = (0.0, 0.0, 0.0);
     let mut best_score = f64::NEG_INFINITY;
@@ -746,8 +853,8 @@ pub fn log_generation(
         hdr_scale: config.hdr_scale,
         dispersion_strength: config.dispersion_strength,
         dispersion_mode: config.dispersion_mode.clone(),
-        palette_harmony: config.palette_harmony.clone(),
-        palette_mood: config.palette_mood.clone(),
+        palette_fingerprint: config.palette_fingerprint.clone(),
+        palette_gate: config.palette_gate.clone(),
     };
 
     record.drift_config = if let Some(drift) = drift_config {
@@ -790,8 +897,8 @@ pub fn log_generation(
         weighted_score: best_info.total_score_weighted,
         total_candidates: num_sims * (selection.retry_count + 1),
         discarded_count: best_info.discarded_count,
-        preferred_structure: selection.preferred_structure.label().to_string(),
-        chosen_structure: selection.structure.label().to_string(),
+        preferred_structure: selection.preferred_stack.label(),
+        chosen_structure: selection.stack.label(),
         retry_count: selection.retry_count,
         aesthetic_score: score.total,
         selection_score: selection.selection_score,
@@ -1058,6 +1165,147 @@ mod tests {
         }
     }
 
+    fn projection_fixture() -> Vec<Vec<Vector3<f64>>> {
+        (0..3)
+            .map(|body| {
+                let phase = f64::from(body as u32) * 2.1;
+                (0..256)
+                    .map(|step| {
+                        let t = f64::from(step) * 0.05;
+                        Vector3::new(
+                            (t + phase).cos() * (1.0 + 0.3 * f64::from(body as u32)),
+                            (t * 1.3 + phase).sin(),
+                            0.2 * (t * 0.7).sin(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_position_projection_is_identity() {
+        let positions = projection_fixture();
+        let projected = apply_projection(&positions, render::ProjectionMode::Position);
+        assert_eq!(projected, positions);
+    }
+
+    #[test]
+    fn test_phase_projections_are_finite_deterministic_and_distinct() {
+        let positions = projection_fixture();
+        for projection in [
+            render::ProjectionMode::PhasePortrait,
+            render::ProjectionMode::CrossBraid,
+            render::ProjectionMode::Hodograph,
+        ] {
+            let a = apply_projection(&positions, projection);
+            let b = apply_projection(&positions, projection);
+            assert_eq!(a, b, "{projection:?} must be deterministic");
+
+            assert_eq!(a.len(), positions.len());
+            let mut differs = false;
+            for (body_idx, body) in a.iter().enumerate() {
+                assert_eq!(body.len(), positions[body_idx].len());
+                for (step, p) in body.iter().enumerate() {
+                    assert!(
+                        p.x.is_finite() && p.y.is_finite() && p.z.is_finite(),
+                        "{projection:?} body {body_idx} step {step} not finite: {p:?}"
+                    );
+                    if (p - positions[body_idx][step]).norm() > 1e-9 {
+                        differs = true;
+                    }
+                }
+            }
+            assert!(differs, "{projection:?} must differ from position space");
+        }
+    }
+
+    #[test]
+    fn test_phase_projection_velocity_axes_match_position_scale() {
+        // The velocity axis of the phase portrait must be rescaled into the
+        // same magnitude band as the position axes, or the composition would
+        // collapse onto a line.
+        let positions = projection_fixture();
+        let projected = apply_projection(&positions, render::ProjectionMode::PhasePortrait);
+
+        let extent = |data: &[Vec<Vector3<f64>>], axis: usize| {
+            let mut min = f64::INFINITY;
+            let mut max = f64::NEG_INFINITY;
+            for body in data {
+                for p in body {
+                    min = min.min(p[axis]);
+                    max = max.max(p[axis]);
+                }
+            }
+            max - min
+        };
+        let x_extent = extent(&projected, 0);
+        let v_extent = extent(&projected, 1);
+        assert!(
+            v_extent > x_extent * 0.05 && v_extent < x_extent * 20.0,
+            "velocity axis badly scaled: x={x_extent} v={v_extent}"
+        );
+    }
+
+    #[test]
+    fn test_projection_handles_degenerate_inputs() {
+        let empty: Vec<Vec<Vector3<f64>>> = vec![Vec::new(), Vec::new(), Vec::new()];
+        let projected = apply_projection(&empty, render::ProjectionMode::Hodograph);
+        assert_eq!(projected.len(), 3);
+
+        let single = vec![
+            vec![Vector3::new(1.0, 2.0, 3.0)],
+            vec![Vector3::new(-1.0, 0.0, 1.0)],
+            vec![Vector3::new(0.0, 1.0, -1.0)],
+        ];
+        let projected = apply_projection(&single, render::ProjectionMode::PhasePortrait);
+        assert_eq!(projected, single, "single-step trajectories pass through unchanged");
+    }
+
+    #[test]
+    fn test_adaptive_stacks_include_seed_stack_and_fallbacks() {
+        let preferred = render::LayerStack::with_underlay(
+            render::StructureMode::NebulaVeil,
+            render::StructureMode::StippleConstellation,
+            0.25,
+        );
+        let stacks = adaptive_structure_stacks(preferred);
+
+        assert_eq!(stacks[0], preferred, "seed stack must be evaluated first");
+        assert!(
+            stacks.contains(&render::LayerStack::solo(render::StructureMode::NebulaVeil)),
+            "primary-only variant must be a fallback"
+        );
+        assert!(
+            stacks.contains(&render::LayerStack::solo(render::StructureMode::OrbitRibbons)),
+            "ribbons must be a reliable fallback"
+        );
+        assert!(stacks.len() <= 5, "adaptive evaluation must stay bounded: {}", stacks.len());
+
+        // No duplicates.
+        for (i, stack) in stacks.iter().enumerate() {
+            for other in &stacks[i + 1..] {
+                assert_ne!(stack, other, "duplicate stack in adaptive list");
+            }
+        }
+    }
+
+    #[test]
+    fn test_mode_selection_prior_protects_new_vocabularies() {
+        let veil = render::LayerStack::solo(render::StructureMode::NebulaVeil);
+        let web = render::LayerStack::solo(render::StructureMode::TriangleWeb);
+        let ribbons = render::LayerStack::solo(render::StructureMode::OrbitRibbons);
+
+        assert!(
+            mode_selection_prior(veil, veil) > mode_selection_prior(web, web),
+            "novel vocabularies need a stronger identity prior than the classic web"
+        );
+        assert!(
+            mode_selection_prior(veil, veil) > mode_selection_prior(ribbons, veil),
+            "the seed's own stack must outrank fallbacks at equal aesthetic score"
+        );
+    }
+
     #[test]
     fn test_view_orientation_is_deterministic_and_rigid() {
         let make_positions = || -> Vec<Vec<Vector3<f64>>> {
@@ -1073,8 +1321,9 @@ mod tests {
         let mut b = make_positions();
         let original = make_positions();
 
-        apply_view_orientation(&mut a, &rng, render::StructureMode::TriangleWeb);
-        apply_view_orientation(&mut b, &rng, render::StructureMode::TriangleWeb);
+        let stack = render::LayerStack::solo(render::StructureMode::TriangleWeb);
+        apply_view_orientation(&mut a, &rng, stack);
+        apply_view_orientation(&mut b, &rng, stack);
 
         for body in 0..3 {
             for step in 0..2 {
@@ -1097,7 +1346,7 @@ mod tests {
         // A different seed must produce a different orientation.
         let rng2 = Sha3RandomByteStream::new(&[0x11, 0x22], 100.0, 300.0, 300.0, 1.0);
         let mut c = make_positions();
-        apply_view_orientation(&mut c, &rng2, render::StructureMode::TriangleWeb);
+        apply_view_orientation(&mut c, &rng2, stack);
         let differs = (0..3).any(|body| (a[body][0] - c[body][0]).norm() > 1e-6);
         assert!(differs, "different seeds should view from different angles");
     }

@@ -340,21 +340,69 @@ pub const VELOCITY_THICKNESS_SLOW: f64 = 1.30;
 /// Line thickness multiplier for the fastest whips (hairline flares).
 pub const VELOCITY_THICKNESS_FAST: f64 = 0.62;
 
-/// Alpha multiplier for the faint triangle web layered under hybrid ribbons.
-pub const HYBRID_WEB_ALPHA_SCALE: f64 = 0.30;
-
-/// Alpha multiplier for the reduced web layer in the web+spokes lace mode.
-pub const LACE_WEB_ALPHA_SCALE: f64 = 0.55;
-
-/// Alpha multiplier for the spoke layer in the web+spokes lace mode.
-pub const LACE_SPOKE_ALPHA_SCALE: f64 = 0.45;
-
 /// Alpha multiplier for the faint ribbon underlay beneath time-lagged chords.
 pub const CHORD_RIBBON_UNDERLAY_ALPHA: f64 = 0.30;
 
-/// Per-echo decay multipliers for the comet-ribbons trailing bands
+/// Per-echo decay multipliers for trailing ribbon echo bands
 /// (applied on top of the seed's `ribbon_echo_alpha` at lags 1x, 2x, 3x).
 pub const COMET_ECHO_DECAY: [f64; 3] = [1.0, 0.55, 0.30];
+
+// ========== Layered Vocabulary Constants ==========
+
+/// Veil fill lines are drawn every Nth step (energy-compensated) to keep the
+/// swept-gauze vocabulary within the accumulation budget.
+pub const VEIL_STEP_STRIDE: usize = 2;
+
+/// Weave chords are drawn every Nth step (energy-compensated).
+pub const WEAVE_STEP_STRIDE: usize = 2;
+
+/// Straight segments per tessellated harmonic-weave Bezier chord.
+pub const WEAVE_SEGMENTS: usize = 6;
+
+/// Depth of the slow timeline modulation applied to the weave bow factor.
+pub const WEAVE_BOW_WOBBLE: f64 = 0.45;
+
+/// Minimum simulation steps between stipple dots (guards tiny test scenes).
+pub const STIPPLE_MIN_PITCH_STEPS: usize = 24;
+
+/// Stipple energy relative to the line ink the skipped steps would deposit.
+pub const STIPPLE_ENERGY_FACTOR: f64 = 0.55;
+
+/// Thickness multiplier for ordinary stipple dots.
+pub const STIPPLE_DOT_THICKNESS: f64 = 1.6;
+
+/// Thickness multiplier for the periodic bright pearls.
+pub const STIPPLE_PEARL_THICKNESS: f64 = 2.6;
+
+/// Energy multiplier for the periodic bright pearls.
+pub const STIPPLE_PEARL_ENERGY: f64 = 2.0;
+
+/// Pixels of tangent length per pixel of per-step screen motion.
+pub const TANGENT_VELOCITY_GAIN: f64 = 14.0;
+
+/// Minimum tangent half-length as a fraction of the output short edge.
+pub const TANGENT_MIN_LEN_FRAC: f64 = 0.004;
+
+/// Maximum tangent half-length as a fraction of the output short edge.
+pub const TANGENT_MAX_LEN_FRAC: f64 = 0.045;
+
+/// Reference tangent length (fraction of short edge) for energy normalization.
+pub const TANGENT_REFERENCE_LEN_FRAC: f64 = 0.012;
+
+/// Stardust dot energy relative to the scene's mean per-body trail budget.
+pub const STARDUST_ENERGY_FACTOR: f64 = 0.0012;
+
+// ========== Diffraction Spike Constants ==========
+
+/// Maximum bright sources marched per spike pass (brightest kept).
+pub const SPIKE_MAX_SOURCES: usize = 20_000;
+
+/// Luminance percentile used as the reference brightness for spike thresholds.
+/// Near-maximum so only genuine cores spike, robust to single hot outliers.
+pub const SPIKE_LUMINANCE_PERCENTILE: f64 = 0.9999;
+
+/// Exponential decay constants per arm: energy falls to ~5% at full length.
+pub const SPIKE_DECAY_AT_TIP: f64 = 3.0;
 
 /// Floor of the lightness-to-energy response (keeps dark bodies visible).
 pub const LIGHTNESS_ENERGY_FLOOR: f64 = 0.30;
