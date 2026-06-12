@@ -355,8 +355,12 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     let coc = (avg_z * CRISP_DEPTH_BROADENING_FACTOR).abs();
     let effective_thickness = thickness + coc;
 
-    // Maximum extent of the SDF bounding box
-    let pad = (effective_thickness * 3.0).ceil() as i32;
+    // Maximum extent of the SDF bounding box. The super-Gaussian kernel
+    // `exp(-2(d/t)^4)` drops below `CRISP_LINE_ENERGY_CUTOFF` (0.004) at
+    // d ≈ 1.29·t, so a 1.5·t pad plus one pixel of subsample margin covers
+    // every pixel that can survive the cutoff; a wider box only burns time
+    // on pixels that are discarded anyway (quadratic cost in thickness).
+    let pad = (effective_thickness * 1.5).ceil() as i32 + 1;
 
     let min_x = (x0.min(x1) as i32 - pad).max(0);
     let max_x = (x0.max(x1) as i32 + pad).min(width as i32 - 1);

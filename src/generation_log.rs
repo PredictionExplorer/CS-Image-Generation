@@ -158,6 +158,8 @@ pub struct OrbitInfo {
     pub crispness: f64,
     /// Proxy interior negative-space score.
     pub negative_space: f64,
+    /// Proxy full-bodied stroke score (revisit-rich ink fraction).
+    pub fullness: f64,
 }
 
 impl GenerationRecord {
@@ -251,6 +253,7 @@ impl Default for OrbitInfo {
             veil_fraction: 0.0,
             crispness: 0.0,
             negative_space: 0.0,
+            fullness: 0.0,
         }
     }
 }

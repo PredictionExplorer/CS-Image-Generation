@@ -812,6 +812,37 @@ impl AccumulationParams<'_> {
         ((total as f64 * self.traits.stipple_pitch_fraction).round() as usize)
             .max(constants::STIPPLE_MIN_PITCH_STEPS)
     }
+
+    /// Effective line weight at `step`: the seed's global weight modulated by
+    /// the calligraphic width pulse, a slow sinusoid along the timeline that
+    /// swells and tapers strokes independently of orbital velocity.
+    #[inline]
+    fn line_weight_at(&self, step: usize) -> f64 {
+        let amp = self.traits.width_pulse_amp;
+        if amp <= 0.0 {
+            return self.traits.line_weight;
+        }
+        let phase = std::f64::consts::TAU
+            * (self.traits.width_pulse_freq * self.timeline_t(step)
+                + self.traits.width_pulse_phase);
+        self.traits.line_weight * (1.0 + amp * phase.sin())
+    }
+
+    /// Brightness companion of the width pulse at `step`, running slightly out
+    /// of phase so luminous gradients travel along each stroke independently
+    /// of its swelling (1.0 when the trait is off).
+    #[inline]
+    fn glow_pulse_at(&self, step: usize) -> f64 {
+        let amp = self.traits.width_pulse_amp;
+        if amp <= 0.0 {
+            return 1.0;
+        }
+        let phase = std::f64::consts::TAU
+            * (self.traits.width_pulse_freq * self.timeline_t(step)
+                + self.traits.width_pulse_phase)
+            + std::f64::consts::FRAC_PI_3;
+        1.0 + 0.45 * amp * phase.sin()
+    }
 }
 
 /// Draw the triangle-web stroke set for one step, with motion interpolation.
@@ -844,7 +875,7 @@ fn accumulate_web_step(
                 vertices,
                 edge_dynamics,
                 edge_weights,
-                line_weight: params.traits.line_weight,
+                line_weight: params.line_weight_at(step),
                 hdr_scale: step_hdr_scale,
                 symmetry: params.traits.symmetry,
             },
@@ -877,7 +908,7 @@ fn accumulate_web_step(
                 vertices: sample_vertices,
                 edge_dynamics,
                 edge_weights,
-                line_weight: params.traits.line_weight,
+                line_weight: params.line_weight_at(step),
                 hdr_scale: substep_hdr_scale,
                 symmetry: params.traits.symmetry,
             },
@@ -926,7 +957,7 @@ fn accumulate_ribbon_step(
         vertices,
         edge_dynamics: body_dynamics_at(params, step),
         edge_weights: [1.0; 3],
-        line_weight: params.traits.line_weight,
+        line_weight: params.line_weight_at(step),
         hdr_scale: step_hdr_scale,
         symmetry: params.traits.symmetry,
     };
@@ -983,7 +1014,7 @@ fn accumulate_chord_step(
         vertices,
         edge_dynamics: body_dynamics_at(params, step),
         edge_weights: [1.0; 3],
-        line_weight: params.traits.line_weight,
+        line_weight: params.line_weight_at(step),
         hdr_scale: step_hdr_scale,
         symmetry: params.traits.symmetry,
     };
@@ -1027,7 +1058,7 @@ fn accumulate_spokes_step(
         vertices: sample_vertices,
         edge_dynamics: body_dynamics,
         edge_weights: [1.0; 3],
-        line_weight: params.traits.line_weight,
+        line_weight: params.line_weight_at(step),
         hdr_scale,
         symmetry: params.traits.symmetry,
     };
@@ -1104,7 +1135,7 @@ fn accumulate_veil_step(
                 start,
                 end,
                 hdr_scale: line_energy,
-                thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+                thickness_factor: dynamics.thickness_factor * params.line_weight_at(step),
             },
             params.traits.symmetry,
         );
@@ -1199,7 +1230,7 @@ fn accumulate_weave_step(
                     start: prev,
                     end: point,
                     hdr_scale: segment_energy * dynamics.hdr_multiplier * weight,
-                    thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+                    thickness_factor: dynamics.thickness_factor * params.line_weight_at(step),
                 },
                 params.traits.symmetry,
             );
@@ -1259,7 +1290,7 @@ fn accumulate_stipple_step(
                 start: vertex,
                 end: vertex,
                 hdr_scale: dot_energy * dynamics.hdr_multiplier,
-                thickness_factor: thickness * params.traits.line_weight,
+                thickness_factor: thickness * params.line_weight_at(step),
             },
             params.traits.symmetry,
         );
@@ -1332,7 +1363,7 @@ fn accumulate_tangent_step(
                 start,
                 end,
                 hdr_scale: step_hdr_scale * energy_scale * length_norm * dynamics.hdr_multiplier,
-                thickness_factor: dynamics.thickness_factor * params.traits.line_weight,
+                thickness_factor: dynamics.thickness_factor * params.line_weight_at(step),
             },
             params.traits.symmetry,
         );
@@ -1483,7 +1514,7 @@ fn accumulate_spectral_steps_into_rows(
         };
         let next_in_chunk = if step + 1 < params.step_end { next_vertices } else { None };
 
-        let age_hdr_scale = params.hdr_scale * params.age_factor(step);
+        let age_hdr_scale = params.hdr_scale * params.age_factor(step) * params.glow_pulse_at(step);
         let t_norm = params.timeline_t(step);
 
         for (layer, edge_weights) in layers.iter().zip(layer_edge_weights.iter()) {

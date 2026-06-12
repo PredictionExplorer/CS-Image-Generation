@@ -59,6 +59,11 @@ pub const SPIKE_PROBABILITY: f64 = 0.04;
 /// Probability of the faint stardust background field.
 pub const STARDUST_PROBABILITY: f64 = 0.10;
 
+/// Probability that a seed receives the calligraphic width pulse: a slow
+/// sinusoid along the timeline that swells and tapers stroke width (and, out
+/// of phase, brightness) independently of orbital velocity.
+pub const WIDTH_PULSE_PROBABILITY: f64 = 0.60;
+
 /// RNG fork domain for layer-stack / trait sampling (keeps the legacy main
 /// stream consumption byte-for-byte aligned).
 const STRUCTURE_RNG_DOMAIN: &[u8] = b"cosmic-structure/v2";
@@ -436,6 +441,12 @@ pub struct SceneTraits {
     pub stipple_pearl_every: u8,
     /// Tangent segment length scale for the caustics vocabulary.
     pub tangent_length: f64,
+    /// Amplitude of the calligraphic width pulse along the timeline (0 disables).
+    pub width_pulse_amp: f64,
+    /// Width pulse frequency in full cycles over the timeline.
+    pub width_pulse_freq: f64,
+    /// Width pulse phase offset in turns (0..1).
+    pub width_pulse_phase: f64,
     /// Symmetry operation applied to every stroke.
     pub symmetry: SymmetryOp,
     /// Rare diffraction-spike finishing trait.
@@ -459,6 +470,9 @@ impl Default for SceneTraits {
             stipple_pitch_fraction: 0.000_35,
             stipple_pearl_every: 6,
             tangent_length: 1.0,
+            width_pulse_amp: 0.0,
+            width_pulse_freq: 3.0,
+            width_pulse_phase: 0.0,
             symmetry: SymmetryOp::None,
             spikes: SpikeTraits::disabled(),
             stardust: StardustTraits::disabled(),
@@ -509,6 +523,12 @@ pub struct CosmicSignatureParameters {
     pub stipple_pearl_every: u8,
     /// Tangent segment length scale for the caustics vocabulary.
     pub tangent_length: f64,
+    /// Amplitude of the calligraphic width pulse along the timeline (0 disables).
+    pub width_pulse_amp: f64,
+    /// Width pulse frequency in full cycles over the timeline.
+    pub width_pulse_freq: f64,
+    /// Width pulse phase offset in turns (0..1).
+    pub width_pulse_phase: f64,
     /// Subtle halation (tight `DoG` bloom) strength; 0 disables the pass entirely.
     pub halation_strength: f64,
     /// Halation inner sigma, relative to the output short edge.
@@ -595,6 +615,12 @@ struct ExtendedRolls {
     stardust_seed: u64,
     stardust_lightness: f64,
     stardust_chroma: f64,
+    // Width-pulse rolls are appended at the end of the forked stream so every
+    // earlier trait keeps its pre-existing value for already-known seeds.
+    width_pulse_gate: f64,
+    width_pulse_amp: f64,
+    width_pulse_freq: f64,
+    width_pulse_phase: f64,
 }
 
 fn resolve_extended_rolls(rng: &mut Sha3RandomByteStream) -> ExtendedRolls {
@@ -627,22 +653,29 @@ fn resolve_extended_rolls(rng: &mut Sha3RandomByteStream) -> ExtendedRolls {
         stardust_seed: rng.next_u64(),
         stardust_lightness: rng.next_f64(),
         stardust_chroma: rng.next_f64(),
+        width_pulse_gate: rng.next_f64(),
+        width_pulse_amp: rng.next_f64(),
+        width_pulse_freq: rng.next_f64(),
+        width_pulse_phase: rng.next_f64(),
     }
 }
 
 /// Mode-aware line weight range: ribbon-style vocabularies draw bolder strokes
 /// so the sparse per-body trails read as luminous bands instead of hairlines,
 /// while veil fill lines stay thin so the gauze reads as continuous surface.
+///
+/// All ranges sit well above 1.0: full-bodied strokes with visible width
+/// gradients are the family identity, and hairline seeds read as defects.
 fn line_weight_range(structure: StructureMode) -> (f64, f64) {
     match structure {
-        StructureMode::TriangleWeb | StructureMode::Duet { .. } => (0.75, 1.60),
-        StructureMode::OrbitRibbons => (1.30, 2.20),
-        StructureMode::Spokes => (0.85, 1.50),
-        StructureMode::TimeChords => (0.90, 1.70),
-        StructureMode::NebulaVeil => (0.70, 1.30),
-        StructureMode::HarmonicWeave => (0.85, 1.60),
-        StructureMode::StippleConstellation => (1.40, 2.60),
-        StructureMode::TangentCaustics => (0.75, 1.45),
+        StructureMode::TriangleWeb | StructureMode::Duet { .. } => (1.10, 2.10),
+        StructureMode::OrbitRibbons => (1.70, 2.90),
+        StructureMode::Spokes => (1.20, 2.00),
+        StructureMode::TimeChords => (1.30, 2.40),
+        StructureMode::NebulaVeil => (0.95, 1.70),
+        StructureMode::HarmonicWeave => (1.20, 2.20),
+        StructureMode::StippleConstellation => (1.70, 3.10),
+        StructureMode::TangentCaustics => (1.10, 2.00),
     }
 }
 
@@ -820,6 +853,18 @@ impl CosmicSignatureParameters {
         let stipple_pearl_every = 4 + ((ext.stipple_pearl * 6.0).floor() as u8).min(5);
         let tangent_length = lerp(0.55, 1.60, ext.tangent_length);
 
+        let (width_pulse_amp, width_pulse_freq, width_pulse_phase) =
+            if ext.width_pulse_gate < WIDTH_PULSE_PROBABILITY {
+                let amp_max = if wildcard { 0.70 } else { 0.55 };
+                (
+                    lerp(0.18, amp_max, ext.width_pulse_amp),
+                    lerp(2.0, 7.0, ext.width_pulse_freq),
+                    ext.width_pulse_phase,
+                )
+            } else {
+                (0.0, 3.0, 0.0)
+            };
+
         let (halation_probability, (hal_min, hal_max)) = halation_profile(structure);
         let hal_max = if wildcard { (hal_max * 1.6).min(0.30) } else { hal_max };
         let (halation_strength, halation_radius_scale, halation_softness) =
@@ -893,6 +938,9 @@ impl CosmicSignatureParameters {
             stipple_pitch_fraction,
             stipple_pearl_every,
             tangent_length,
+            width_pulse_amp,
+            width_pulse_freq,
+            width_pulse_phase,
             halation_strength,
             halation_radius_scale,
             halation_softness,
@@ -921,6 +969,9 @@ impl CosmicSignatureParameters {
             stipple_pitch_fraction: self.stipple_pitch_fraction,
             stipple_pearl_every: self.stipple_pearl_every,
             tangent_length: self.tangent_length,
+            width_pulse_amp: self.width_pulse_amp,
+            width_pulse_freq: self.width_pulse_freq,
+            width_pulse_phase: self.width_pulse_phase,
             symmetry: self.symmetry,
             spikes: self.spikes,
             stardust: self.stardust,
@@ -930,7 +981,10 @@ impl CosmicSignatureParameters {
 
 fn resolve_base_parameters(rng: &mut Sha3RandomByteStream) -> ModeIndependentParameters {
     ModeIndependentParameters {
-        hdr_scale: sample_range(rng, 0.155, 0.215),
+        // Floor sits at the energy level of the strongest reference seeds:
+        // below ~0.19 the 1-exp(-E) tonemap renders strokes as faint hairlines
+        // instead of saturated cores with luminous gradient skirts.
+        hdr_scale: sample_range(rng, 0.195, 0.285),
         clip_black: sample_range(rng, 0.0045, 0.0085),
         clip_white: sample_range(rng, 0.9935, 0.9985),
         palette_phase: sample_range(rng, 0.0, 1.0),
@@ -1158,7 +1212,7 @@ fn build_profile_log(
 ) -> RandomizationLog {
     let mode_count = StructureMode::COUNT;
     let mut record = RandomizationRecord::new(COSMIC_SIGNATURE_PROFILE_NAME, true, true);
-    record.add_float("hdr_scale", parameters.hdr_scale, true, (0.155, 0.215));
+    record.add_float("hdr_scale", parameters.hdr_scale, true, (0.195, 0.285));
     record.add_float("clip_black", parameters.clip_black, true, (0.0045, 0.0085));
     record.add_float("clip_white", parameters.clip_white, true, (0.9935, 0.9985));
     record.add_float("palette_phase", parameters.palette_phase, true, (0.0, 1.0));
@@ -1198,7 +1252,7 @@ fn build_profile_log(
     record.add_int("projection", parameters.projection.log_index(), true, (0, 3));
     record.add_int("symmetry", parameters.symmetry.log_index(), true, (0, 26));
     record.add_int("wildcard", usize::from(parameters.wildcard), true, (0, 1));
-    record.add_float("line_weight", parameters.line_weight, true, (0.70, 3.60));
+    record.add_float("line_weight", parameters.line_weight, true, (0.95, 4.20));
     record.add_float("age_ramp", parameters.age_ramp, true, (-0.85, 0.85));
     record.add_float("chord_lag_fraction", parameters.chord_lag_fraction, true, (0.004, 0.020));
     record.add_float("ribbon_echo_alpha", parameters.ribbon_echo_alpha, true, (0.0, 0.42));
@@ -1218,6 +1272,9 @@ fn build_profile_log(
         (4, 9),
     );
     record.add_float("tangent_length", parameters.tangent_length, true, (0.55, 1.60));
+    record.add_float("width_pulse_amp", parameters.width_pulse_amp, true, (0.0, 0.70));
+    record.add_float("width_pulse_freq", parameters.width_pulse_freq, true, (2.0, 7.0));
+    record.add_float("width_pulse_phase", parameters.width_pulse_phase, true, (0.0, 1.0));
     record.add_float("halation_strength", parameters.halation_strength, true, (0.0, 0.30));
     record.add_float("prism_strength", parameters.prism_strength, true, (0.0, 0.30));
     record.add_float("spike_strength", parameters.spikes.strength, true, (0.0, 0.32));
@@ -1464,10 +1521,10 @@ mod tests {
             }
         }
         assert!(
-            ribbon_min >= 1.30,
+            ribbon_min >= 1.70,
             "orbit ribbons must draw bold strokes, found line weight {ribbon_min}"
         );
-        assert!(web_max <= 1.60, "triangle web line weight exceeded mode cap: {web_max}");
+        assert!(web_max <= 2.10, "triangle web line weight exceeded mode cap: {web_max}");
     }
 
     #[test]
@@ -1620,7 +1677,7 @@ mod tests {
         assert_eq!(profile.name, COSMIC_SIGNATURE_PROFILE_NAME);
         assert_eq!(profile.randomization_log.effects.len(), 1);
         assert_eq!(profile.randomization_log.effects[0].effect_name, COSMIC_SIGNATURE_PROFILE_NAME);
-        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 31);
+        assert_eq!(profile.randomization_log.effects[0].parameters.len(), 34);
     }
 
     #[test]

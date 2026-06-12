@@ -192,17 +192,17 @@ pub const DEFAULT_AETHER_CAUSTIC_SOFTNESS: f64 = 3.0;
 // ========== Special Mode Enhancement Constants ==========
 
 /// Production crisp line base thickness in pixels.
-pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.82;
+pub const CRISP_LINE_BASE_THICKNESS: f32 = 0.95;
 
 /// Minimum production line thickness in pixels.
 pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.30;
 
 /// Maximum production line thickness in pixels.
 ///
-/// Raised from 2.40 so that bold ribbon seeds (mode-aware `line_weight` up to
-/// 2.2) and slow, close passages can render genuinely weighty strokes instead
-/// of being clamped flat.
-pub const CRISP_LINE_MAX_THICKNESS: f32 = 3.20;
+/// Raised from 3.20 so that bold seeds (mode-aware `line_weight` up to ~3.1,
+/// wildcard ~4.2, times the slow-arc velocity multiplier) and slow, close
+/// passages can render genuinely weighty strokes instead of being clamped flat.
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 5.50;
 
 /// Offset term of the proximity response in the line width model.
 ///
@@ -211,7 +211,12 @@ pub const CRISP_LINE_MAX_THICKNESS: f32 = 3.20;
 pub const CRISP_LINE_PROXIMITY_OFFSET: f32 = 0.55;
 
 /// Slope term of the proximity response in the line width model (per pixel).
-pub const CRISP_LINE_PROXIMITY_SLOPE: f32 = 0.0125;
+///
+/// Softened from 0.0125: fast passages and drift sweeps produce 40-150 px
+/// per-step strokes, and the steeper slope throttled that whole band to
+/// hairlines no matter how bold the seed's `line_weight` was. Long ruled
+/// chord sheets (300 px+) still resolve gossamer-fine.
+pub const CRISP_LINE_PROXIMITY_SLOPE: f32 = 0.008;
 
 /// Z-depth broadening factor for production stills; zero means no depth-of-field blur.
 pub const CRISP_DEPTH_BROADENING_FACTOR: f32 = 0.0;
@@ -290,7 +295,8 @@ pub fn crisp_line_interpolation_substeps(width: u32, height: u32, max_motion_px:
 #[inline]
 pub fn crisp_tiled_guard_rows(width: u32, height: u32) -> usize {
     let scale = crisp_line_resolution_scale(width, height);
-    let max_footprint = (CRISP_LINE_MAX_THICKNESS * scale * 3.0).ceil() as usize;
+    // Matches the splat bounding-box pad (1.5x thickness + 1 px margin).
+    let max_footprint = (CRISP_LINE_MAX_THICKNESS * scale * 1.5).ceil() as usize + 1;
     HIGH_RES_TILE_GUARD_ROWS.max(max_footprint + HIGH_RES_TILE_GUARD_MARGIN_ROWS)
 }
 
@@ -335,10 +341,10 @@ pub const VELOCITY_NORM_HIGH_QUANTILE: f64 = 0.97;
 pub const VELOCITY_FLARE_GAMMA: f64 = 1.35;
 
 /// Line thickness multiplier for the slowest arcs (bold, contemplative strokes).
-pub const VELOCITY_THICKNESS_SLOW: f64 = 1.30;
+pub const VELOCITY_THICKNESS_SLOW: f64 = 1.55;
 
-/// Line thickness multiplier for the fastest whips (hairline flares).
-pub const VELOCITY_THICKNESS_FAST: f64 = 0.62;
+/// Line thickness multiplier for the fastest whips (fine but never hairline flares).
+pub const VELOCITY_THICKNESS_FAST: f64 = 0.72;
 
 /// Alpha multiplier for the faint ribbon underlay beneath time-lagged chords.
 pub const CHORD_RIBBON_UNDERLAY_ALPHA: f64 = 0.30;

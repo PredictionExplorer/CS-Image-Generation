@@ -96,6 +96,11 @@ struct Args {
     #[arg(long, default_value_t = false)]
     fast_encode: bool,
 
+    /// Render only image.png (skip trajectory video, spectral gallery, and
+    /// sweep video). Fast-iteration mode for parameter-tuning batches.
+    #[arg(long, default_value_t = false)]
+    image_only: bool,
+
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
 
@@ -389,38 +394,49 @@ fn main() -> Result<()> {
     let output_png = format!("{seed_dir}/image.png");
     let output_vid = format!("{seed_dir}/video.mp4");
 
-    let accum_spd = app::render_video(
-        render::SpectralScene::new(&positions, &colors, &body_alphas),
-        &levels,
-        render::SpectralRenderSettings::new(
-            &resolved_effect_config,
-            &render_config,
-            enhancements.aspect_correction,
-        )
-        .with_traits(scene_traits),
-        &output_vid,
-        &output_png,
-        args.fast_encode,
-        false,
-    )?;
+    let spectral_settings = render::SpectralRenderSettings::new(
+        &resolved_effect_config,
+        &render_config,
+        enhancements.aspect_correction,
+    )
+    .with_traits(scene_traits);
 
-    let spectral_dir = format!("{seed_dir}/spectral");
-    let spectral_sweep_path = format!("{seed_dir}/spectral_sweep.mp4");
+    if args.image_only {
+        app::render_still_image(
+            render::SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            spectral_settings,
+            &output_png,
+        )?;
+    } else {
+        let accum_spd = app::render_video(
+            render::SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            spectral_settings,
+            &output_vid,
+            &output_png,
+            args.fast_encode,
+            false,
+        )?;
 
-    app::generate_spectral_gallery(
-        &accum_spd,
-        args.resolution.width,
-        args.resolution.height,
-        &spectral_dir,
-    )?;
+        let spectral_dir = format!("{seed_dir}/spectral");
+        let spectral_sweep_path = format!("{seed_dir}/spectral_sweep.mp4");
 
-    app::generate_spectral_sweep_video(
-        &accum_spd,
-        args.resolution.width,
-        args.resolution.height,
-        &spectral_sweep_path,
-        args.fast_encode,
-    )?;
+        app::generate_spectral_gallery(
+            &accum_spd,
+            args.resolution.width,
+            args.resolution.height,
+            &spectral_dir,
+        )?;
+
+        app::generate_spectral_sweep_video(
+            &accum_spd,
+            args.resolution.width,
+            args.resolution.height,
+            &spectral_sweep_path,
+            args.fast_encode,
+        )?;
+    }
 
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",

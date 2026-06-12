@@ -8,8 +8,18 @@ use crate::error::ConfigError;
 use crate::sim::Sha3RandomByteStream;
 use tracing::info;
 
-const DRIFT_SCALE_MIN: f64 = 0.8;
-const DRIFT_SCALE_RANGE: f64 = 1.2;
+/// Drift scale is capped at 1.30: larger sweeps smear the trajectory across
+/// the whole canvas, which both thins the proximity-based line width and
+/// dilutes per-pixel energy into faint hairline wreaths (validation batches
+/// showed every render at scale >= 1.38 degrading into thin scribbles while
+/// everything <= ~1.1 stayed full-bodied).
+const DRIFT_SCALE_MIN: f64 = 0.85;
+const DRIFT_SCALE_RANGE: f64 = 0.45;
+/// Cap on `scale * arc_fraction`: the camera sweep length dominates per-step
+/// screen motion, and past this product every stroke is drift-stretched into
+/// a uniform thin scribble no matter how bold the seed's line weight is.
+/// Long arcs stay possible at small scales and vice versa.
+const DRIFT_SWEEP_MAX: f64 = 1.30;
 /// Sweeps may now exceed one full orbit (up to 1.35 loops) so long, smeary
 /// camera arcs become part of the population alongside static-ish framings.
 const DRIFT_ARC_FRACTION_RANGE: f64 = 1.35;
@@ -38,8 +48,13 @@ impl ResolvedDriftConfig {
 
     /// Generate random drift configuration with curated ranges.
     pub fn generate_random(rng: &mut Sha3RandomByteStream) -> Self {
-        let scale = DRIFT_SCALE_MIN + rng.next_f64() * DRIFT_SCALE_RANGE; // 0.8 to 2.0
-        let arc_fraction = rng.next_f64() * DRIFT_ARC_FRACTION_RANGE; // 0.0 to 1.35
+        let scale = DRIFT_SCALE_MIN + rng.next_f64() * DRIFT_SCALE_RANGE; // 0.85 to 1.30
+        let mut arc_fraction = rng.next_f64() * DRIFT_ARC_FRACTION_RANGE; // 0.0 to 1.35
+        // Keep the total camera sweep (scale x arc) below the thin-scribble
+        // threshold while preserving each roll's relative position.
+        if scale * arc_fraction > DRIFT_SWEEP_MAX {
+            arc_fraction = DRIFT_SWEEP_MAX / scale;
+        }
         let orbit_eccentricity = DRIFT_ECCENTRICITY_MIN + rng.next_f64() * DRIFT_ECCENTRICITY_RANGE; // 0.4 to 0.5
 
         info!("Generated random drift parameters:");
@@ -109,8 +124,8 @@ mod tests {
         let config = ResolvedDriftConfig::generate_random(&mut rng);
 
         assert!(
-            config.scale >= 0.8 && config.scale <= 2.0,
-            "drift_scale {} outside [0.8, 2.0]",
+            config.scale >= 0.85 && config.scale <= 1.30,
+            "drift_scale {} outside [0.85, 1.30]",
             config.scale
         );
         assert!(config.arc_fraction >= 0.0 && config.arc_fraction <= 1.35);
@@ -146,6 +161,21 @@ mod tests {
     }
 
     #[test]
+    fn test_drift_sweep_product_stays_capped() {
+        for seed_byte in 0u8..=255 {
+            let seed = [seed_byte, 0x5C];
+            let mut rng = Sha3RandomByteStream::new(&seed, 1.0, 2.0, 1.0, 1.0);
+            let config = ResolvedDriftConfig::generate_random(&mut rng);
+            let sweep = config.scale * config.arc_fraction;
+            assert!(
+                sweep <= DRIFT_SWEEP_MAX + 1e-12,
+                "seed {seed_byte} produced drift sweep {sweep} above the {DRIFT_SWEEP_MAX} cap",
+            );
+            assert!(config.arc_fraction >= 0.0);
+        }
+    }
+
+    #[test]
     fn test_drift_scale_always_above_floor() {
         for seed_byte in 0u8..=255 {
             let seed = [seed_byte; 32];
@@ -153,14 +183,14 @@ mod tests {
             let config = ResolvedDriftConfig::generate_random(&mut rng);
 
             assert!(
-                config.scale >= 0.8,
-                "seed {} produced drift_scale {} below 0.8 floor",
+                config.scale >= 0.85,
+                "seed {} produced drift_scale {} below 0.85 floor",
                 seed_byte,
                 config.scale
             );
             assert!(
-                config.scale <= 2.0,
-                "seed {} produced drift_scale {} above 2.0 ceiling",
+                config.scale <= 1.30,
+                "seed {} produced drift_scale {} above 1.30 ceiling",
                 seed_byte,
                 config.scale
             );

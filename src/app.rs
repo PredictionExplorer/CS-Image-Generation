@@ -309,7 +309,10 @@ fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f6
 ///
 /// The seed's own stack gets the strongest bonus (larger for the newer
 /// vocabularies so adaptive scoring cannot systematically homogenize the
-/// population back to webs); fallbacks get small nudges.
+/// population back to webs); fallbacks get small nudges. Ribbons carry no
+/// fallback bonus at all: they proxy-score so well that even a small nudge
+/// collapsed most of the population to `orbit_ribbons`, so they may only
+/// override the preferred stack when genuinely better.
 fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack) -> f64 {
     if stack == preferred {
         return match preferred.primary {
@@ -318,10 +321,10 @@ fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack
             | render::StructureMode::NebulaVeil
             | render::StructureMode::HarmonicWeave
             | render::StructureMode::StippleConstellation
-            | render::StructureMode::TangentCaustics => 0.20,
+            | render::StructureMode::TangentCaustics => 0.24,
             render::StructureMode::TriangleWeb
             | render::StructureMode::Duet { .. }
-            | render::StructureMode::Spokes => 0.05,
+            | render::StructureMode::Spokes => 0.12,
         };
     }
     if stack.primary == preferred.primary {
@@ -334,7 +337,7 @@ fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack
             if stack.underlay.is_some() {
                 -0.07
             } else {
-                0.015
+                0.0
             }
         }
         _ => 0.0,
@@ -360,10 +363,13 @@ fn best_aesthetic_selection_from_shortlist(
             let proxy_params = render::aesthetic_score::ProxyRenderParams::for_candidates(stack);
             let score = render::aesthetic_score::score_trajectory(&positions, proxy_params);
             let prior_bonus = mode_selection_prior(stack, preferred_stack);
-            let selection_score = (score.total + prior_bonus).clamp(0.0, 1.0);
+            // No upper clamp: clamping at 1.0 used to collapse every strong
+            // preferred-stack candidate to the same score, so the first tie in
+            // iteration order won instead of the genuinely best orbit.
+            let selection_score = (score.total + prior_bonus).max(0.0);
             info!(
                 "   candidate {rank}: orbit idx {} stack={} borda {:.1} aesthetic {:.4} select {:.4} \
-                 (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3}, veil {:.3}, crisp {:.3}, void {:.3})",
+                 (coverage {:.3}, balance {:.3}, contrast {:.3}, mix {:.3}, mush {:.3}, veil {:.3}, crisp {:.3}, void {:.3}, full {:.3})",
                 candidate.result.selected_index,
                 stack.label(),
                 candidate.result.total_score_weighted,
@@ -377,6 +383,7 @@ fn best_aesthetic_selection_from_shortlist(
                 score.veil_fraction,
                 score.crispness,
                 score.negative_space,
+                score.fullness,
             );
 
             let improves = best.as_ref().is_none_or(|cur| selection_score > cur.selection_score);
@@ -796,6 +803,23 @@ pub fn render_video(
     Ok(accum_spd)
 }
 
+/// Render only the fully accumulated still image, skipping all video outputs.
+///
+/// This is the fast-iteration path for parameter-tuning batches: the still is
+/// identical in composition to the final video frame but avoids encoding the
+/// trajectory video and the spectral sweep.
+pub fn render_still_image(
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
+    output_png: &str,
+) -> Result<()> {
+    info!("STAGE 7/7: PASS 2 => final still only (IMAGE-ONLY MODE)...");
+    let frame = render::render_final_frame_spectral(scene, levels, settings)?;
+    info!("Saving still image: {}", output_png);
+    Ok(save_image_as_png_16bit(&frame, output_png)?)
+}
+
 /// Generate the spectral gallery: 64 per-bin 16-bit PNGs in `spectral_dir`.
 pub fn generate_spectral_gallery(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
@@ -910,6 +934,7 @@ pub fn log_generation(
         veil_fraction: score.veil_fraction,
         crispness: score.crispness,
         negative_space: score.negative_space,
+        fullness: score.fullness,
     };
 
     // Include randomization log if provided

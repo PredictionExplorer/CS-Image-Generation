@@ -26,7 +26,10 @@ pub const VIEW_SAMPLES_PER_BODY: usize = 6_000;
 /// Ideal lower bound of the inked-area fraction (sparser images start losing points).
 const COVERAGE_BAND_LOW: f64 = 0.10;
 /// Ideal upper bound of the inked-area fraction (denser images start losing points).
-const COVERAGE_BAND_HIGH: f64 = 0.42;
+///
+/// Tightened from 0.42: sprawling compositions spread the fixed ink budget so
+/// thin that production strokes render as faint hairlines.
+const COVERAGE_BAND_HIGH: f64 = 0.36;
 /// Coverage below this scores zero (an almost empty frame).
 const COVERAGE_FLOOR: f64 = 0.01;
 /// Coverage above this scores zero (a fully flooded frame).
@@ -47,6 +50,11 @@ const VEIL_TOLERANCE: f64 = 0.12;
 const NEGATIVE_SPACE_CELLS: usize = 8;
 /// Time-lag fraction used to proxy chord-style modes during scoring.
 const PROXY_CHORD_LAG_FRACTION: f64 = 0.012;
+/// Multiple of the median lit density above which a pixel counts as
+/// revisit-rich (full-bodied accumulation rather than a one-pass scribble).
+const FULLNESS_DENSITY_FACTOR: f64 = 2.5;
+/// Revisit-rich fraction of lit pixels that maps to a full fullness score.
+const FULLNESS_SATURATION: f64 = 0.18;
 
 /// Component metrics of a proxy-rendered aesthetic evaluation.
 #[derive(Clone, Copy, Debug)]
@@ -71,6 +79,10 @@ pub struct AestheticScore {
     pub crispness: f64,
     /// Coarse interior dark-space score in `[0, 1]`.
     pub negative_space: f64,
+    /// Full-bodied stroke score in `[0, 1]`: saturating fraction of lit pixels
+    /// whose accumulated ink is well above the median (repeated passes, slow
+    /// cusps, crossings) rather than one-pass hairline deposits.
+    pub fullness: f64,
 }
 
 impl AestheticScore {
@@ -86,6 +98,7 @@ impl AestheticScore {
             veil_fraction: 0.0,
             crispness: 0.0,
             negative_space: 0.0,
+            fullness: 0.0,
         }
     }
 }
@@ -129,6 +142,7 @@ struct ScoreProfile {
     body_mix_weight: f64,
     crisp_weight: f64,
     negative_weight: f64,
+    fullness_weight: f64,
     veil_tolerance: f64,
     veil_penalty_scale: f64,
 }
@@ -137,23 +151,25 @@ impl ScoreProfile {
     fn for_stack(stack: &LayerStack) -> Self {
         if stack.contains_family(VocabularyFamily::Veil) {
             Self {
-                coverage_weight: 0.28,
-                balance_weight: 0.22,
-                contrast_weight: 0.18,
+                coverage_weight: 0.26,
+                balance_weight: 0.20,
+                contrast_weight: 0.14,
                 body_mix_weight: 0.10,
-                crisp_weight: 0.14,
+                crisp_weight: 0.18,
                 negative_weight: 0.08,
-                veil_tolerance: 0.32,
-                veil_penalty_scale: 0.15,
+                fullness_weight: 0.06,
+                veil_tolerance: 0.22,
+                veil_penalty_scale: 0.30,
             }
         } else {
             Self {
                 coverage_weight: 0.28,
                 balance_weight: 0.18,
-                contrast_weight: 0.14,
+                contrast_weight: 0.10,
                 body_mix_weight: 0.10,
-                crisp_weight: 0.30,
+                crisp_weight: 0.22,
                 negative_weight: 0.10,
+                fullness_weight: 0.12,
                 veil_tolerance: VEIL_TOLERANCE,
                 veil_penalty_scale: 0.40,
             }
@@ -592,6 +608,14 @@ fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
     let contrast = smoothstep(log_spread / 2.3);
     let density_scale = p95.max(p50).max(1e-12);
 
+    // Full-bodied strokes: lit pixels whose ink is well above the median come
+    // from repeated passes (loops, slow cusps, crossings). One-pass hairline
+    // scribbles keep almost every lit pixel near the single-deposit level.
+    let fullness_threshold = p50 * FULLNESS_DENSITY_FACTOR;
+    let revisit_rich = densities.partition_point(|&d| d < fullness_threshold);
+    let revisit_fraction = (densities.len() - revisit_rich) as f64 / densities.len() as f64;
+    let fullness = smoothstep(revisit_fraction / FULLNESS_SATURATION);
+
     // Per-body presence: every body should own a visible share of the ink.
     let ink_sum: f64 = total_ink.iter().sum();
     let min_share = total_ink.iter().fold(f64::INFINITY, |acc, &v| acc.min(v / ink_sum.max(1e-12)));
@@ -644,7 +668,8 @@ fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
         + profile.contrast_weight * contrast
         + profile.body_mix_weight * body_mix
         + profile.crisp_weight * crispness
-        + profile.negative_weight * negative_space;
+        + profile.negative_weight * negative_space
+        + profile.fullness_weight * fullness;
     let total = (weighted - mush_penalty - veil_penalty).clamp(0.0, 1.0);
 
     AestheticScore {
@@ -658,6 +683,7 @@ fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
         veil_fraction,
         crispness,
         negative_space,
+        fullness,
     }
 }
 
@@ -725,7 +751,10 @@ mod tests {
                 let dy = y as f64 - center;
                 if (dx * dx + dy * dy).sqrt() <= radius {
                     let idx = y * size + x;
-                    grid.ink[idx] = [1.0, 0.8, 0.7];
+                    // Dominated by two bodies so the fixture isolates the
+                    // flat-veil signal instead of also saturating the
+                    // three-body mush penalty.
+                    grid.ink[idx] = [1.0, 0.8, 0.1];
                 }
             }
         }
