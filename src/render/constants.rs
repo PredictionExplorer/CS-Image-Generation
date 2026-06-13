@@ -199,10 +199,11 @@ pub const CRISP_LINE_MIN_THICKNESS: f32 = 0.30;
 
 /// Maximum production line thickness in pixels.
 ///
-/// Raised from 3.20 so that bold seeds (mode-aware `line_weight` up to ~3.1,
-/// wildcard ~4.2, times the slow-arc velocity multiplier) and slow, close
-/// passages can render genuinely weighty strokes instead of being clamped flat.
-pub const CRISP_LINE_MAX_THICKNESS: f32 = 5.50;
+/// Sized so bold seeds (mode-aware `line_weight` up to ~3.1, wildcard ~4.2,
+/// times the slow-arc velocity multiplier and width pulse) can express full
+/// calligraphic swells instead of being clamped flat. The splat bounding box
+/// pads only 1.5x thickness, which keeps the cost of wide strokes bounded.
+pub const CRISP_LINE_MAX_THICKNESS: f32 = 7.00;
 
 /// Offset term of the proximity response in the line width model.
 ///
@@ -341,7 +342,10 @@ pub const VELOCITY_NORM_HIGH_QUANTILE: f64 = 0.97;
 pub const VELOCITY_FLARE_GAMMA: f64 = 1.35;
 
 /// Line thickness multiplier for the slowest arcs (bold, contemplative strokes).
-pub const VELOCITY_THICKNESS_SLOW: f64 = 1.55;
+///
+/// Together with `VELOCITY_THICKNESS_FAST` this sets the calligraphic swell
+/// ratio (~2.6x slow vs fast) that makes strokes breathe along the orbit.
+pub const VELOCITY_THICKNESS_SLOW: f64 = 1.90;
 
 /// Line thickness multiplier for the fastest whips (fine but never hairline flares).
 pub const VELOCITY_THICKNESS_FAST: f64 = 0.72;

@@ -332,7 +332,9 @@ fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack
         return 0.04;
     }
     match stack.primary {
-        render::StructureMode::TimeChords => 0.020,
+        // Chord sails carry the family's calligraphic signature, so the
+        // fallback gets a slightly stronger nudge when scores are comparable.
+        render::StructureMode::TimeChords => 0.035,
         render::StructureMode::OrbitRibbons => {
             if stack.underlay.is_some() {
                 -0.07
