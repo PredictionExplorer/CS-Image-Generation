@@ -143,12 +143,16 @@ struct ScoreProfile {
     crisp_weight: f64,
     negative_weight: f64,
     fullness_weight: f64,
+    lushness_weight: f64,
     veil_tolerance: f64,
     veil_penalty_scale: f64,
 }
 
 impl ScoreProfile {
     fn for_stack(stack: &LayerStack) -> Self {
+        let has_lush_weave = stack.contains_family(VocabularyFamily::Weave)
+            && (stack.contains_family(VocabularyFamily::Trails)
+                || stack.contains_family(VocabularyFamily::Chords));
         if stack.contains_family(VocabularyFamily::Veil) {
             Self {
                 coverage_weight: 0.26,
@@ -158,8 +162,22 @@ impl ScoreProfile {
                 crisp_weight: 0.18,
                 negative_weight: 0.08,
                 fullness_weight: 0.06,
+                lushness_weight: 0.08,
                 veil_tolerance: 0.22,
                 veil_penalty_scale: 0.30,
+            }
+        } else if has_lush_weave {
+            Self {
+                coverage_weight: 0.22,
+                balance_weight: 0.15,
+                contrast_weight: 0.12,
+                body_mix_weight: 0.09,
+                crisp_weight: 0.10,
+                negative_weight: 0.13,
+                fullness_weight: 0.17,
+                lushness_weight: 0.22,
+                veil_tolerance: 0.44,
+                veil_penalty_scale: 0.12,
             }
         } else {
             Self {
@@ -170,6 +188,7 @@ impl ScoreProfile {
                 crisp_weight: 0.22,
                 negative_weight: 0.10,
                 fullness_weight: 0.12,
+                lushness_weight: 0.06,
                 veil_tolerance: VEIL_TOLERANCE,
                 veil_penalty_scale: 0.40,
             }
@@ -193,6 +212,25 @@ fn coverage_band_score(coverage: f64) -> f64 {
     }
     if coverage > COVERAGE_BAND_HIGH {
         return smoothstep((COVERAGE_CEIL - coverage) / (COVERAGE_CEIL - COVERAGE_BAND_HIGH));
+    }
+    1.0
+}
+
+/// Reward full-frame luminous structure without accepting flooded mush.
+fn lush_coverage_score(coverage: f64) -> f64 {
+    const LOW: f64 = 0.12;
+    const IDEAL_LOW: f64 = 0.24;
+    const IDEAL_HIGH: f64 = 0.46;
+    const HIGH: f64 = 0.66;
+
+    if coverage <= LOW || coverage >= HIGH {
+        return 0.0;
+    }
+    if coverage < IDEAL_LOW {
+        return smoothstep((coverage - LOW) / (IDEAL_LOW - LOW));
+    }
+    if coverage > IDEAL_HIGH {
+        return smoothstep((HIGH - coverage) / (HIGH - IDEAL_HIGH));
     }
     1.0
 }
@@ -659,6 +697,12 @@ fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
     let veil_fraction = if lit_for_edges > 0 { veiled as f64 / lit_for_edges as f64 } else { 0.0 };
     let crispness = if lit_for_edges > 0 { crisp as f64 / lit_for_edges as f64 } else { 0.0 };
     let negative_space = negative_space_score(&density_map, grid.size);
+    let lushness = (0.30 * lush_coverage_score(coverage)
+        + 0.26 * fullness
+        + 0.20 * negative_space
+        + 0.14 * contrast
+        + 0.10 * smoothstep(crispness / 0.45))
+    .clamp(0.0, 1.0);
     let veil_penalty = ((veil_fraction - profile.veil_tolerance).max(0.0)
         / (1.0 - profile.veil_tolerance))
         * profile.veil_penalty_scale;
@@ -669,7 +713,8 @@ fn score_grid(grid: &InkGrid, profile: ScoreProfile) -> AestheticScore {
         + profile.body_mix_weight * body_mix
         + profile.crisp_weight * crispness
         + profile.negative_weight * negative_space
-        + profile.fullness_weight * fullness;
+        + profile.fullness_weight * fullness
+        + profile.lushness_weight * lushness;
     let total = (weighted - mush_penalty - veil_penalty).clamp(0.0, 1.0);
 
     AestheticScore {
@@ -934,6 +979,44 @@ mod tests {
         assert_eq!(coverage_band_score(0.9), 0.0);
         assert!(coverage_band_score(0.2) > coverage_band_score(0.03));
         assert!((coverage_band_score(0.25) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn lush_coverage_rewards_full_but_not_flooded_frames() {
+        assert_eq!(lush_coverage_score(0.05), 0.0);
+        assert_eq!(lush_coverage_score(0.75), 0.0);
+        assert!(lush_coverage_score(0.34) > lush_coverage_score(0.14));
+        assert!((lush_coverage_score(0.36) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ribbon_weave_stack_gets_lushness_credit() {
+        let positions = looping_positions(4_000, 7.0);
+        let solo = score_trajectory(
+            &positions,
+            ProxyRenderParams::for_candidates(LayerStack::solo(StructureMode::OrbitRibbons)),
+        );
+        let layered = score_trajectory(
+            &positions,
+            ProxyRenderParams::for_candidates(LayerStack::with_underlay(
+                StructureMode::OrbitRibbons,
+                StructureMode::HarmonicWeave,
+                0.29,
+            )),
+        );
+
+        assert!(
+            layered.coverage > solo.coverage,
+            "weave underlay should create richer coverage: solo={} layered={}",
+            solo.coverage,
+            layered.coverage
+        );
+        assert!(
+            layered.total > solo.total * 0.80,
+            "lush ribbon+weave stack should not be treated as a defect: solo={} layered={}",
+            solo.total,
+            layered.total
+        );
     }
 
     #[test]

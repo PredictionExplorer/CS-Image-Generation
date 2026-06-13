@@ -282,19 +282,34 @@ fn adaptive_structure_stacks(preferred: render::LayerStack) -> Vec<render::Layer
     let mut stacks = vec![preferred];
     for fallback in [
         render::LayerStack::solo(preferred.primary),
+        render::LayerStack {
+            primary: render::StructureMode::OrbitRibbons,
+            underlay: Some(render::StackLayer {
+                vocabulary: render::StructureMode::HarmonicWeave,
+                alpha: 0.29,
+            }),
+            accent: None,
+        },
+        render::LayerStack {
+            primary: render::StructureMode::TimeChords,
+            underlay: Some(render::StackLayer {
+                vocabulary: render::StructureMode::HarmonicWeave,
+                alpha: 0.24,
+            }),
+            accent: None,
+        },
         render::LayerStack::solo(render::StructureMode::OrbitRibbons),
         render::LayerStack::solo(render::StructureMode::TimeChords),
-        render::LayerStack::with_underlay(
-            render::StructureMode::OrbitRibbons,
-            render::StructureMode::TriangleWeb,
-            0.30,
-        ),
     ] {
         if !stacks.contains(&fallback) {
             stacks.push(fallback);
         }
     }
     stacks
+}
+
+fn has_underlay(stack: render::LayerStack, vocabulary: render::StructureMode) -> bool {
+    stack.underlay.is_some_and(|layer| layer.vocabulary == vocabulary)
 }
 
 fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f64, f64) {
@@ -309,10 +324,9 @@ fn retry_borda_weights(chaos_weight: f64, rng: &mut Sha3RandomByteStream) -> (f6
 ///
 /// The seed's own stack gets the strongest bonus (larger for the newer
 /// vocabularies so adaptive scoring cannot systematically homogenize the
-/// population back to webs); fallbacks get small nudges. Ribbons carry no
-/// fallback bonus at all: they proxy-score so well that even a small nudge
-/// collapsed most of the population to `orbit_ribbons`, so they may only
-/// override the preferred stack when genuinely better.
+/// population back to webs); fallbacks get small nudges. The strongest fallback
+/// nudge goes to ribbon/chord + harmonic-weave stacks because the proxy score
+/// otherwise underrates their lush coverage relative to sparse solo ribbons.
 fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack) -> f64 {
     if stack == preferred {
         return match preferred.primary {
@@ -321,11 +335,19 @@ fn mode_selection_prior(stack: render::LayerStack, preferred: render::LayerStack
             | render::StructureMode::NebulaVeil
             | render::StructureMode::HarmonicWeave
             | render::StructureMode::StippleConstellation
-            | render::StructureMode::TangentCaustics => 0.24,
+            | render::StructureMode::TangentCaustics => 0.22,
             render::StructureMode::TriangleWeb
             | render::StructureMode::Duet { .. }
             | render::StructureMode::Spokes => 0.12,
         };
+    }
+    if has_underlay(stack, render::StructureMode::HarmonicWeave)
+        && matches!(
+            stack.primary,
+            render::StructureMode::OrbitRibbons | render::StructureMode::TimeChords
+        )
+    {
+        return 0.075;
     }
     if stack.primary == preferred.primary {
         // The seed's primary without its secondary layers.
@@ -1307,7 +1329,15 @@ mod tests {
             stacks.contains(&render::LayerStack::solo(render::StructureMode::OrbitRibbons)),
             "ribbons must be a reliable fallback"
         );
-        assert!(stacks.len() <= 5, "adaptive evaluation must stay bounded: {}", stacks.len());
+        assert!(
+            stacks.contains(&render::LayerStack::with_underlay(
+                render::StructureMode::OrbitRibbons,
+                render::StructureMode::HarmonicWeave,
+                0.29,
+            )),
+            "target-like ribbon+weave stack must be evaluated"
+        );
+        assert!(stacks.len() <= 6, "adaptive evaluation must stay bounded: {}", stacks.len());
 
         // No duplicates.
         for (i, stack) in stacks.iter().enumerate() {

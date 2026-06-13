@@ -68,6 +68,7 @@ class AestheticMetrics(typing.NamedTuple):
     luminance_spread: float
     veil_fraction: float
     crispness: float
+    lushness: float
     score: float
 
 
@@ -101,6 +102,18 @@ def _decode_rgb_frame(image_path: Path, size: int) -> bytes | None:
 def _coverage_band_score(coverage: float) -> float:
     """Map an ink-coverage fraction onto [0, 1] with a flat ideal band."""
     floor, band_low, band_high, ceil = 0.02, 0.06, 0.45, 0.85
+    if coverage <= floor or coverage >= ceil:
+        return 0.0
+    if coverage < band_low:
+        return (coverage - floor) / (band_low - floor)
+    if coverage > band_high:
+        return (ceil - coverage) / (ceil - band_high)
+    return 1.0
+
+
+def _lush_coverage_score(coverage: float) -> float:
+    """Reward substantial luminous coverage without accepting flooded frames."""
+    floor, band_low, band_high, ceil = 0.10, 0.22, 0.46, 0.68
     if coverage <= floor or coverage >= ceil:
         return 0.0
     if coverage < band_low:
@@ -150,7 +163,7 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
 
     coverage = len(lit_lumas) / total_pixels
     if not lit_lumas:
-        return AestheticMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        return AestheticMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     # Hasler-Suesstrunk colorfulness over lit pixels, normalized to ~[0, 1].
     if len(rg_values) > 1:
@@ -201,17 +214,26 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
 
     veil_fraction = veiled / lit if lit else 0.0
     crispness = crisp / lit if lit else 0.0
-    veil_penalty = max(veil_fraction - 0.12, 0.0) / 0.88
+    lushness = min(
+        0.34 * _lush_coverage_score(coverage)
+        + 0.22 * min(luminance_spread / 0.38, 1.0)
+        + 0.20 * colorfulness
+        + 0.14 * hue_entropy
+        + 0.10 * min(crispness / 0.45, 1.0),
+        1.0,
+    )
+    veil_penalty = max(veil_fraction - 0.22, 0.0) / 0.78
 
     score = 100.0 * (
-        0.25 * _coverage_band_score(coverage)
-        + 0.20 * colorfulness
-        + 0.16 * hue_entropy
-        + 0.14 * min(luminance_spread / 0.45, 1.0)
-        + 0.20 * crispness
+        0.20 * _coverage_band_score(coverage)
+        + 0.18 * lushness
+        + 0.18 * colorfulness
+        + 0.14 * hue_entropy
+        + 0.12 * min(luminance_spread / 0.45, 1.0)
+        + 0.13 * crispness
         + 0.05 * (1.0 - veil_fraction)
     )
-    score = max(0.0, score - 40.0 * veil_penalty)
+    score = max(0.0, score - 24.0 * veil_penalty)
     return AestheticMetrics(
         coverage,
         colorfulness,
@@ -219,5 +241,6 @@ def compute_aesthetic_metrics(image_path: Path) -> AestheticMetrics | None:
         luminance_spread,
         veil_fraction,
         crispness,
+        lushness,
         score,
     )

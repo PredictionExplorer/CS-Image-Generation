@@ -97,7 +97,7 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
 
     logger.debug(
         "[%d] QA    %s  coverage=%.3f colorfulness=%.3f hue_entropy=%.3f "
-        "spread=%.3f veil=%.3f crisp=%.3f",
+        "spread=%.3f veil=%.3f crisp=%.3f lush=%.3f",
         run_id,
         seed,
         metrics.coverage,
@@ -106,6 +106,7 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
         metrics.luminance_spread,
         metrics.veil_fraction,
         metrics.crispness,
+        metrics.lushness,
     )
     return metrics.score
 

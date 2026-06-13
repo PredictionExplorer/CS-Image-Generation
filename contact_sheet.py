@@ -152,8 +152,8 @@ def tile_sheet(images: list[Path], columns: int, output: Path) -> None:
 
 
 def report(entries: list[SheetEntry]) -> None:
-    print("\nseed            score  coverage  colorful  hue-ent  spread   veil  crisp   time")
-    print("-" * 86)
+    print("\nseed            score  coverage  colorful  hue-ent  spread   veil  crisp   lush   time")
+    print("-" * 94)
     scored = [entry for entry in entries if entry.metrics is not None]
     for entry in sorted(scored, key=lambda e: e.metrics.score if e.metrics else 0.0):
         m = entry.metrics
@@ -162,12 +162,13 @@ def report(entries: list[SheetEntry]) -> None:
         print(
             f"{entry.seed:<15s} {m.score:5.1f}  {m.coverage:8.3f}  {m.colorfulness:8.3f}"
             f"  {m.hue_entropy:7.3f}  {m.luminance_spread:6.3f}"
-            f"  {m.veil_fraction:5.3f}  {m.crispness:5.3f}  {fmt_duration(entry.elapsed):>5s}"
+            f"  {m.veil_fraction:5.3f}  {m.crispness:5.3f}  {m.lushness:5.3f}"
+            f"  {fmt_duration(entry.elapsed):>5s}"
             f"{flag}"
         )
     if scored:
         mean_score = sum(e.metrics.score for e in scored if e.metrics) / len(scored)
-        print("-" * 86)
+        print("-" * 94)
         print(f"{len(scored)} rendered, mean score {mean_score:.1f}")
     failed = [entry.seed for entry in entries if entry.image is None]
     if failed:

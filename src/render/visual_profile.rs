@@ -29,15 +29,15 @@ pub const COSMIC_SIGNATURE_PROFILE_NAME: &str = "cosmic_signature";
 /// Probability that a seed receives the rare prism (chromatic bloom) trait.
 pub const PRISM_PROBABILITY: f64 = 0.05;
 
-/// Probability that an `OrbitRibbons` seed layers a time-lagged echo band.
+/// Probability that a trail-bearing seed layers a time-lagged echo band.
 ///
 /// Echo bands are the ribbon vocabulary's version of the chord sails (ruled
 /// sheets between a trail and its time-lagged copy), so they run near-always
 /// to keep the calligraphic swell-and-taper look dominant.
-pub const RIBBON_ECHO_PROBABILITY: f64 = 0.85;
+pub const RIBBON_ECHO_PROBABILITY: f64 = 0.94;
 
 /// Probability that a seed composes a second (underlay) vocabulary layer.
-pub const UNDERLAY_PROBABILITY: f64 = 0.40;
+pub const UNDERLAY_PROBABILITY: f64 = 0.58;
 
 /// Probability that a seed adds a rare third (accent) vocabulary layer.
 pub const ACCENT_PROBABILITY: f64 = 0.10;
@@ -55,7 +55,7 @@ pub const ROTATIONAL_PROBABILITY: f64 = 0.07;
 pub const DIHEDRAL_PROBABILITY: f64 = 0.05;
 
 /// Probability that a seed renders a phase-space projection instead of position space.
-pub const PHASE_PROJECTION_PROBABILITY: f64 = 0.08;
+pub const PHASE_PROJECTION_PROBABILITY: f64 = 0.18;
 
 /// Probability of the rare diffraction-spike (astrophoto star cross) trait.
 pub const SPIKE_PROBABILITY: f64 = 0.04;
@@ -68,7 +68,7 @@ pub const STARDUST_PROBABILITY: f64 = 0.10;
 /// of phase, brightness) independently of orbital velocity. Near-universal so
 /// even uniform-speed orbits breathe; the rare exceptions keep pure
 /// velocity-calligraphy seeds in the population.
-pub const WIDTH_PULSE_PROBABILITY: f64 = 0.95;
+pub const WIDTH_PULSE_PROBABILITY: f64 = 0.98;
 
 /// RNG fork domain for layer-stack / trait sampling (keeps the legacy main
 /// stream consumption byte-for-byte aligned).
@@ -675,11 +675,11 @@ fn resolve_extended_rolls(rng: &mut Sha3RandomByteStream) -> ExtendedRolls {
 fn line_weight_range(structure: StructureMode) -> (f64, f64) {
     match structure {
         StructureMode::TriangleWeb | StructureMode::Duet { .. } => (1.10, 2.10),
-        StructureMode::OrbitRibbons => (1.70, 2.90),
+        StructureMode::OrbitRibbons => (1.85, 3.05),
         StructureMode::Spokes => (1.20, 2.00),
-        StructureMode::TimeChords => (1.30, 2.40),
+        StructureMode::TimeChords => (1.45, 2.55),
         StructureMode::NebulaVeil => (0.95, 1.70),
-        StructureMode::HarmonicWeave => (1.20, 2.20),
+        StructureMode::HarmonicWeave => (1.35, 2.45),
         StructureMode::StippleConstellation => (1.70, 3.10),
         StructureMode::TangentCaustics => (1.10, 2.00),
     }
@@ -688,10 +688,11 @@ fn line_weight_range(structure: StructureMode) -> (f64, f64) {
 /// Mode-aware halation gate: sparse vocabularies always glow, dense webs less often.
 fn halation_profile(structure: StructureMode) -> (f64, (f64, f64)) {
     match structure {
-        StructureMode::OrbitRibbons => (1.0, (0.10, 0.18)),
+        StructureMode::OrbitRibbons => (1.0, (0.11, 0.20)),
         StructureMode::StippleConstellation => (1.0, (0.10, 0.20)),
-        StructureMode::TimeChords | StructureMode::TangentCaustics => (0.60, (0.06, 0.15)),
-        StructureMode::HarmonicWeave => (0.55, (0.05, 0.14)),
+        StructureMode::TimeChords => (0.82, (0.08, 0.18)),
+        StructureMode::HarmonicWeave => (0.74, (0.07, 0.17)),
+        StructureMode::TangentCaustics => (0.60, (0.06, 0.15)),
         StructureMode::Spokes => (0.50, (0.05, 0.14)),
         StructureMode::NebulaVeil => (0.35, (0.04, 0.12)),
         StructureMode::TriangleWeb | StructureMode::Duet { .. } => (0.40, (0.05, 0.14)),
@@ -703,28 +704,27 @@ fn halation_profile(structure: StructureMode) -> (f64, (f64, f64)) {
 /// Consumption is one roll (plus one sub-roll for the duet edge), matching the
 /// legacy layout so downstream main-stream rolls stay aligned.
 ///
-/// Calligraphic vocabularies lead: time chords (ruled-surface sails with fold
-/// caustics) and orbit ribbons (velocity-swelled trails) carry the family's
-/// signature swell-and-taper look, with the remaining vocabularies kept as
-/// minority styles for variety.
+/// Calligraphic vocabularies lead: orbit ribbons, time chords, and harmonic
+/// weave carry the lush swell-and-taper look, with the remaining vocabularies
+/// kept as minority styles for variety.
 fn resolve_structure_mode(rng: &mut Sha3RandomByteStream) -> StructureMode {
     let roll = rng.next_f64();
-    if roll < 0.10 {
+    if roll < 0.07 {
         StructureMode::TriangleWeb
-    } else if roll < 0.30 {
-        StructureMode::OrbitRibbons
     } else if roll < 0.35 {
+        StructureMode::OrbitRibbons
+    } else if roll < 0.38 {
         let dropped_edge = ((rng.next_f64() * 3.0).floor() as u8).min(2);
         StructureMode::Duet { dropped_edge }
-    } else if roll < 0.39 {
+    } else if roll < 0.41 {
         StructureMode::Spokes
-    } else if roll < 0.63 {
+    } else if roll < 0.68 {
         StructureMode::TimeChords
-    } else if roll < 0.71 {
+    } else if roll < 0.74 {
         StructureMode::NebulaVeil
-    } else if roll < 0.83 {
+    } else if roll < 0.87 {
         StructureMode::HarmonicWeave
-    } else if roll < 0.92 {
+    } else if roll < 0.94 {
         StructureMode::StippleConstellation
     } else {
         StructureMode::TangentCaustics
@@ -733,18 +733,18 @@ fn resolve_structure_mode(rng: &mut Sha3RandomByteStream) -> StructureMode {
 
 /// Weighted layer-vocabulary table used for underlay/accent picks.
 ///
-/// Veil leads: translucent gauze beneath line work is the highest-yield
-/// combination, with time chords next so calligraphic sails appear beneath
-/// other vocabularies too. Duet never appears as a secondary layer (a missing
-/// edge reads as a glitch under another structure).
+/// Harmonic weave and time chords lead: bowed lace and ruled sails are the
+/// highest-yield underlays for the target lush-ribbon family. Duet never
+/// appears as a secondary layer (a missing edge reads as a glitch under another
+/// structure).
 const LAYER_VOCAB_TABLE: [(StructureMode, f64); 8] = [
-    (StructureMode::NebulaVeil, 0.26),
-    (StructureMode::TriangleWeb, 0.12),
-    (StructureMode::OrbitRibbons, 0.15),
+    (StructureMode::NebulaVeil, 0.18),
+    (StructureMode::TriangleWeb, 0.08),
+    (StructureMode::OrbitRibbons, 0.16),
     (StructureMode::TimeChords, 0.18),
-    (StructureMode::Spokes, 0.07),
-    (StructureMode::StippleConstellation, 0.10),
-    (StructureMode::HarmonicWeave, 0.07),
+    (StructureMode::Spokes, 0.05),
+    (StructureMode::StippleConstellation, 0.08),
+    (StructureMode::HarmonicWeave, 0.22),
     (StructureMode::TangentCaustics, 0.05),
 ];
 
@@ -794,10 +794,12 @@ fn resolve_projection(rolls: &ExtendedRolls) -> ProjectionMode {
     if rolls.projection_roll >= PHASE_PROJECTION_PROBABILITY {
         return ProjectionMode::Position;
     }
-    match (rolls.projection_variant * 3.0).floor() as u8 {
-        0 => ProjectionMode::PhasePortrait,
-        1 => ProjectionMode::CrossBraid,
-        _ => ProjectionMode::Hodograph,
+    if rolls.projection_variant < 0.25 {
+        ProjectionMode::PhasePortrait
+    } else if rolls.projection_variant < 0.75 {
+        ProjectionMode::CrossBraid
+    } else {
+        ProjectionMode::Hodograph
     }
 }
 
@@ -806,8 +808,8 @@ fn resolve_stack(primary: StructureMode, rolls: &ExtendedRolls, wildcard: bool) 
     if rolls.underlay_gate < UNDERLAY_PROBABILITY {
         let excluded = [primary.family()];
         if let Some(vocab) = pick_layer_vocabulary(rolls.underlay_pick, &excluded) {
-            let alpha_max = if wildcard { 0.65 } else { 0.45 };
-            let alpha = log_lerp(0.08, alpha_max, rolls.underlay_alpha);
+            let alpha_max = if wildcard { 0.70 } else { 0.54 };
+            let alpha = log_lerp(0.12, alpha_max, rolls.underlay_alpha);
             stack.underlay = Some(StackLayer { vocabulary: vocab, alpha });
         }
     }
@@ -818,7 +820,7 @@ fn resolve_stack(primary: StructureMode, rolls: &ExtendedRolls, wildcard: bool) 
             excluded.push(underlay.vocabulary.family());
         }
         if let Some(vocab) = pick_layer_vocabulary(rolls.accent_pick, &excluded) {
-            let alpha = log_lerp(0.04, 0.16, rolls.accent_alpha);
+            let alpha = log_lerp(0.05, 0.18, rolls.accent_alpha);
             stack.accent = Some(StackLayer { vocabulary: vocab, alpha });
         }
     }
@@ -841,22 +843,29 @@ impl CosmicSignatureParameters {
         let lw_max = if wildcard { lw_max * 1.35 } else { lw_max };
         let line_weight = lerp(lw_min, lw_max, rolls.line_weight);
         let age_span = if wildcard { 0.85 } else { 0.6 };
-        let age_ramp = lerp(-age_span, age_span, rolls.age_ramp);
+        let age_ramp = if stack.contains_family(VocabularyFamily::Trails) {
+            lerp(-age_span, age_span * 0.45, rolls.age_ramp)
+        } else {
+            lerp(-age_span, age_span, rolls.age_ramp)
+        };
         // Longer lags rule wider, more dramatic sails between loop windings.
         let chord_lag_fraction = lerp(0.006, 0.026, rolls.chord_lag_fraction);
 
         let stack_has_trails = stack.contains_family(VocabularyFamily::Trails);
         let ribbon_echo_alpha = if stack_has_trails {
             if rolls.ribbon_echo_gate < RIBBON_ECHO_PROBABILITY {
-                lerp(0.22, 0.50, rolls.ribbon_echo_alpha)
+                lerp(0.30, 0.56, rolls.ribbon_echo_alpha)
             } else {
                 0.0
             }
         } else {
             0.0
         };
-        // u8 cast: floor of a value in [0, 3) plus one.
-        let echo_layers = 1 + ((ext.echo_layers * 3.0).floor() as u8).min(2);
+        let echo_layers = if stack_has_trails {
+            if ext.echo_layers < 0.18 { 2 } else { 3 }
+        } else {
+            1 + ((ext.echo_layers * 3.0).floor() as u8).min(2)
+        };
 
         // u8 cast: floor of bounded rolls.
         let veil_max = if wildcard { 12.0 } else { 9.0 };
@@ -870,7 +879,7 @@ impl CosmicSignatureParameters {
             if ext.width_pulse_gate < WIDTH_PULSE_PROBABILITY {
                 let amp_max = if wildcard { 0.70 } else { 0.60 };
                 (
-                    lerp(0.25, amp_max, ext.width_pulse_amp),
+                    lerp(0.32, amp_max, ext.width_pulse_amp),
                     lerp(2.0, 8.0, ext.width_pulse_freq),
                     ext.width_pulse_phase,
                 )
@@ -997,12 +1006,12 @@ fn resolve_base_parameters(rng: &mut Sha3RandomByteStream) -> ModeIndependentPar
         // Floor sits at the energy level of the strongest reference seeds:
         // below ~0.19 the 1-exp(-E) tonemap renders strokes as faint hairlines
         // instead of saturated cores with luminous gradient skirts.
-        hdr_scale: sample_range(rng, 0.195, 0.285),
+        hdr_scale: sample_range(rng, 0.225, 0.295),
         clip_black: sample_range(rng, 0.0045, 0.0085),
         clip_white: sample_range(rng, 0.9935, 0.9985),
         palette_phase: sample_range(rng, 0.0, 1.0),
         edge_energy: sample_range(rng, 0.92, 1.18),
-        exposure_key: sample_range(rng, 0.85, 1.12),
+        exposure_key: sample_range(rng, 0.94, 1.16),
     }
 }
 
@@ -1225,12 +1234,12 @@ fn build_profile_log(
 ) -> RandomizationLog {
     let mode_count = StructureMode::COUNT;
     let mut record = RandomizationRecord::new(COSMIC_SIGNATURE_PROFILE_NAME, true, true);
-    record.add_float("hdr_scale", parameters.hdr_scale, true, (0.195, 0.285));
+    record.add_float("hdr_scale", parameters.hdr_scale, true, (0.225, 0.295));
     record.add_float("clip_black", parameters.clip_black, true, (0.0045, 0.0085));
     record.add_float("clip_white", parameters.clip_white, true, (0.9935, 0.9985));
     record.add_float("palette_phase", parameters.palette_phase, true, (0.0, 1.0));
     record.add_float("edge_energy", parameters.edge_energy, true, (0.92, 1.18));
-    record.add_float("exposure_key", parameters.exposure_key, true, (0.85, 1.12));
+    record.add_float("exposure_key", parameters.exposure_key, true, (0.94, 1.16));
     record.add_int(
         "preferred_primary",
         preferred_stack.primary.log_index(),
@@ -1253,14 +1262,14 @@ fn build_profile_log(
         "underlay_alpha",
         parameters.stack.underlay.map_or(0.0, |l| l.alpha),
         true,
-        (0.0, 0.65),
+        (0.0, 0.70),
     );
     record.add_int("accent_vocab", layer_log_index(parameters.stack.accent), true, (0, mode_count));
     record.add_float(
         "accent_alpha",
         parameters.stack.accent.map_or(0.0, |l| l.alpha),
         true,
-        (0.0, 0.16),
+        (0.0, 0.18),
     );
     record.add_int("projection", parameters.projection.log_index(), true, (0, 3));
     record.add_int("symmetry", parameters.symmetry.log_index(), true, (0, 26));
@@ -1268,7 +1277,7 @@ fn build_profile_log(
     record.add_float("line_weight", parameters.line_weight, true, (0.95, 4.20));
     record.add_float("age_ramp", parameters.age_ramp, true, (-0.85, 0.85));
     record.add_float("chord_lag_fraction", parameters.chord_lag_fraction, true, (0.006, 0.026));
-    record.add_float("ribbon_echo_alpha", parameters.ribbon_echo_alpha, true, (0.0, 0.50));
+    record.add_float("ribbon_echo_alpha", parameters.ribbon_echo_alpha, true, (0.0, 0.56));
     record.add_int("echo_layers", usize::from(parameters.echo_layers), true, (1, 3));
     record.add_int("veil_fill_lines", usize::from(parameters.veil_fill_lines), true, (5, 12));
     record.add_float("weave_bow", parameters.weave_bow, true, (-0.85, 0.85));
@@ -1403,7 +1412,7 @@ mod tests {
                     stack.label()
                 );
                 assert!(
-                    (0.08..=0.65).contains(&underlay.alpha),
+                    (0.12..=0.70).contains(&underlay.alpha),
                     "underlay alpha out of range: {}",
                     underlay.alpha
                 );
@@ -1422,14 +1431,14 @@ mod tests {
                         stack.label()
                     );
                 }
-                assert!((0.04..=0.16).contains(&accent.alpha));
+                assert!((0.05..=0.18).contains(&accent.alpha));
             }
         }
 
         let underlay_rate = with_underlay as f64 / total as f64;
         let accent_rate = with_accent as f64 / total as f64;
         assert!(
-            (0.30..=0.50).contains(&underlay_rate),
+            (0.48..=0.68).contains(&underlay_rate),
             "underlay rate drifted: {underlay_rate:.3}"
         );
         assert!((0.05..=0.16).contains(&accent_rate), "accent rate drifted: {accent_rate:.3}");
@@ -1470,7 +1479,7 @@ mod tests {
         assert!((0.01..=0.06).contains(&rate(mirror)), "mirror rate: {}", rate(mirror));
         assert!((0.04..=0.11).contains(&rate(rotational)), "rotational rate: {}", rate(rotational));
         assert!((0.02..=0.09).contains(&rate(dihedral)), "dihedral rate: {}", rate(dihedral));
-        assert!((0.05..=0.12).contains(&rate(phase)), "phase projection rate: {}", rate(phase));
+        assert!((0.14..=0.22).contains(&rate(phase)), "phase projection rate: {}", rate(phase));
         assert!((0.04..=0.11).contains(&rate(wildcard)), "wildcard rate: {}", rate(wildcard));
     }
 
@@ -1534,7 +1543,7 @@ mod tests {
             }
         }
         assert!(
-            ribbon_min >= 1.70,
+            ribbon_min >= 1.85,
             "orbit ribbons must draw bold strokes, found line weight {ribbon_min}"
         );
         assert!(web_max <= 2.10, "triangle web line weight exceeded mode cap: {web_max}");
@@ -1557,7 +1566,7 @@ mod tests {
             if p.stack.contains_family(VocabularyFamily::Trails) {
                 if p.ribbon_echo_alpha > 0.0 {
                     echo_seen = true;
-                    assert!((0.22..=0.50).contains(&p.ribbon_echo_alpha));
+                    assert!((0.30..=0.56).contains(&p.ribbon_echo_alpha));
                 }
             } else {
                 assert_eq!(p.ribbon_echo_alpha, 0.0);
