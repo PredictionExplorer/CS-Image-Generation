@@ -8,12 +8,12 @@ Type=oneshot
 
 # --- Adjust these to match your deployment ---
 # User to run as (must have SSH key access to the remote server)
-User=ubuntu
+User=user
 # Directory containing run.py, the generator binary, and the .env file
-WorkingDirectory=/home/ubuntu/CS-Image-Generation
+WorkingDirectory=/home/user/Dev/CS-Image-Generation
 
 # Load deployment config (.env must exist alongside run.py)
-EnvironmentFile=%h/CS-Image-Generation/.env
+EnvironmentFile=/home/user/Dev/CS-Image-Generation/.env
 
 ExecStart=/usr/bin/python3 run.py
 
