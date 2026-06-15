@@ -100,12 +100,27 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 `run.py` is the deployment helper that keeps a remote server in sync. Each run it:
 
 1. Fetches the current list of CosmicSignature token seeds from the CosmicGame HTTP API.
-2. Checks which `0x<seed>.png` / `0x<seed>.mp4` files already exist on the remote server (via SSH).
-3. Generates missing assets locally with the Rust binary.
-4. Uploads the new files to the remote server via SCP.
+2. Checks which per-seed asset packages already exist on the remote server (via SSH).
+3. Generates incomplete packages locally with the Rust binary.
+4. Uploads the complete output package to the remote server via SCP.
 5. Deletes the local copies after a successful upload.
 
 It also supports `--dry-run` (report what's missing without generating or uploading) and `--preflight` (test all external dependencies before committing to real runs).
+
+Remote files mirror the Rust output package under `COSMICSIG_REMOTE_DIR/0x<seed>/`:
+
+```text
+0x<seed>/
+  image.png
+  video.mp4
+  spectral/
+    00_...nm.png
+    ...
+    63_...nm.png
+  spectral_sweep.mp4
+```
+
+Only API-listed seeds are considered. If any required file in an API seed's remote package is missing, `run.py` treats that seed as incomplete and regenerates/uploads the full package.
 
 ### How the Two Machines Relate
 
@@ -114,7 +129,7 @@ It also supports `--dry-run` (report what's missing without generating or upload
 │    Generator Machine    │ ──────────────────────▶│     Remote Server        │
 │  (Ubuntu, runs run.py)  │                        │  (any Linux with sshd)   │
 │                         │                        │                          │
-│  • Rust binary          │  uploads .png and .mp4 │  • Stores asset files    │
+│  • Rust binary          │  uploads asset packages│  • Stores asset files    │
 │  • run.py + systemd     │  to COSMICSIG_REMOTE_DIR │  • Web server (nginx)    │
 │  • All CPU-heavy work   │                        │    serves them to users  │
 └─────────────────────────┘                        └──────────────────────────┘
@@ -177,7 +192,7 @@ COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 | `COSMICSIG_SSH_HOST` | IP address or hostname of the remote server |
 | `COSMICSIG_SSH_USER` | SSH user on the remote server (must accept your key) |
 | `COSMICSIG_API_URL` | CosmicGame API base URL (CosmicSignature token list), no trailing slash |
-| `COSMICSIG_REMOTE_DIR` | Absolute path on the remote server where PNG/MP4 files are stored |
+| `COSMICSIG_REMOTE_DIR` | Absolute path on the remote server where per-seed asset package directories are stored |
 
 **5. Run the preflight check**
 

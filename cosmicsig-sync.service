@@ -1,5 +1,5 @@
 [Unit]
-Description=CosmicSignature NFT asset sync (generate + upload missing images/videos)
+Description=CosmicSignature NFT asset package sync (generate + upload incomplete packages)
 After=network-online.target
 Wants=network-online.target
 

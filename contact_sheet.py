@@ -152,7 +152,10 @@ def tile_sheet(images: list[Path], columns: int, output: Path) -> None:
 
 
 def report(entries: list[SheetEntry]) -> None:
-    print("\nseed            score  coverage  colorful  hue-ent  spread   veil  crisp   lush   time")
+    print(
+        "\nseed            score  coverage  colorful  hue-ent  spread"
+        "   veil  crisp   lush   time"
+    )
     print("-" * 94)
     scored = [entry for entry in entries if entry.metrics is not None]
     for entry in sorted(scored, key=lambda e: e.metrics.score if e.metrics else 0.0):

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-CosmicSignature NFT image/video checker and uploader.
+CosmicSignature NFT asset package checker and uploader.
 
-Fetches all tokens from the CosmicGame API, determines which images/videos
-are missing on the destination server, generates missing artifacts via the
-Rust binary, and uploads them via SCP.
+Fetches all tokens from the CosmicGame API, determines which per-seed asset
+packages are incomplete on the destination server, generates missing packages
+via the Rust binary, and uploads them via SCP.
 
 Designed to run under a systemd timer (every 5 minutes). The systemd service
 unit prevents overlapping runs.
@@ -60,6 +60,11 @@ SSH_BASE_OPTS = [
     "StrictHostKeyChecking=accept-new",
 ]
 
+
+# Expected per-seed package emitted by the Rust generator.
+SPECTRAL_BIN_COUNT = 64
+SPECTRAL_FILE_RE = re.compile(r"^(?P<bin>\d{2})_\d+nm\.png$")
+EXPECTED_SPECTRAL_BINS = set(range(SPECTRAL_BIN_COUNT))
 
 # Environment variable names for required config
 ENV_SSH_HOST = "COSMICSIG_SSH_HOST"
@@ -272,38 +277,73 @@ def fetch_token_seeds(api_base_url: str, retries: int = 3) -> list[str]:
 
 
 def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]:
-    """List all filenames in the remote asset directory via a single SSH call."""
+    """List known asset package files beneath the remote asset directory."""
     quoted_dir = shlex.quote(remote_dir)
-    cmd = [*ssh_cmd(ssh_host, ssh_user), f"ls -1 -- {quoted_dir}/ 2>/dev/null || true"]
+    remote_cmd = (
+        f"cd {quoted_dir} 2>/dev/null "
+        "&& find . -mindepth 2 -maxdepth 3 -type f -print || true"
+    )
+    cmd = [*ssh_cmd(ssh_host, ssh_user), remote_cmd]
 
     try:
-        result = run_subprocess(cmd, timeout=30, label="ssh-ls")
+        result = run_subprocess(cmd, timeout=60, label="ssh-find")
     except (subprocess.TimeoutExpired, OSError):
         log.warning("Could not list remote files -- treating as empty")
         return set()
 
     if result.returncode != 0:
-        log.warning("SSH ls returned rc=%d -- treating remote as empty", result.returncode)
+        log.warning("SSH find returned rc=%d -- treating remote as empty", result.returncode)
         return set()
 
-    files = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    log.info("Found %d existing files on remote server", len(files))
+    files = {
+        line.strip().removeprefix("./")
+        for line in result.stdout.splitlines()
+        if line.strip()
+    }
+    log.info("Found %d existing package files on remote server", len(files))
     return files
 
 
+def missing_remote_package_parts(seed: str, remote_files: set[str]) -> list[str]:
+    """Return missing files/groups for the remote package at 0x<seed>/."""
+    package_dir = f"0x{seed}"
+    required_files = [
+        f"{package_dir}/image.png",
+        f"{package_dir}/video.mp4",
+        f"{package_dir}/spectral_sweep.mp4",
+    ]
+    missing = [
+        path.removeprefix(f"{package_dir}/")
+        for path in required_files
+        if path not in remote_files
+    ]
+
+    spectral_prefix = f"{package_dir}/spectral/"
+    spectral_bins: set[int] = set()
+    for path in remote_files:
+        if not path.startswith(spectral_prefix):
+            continue
+        filename = path.removeprefix(spectral_prefix)
+        match = SPECTRAL_FILE_RE.match(filename)
+        if match:
+            bin_idx = int(match.group("bin"))
+            if bin_idx in EXPECTED_SPECTRAL_BINS:
+                spectral_bins.add(bin_idx)
+
+    missing_bins = EXPECTED_SPECTRAL_BINS - spectral_bins
+    if missing_bins:
+        missing.append(f"spectral/*.png ({len(missing_bins)} missing)")
+
+    return missing
+
+
 def find_missing_seeds(seeds: list[str], remote_files: set[str]) -> list[str]:
-    """Return seeds that are missing at least one of PNG or MP4 on the remote."""
+    """Return API seeds missing one or more files from their remote asset package."""
     missing: list[str] = []
     for seed in seeds:
-        img_present = f"0x{seed}.png" in remote_files
-        vid_present = f"0x{seed}.mp4" in remote_files
-        if not img_present or not vid_present:
-            parts = []
-            if not img_present:
-                parts.append("PNG")
-            if not vid_present:
-                parts.append("MP4")
-            log.debug("MISSING  0x%s  (%s)", seed, " + ".join(parts))
+        missing_parts = missing_remote_package_parts(seed, remote_files)
+        if missing_parts:
+            log.debug("MISSING  0x%s  (%s)", seed, ", ".join(missing_parts))
             missing.append(seed)
     return missing
 
@@ -360,67 +400,123 @@ def generate(exec_cmd: list[str], seed: str, timeout: int) -> bool:
     return True
 
 
-def find_local_files(seed: str) -> tuple[Path | None, Path | None]:
-    """Search for generated image and video files in the per-seed output directory."""
-    img_path: Path | None
-    vid_path: Path | None
+def missing_local_package_parts(seed_dir: Path) -> list[str]:
+    """Return missing files/groups for a generated local seed package."""
+    missing: list[str] = []
+    for filename in ["image.png", "video.mp4", "spectral_sweep.mp4"]:
+        path = seed_dir / filename
+        if not path.is_file():
+            missing.append(filename)
+
+    spectral_dir = seed_dir / "spectral"
+    spectral_bins: set[int] = set()
+    if spectral_dir.is_dir():
+        for path in spectral_dir.iterdir():
+            if not path.is_file():
+                continue
+            match = SPECTRAL_FILE_RE.match(path.name)
+            if match:
+                bin_idx = int(match.group("bin"))
+                if bin_idx in EXPECTED_SPECTRAL_BINS:
+                    spectral_bins.add(bin_idx)
+    else:
+        missing.append("spectral/")
+
+    missing_bins = EXPECTED_SPECTRAL_BINS - spectral_bins
+    if missing_bins:
+        missing.append(f"spectral/*.png ({len(missing_bins)} missing)")
+
+    return missing
+
+
+def find_local_package(seed: str) -> Path | None:
+    """Validate and return the generated per-seed output package directory."""
     seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
-    img_candidate = seed_dir / "image.png"
-    if img_candidate.is_file():
-        log.debug("Found image: %s (%d bytes)", img_candidate, img_candidate.stat().st_size)
-        img_path = img_candidate
-    else:
-        log.error("Image NOT FOUND for 0x%s. Tried: %s", seed, img_candidate)
-        img_path = None
+    if not seed_dir.is_dir():
+        log.error("Package directory NOT FOUND for 0x%s. Tried: %s", seed, seed_dir)
+        return None
 
-    vid_candidate = seed_dir / "video.mp4"
-    if vid_candidate.is_file():
-        log.debug("Found video: %s (%d bytes)", vid_candidate, vid_candidate.stat().st_size)
-        vid_path = vid_candidate
-    else:
-        log.error("Video NOT FOUND for 0x%s. Tried: %s", seed, vid_candidate)
-        vid_path = None
+    missing = missing_local_package_parts(seed_dir)
+    if missing:
+        log.error("Package INCOMPLETE for 0x%s. Missing: %s", seed, ", ".join(missing))
+        return None
 
-    return img_path, vid_path
+    file_count = sum(1 for path in seed_dir.rglob("*") if path.is_file())
+    log.debug("Found complete package: %s (%d files)", seed_dir, file_count)
+    return seed_dir
 
 
-def upload_file(
+def ensure_remote_dir(ssh_host: str, ssh_user: str, remote_dir: str) -> bool:
+    """Ensure the remote asset root exists before uploading a seed package."""
+    quoted_dir = shlex.quote(remote_dir)
+    try:
+        result = run_subprocess(
+            [*ssh_cmd(ssh_host, ssh_user), f"mkdir -p -- {quoted_dir}"],
+            timeout=30,
+            label="ssh-mkdir",
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+    if result.returncode == 0:
+        return True
+
+    log.error("Could not create remote asset directory %s (rc=%d)", remote_dir, result.returncode)
+    return False
+
+
+def upload_package(
     ssh_host: str,
     ssh_user: str,
-    local_path: Path,
-    remote_path: str,
+    local_seed_dir: Path,
+    remote_dir: str,
     retries: int = 2,
 ) -> bool:
-    """Upload a single file via SCP with retries."""
-    cmd = ["scp", *ssh_opts(), str(local_path), f"{ssh_user}@{ssh_host}:{remote_path}"]
+    """Upload the complete per-seed output directory via recursive SCP."""
+    if not ensure_remote_dir(ssh_host, ssh_user, remote_dir):
+        return False
+
+    remote_target = f"{ssh_user}@{ssh_host}:{remote_dir.rstrip('/')}/"
+    cmd = ["scp", *ssh_opts(), "-r", str(local_seed_dir), remote_target]
 
     for attempt in range(1, retries + 1):
         backoff = 2**attempt
-        log.info("UPLOAD (attempt %d/%d)  %s -> %s", attempt, retries, local_path.name, remote_path)
+        log.info(
+            "UPLOAD PACKAGE (attempt %d/%d)  %s -> %s",
+            attempt,
+            retries,
+            local_seed_dir.name,
+            remote_target,
+        )
         try:
-            result = run_subprocess(cmd, timeout=300, label=f"scp-{local_path.name}")
+            result = run_subprocess(cmd, timeout=900, label=f"scp-package-{local_seed_dir.name}")
         except (subprocess.TimeoutExpired, OSError):
             if attempt < retries:
-                log.info("Retrying SCP in %ds ...", backoff)
+                log.info("Retrying package SCP in %ds ...", backoff)
                 time.sleep(backoff)
             continue
 
         if result.returncode == 0:
-            log.info("UPLOADED  %s -> %s", local_path.name, remote_path)
+            log.info("UPLOADED PACKAGE  %s -> %s", local_seed_dir.name, remote_target)
             return True
 
         log.warning(
-            "SCP failed (attempt %d/%d) rc=%d: %s",
+            "Package SCP failed (attempt %d/%d) rc=%d: %s",
             attempt,
             retries,
             result.returncode,
             result.stderr.strip()[:300],
         )
         if attempt < retries:
-            log.info("Retrying SCP in %ds ...", backoff)
+            log.info("Retrying package SCP in %ds ...", backoff)
             time.sleep(backoff)
 
-    log.error("SCP FAILED after %d attempts: %s -> %s", retries, local_path, remote_path)
+    log.error(
+        "PACKAGE SCP FAILED after %d attempts: %s -> %s",
+        retries,
+        local_seed_dir,
+        remote_dir,
+    )
     return False
 
 
@@ -445,9 +541,9 @@ def process_seed(
     timeout: int,
     dry_run: bool,
 ) -> bool:
-    """Full pipeline for one seed: generate -> find -> upload -> cleanup."""
+    """Full pipeline for one seed: generate -> validate package -> upload -> cleanup."""
     if dry_run:
-        log.info("DRY-RUN  would generate and upload 0x%s", seed)
+        log.info("DRY-RUN  would generate and upload package 0x%s/", seed)
         return True
 
     t0 = time.monotonic()
@@ -459,29 +555,18 @@ def process_seed(
     if not generate(exec_cmd, seed, timeout):
         return False
 
-    img_path, vid_path = find_local_files(seed)
-    if img_path is None or vid_path is None:
+    package_dir = find_local_package(seed)
+    if package_dir is None:
         cleanup_seed_dir(seed)
         return False
 
-    remote_img = f"{remote_dir}/0x{seed}.png"
-    remote_vid = f"{remote_dir}/0x{seed}.mp4"
-
-    img_ok = upload_file(ssh_host, ssh_user, img_path, remote_img)
-    vid_ok = upload_file(ssh_host, ssh_user, vid_path, remote_vid)
-
-    if img_ok and vid_ok:
+    if upload_package(ssh_host, ssh_user, package_dir, remote_dir):
         cleanup_seed_dir(seed)
         elapsed = time.monotonic() - t0
         log.info("OK  seed=0x%s  (total %s)", seed, fmt_duration(elapsed))
         return True
 
-    log.error(
-        "PARTIAL FAILURE for 0x%s (img_upload=%s, vid_upload=%s)",
-        seed,
-        "ok" if img_ok else "FAIL",
-        "ok" if vid_ok else "FAIL",
-    )
+    log.error("UPLOAD FAILURE for 0x%s", seed)
     return False
 
 
@@ -697,14 +782,14 @@ def main() -> int:
     if not missing:
         elapsed = time.monotonic() - t_start
         log.info(
-            "All %d tokens have both PNG and MP4 on remote. Nothing to do. (%s)",
+            "All %d tokens have complete asset packages on remote. Nothing to do. (%s)",
             len(seeds),
             fmt_duration(elapsed),
         )
         return 0
 
     log.info(
-        "Found %d seeds with missing assets (out of %d total)",
+        "Found %d seeds with incomplete asset packages (out of %d total)",
         len(missing),
         len(seeds),
     )
