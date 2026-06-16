@@ -33,10 +33,11 @@ echo "  Drift: $DRIFT_MODE"
     --resolution "$RESOLUTION" \
     --steps "$NUM_STEPS" \
     --drift "$DRIFT_MODE" \
-    --output "baseline"
+    --output "baseline" \
+    --image-only
 
 # Move the generated files to reference directory
-mv "output/baseline/image.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
+mv "output/baseline/images/source/master.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
 
 # Generate JSON metadata
 cat > "ci/reference/baseline_${WIDTH}x${HEIGHT}.json" << EOF

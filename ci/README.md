@@ -61,5 +61,7 @@ The generator uses a single explicit output name:
 
 ```bash
 ./target/release/three_body_problem --seed 0x123 --output experiment-1
-# Creates: output/experiment-1/image.png and output/experiment-1/video.mp4
+# Creates: output/experiment-1/images/source/master.png,
+#          output/experiment-1/images/web/*.webp,
+#          output/experiment-1/videos/{web,hq}/*.mp4
 ```

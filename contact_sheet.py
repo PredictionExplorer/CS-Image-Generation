@@ -117,7 +117,7 @@ def render_one(binary: str, seed: str, prefix: str, args: argparse.Namespace) ->
         return SheetEntry(seed, None, None, time.monotonic() - t0)
     elapsed = time.monotonic() - t0
 
-    image = Path("output") / out_name / "image.png"
+    image = Path("output") / out_name / "images" / "source" / "master.png"
     if proc.returncode != 0 or not image.exists():
         print(f"  {seed}  FAILED (exit={proc.returncode}, {fmt_duration(elapsed)})")
         return SheetEntry(seed, None, None, elapsed)

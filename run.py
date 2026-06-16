@@ -70,6 +70,17 @@ SSH_BASE_OPTS = [
 SPECTRAL_BIN_COUNT = 64
 SPECTRAL_FILE_RE = re.compile(r"^(?P<bin>\d{2})_\d+nm\.png$")
 EXPECTED_SPECTRAL_BINS = set(range(SPECTRAL_BIN_COUNT))
+REQUIRED_PACKAGE_FILES = (
+    "images/source/master.png",
+    "images/web/full.webp",
+    "images/web/preview.webp",
+    "videos/web/main.mp4",
+    "videos/web/spectral_sweep.mp4",
+    "videos/hq/main.mp4",
+    "videos/hq/spectral_sweep.mp4",
+    "metadata/generation.json",
+    "metadata/assets.json",
+)
 
 # Environment variable names for required config
 ENV_SSH_HOST = "COSMICSIG_SSH_HOST"
@@ -526,7 +537,7 @@ def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]
     """List known asset package files beneath the remote asset directory."""
     quoted_dir = shlex.quote(remote_dir)
     remote_cmd = (
-        f"cd {quoted_dir} 2>/dev/null && find . -mindepth 2 -maxdepth 3 -type f -print || true"
+        f"cd {quoted_dir} 2>/dev/null && find . -mindepth 2 -maxdepth 4 -type f -print || true"
     )
     cmd = [*ssh_cmd(ssh_host, ssh_user), remote_cmd]
 
@@ -548,11 +559,7 @@ def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]
 def missing_remote_package_parts(seed: str, remote_files: set[str]) -> list[str]:
     """Return missing files/groups for the remote package at 0x<seed>/."""
     package_dir = f"0x{seed}"
-    required_files = [
-        f"{package_dir}/image.png",
-        f"{package_dir}/video.mp4",
-        f"{package_dir}/spectral_sweep.mp4",
-    ]
+    required_files = [f"{package_dir}/{filename}" for filename in REQUIRED_PACKAGE_FILES]
     missing = [
         path.removeprefix(f"{package_dir}/") for path in required_files if path not in remote_files
     ]
@@ -642,7 +649,7 @@ def generate(exec_cmd: list[str], seed: str, timeout: int) -> bool:
 def missing_local_package_parts(seed_dir: Path) -> list[str]:
     """Return missing files/groups for a generated local seed package."""
     missing: list[str] = []
-    for filename in ["image.png", "video.mp4", "spectral_sweep.mp4"]:
+    for filename in REQUIRED_PACKAGE_FILES:
         path = seed_dir / filename
         if not path.is_file():
             missing.append(filename)

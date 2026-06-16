@@ -9,7 +9,7 @@ use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use super::save_image_as_png_16bit;
-use super::video::{VideoEncodingOptions, create_video_from_frames_singlepass};
+use super::video::{VideoEncodingOptions, VideoOutputSpec, create_videos_from_frames_singlepass};
 use crate::post_effects::{CinematicColorGrade, ColorGradeParams, GaussianBloom, PostEffect};
 use crate::spectrum::{
     NUM_BINS, linear_srgb_to_display_p3, wavelength_nm_for_bin, wavelength_to_rgb,
@@ -503,7 +503,8 @@ pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_web_path: &str,
+    output_hq_path: &str,
     fast_encode: bool,
 ) -> Result<()> {
     info!("Building BinBuffers for spectral sweep ({NUM_BINS} bins)...");
@@ -537,10 +538,17 @@ pub fn generate_spectral_sweep_video(
     let options = if fast_encode {
         VideoEncodingOptions::fast_encode()
     } else {
-        VideoEncodingOptions::default()
+        VideoEncodingOptions::high_quality()
     };
+    let outputs = [
+        VideoOutputSpec {
+            output_file: output_web_path.to_string(),
+            options: VideoEncodingOptions::web_compatible(),
+        },
+        VideoOutputSpec { output_file: output_hq_path.to_string(), options },
+    ];
 
-    create_video_from_frames_singlepass(
+    create_videos_from_frames_singlepass(
         width,
         height,
         fps,
@@ -569,11 +577,10 @@ pub fn generate_spectral_sweep_video(
             }
             Ok(())
         },
-        output_path,
-        &options,
+        &outputs,
     )?;
 
-    info!("   Spectral sweep video complete => {output_path}");
+    info!("   Spectral sweep video complete => {output_web_path}, {output_hq_path}");
     Ok(())
 }
 

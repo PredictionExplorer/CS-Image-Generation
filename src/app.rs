@@ -13,18 +13,24 @@ use crate::generation_log::{
 };
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
-    VideoEncodingOptions, constants, create_video_from_frames_singlepass,
+    VideoEncodingOptions, VideoOutputSpec, constants, create_videos_from_frames_singlepass,
     generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
     save_image_as_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
+use chrono::Local;
 use image::{ImageBuffer, Rgb};
 use nalgebra::{Matrix3, Vector3};
-use std::fs;
+use serde::Serialize;
+use std::fs::{self, File};
+use std::io::BufWriter;
+use std::process::Command;
 use tracing::{info, warn};
 
 /// RNG fork domain for the seeded viewing orientation.
 const VIEW_RNG_DOMAIN: &[u8] = b"cosmic-view/v1";
+/// Maximum width of the lightweight WebP preview image.
+pub const WEB_PREVIEW_MAX_WIDTH: u32 = 640;
 
 /// Core `CosmicSignature` enhancement flags.
 #[derive(Clone, Debug)]
@@ -110,9 +116,33 @@ pub struct GenerationLogConfig {
     pub weights_randomized: bool,
 }
 
+/// Paths for the generated still image and its website derivatives.
+#[derive(Clone, Copy, Debug)]
+pub struct ImageOutputPaths<'a> {
+    /// Maximum-quality 16-bit PNG source image.
+    pub master_png: &'a str,
+    /// Full-resolution WebP with the same pixel dimensions as `master_png`.
+    pub full_webp: &'a str,
+    /// Smaller same-aspect-ratio WebP for cards, previews, and video posters.
+    pub preview_webp: &'a str,
+}
+
+/// Paths for a pair of video variants generated from one animation.
+#[derive(Clone, Copy, Debug)]
+pub struct VideoOutputPaths<'a> {
+    /// Website-compatible H.264 MP4.
+    pub web: &'a str,
+    /// High-quality HEVC MP4.
+    pub high_quality: &'a str,
+}
+
 /// Initialize per-seed output directory structure:
-///   output/{seed}/
+///   output/{seed}/images/source/
+///   output/{seed}/images/web/
+///   output/{seed}/videos/web/
+///   output/{seed}/videos/hq/
 ///   output/{seed}/spectral/
+///   output/{seed}/metadata/
 ///
 /// Rejects output names containing path separators or `..` to prevent directory traversal.
 pub fn setup_seed_directory(seed: &str) -> Result<String> {
@@ -124,19 +154,21 @@ pub fn setup_seed_directory(seed: &str) -> Result<String> {
     }
 
     let seed_dir = format!("output/{seed}");
-    let spectral_dir = format!("{seed_dir}/spectral");
-
     fs::create_dir_all(&seed_dir).map_err(|e| ConfigError::FileSystem {
         operation: "create directory".to_string(),
         path: seed_dir.clone(),
         error: e,
     })?;
 
-    fs::create_dir_all(&spectral_dir).map_err(|e| ConfigError::FileSystem {
-        operation: "create directory".to_string(),
-        path: spectral_dir,
-        error: e,
-    })?;
+    for subdir in ["images/source", "images/web", "videos/web", "videos/hq", "spectral", "metadata"]
+    {
+        let path = format!("{seed_dir}/{subdir}");
+        fs::create_dir_all(&path).map_err(|e| ConfigError::FileSystem {
+            operation: "create directory".to_string(),
+            path,
+            error: e,
+        })?;
+    }
 
     Ok(seed_dir)
 }
@@ -147,6 +179,236 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
 
     hex::decode(hex_seed)
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
+}
+
+#[derive(Serialize)]
+struct AssetManifest {
+    schema_version: u32,
+    generated_at: String,
+    assets: Vec<AssetEntry>,
+}
+
+#[derive(Serialize)]
+struct AssetEntry {
+    path: String,
+    kind: String,
+    role: String,
+    format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_seconds: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frame_rate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pixel_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<u64>,
+}
+
+fn file_size(seed_dir: &str, relative_path: &str) -> Option<u64> {
+    fs::metadata(format!("{seed_dir}/{relative_path}")).ok().map(|meta| meta.len())
+}
+
+fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
+    if width <= WEB_PREVIEW_MAX_WIDTH {
+        return (width, height);
+    }
+    let preview_height =
+        (f64::from(height) * f64::from(WEB_PREVIEW_MAX_WIDTH) / f64::from(width)).round() as u32;
+    (WEB_PREVIEW_MAX_WIDTH, preview_height.max(1))
+}
+
+fn run_webp_encode(input_path: &str, output_path: &str, scale_filter: Option<&str>) -> Result<()> {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-i", input_path, "-map_metadata", "-1"]);
+    if let Some(filter) = scale_filter {
+        cmd.args(["-vf", filter]);
+    }
+    cmd.args([
+        "-frames:v",
+        "1",
+        "-c:v",
+        "libwebp",
+        "-preset",
+        "picture",
+        "-quality",
+        "82",
+        "-compression_level",
+        "6",
+        output_path,
+    ]);
+
+    let status = cmd.status().map_err(render::error::RenderError::VideoEncoding)?;
+    if !status.success() {
+        return Err(render::error::RenderError::ImageEncoding {
+            reason: format!("ffmpeg WebP encode failed for {output_path}"),
+        }
+        .into());
+    }
+
+    info!("   Saved WebP => {output_path}");
+    Ok(())
+}
+
+/// Generate full-size and preview WebP derivatives from the master PNG.
+pub fn generate_webp_images(paths: ImageOutputPaths<'_>) -> Result<()> {
+    run_webp_encode(paths.master_png, paths.full_webp, None)?;
+    run_webp_encode(paths.master_png, paths.preview_webp, Some("scale=w=min(640\\,iw):h=-1"))
+}
+
+/// Write a website-oriented asset manifest for the generated package.
+pub fn write_asset_manifest(
+    seed_dir: &str,
+    width: u32,
+    height: u32,
+    image_only: bool,
+) -> Result<()> {
+    let (preview_width, preview_height) = preview_dimensions(width, height);
+    let mut assets = vec![
+        AssetEntry {
+            path: "images/source/master.png".to_string(),
+            kind: "image".to_string(),
+            role: "source_master".to_string(),
+            format: "png".to_string(),
+            width: Some(width),
+            height: Some(height),
+            duration_seconds: None,
+            frame_rate: None,
+            codec: None,
+            pixel_format: Some("rgb48".to_string()),
+            file_count: None,
+            bytes: file_size(seed_dir, "images/source/master.png"),
+        },
+        AssetEntry {
+            path: "images/web/full.webp".to_string(),
+            kind: "image".to_string(),
+            role: "web_full".to_string(),
+            format: "webp".to_string(),
+            width: Some(width),
+            height: Some(height),
+            duration_seconds: None,
+            frame_rate: None,
+            codec: None,
+            pixel_format: None,
+            file_count: None,
+            bytes: file_size(seed_dir, "images/web/full.webp"),
+        },
+        AssetEntry {
+            path: "images/web/preview.webp".to_string(),
+            kind: "image".to_string(),
+            role: "web_preview".to_string(),
+            format: "webp".to_string(),
+            width: Some(preview_width),
+            height: Some(preview_height),
+            duration_seconds: None,
+            frame_rate: None,
+            codec: None,
+            pixel_format: None,
+            file_count: None,
+            bytes: file_size(seed_dir, "images/web/preview.webp"),
+        },
+    ];
+
+    if !image_only {
+        let main_duration = f64::from(render::constants::DEFAULT_TARGET_FRAMES)
+            / f64::from(render::constants::DEFAULT_VIDEO_FPS);
+        let sweep_duration = f64::from(render::constants::CYCLE_TOTAL_FRAMES)
+            / f64::from(render::constants::DEFAULT_VIDEO_FPS);
+        assets.extend([
+            AssetEntry {
+                path: "videos/web/main.mp4".to_string(),
+                kind: "video".to_string(),
+                role: "main_web".to_string(),
+                format: "mp4".to_string(),
+                width: Some(width),
+                height: Some(height),
+                duration_seconds: Some(main_duration),
+                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
+                codec: Some("h264".to_string()),
+                pixel_format: Some("yuv420p".to_string()),
+                file_count: None,
+                bytes: file_size(seed_dir, "videos/web/main.mp4"),
+            },
+            AssetEntry {
+                path: "videos/hq/main.mp4".to_string(),
+                kind: "video".to_string(),
+                role: "main_hq".to_string(),
+                format: "mp4".to_string(),
+                width: Some(width),
+                height: Some(height),
+                duration_seconds: Some(main_duration),
+                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
+                codec: Some("hevc".to_string()),
+                pixel_format: Some("yuv422p10le".to_string()),
+                file_count: None,
+                bytes: file_size(seed_dir, "videos/hq/main.mp4"),
+            },
+            AssetEntry {
+                path: "videos/web/spectral_sweep.mp4".to_string(),
+                kind: "video".to_string(),
+                role: "spectral_sweep_web".to_string(),
+                format: "mp4".to_string(),
+                width: Some(width),
+                height: Some(height),
+                duration_seconds: Some(sweep_duration),
+                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
+                codec: Some("h264".to_string()),
+                pixel_format: Some("yuv420p".to_string()),
+                file_count: None,
+                bytes: file_size(seed_dir, "videos/web/spectral_sweep.mp4"),
+            },
+            AssetEntry {
+                path: "videos/hq/spectral_sweep.mp4".to_string(),
+                kind: "video".to_string(),
+                role: "spectral_sweep_hq".to_string(),
+                format: "mp4".to_string(),
+                width: Some(width),
+                height: Some(height),
+                duration_seconds: Some(sweep_duration),
+                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
+                codec: Some("hevc".to_string()),
+                pixel_format: Some("yuv422p10le".to_string()),
+                file_count: None,
+                bytes: file_size(seed_dir, "videos/hq/spectral_sweep.mp4"),
+            },
+            AssetEntry {
+                path: "spectral/".to_string(),
+                kind: "image_set".to_string(),
+                role: "spectral_bins".to_string(),
+                format: "png".to_string(),
+                width: Some(width),
+                height: Some(height),
+                duration_seconds: None,
+                frame_rate: None,
+                codec: None,
+                pixel_format: Some("rgb48".to_string()),
+                file_count: Some(crate::spectrum::NUM_BINS),
+                bytes: None,
+            },
+        ]);
+    }
+
+    let manifest =
+        AssetManifest { schema_version: 1, generated_at: Local::now().to_rfc3339(), assets };
+    let path = format!("{seed_dir}/metadata/assets.json");
+    let file = File::create(&path)?;
+    serde_json::to_writer_pretty(BufWriter::new(file), &manifest).map_err(std::io::Error::other)?;
+    info!("   Saved asset metadata => {path}");
+    Ok(())
+}
+
+fn write_generation_record(path: &str, record: &GenerationRecord) -> Result<()> {
+    let file = File::create(path)?;
+    serde_json::to_writer_pretty(BufWriter::new(file), record).map_err(std::io::Error::other)?;
+    info!("   Saved generation metadata => {path}");
+    Ok(())
 }
 
 /// Winning orbit of the combined Borda + aesthetic selection.
@@ -746,8 +1008,8 @@ pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
-    output_vid: &str,
-    output_png: &str,
+    output_videos: VideoOutputPaths<'_>,
+    output_images: ImageOutputPaths<'_>,
     fast_encode: bool,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     if fast_encode {
@@ -764,12 +1026,22 @@ pub fn render_video(
     let video_options = if fast_encode {
         VideoEncodingOptions::fast_encode()
     } else {
-        VideoEncodingOptions::default()
+        VideoEncodingOptions::high_quality()
     };
+    let video_outputs = [
+        VideoOutputSpec {
+            output_file: output_videos.web.to_string(),
+            options: VideoEncodingOptions::web_compatible(),
+        },
+        VideoOutputSpec {
+            output_file: output_videos.high_quality.to_string(),
+            options: video_options,
+        },
+    ];
 
     let mut accum_spd = Vec::new();
 
-    create_video_from_frames_singlepass(
+    create_videos_from_frames_singlepass(
         settings.resolved_config.width,
         settings.resolved_config.height,
         frame_rate,
@@ -790,13 +1062,13 @@ pub fn render_video(
             )?;
             Ok(())
         },
-        output_vid,
-        &video_options,
+        &video_outputs,
     )?;
 
     if let Some(frame) = last_frame_png {
-        info!("Saving still image from final video frame: {}", output_png);
-        save_image_as_png_16bit(&frame, output_png)?;
+        info!("Saving still image from final video frame: {}", output_images.master_png);
+        save_image_as_png_16bit(&frame, output_images.master_png)?;
+        generate_webp_images(output_images)?;
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
@@ -813,12 +1085,13 @@ pub fn render_still_image(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
     settings: SpectralRenderSettings<'_>,
-    output_png: &str,
+    output_images: ImageOutputPaths<'_>,
 ) -> Result<()> {
     info!("STAGE 7/7: PASS 2 => final still only (IMAGE-ONLY MODE)...");
     let frame = render::render_final_frame_spectral(scene, levels, settings)?;
-    info!("Saving still image: {}", output_png);
-    Ok(save_image_as_png_16bit(&frame, output_png)?)
+    info!("Saving still image: {}", output_images.master_png);
+    save_image_as_png_16bit(&frame, output_images.master_png)?;
+    generate_webp_images(output_images)
 }
 
 /// Generate the spectral gallery: 64 per-bin 16-bit PNGs in `spectral_dir`.
@@ -836,14 +1109,15 @@ pub fn generate_spectral_sweep_video(
     accum_spd: &[[f64; crate::spectrum::NUM_BINS]],
     width: u32,
     height: u32,
-    output_path: &str,
+    output_videos: VideoOutputPaths<'_>,
     fast_encode: bool,
 ) -> Result<()> {
     Ok(render::spectral_output::generate_spectral_sweep_video(
         accum_spd,
         width,
         height,
-        output_path,
+        output_videos.web,
+        output_videos.high_quality,
         fast_encode,
     )?)
 }
@@ -859,6 +1133,7 @@ pub fn log_generation(
     num_sims: usize,
     selection: &AestheticSelection,
     randomization_log: Option<&render::effect_randomizer::RandomizationLog>,
+    package_record_path: Option<&str>,
 ) -> Result<()> {
     let logger = GenerationLogger::new();
 
@@ -940,6 +1215,10 @@ pub fn log_generation(
 
     // Include randomization log if provided
     record.randomization_log = randomization_log.cloned();
+
+    if let Some(path) = package_record_path {
+        write_generation_record(path, &record)?;
+    }
 
     logger.log_generation(record)
 }
@@ -1162,7 +1441,12 @@ mod tests {
         let seed_dir = result.expect("seed directory setup should succeed");
         assert_eq!(seed_dir, "output/test_seed_42");
         assert!(std::path::Path::new("output/test_seed_42").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/images/source").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/images/web").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/videos/web").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/videos/hq").is_dir());
         assert!(std::path::Path::new("output/test_seed_42/spectral").is_dir());
+        assert!(std::path::Path::new("output/test_seed_42/metadata").is_dir());
         let _ = fs::remove_dir_all("output/test_seed_42");
     }
 

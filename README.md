@@ -88,12 +88,18 @@ CLI reference:
 
 Under `output/<name>/` (default name `output`, so default paths look like `output/output/...` unless you pass `--output`):
 
-- `image.png` — 16-bit still frame
-- `video.mp4` — main H.265 trajectory video
+- `images/source/master.png` — maximum-quality 16-bit Display P3 still frame
+- `images/web/full.webp` — full-resolution WebP website image
+- `images/web/preview.webp` — smaller same-aspect-ratio WebP preview/poster
+- `videos/web/main.mp4` — browser-compatible H.264 trajectory video
+- `videos/hq/main.mp4` — high-quality HEVC trajectory video
 - `spectral/` — 64 per-wavelength-bin 16-bit PNGs (`00_…nm.png` … `63_…nm.png`)
-- `spectral_sweep.mp4` — spectral sweep through active bins (Gaussian blend + cosine easing)
+- `videos/web/spectral_sweep.mp4` — browser-compatible spectral sweep video
+- `videos/hq/spectral_sweep.mp4` — high-quality HEVC spectral sweep video
+- `metadata/generation.json` — per-package resolved generation parameters and randomization log
+- `metadata/assets.json` — website asset manifest with paths, dimensions, codecs, and byte sizes
 
-`generation_log.json` is written in the **process working directory** (typically the repo root when you run the binary from there), not under `output/<name>/`. It records reproducibility metadata for each run.
+`generation_log.json` is also appended in the **process working directory** (typically the repo root when you run the binary from there). It records the same reproducibility metadata across runs.
 
 ## Automation
 
@@ -111,13 +117,26 @@ Remote files mirror the Rust output package under `COSMICSIG_REMOTE_DIR/0x<seed>
 
 ```text
 0x<seed>/
-  image.png
-  video.mp4
+  images/
+    source/
+      master.png
+    web/
+      full.webp
+      preview.webp
+  videos/
+    web/
+      main.mp4
+      spectral_sweep.mp4
+    hq/
+      main.mp4
+      spectral_sweep.mp4
   spectral/
     00_...nm.png
     ...
     63_...nm.png
-  spectral_sweep.mp4
+  metadata/
+    generation.json
+    assets.json
 ```
 
 Only API-listed seeds are considered. If any required file in an API seed's remote package is missing, `run.py` treats that seed as incomplete and regenerates/uploads the full package.
@@ -305,7 +324,7 @@ cd ci/reference
 This creates `baseline_512x288.png` and a companion `.json` with the parameters and hash. From the **repository root**, verify a test image against the default baseline:
 
 ```bash
-python3 ci/verify_reference.py output/test/image.png
+python3 ci/verify_reference.py output/test/images/source/master.png
 ```
 
 Pass a second path if your reference image or JSON lives elsewhere. Run with no arguments to print a short usage line.

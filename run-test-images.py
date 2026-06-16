@@ -23,6 +23,7 @@ import typing
 from pathlib import Path
 
 from _utils import check_ffmpeg, compute_aesthetic_metrics, fmt_duration, resolve_binary
+from run import REQUIRED_PACKAGE_FILES, EXPECTED_SPECTRAL_BINS, SPECTRAL_FILE_RE
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
@@ -63,6 +64,7 @@ class SimResult(typing.NamedTuple):
     seed: str
     elapsed: float
     aesthetic_score: float | None = None
+    missing_parts: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +92,7 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
     crisp line energy, replacing the old PNG-file-size heuristic. Returns
     ``None`` when the image is missing or undecodable.
     """
-    image_path = Path("output") / seed / "image.png"
+    image_path = Path("output") / seed / "images" / "source" / "master.png"
     metrics = compute_aesthetic_metrics(image_path)
     if metrics is None:
         return None
@@ -109,6 +111,35 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
         metrics.lushness,
     )
     return metrics.score
+
+
+def missing_local_package_parts(seed_dir: Path) -> list[str]:
+    """Return missing files/groups using the same package contract as run.py."""
+    missing: list[str] = []
+    for filename in REQUIRED_PACKAGE_FILES:
+        path = seed_dir / filename
+        if not path.is_file():
+            missing.append(filename)
+
+    spectral_dir = seed_dir / "spectral"
+    spectral_bins: set[int] = set()
+    if spectral_dir.is_dir():
+        for path in spectral_dir.iterdir():
+            if not path.is_file():
+                continue
+            match = SPECTRAL_FILE_RE.match(path.name)
+            if match:
+                bin_idx = int(match.group("bin"))
+                if bin_idx in EXPECTED_SPECTRAL_BINS:
+                    spectral_bins.add(bin_idx)
+    else:
+        missing.append("spectral/")
+
+    missing_bins = EXPECTED_SPECTRAL_BINS - spectral_bins
+    if missing_bins:
+        missing.append(f"spectral/*.png ({len(missing_bins)} missing)")
+
+    return missing
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +170,21 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
             logger.debug("[%d] stderr:\n%s", run_id, proc.stderr.rstrip())
 
         if proc.returncode == 0:
+            seed_dir = Path("output") / seed
+            missing_parts = missing_local_package_parts(seed_dir)
+            if missing_parts:
+                logger.warning(
+                    "[%d] PACKAGE INCOMPLETE %s  missing=%s",
+                    run_id,
+                    seed,
+                    ", ".join(missing_parts),
+                )
+                return SimResult(False, seed, elapsed, None, tuple(missing_parts))
+
             aesthetic_score = estimate_aesthetic_score(seed, run_id)
             if aesthetic_score is None:
-                logger.warning("[%d] QA    %s  image.png missing", run_id, seed)
+                logger.warning("[%d] QA    %s  images/source/master.png missing", run_id, seed)
+                return SimResult(False, seed, elapsed, None, ("images/source/master.png",))
             elif aesthetic_score < 25.0:
                 logger.warning(
                     "[%d] QA    %s  low aesthetic_score=%.1f",

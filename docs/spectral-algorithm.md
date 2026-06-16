@@ -745,8 +745,9 @@ Final: `(R * factor, G * factor, B * factor)`
 
 ## 10. Spectral Sweep Video
 
-After the main still image and gallery, the pipeline can encode **one**
-spectral sweep video (`spectral_sweep.mp4`). It animates a smooth sweep through
+After the main still image and gallery, the pipeline encodes web and HQ
+spectral sweep videos (`videos/web/spectral_sweep.mp4` and
+`videos/hq/spectral_sweep.mp4`). They animate a smooth sweep through
 wavelength bins using precomputed bin images, **Gaussian blending** across bins
 (not simple two-bin linear interpolation), **cosine easing** over time, and a
 dynamic **active bin range** so mostly-empty bins at the spectrum edges can be

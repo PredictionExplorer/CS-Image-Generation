@@ -1,11 +1,10 @@
 //! Video encoding functionality
 //!
-//! Provides high-quality H.265 encoding with 10-bit color depth by default,
-//! plus a fast encoding mode using hardware acceleration.
+//! Provides website-compatible H.264 plus high-quality H.265 encoding.
 
 use std::error::Error;
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use tracing::info;
 
 use crate::render::error::{RenderError, Result};
@@ -13,9 +12,8 @@ use crate::render::error::{RenderError, Result};
 /// Configuration for video encoding
 ///
 /// This struct provides fine-grained control over `FFmpeg` encoding parameters.
-/// The default configuration uses H.265 with 10-bit color depth and perceptual
-/// optimizations for maximum quality. Use `fast_encode()` for hardware-accelerated
-/// encoding when speed is prioritized over quality.
+/// Use [`VideoEncodingOptions::web_compatible`] for the public website MP4 and
+/// [`VideoEncodingOptions::high_quality`] for the archival HEVC copy.
 #[derive(Debug, Clone)]
 pub struct VideoEncodingOptions {
     /// Output bitrate (only used for hardware encoders or 2-pass encoding)
@@ -49,23 +47,51 @@ pub struct VideoEncodingOptions {
     pub extra_args: Vec<String>,
 }
 
+/// One encoded output produced from the same raw frame stream.
+#[derive(Debug, Clone)]
+pub struct VideoOutputSpec {
+    /// Path to the MP4 file to create.
+    pub output_file: String,
+    /// FFmpeg options used for this output.
+    pub options: VideoEncodingOptions,
+}
+
 impl Default for VideoEncodingOptions {
-    /// High-quality encoding with H.265, 10-bit color, QuickTime-compatible
-    ///
-    /// This configuration prioritizes visual quality for gradient-heavy content:
-    /// - H.265 codec: 30-40% better compression than H.264
-    /// - 10-bit color: Eliminates banding in smooth gradients
-    /// - 4:2:0 chroma: Standard chroma subsampling (QuickTime/Safari compatible)
-    /// - Main10 profile: Widely supported, works in `QuickTime` and modern browsers
-    /// - CRF 19: Visually transparent quality
-    /// - "slower" preset: Excellent compression efficiency
-    /// - Perceptual tuning: Optimized for human perception
-    /// - Large lookahead: Simulates 2-pass benefits in single pass
-    ///
-    /// Expected encoding time: 3-5× slower than H.264 medium preset
-    /// Expected file size: 30-40% smaller than current H.264 output
-    /// Compatibility: `QuickTime`, Safari, VLC, most modern video players
+    /// Default to the high-quality archival encoder.
     fn default() -> Self {
+        Self::high_quality()
+    }
+}
+
+impl VideoEncodingOptions {
+    /// Website-compatible H.264 MP4 for QuickTime and broad browser playback.
+    #[must_use]
+    pub fn web_compatible() -> Self {
+        Self {
+            codec: "libx264".to_string(),
+            preset: "medium".to_string(),
+            crf: 18,
+            bitrate: String::new(),
+            pixel_format: "yuv420p".to_string(),
+            input_pixel_format: "rgb48le".to_string(),
+            extra_args: vec![
+                "-movflags".to_string(),
+                "+faststart".to_string(),
+                "-colorspace".to_string(),
+                "bt709".to_string(),
+                "-color_primaries".to_string(),
+                "bt709".to_string(),
+                "-color_trc".to_string(),
+                "bt709".to_string(),
+                "-color_range".to_string(),
+                "tv".to_string(),
+            ],
+        }
+    }
+
+    /// High-quality HEVC copy preserving the existing 10-bit 4:2:2 encode path.
+    #[must_use]
+    pub fn high_quality() -> Self {
         Self {
             codec: "libx265".to_string(),
             preset: "slower".to_string(),
@@ -74,9 +100,10 @@ impl Default for VideoEncodingOptions {
             pixel_format: "yuv422p10le".to_string(),
             input_pixel_format: "rgb48le".to_string(),
             extra_args: vec![
+                "-profile:v".to_string(),
+                "main422-10".to_string(),
                 "-x265-params".to_string(),
-                "profile=main422-10:\
-                 bframes=8:ref=6:\
+                "bframes=8:ref=6:\
                  rc-lookahead=250:\
                  aq-mode=3:aq-strength=1.0:\
                  psy-rd=2.5:psy-rdoq=1.5:\
@@ -101,12 +128,12 @@ impl Default for VideoEncodingOptions {
                 "iec61966-2-1".to_string(),
                 "-color_range".to_string(),
                 "tv".to_string(),
+                "-tag:v".to_string(),
+                "hvc1".to_string(),
             ],
         }
     }
-}
 
-impl VideoEncodingOptions {
     /// Fast encoding mode using hardware acceleration (macOS `VideoToolbox`)
     ///
     /// This configuration prioritizes encoding speed over maximum quality:
@@ -187,6 +214,137 @@ impl VideoEncodingOptions {
     }
 }
 
+struct MultiVideoWriter {
+    writers: Vec<ChildStdin>,
+}
+
+impl Write for MultiVideoWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for writer in &mut self.writers {
+            writer.write_all(buf)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        for writer in &mut self.writers {
+            writer.flush()?;
+        }
+        Ok(())
+    }
+}
+
+fn build_ffmpeg_command(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    spec: &VideoOutputSpec,
+) -> Command {
+    let options = &spec.options;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args([
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        &options.input_pixel_format,
+        "-s",
+        &format!("{width}x{height}"),
+        "-r",
+        &frame_rate.to_string(),
+        "-i",
+        "-",
+    ]);
+
+    cmd.args(["-c:v", &options.codec]);
+    if !options.preset.is_empty() && options.codec.starts_with("lib") {
+        cmd.args(["-preset", &options.preset]);
+    }
+    if options.codec.starts_with("lib") && options.crf > 0 {
+        cmd.args(["-crf", &options.crf.to_string()]);
+    }
+    if !options.bitrate.is_empty() {
+        cmd.args(["-b:v", &options.bitrate]);
+    }
+    cmd.args(["-pix_fmt", &options.pixel_format]);
+    for arg in &options.extra_args {
+        cmd.arg(arg);
+    }
+    cmd.arg(&spec.output_file);
+    cmd
+}
+
+fn spawn_encoder(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    spec: &VideoOutputSpec,
+) -> Result<(String, Child, ChildStdin)> {
+    info!(
+        "Encoding {} with codec: {}, pixel format: {}",
+        spec.output_file, spec.options.codec, spec.options.pixel_format
+    );
+
+    let mut child = build_ffmpeg_command(width, height, frame_rate, spec)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(RenderError::VideoEncoding)?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        RenderError::VideoEncoding(std::io::Error::other("failed to open ffmpeg stdin"))
+    })?;
+    Ok((spec.output_file.clone(), child, stdin))
+}
+
+fn validate_video_params(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    output_count: usize,
+) -> Result<()> {
+    if width == 0 || height == 0 {
+        return Err(RenderError::InvalidDimensions { width, height });
+    }
+
+    if frame_rate == 0 {
+        return Err(RenderError::InvalidConfig {
+            parameter: "frame_rate".into(),
+            reason: "must be greater than 0".into(),
+        });
+    }
+
+    if output_count == 0 {
+        return Err(RenderError::InvalidConfig {
+            parameter: "outputs".into(),
+            reason: "must include at least one video output".into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn wait_for_encoders(mut children: Vec<(String, Child)>) -> Result<()> {
+    for (output_file, child) in children.drain(..) {
+        let output = child.wait_with_output().map_err(RenderError::VideoEncoding)?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(RenderError::VideoEncoding(std::io::Error::other(format!(
+                "FFmpeg failed for {output_file} with status {:?}. stderr: {}",
+                output.status, stderr
+            ))));
+        }
+        info!("   Saved video => {}", output_file);
+    }
+    Ok(())
+}
+
+fn kill_encoders(children: &mut [(String, Child)]) {
+    for (_, child) in children {
+        let _ = child.kill();
+    }
+}
+
 /// Create video in a single pass using `FFmpeg` with configurable options
 ///
 /// This function pipes raw RGB frames directly to `FFmpeg`'s stdin, avoiding the need
@@ -222,104 +380,55 @@ pub fn create_video_from_frames_singlepass(
     width: u32,
     height: u32,
     frame_rate: u32,
-    mut frames_iter: impl FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+    frames_iter: impl FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
     output_file: &str,
     options: &VideoEncodingOptions,
 ) -> Result<()> {
-    // Validate parameters
-    if width == 0 || height == 0 {
-        return Err(RenderError::InvalidDimensions { width, height });
-    }
+    create_videos_from_frames_singlepass(
+        width,
+        height,
+        frame_rate,
+        frames_iter,
+        &[VideoOutputSpec { output_file: output_file.to_string(), options: options.clone() }],
+    )
+}
 
-    if frame_rate == 0 {
-        return Err(RenderError::InvalidConfig {
-            parameter: "frame_rate".into(),
-            reason: "must be greater than 0".into(),
-        });
-    }
+/// Create one or more videos from a single raw frame stream.
+pub fn create_videos_from_frames_singlepass(
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    mut frames_iter: impl FnMut(&mut dyn Write) -> std::result::Result<(), Box<dyn Error>>,
+    outputs: &[VideoOutputSpec],
+) -> Result<()> {
+    validate_video_params(width, height, frame_rate, outputs.len())?;
 
-    info!("Encoding video with codec: {}, pixel format: {}", options.codec, options.pixel_format);
-
-    // Build FFmpeg command
-    let mut cmd = Command::new("ffmpeg");
-
-    // Input parameters
-    cmd.args([
-        "-y", // Overwrite output file
-        "-f",
-        "rawvideo", // Input format
-        "-pix_fmt",
-        &options.input_pixel_format, // rgb24 (8-bit) or rgb48le (16-bit)
-        "-s",
-        &format!("{width}x{height}"),
-        "-r",
-        &frame_rate.to_string(),
-        "-i",
-        "-", // Read from stdin
-    ]);
-
-    // Codec selection
-    cmd.args(["-c:v", &options.codec]);
-
-    // Preset (only for software encoders like libx264/libx265)
-    if !options.preset.is_empty() && options.codec.starts_with("lib") {
-        cmd.args(["-preset", &options.preset]);
-    }
-
-    // CRF mode (only for software encoders using CRF)
-    if options.codec.starts_with("lib") && options.crf > 0 {
-        cmd.args(["-crf", &options.crf.to_string()]);
-    }
-
-    // Bitrate (only if specified, typically for hardware encoders)
-    if !options.bitrate.is_empty() {
-        cmd.args(["-b:v", &options.bitrate]);
-    }
-
-    // Output pixel format
-    cmd.args(["-pix_fmt", &options.pixel_format]);
-
-    // Add any extra arguments
-    for arg in &options.extra_args {
-        cmd.arg(arg);
-    }
-
-    // Output file
-    cmd.arg(output_file);
-
-    // Spawn FFmpeg process
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(RenderError::VideoEncoding)?;
-
-    // Write frames to FFmpeg's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = frames_iter(&mut stdin) {
-            let _ = stdin.flush();
-            let _ = child.kill();
-            return Err(RenderError::VideoEncoding(std::io::Error::other(e.to_string())));
+    let mut children = Vec::with_capacity(outputs.len());
+    let mut writers = Vec::with_capacity(outputs.len());
+    for spec in outputs {
+        match spawn_encoder(width, height, frame_rate, spec) {
+            Ok((output_file, child, stdin)) => {
+                children.push((output_file, child));
+                writers.push(stdin);
+            }
+            Err(e) => {
+                kill_encoders(&mut children);
+                return Err(e);
+            }
         }
-        // Ensure stdin is closed so ffmpeg sees EOF
-        let _ = stdin.flush();
-        drop(stdin);
     }
 
-    // Wait for FFmpeg to complete
-    let output = child.wait_with_output().map_err(RenderError::VideoEncoding)?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RenderError::VideoEncoding(std::io::Error::other(format!(
-            "FFmpeg failed with status {:?}. stderr: {}",
-            output.status, stderr
-        ))));
+    let mut writer = MultiVideoWriter { writers };
+    if let Err(e) = frames_iter(&mut writer) {
+        let _ = writer.flush();
+        drop(writer);
+        kill_encoders(&mut children);
+        return Err(RenderError::VideoEncoding(std::io::Error::other(e.to_string())));
     }
+    let _ = writer.flush();
+    drop(writer);
 
-    info!("   Saved video => {}", output_file);
-    Ok(())
+    wait_for_encoders(children)
 }
 
 #[cfg(test)]
@@ -341,6 +450,16 @@ mod tests {
         assert!(options.extra_args.contains(&"+faststart".to_string()));
         assert!(options.extra_args.contains(&"-colorspace".to_string()));
         assert!(options.extra_args.contains(&"bt709".to_string()));
+    }
+
+    #[test]
+    fn test_web_compatible_options() {
+        let options = VideoEncodingOptions::web_compatible();
+        assert_eq!(options.codec, "libx264");
+        assert_eq!(options.pixel_format, "yuv420p");
+        assert_eq!(options.input_pixel_format, "rgb48le");
+        assert!(options.extra_args.contains(&"-movflags".to_string()));
+        assert!(options.extra_args.contains(&"+faststart".to_string()));
     }
 
     #[test]
@@ -397,10 +516,13 @@ mod tests {
 
         assert!(x265_params.is_some());
         let params = x265_params.expect("expected -x265-params arg");
-        assert!(params.contains("profile=main422-10"));
         assert!(params.contains("aq-mode=3"));
         assert!(params.contains("psy-rd=2.5"));
         assert!(params.contains("rc-lookahead=250"));
+        assert!(options.extra_args.contains(&"-profile:v".to_string()));
+        assert!(options.extra_args.contains(&"main422-10".to_string()));
+        assert!(options.extra_args.contains(&"-tag:v".to_string()));
+        assert!(options.extra_args.contains(&"hvc1".to_string()));
     }
 
     #[test]
@@ -443,11 +565,9 @@ mod tests {
             .position(|s| s == "-x265-params")
             .map(|idx| &options.extra_args[idx + 1]);
 
-        if let Some(params) = x265_params
-            && has_422
-        {
+        if x265_params.is_some() && has_422 {
             assert!(
-                params.contains("main422-10"),
+                options.extra_args.contains(&"main422-10".to_string()),
                 "4:2:2 pixel format requires main422-10 profile"
             );
         }
