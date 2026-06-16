@@ -184,6 +184,8 @@ Edit `.env` with your actual deployment values:
 COSMICSIG_SSH_HOST=203.0.113.42
 COSMICSIG_SSH_USER=frontend
 COSMICSIG_API_URL=http://api.example.com:8353
+COSMICSIG_ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+COSMICSIG_NFT_CONTRACT=0xbb84Be3500A63581d3F2d5AC3bdF8685AAedad25
 COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 ```
 
@@ -191,18 +193,20 @@ COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 |----------|------------------|
 | `COSMICSIG_SSH_HOST` | IP address or hostname of the remote server |
 | `COSMICSIG_SSH_USER` | SSH user on the remote server (must accept your key) |
-| `COSMICSIG_API_URL` | CosmicGame API base URL (CosmicSignature token list), no trailing slash |
+| `COSMICSIG_API_URL` | CosmicGame API base URL (CosmicSignature token list), no trailing slash. Preferred, but the script can fall back to Arbitrum if this fails. |
+| `COSMICSIG_ARBITRUM_RPC_URL` | Arbitrum One JSON-RPC URL used to verify/fallback seed reads. Defaults to the public Arbitrum RPC if omitted; a private provider is more reliable. |
+| `COSMICSIG_NFT_CONTRACT` | Cosmic Signature NFT contract address on Arbitrum. Defaults to the official contract address. |
 | `COSMICSIG_REMOTE_DIR` | Absolute path on the remote server where per-seed asset package directories are stored |
 
 **5. Run the preflight check**
 
-This tests SSH connectivity, remote write permissions, API reachability, that the release generator binary exists, and that `ffmpeg` is on `PATH`:
+This tests SSH connectivity, remote write permissions, seed-source reachability (API and/or Arbitrum), that the release generator binary exists, and that `ffmpeg` is on `PATH`:
 
 ```bash
 python3 run.py --preflight
 ```
 
-All five checks should report success in the log (`OK` lines for SSH, remote write, API, generator binary, and ffmpeg). Fix any failures before continuing.
+The seed-source check passes if either the API or the Arbitrum contract read works. If both API and blockchain reads work during a normal run, `run.py` verifies that they return the same unique seed set. A mismatch is treated as fatal and written to `seed_source_mismatch.json`.
 
 **6. Do a dry run (optional)**
 

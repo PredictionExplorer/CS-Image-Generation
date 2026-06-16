@@ -35,6 +35,7 @@ import sys
 import time
 import types
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -45,11 +46,15 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # ---------------------------------------------------------------------------
 
 DEFAULT_TIMEOUT = 86400  # 24 hours
+API_TOKEN_FETCH_LIMIT = 999999
+DEFAULT_ARBITRUM_RPC_URL = "https://arb1.arbitrum.io/rpc"
+DEFAULT_NFT_CONTRACT = "0xbb84Be3500A63581d3F2d5AC3bdF8685AAedad25"
 
 LOCAL_OUTPUT_DIR = Path("output")
 LOG_FILE = "imgcheck.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 LOG_BACKUP_COUNT = 5
+SEED_MISMATCH_REPORT = Path("seed_source_mismatch.json")
 
 SSH_BASE_OPTS = [
     "-o",
@@ -71,6 +76,13 @@ ENV_SSH_HOST = "COSMICSIG_SSH_HOST"
 ENV_SSH_USER = "COSMICSIG_SSH_USER"
 ENV_API_URL = "COSMICSIG_API_URL"
 ENV_REMOTE_DIR = "COSMICSIG_REMOTE_DIR"
+ENV_ARBITRUM_RPC_URL = "COSMICSIG_ARBITRUM_RPC_URL"
+ENV_NFT_CONTRACT = "COSMICSIG_NFT_CONTRACT"
+
+# Minimal ABI selectors for the verified Cosmic Signature NFT contract.
+SELECTOR_TOTAL_SUPPLY = "0x18160ddd"  # totalSupply()
+SELECTOR_TOKEN_BY_INDEX = "0x4f6ccce7"  # tokenByIndex(uint256)
+SELECTOR_GET_NFT_SEED = "0xb0c0fe4e"  # getNftSeed(uint256)
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -209,6 +221,34 @@ def run_subprocess(
         raise
 
 
+def normalize_seed(seed: str | int) -> str:
+    """Return a canonical 32-byte lowercase hex seed without 0x."""
+    if isinstance(seed, int):
+        value = seed
+    else:
+        hex_seed = seed.strip().removeprefix("0x").removeprefix("0X")
+        if not hex_seed:
+            raise ValueError("empty seed")
+        if not re.fullmatch(r"[0-9a-fA-F]+", hex_seed):
+            raise ValueError(f"non-hex seed: {seed!r}")
+        value = int(hex_seed, 16)
+
+    if value < 0 or value >= 2**256:
+        raise ValueError(f"seed outside uint256 range: {seed!r}")
+    return f"{value:064x}"
+
+
+def safe_url_for_log(url: str | None) -> str:
+    """Redact path/query details because RPC URLs often contain API keys."""
+    if not url:
+        return "(not set)"
+    parts = urllib.parse.urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return "(configured)"
+    suffix = "/..." if parts.path and parts.path != "/" else ""
+    return f"{parts.scheme}://{parts.netloc}{suffix}"
+
+
 # ---------------------------------------------------------------------------
 # API fetch
 # ---------------------------------------------------------------------------
@@ -219,7 +259,11 @@ def fetch_token_seeds(api_base_url: str, retries: int = 3) -> list[str]:
     Fetch all CosmicSignature token seeds from the API.
     Returns normalized hex seed strings (without 0x prefix).
     """
-    url = f"{api_base_url}/api/cosmicgame/cst/list/all/0/100000"
+    api_base_url = api_base_url.rstrip("/")
+    if not api_base_url:
+        raise RuntimeError("CosmicGame API URL is not configured")
+
+    url = f"{api_base_url}/api/cosmicgame/cst/list/all/0/{API_TOKEN_FETCH_LIMIT}"
     last_err: Exception | None = None
 
     for attempt in range(1, retries + 1):
@@ -250,7 +294,7 @@ def fetch_token_seeds(api_base_url: str, retries: int = 3) -> list[str]:
                 seed = token.get("Seed", "")
                 if not seed:
                     continue
-                seed = seed.removeprefix("0x").removeprefix("0X")
+                seed = normalize_seed(str(seed))
                 if seed and seed not in seen:
                     seen.add(seed)
                     seeds.append(seed)
@@ -269,6 +313,210 @@ def fetch_token_seeds(api_base_url: str, retries: int = 3) -> list[str]:
                 time.sleep(backoff)
 
     raise RuntimeError(f"Failed to fetch token seeds after {retries} attempts: {last_err}")
+
+
+# ---------------------------------------------------------------------------
+# Blockchain fetch
+# ---------------------------------------------------------------------------
+
+
+def normalize_eth_address(address: str) -> str:
+    value = address.strip()
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
+        raise ValueError(f"invalid Ethereum address: {address!r}")
+    return value
+
+
+def encode_uint256_arg(value: int) -> str:
+    if value < 0 or value >= 2**256:
+        raise ValueError(f"uint256 argument out of range: {value}")
+    return f"{value:064x}"
+
+
+def decode_uint256_result(result: str) -> int:
+    if not isinstance(result, str) or not result.startswith("0x"):
+        raise RuntimeError(f"invalid eth_call result: {result!r}")
+    hex_value = result[2:]
+    if len(hex_value) < 64:
+        raise RuntimeError(f"short eth_call result: {result!r}")
+    return int(hex_value[-64:], 16)
+
+
+def rpc_request(rpc_url: str, method: str, params: list[object], timeout: int = 30) -> object:
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        rpc_url,
+        data=payload,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "cosmicsig-sync/1.0",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+
+    data = json.loads(raw)
+    if "error" in data:
+        raise RuntimeError(f"RPC {method} failed: {data['error']}")
+    if "result" not in data:
+        raise RuntimeError(f"RPC {method} response missing result")
+    return data["result"]
+
+
+def eth_call_uint256(rpc_url: str, contract: str, calldata: str) -> int:
+    result = rpc_request(
+        rpc_url,
+        "eth_call",
+        [
+            {
+                "to": contract,
+                "data": calldata,
+            },
+            "latest",
+        ],
+    )
+    return decode_uint256_result(str(result))
+
+
+def fetch_blockchain_token_seeds(
+    rpc_url: str,
+    nft_contract: str,
+    retries: int = 2,
+) -> list[str]:
+    """Fetch token seeds directly from the Arbitrum NFT contract."""
+    rpc_url = rpc_url.strip()
+    if not rpc_url:
+        raise RuntimeError("Arbitrum RPC URL is not configured")
+    nft_contract = normalize_eth_address(nft_contract)
+
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            log.info(
+                "Fetching token seeds from Arbitrum contract %s (attempt %d/%d)",
+                nft_contract,
+                attempt,
+                retries,
+            )
+            total_supply = eth_call_uint256(rpc_url, nft_contract, SELECTOR_TOTAL_SUPPLY)
+            log.info("NFT totalSupply from chain: %d", total_supply)
+            if total_supply <= 0:
+                raise ValueError("NFT totalSupply is zero")
+
+            seen: set[str] = set()
+            seeds: list[str] = []
+            for index in range(total_supply):
+                if shutdown_requested:
+                    raise RuntimeError("shutdown requested while fetching blockchain seeds")
+
+                token_id = eth_call_uint256(
+                    rpc_url,
+                    nft_contract,
+                    f"{SELECTOR_TOKEN_BY_INDEX}{encode_uint256_arg(index)}",
+                )
+                seed_value = eth_call_uint256(
+                    rpc_url,
+                    nft_contract,
+                    f"{SELECTOR_GET_NFT_SEED}{encode_uint256_arg(token_id)}",
+                )
+                seed = normalize_seed(seed_value)
+                if seed not in seen:
+                    seen.add(seed)
+                    seeds.append(seed)
+
+                if (index + 1) % 50 == 0 or index + 1 == total_supply:
+                    log.info(
+                        "Fetched %d/%d NFT seeds from chain (%d unique)",
+                        index + 1,
+                        total_supply,
+                        len(seeds),
+                    )
+
+            if not seeds:
+                raise ValueError("No valid seeds found on chain")
+
+            log.info("Fetched %d unique token seeds from blockchain", len(seeds))
+            return seeds
+        except Exception as exc:
+            last_err = exc
+            log.warning("Blockchain attempt %d/%d failed: %s", attempt, retries, exc)
+            if attempt < retries:
+                backoff = 2**attempt
+                log.info("Retrying blockchain fetch in %ds ...", backoff)
+                time.sleep(backoff)
+
+    raise RuntimeError(f"Failed to fetch token seeds from blockchain: {last_err}")
+
+
+def write_seed_mismatch_report(api_seeds: list[str], chain_seeds: list[str]) -> None:
+    api_set = set(api_seeds)
+    chain_set = set(chain_seeds)
+    report = {
+        "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "api_count": len(api_seeds),
+        "api_unique_count": len(api_set),
+        "blockchain_count": len(chain_seeds),
+        "blockchain_unique_count": len(chain_set),
+        "api_only": sorted(api_set - chain_set),
+        "blockchain_only": sorted(chain_set - api_set),
+    }
+    SEED_MISMATCH_REPORT.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    log.error("Seed source mismatch report written to %s", SEED_MISMATCH_REPORT)
+
+
+def resolve_token_seeds(
+    api_url: str,
+    arbitrum_rpc_url: str,
+    nft_contract: str,
+) -> tuple[list[str], str]:
+    """
+    Prefer API seeds, verify against chain when possible, and fall back to chain
+    if the API is unavailable.
+    """
+    api_seeds: list[str] | None = None
+    chain_seeds: list[str] | None = None
+    api_error: Exception | None = None
+    chain_error: Exception | None = None
+
+    try:
+        api_seeds = fetch_token_seeds(api_url)
+    except RuntimeError as exc:
+        api_error = exc
+        log.warning("API seed source unavailable: %s", exc)
+
+    try:
+        chain_seeds = fetch_blockchain_token_seeds(arbitrum_rpc_url, nft_contract)
+    except RuntimeError as exc:
+        chain_error = exc
+        log.warning("Blockchain seed source unavailable: %s", exc)
+
+    if api_seeds is not None and chain_seeds is not None:
+        if set(api_seeds) != set(chain_seeds):
+            write_seed_mismatch_report(api_seeds, chain_seeds)
+            raise RuntimeError(
+                "API and blockchain seed lists do not match; refusing to continue"
+            )
+        log.info("API and blockchain seed sources match (%d unique seeds)", len(api_seeds))
+        return api_seeds, "API verified against blockchain"
+
+    if api_seeds is not None:
+        log.warning("Using API seeds without blockchain verification: %s", chain_error)
+        return api_seeds, "API only"
+
+    if chain_seeds is not None:
+        log.warning("Using blockchain seed fallback because API failed: %s", api_error)
+        return chain_seeds, "blockchain fallback"
+
+    raise RuntimeError(f"Both seed sources failed: API={api_error}; blockchain={chain_error}")
 
 
 # ---------------------------------------------------------------------------
@@ -575,11 +823,18 @@ def process_seed(
 # ---------------------------------------------------------------------------
 
 
-def preflight(ssh_host: str, ssh_user: str, remote_dir: str, api_url: str) -> bool:
+def preflight(
+    ssh_host: str,
+    ssh_user: str,
+    remote_dir: str,
+    api_url: str,
+    arbitrum_rpc_url: str,
+    nft_contract: str,
+) -> bool:
     """
     Verify that all external dependencies are working before committing to
-    lengthy generation: SSH auth, remote write permissions, API connectivity,
-    release generator binary, and ffmpeg on PATH. Returns True if all checks pass.
+    lengthy generation: SSH auth, remote write permissions, seed source
+    connectivity, release generator binary, and ffmpeg on PATH.
     """
     all_ok = True
 
@@ -624,20 +879,62 @@ def preflight(ssh_host: str, ssh_user: str, remote_dir: str, api_url: str) -> bo
         log.error("[preflight] Remote write access: FAILED (%s)", exc)
         all_ok = False
 
-    # 3. API reachability
-    log.info("[preflight] Testing API at %s ...", api_url)
-    url = f"{api_url}/api/cosmicgame/cst/list/all/0/1"
+    # 3. Seed source reachability: API is preferred, blockchain is fallback.
+    seed_source_ok = False
+
+    log.info("[preflight] Testing API at %s ...", api_url or "(not configured)")
+    if api_url:
+        url = f"{api_url.rstrip('/')}/api/cosmicgame/cst/list/all/0/1"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+                if str(data.get("status", 0)) == "1":
+                    log.info("[preflight] API connectivity: OK")
+                    seed_source_ok = True
+                else:
+                    log.warning(
+                        "[preflight] API connectivity: FAILED (status=%s)",
+                        data.get("status"),
+                    )
+        except Exception as exc:
+            log.warning("[preflight] API connectivity: FAILED (%s)", exc)
+    else:
+        log.warning("[preflight] API connectivity: SKIPPED (not configured)")
+
+    log.info(
+        "[preflight] Testing blockchain seed source via %s ...",
+        safe_url_for_log(arbitrum_rpc_url),
+    )
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-            if str(data.get("status", 0)) == "1":
-                log.info("[preflight] API connectivity: OK")
-            else:
-                log.error("[preflight] API connectivity: FAILED (status=%s)", data.get("status"))
-                all_ok = False
+        contract = normalize_eth_address(nft_contract)
+        total_supply = eth_call_uint256(arbitrum_rpc_url, contract, SELECTOR_TOTAL_SUPPLY)
+        if total_supply > 0:
+            token_id = eth_call_uint256(
+                arbitrum_rpc_url,
+                contract,
+                f"{SELECTOR_TOKEN_BY_INDEX}{encode_uint256_arg(0)}",
+            )
+            seed_value = eth_call_uint256(
+                arbitrum_rpc_url,
+                contract,
+                f"{SELECTOR_GET_NFT_SEED}{encode_uint256_arg(token_id)}",
+            )
+            log.info(
+                "[preflight] Blockchain seed source: OK "
+                "(totalSupply=%d, first token=%d, first seed=0x%s)",
+                total_supply,
+                token_id,
+                normalize_seed(seed_value),
+            )
+            seed_source_ok = True
+        else:
+            log.warning("[preflight] Blockchain seed source: FAILED (totalSupply=0)")
     except Exception as exc:
-        log.error("[preflight] API connectivity: FAILED (%s)", exc)
+        log.warning("[preflight] Blockchain seed source: FAILED (%s)", exc)
+
+    if not seed_source_ok:
+        log.error("[preflight] No seed source is reachable")
         all_ok = False
 
     # 4. Generator binary
@@ -688,13 +985,23 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--api-url",
-        default=os.environ.get(ENV_API_URL),
-        help=f"CosmicGame API base URL (env: {ENV_API_URL})",
+        default=os.environ.get(ENV_API_URL, ""),
+        help=f"CosmicGame API base URL (env: {ENV_API_URL}; optional with blockchain fallback)",
     )
     p.add_argument(
         "--remote-dir",
         default=os.environ.get(ENV_REMOTE_DIR),
         help=f"Remote asset directory (env: {ENV_REMOTE_DIR})",
+    )
+    p.add_argument(
+        "--arbitrum-rpc-url",
+        default=os.environ.get(ENV_ARBITRUM_RPC_URL, DEFAULT_ARBITRUM_RPC_URL),
+        help=f"Arbitrum JSON-RPC URL (env: {ENV_ARBITRUM_RPC_URL})",
+    )
+    p.add_argument(
+        "--nft-contract",
+        default=os.environ.get(ENV_NFT_CONTRACT, DEFAULT_NFT_CONTRACT),
+        help=f"Cosmic Signature NFT contract address (env: {ENV_NFT_CONTRACT})",
     )
     p.add_argument(
         "--generator", default=None, help="Path to generator binary (auto-detected if omitted)"
@@ -713,7 +1020,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--preflight",
         action="store_true",
-        help=("Verify SSH, remote write, API, release generator binary, and ffmpeg, then exit"),
+        help=(
+            "Verify SSH, remote write, seed sources, release generator binary, "
+            "and ffmpeg, then exit"
+        ),
     )
     return p.parse_args()
 
@@ -724,8 +1034,9 @@ def validate_config(args: argparse.Namespace) -> list[str]:
     for attr, env_name in [
         ("ssh_host", ENV_SSH_HOST),
         ("ssh_user", ENV_SSH_USER),
-        ("api_url", ENV_API_URL),
         ("remote_dir", ENV_REMOTE_DIR),
+        ("arbitrum_rpc_url", ENV_ARBITRUM_RPC_URL),
+        ("nft_contract", ENV_NFT_CONTRACT),
     ]:
         if not getattr(args, attr, None):
             missing.append(f"  --{attr.replace('_', '-')}  (or env {env_name})")
@@ -746,17 +1057,26 @@ def main() -> int:
 
     log.info("=" * 60)
     log.info("CosmicSignature asset sync started")
-    log.info("  ssh_host   = %s", args.ssh_host)
-    log.info("  ssh_user   = %s", args.ssh_user)
-    log.info("  api_url    = %s", args.api_url)
-    log.info("  remote_dir = %s", args.remote_dir)
-    log.info("  timeout    = %s", fmt_duration(args.timeout))
-    log.info("  dry_run    = %s", args.dry_run)
-    log.info("  preflight  = %s", args.preflight)
+    log.info("  ssh_host         = %s", args.ssh_host)
+    log.info("  ssh_user         = %s", args.ssh_user)
+    log.info("  api_url          = %s", args.api_url or "(not set)")
+    log.info("  remote_dir       = %s", args.remote_dir)
+    log.info("  arbitrum_rpc_url = %s", safe_url_for_log(args.arbitrum_rpc_url))
+    log.info("  nft_contract     = %s", args.nft_contract)
+    log.info("  timeout          = %s", fmt_duration(args.timeout))
+    log.info("  dry_run          = %s", args.dry_run)
+    log.info("  preflight        = %s", args.preflight)
     log.info("=" * 60)
 
     if args.preflight:
-        ok = preflight(args.ssh_host, args.ssh_user, args.remote_dir, args.api_url)
+        ok = preflight(
+            args.ssh_host,
+            args.ssh_user,
+            args.remote_dir,
+            args.api_url,
+            args.arbitrum_rpc_url,
+            args.nft_contract,
+        )
         return 0 if ok else 1
 
     t_start = time.monotonic()
@@ -771,7 +1091,11 @@ def main() -> int:
     # --- Phase 1: discover what's missing ---
 
     try:
-        seeds = fetch_token_seeds(args.api_url)
+        seeds, seed_source = resolve_token_seeds(
+            args.api_url,
+            args.arbitrum_rpc_url,
+            args.nft_contract,
+        )
     except RuntimeError as exc:
         log.error("Fatal: %s", exc)
         return 1
@@ -830,7 +1154,8 @@ def main() -> int:
 
     log.info("=" * 60)
     log.info("SUMMARY")
-    log.info("  Total seeds from API : %d", len(seeds))
+    log.info("  Seed source          : %s", seed_source)
+    log.info("  Total seeds          : %d", len(seeds))
     log.info("  Missing on remote    : %d", len(missing))
     log.info("  Processed OK         : %d", ok_count)
     log.info("  Failed               : %d", fail_count)
