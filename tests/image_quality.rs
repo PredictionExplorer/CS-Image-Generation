@@ -201,9 +201,7 @@ fn cosmic_signature_crisp_mode_disables_all_softening_sources() {
         "post-effects outside the signature trait set must stay disabled"
     );
     assert_eq!(config.blur_strength, 0.0);
-    assert_eq!(config.glow_strength, 0.0);
     assert_eq!(config.chromatic_bloom_strength, profile.parameters.prism_strength);
-    assert_eq!(config.perceptual_blur_strength, 0.0);
     assert_eq!(constants::CRISP_DISPERSION_STRENGTH, 0.0);
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH, 0.0);
     assert_eq!(constants::SPECTRAL_DISPERSION_STRENGTH_BOOSTED, 0.0);

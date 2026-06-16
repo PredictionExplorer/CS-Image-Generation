@@ -416,7 +416,6 @@ fn main() -> Result<()> {
             &output_vid,
             &output_png,
             args.fast_encode,
-            false,
         )?;
 
         let spectral_dir = format!("{seed_dir}/spectral");

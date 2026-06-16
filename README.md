@@ -14,15 +14,15 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
 - Samples every palette from a continuous OKLCh genome (no presets) behind a
   deterministic perceptual beauty gate
 - Renders spectral trails with SIMD acceleration
-- Applies the crisp CosmicSignature visual profile with legacy post-effects off by
-  default (seed-gated halation, prism, diffraction spikes, and stardust only)
+- Applies the crisp CosmicSignature visual profile with only the active finish
+  traits: seed-gated halation, prism, diffraction spikes, and stardust
 - Writes outputs to `output/<name>/`
 
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
 - FFmpeg (for video encoding)
-- Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. Separate optional dev packages (Ruff, Mypy) apply when you run Python quality checks or CI; see [Development](#development).
+- Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `contact_sheet.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. Separate optional dev packages (Ruff, Mypy) apply when you run Python quality checks or CI; see [Development](#development).
 - Git
 
 ### Installing on Ubuntu
@@ -346,10 +346,10 @@ Separate from *running* the scripts, the repo pins **developer** tools so format
 
 | Tool | Role |
 |------|------|
-| [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the four Python files (replaces a pile of flake8/isort/black-style checks in one fast binary). |
+| [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the repository Python scripts (replaces a pile of flake8/isort/black-style checks in one fast binary). |
 | [Mypy](https://mypy.readthedocs.io/) | Strict type-checking for the same files. |
 
-Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `run.py`, `run-test-images.py`, and `ci/verify_reference.py`.
+Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `contact_sheet.py`, `run.py`, `run-test-images.py`, and `ci/verify_reference.py`.
 
 **Install the dev tools** (recommended: virtual environment so you do not fight [PEP 668](https://peps.python.org/pep-0668/) on Homebrew or Debian `externally-managed-environment`):
 
@@ -388,13 +388,14 @@ src/main.rs              CLI entry point
 src/app.rs               Pipeline orchestration
 src/sim.rs               Physics simulation and selection
 src/render/              Rendering, tonemapping, visual profiles, video
-src/post_effects/        Legacy optional post-processing effects
+src/post_effects/        Active bloom, prism, and spectral-sweep post effects
 src/spectrum.rs          Spectral conversion
 src/spectrum_simd.rs     SIMD spectral fast paths
 src/oklab.rs             OKLab utilities
 _utils.py                Shared helpers imported by `run.py` / `run-test-images.py`
 run.py                   Automated generation and upload
 run-test-images.py       Batch random-seed test runner
+contact_sheet.py         Visual contact sheet and golden gallery generator
 pyproject.toml           Python dev tooling (Ruff, Mypy) and optional `[dev]` deps
 justfile                 `just` recipes (`check`, `test`, `py-check`, …)
 ci/                      Reference-image verification tooling

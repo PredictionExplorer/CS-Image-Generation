@@ -66,13 +66,6 @@ tempfile = "3.27.0"
 name    = "spectral"
 harness = false
 
-[[bench]]
-name    = "post_effects"
-harness = false
-
-[features]
-default = []
-
 [profile.release]
 opt-level       = 3
 lto             = "fat"

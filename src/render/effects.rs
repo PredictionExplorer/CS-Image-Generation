@@ -1,19 +1,11 @@
-//! Legacy finish-effect pipeline
-//!
-//! The default `CosmicSignature` profile builds an empty chain here. The machinery
-//! remains for optional experiments and tests that exercise legacy effects.
+//! Active finish-effect pipeline for the `CosmicSignature` renderer.
 
 use super::constants;
 use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use crate::post_effects::{
-    AtmosphericDepth, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloom,
-    ChromaticBloomConfig, CinematicColorGrade, ColorGradeParams, DogBloom, EdgeLuminance,
-    EdgeLuminanceConfig, FineTexture, FineTextureConfig, GaussianBloom, GlowEnhancement,
-    GlowEnhancementConfig, GradientMap, GradientMapConfig, MicroContrast, MicroContrastConfig,
-    Opalescence, OpalescenceConfig, PerceptualBlur, PerceptualBlurConfig, PostEffect,
-    PostEffectChain, aether::AetherConfig, apply_aether_weave, apply_champleve_iridescence,
+    ChromaticBloom, ChromaticBloomConfig, DogBloom, GaussianBloom, PostEffectChain,
 };
 use crate::spectrum::{NUM_BINS, spd_to_rgba};
 use rayon::prelude::*;
@@ -22,16 +14,7 @@ const LUMA_R: f64 = 0.299;
 const LUMA_G: f64 = 0.587;
 const LUMA_B: f64 = 0.114;
 
-/// Configuration for effect chain creation
-///
-/// Controls which effects are enabled and their parameters. Effects are applied
-/// in a carefully ordered sequence for optimal visual quality:
-/// 1. Bloom effects (diffuse glow)
-/// 2. Tone mapping and blur
-/// 3. Color manipulation (palettes, grading)
-/// 4. Material effects (iridescence, structure)
-/// 5. Detail enhancement (edges, contrast)
-/// 6. Atmospheric effects (depth, texture)
+/// Configuration for active finish-chain creation.
 #[derive(Clone, Debug)]
 pub struct EffectConfig {
     /// Bloom mode selector (e.g., "gaussian", "dog", "none")
@@ -44,58 +27,10 @@ pub struct EffectConfig {
     pub blur_core_brightness: f64,
     /// Difference-of-Gaussians bloom configuration
     pub dog_config: DogBloomConfig,
-    /// Whether perceptual (`OKLab`) blur is enabled.
-    pub perceptual_blur_enabled: bool,
-    /// Perceptual blur parameters, if enabled
-    pub perceptual_blur_config: Option<PerceptualBlurConfig>,
-
-    /// Whether cinematic color grading is enabled
-    pub color_grade_enabled: bool,
-    /// Cinematic color grading parameters
-    pub color_grade_params: ColorGradeParams,
-    /// Whether gradient map color remapping is enabled
-    pub gradient_map_enabled: bool,
-    /// Gradient map configuration
-    pub gradient_map_config: GradientMapConfig,
-
-    /// Whether champlevé iridescence effect is enabled
-    pub champleve_enabled: bool,
-    /// Champlevé iridescence configuration
-    pub champleve_config: ChampleveConfig,
-    /// Whether aether weave effect is enabled
-    pub aether_enabled: bool,
-    /// Aether weave configuration
-    pub aether_config: AetherConfig,
     /// Whether chromatic bloom (prismatic separation) is enabled
     pub chromatic_bloom_enabled: bool,
     /// Chromatic bloom configuration
     pub chromatic_bloom_config: ChromaticBloomConfig,
-    /// Whether opalescence shimmer effect is enabled
-    pub opalescence_enabled: bool,
-    /// Opalescence shimmer configuration
-    pub opalescence_config: OpalescenceConfig,
-
-    /// Whether edge luminance enhancement is enabled
-    pub edge_luminance_enabled: bool,
-    /// Edge luminance configuration
-    pub edge_luminance_config: EdgeLuminanceConfig,
-    /// Whether micro-contrast detail enhancement is enabled
-    pub micro_contrast_enabled: bool,
-    /// Micro-contrast configuration
-    pub micro_contrast_config: MicroContrastConfig,
-    /// Whether glow enhancement (tight sparkle) is enabled
-    pub glow_enhancement_enabled: bool,
-    /// Glow enhancement configuration
-    pub glow_enhancement_config: GlowEnhancementConfig,
-
-    /// Whether atmospheric depth/fog effect is enabled
-    pub atmospheric_depth_enabled: bool,
-    /// Atmospheric depth configuration
-    pub atmospheric_depth_config: AtmosphericDepthConfig,
-    /// Whether fine surface texture effect is enabled
-    pub fine_texture_enabled: bool,
-    /// Fine texture configuration
-    pub fine_texture_config: FineTextureConfig,
 }
 
 /// Per-frame parameters that may vary
@@ -114,7 +49,7 @@ pub struct FinishEffectPipeline {
 }
 
 impl FinishEffectPipeline {
-    /// Create a new finish pipeline with given configuration
+    /// Create a new finish pipeline with given configuration.
     #[must_use]
     pub fn new(config: EffectConfig) -> Self {
         let trajectory_chain = Self::build_trajectory_chain(&config);
@@ -124,21 +59,9 @@ impl FinishEffectPipeline {
 
     /// Build the trajectory finish chain based on configuration.
     ///
-    /// Effects are applied in a carefully optimized order:
-    /// 1. Bloom effects (diffuse and tight glow)
-    /// 2. Tone mapping and perceptual smoothing
-    /// 3. Detail enhancement (contrast, clarity)
-    /// 4. Color manipulation (palettes, grading)
-    /// 5. Material properties (iridescence layers)
-    /// 6. Form refinement (edges)
-    /// 7. Atmospheric effects (depth)
     fn build_trajectory_chain(config: &EffectConfig) -> PostEffectChain {
         let mut chain = PostEffectChain::new();
 
-        // ===== PHASE 1: BLOOM & GLOW =====
-        // Base lighting effects that work on bright areas
-
-        // 1a. Traditional bloom (large diffuse glow)
         if config.blur_radius_px > 0 {
             chain.add(Box::new(GaussianBloom::new(
                 config.blur_radius_px,
@@ -147,7 +70,6 @@ impl FinishEffectPipeline {
             )));
         }
 
-        // 1b. DoG bloom (edge-detected glow, mutually exclusive with Gaussian)
         if config.bloom_mode == "dog" {
             chain.add(Box::new(DogBloom::new(
                 config.dog_config.clone(),
@@ -155,92 +77,15 @@ impl FinishEffectPipeline {
             )));
         }
 
-        // 1c. Glow enhancement (tight sparkle on very bright areas)
-        if config.glow_enhancement_enabled {
-            chain.add(Box::new(GlowEnhancement::new(config.glow_enhancement_config.clone())));
-        }
-
-        // 1d. Chromatic bloom (prismatic color separation)
         if config.chromatic_bloom_enabled {
             chain.add(Box::new(ChromaticBloom::new(config.chromatic_bloom_config.clone())));
-        }
-
-        // ===== PHASE 2: TONE MAPPING & BLUR =====
-        // Perceptual processing for smooth, natural appearance
-
-        // 2a. Perceptual blur (OKLab space smoothing)
-        if config.perceptual_blur_enabled
-            && let Some(blur_config) = &config.perceptual_blur_config
-        {
-            chain.add(Box::new(PerceptualBlur::new(blur_config.clone())));
-        }
-
-        // ===== PHASE 3: DETAIL ENHANCEMENT =====
-        // Clarity and definition improvements
-
-        // 3. Micro-contrast (local contrast enhancement for detail clarity)
-        if config.micro_contrast_enabled {
-            chain.add(Box::new(MicroContrast::new(config.micro_contrast_config.clone())));
-        }
-
-        // ===== PHASE 4: COLOR MANIPULATION =====
-        // Artistic color transformations
-
-        // 4a. Gradient mapping (luxury color palettes)
-        if config.gradient_map_enabled {
-            chain.add(Box::new(GradientMap::new(config.gradient_map_config.clone())));
-        }
-
-        // 4b. Cinematic color grading (film-like look)
-        if config.color_grade_enabled && config.color_grade_params.strength > 0.0 {
-            chain.add(Box::new(CinematicColorGrade::new(config.color_grade_params.clone())));
-        }
-
-        // ===== PHASE 5: MATERIAL PROPERTIES =====
-        // Iridescence and material quality (layered for depth)
-
-        // 5a. Opalescence (base gem-like shimmer layer)
-        if config.opalescence_enabled {
-            chain.add(Box::new(Opalescence::new(config.opalescence_config.clone())));
-        }
-
-        // 5b. Champlevé (structure layer: Voronoi cells + metallic rims)
-        if config.champleve_enabled {
-            chain.add(Box::new(ChampleveFinish::new(config.champleve_config.clone())));
-        }
-
-        // 5c. Aether (flow layer: woven filaments + volumetric scattering)
-        if config.aether_enabled {
-            chain.add(Box::new(AetherFinish::new(config.aether_config.clone())));
-        }
-
-        // ===== PHASE 6: FORM REFINEMENT =====
-        // Edge and shape definition
-
-        // 6. Edge luminance (selective edge brightening for refined forms)
-        if config.edge_luminance_enabled {
-            chain.add(Box::new(EdgeLuminance::new(config.edge_luminance_config.clone())));
-        }
-
-        // ===== PHASE 7: ATMOSPHERIC & SURFACE =====
-        // Final spatial and material qualities
-
-        // 7a. Atmospheric depth (spatial perspective + fog)
-        if config.atmospheric_depth_enabled {
-            chain.add(Box::new(AtmosphericDepth::new(config.atmospheric_depth_config.clone())));
         }
 
         chain
     }
 
-    fn build_image_chain(config: &EffectConfig) -> PostEffectChain {
-        let mut chain = PostEffectChain::new();
-
-        if config.fine_texture_enabled {
-            chain.add(Box::new(FineTexture::new(config.fine_texture_config.clone())));
-        }
-
-        chain
+    fn build_image_chain(_config: &EffectConfig) -> PostEffectChain {
+        PostEffectChain::new()
     }
 
     /// Process trajectory content through the persistent finish chain.
@@ -669,52 +514,6 @@ pub(crate) fn convert_spd_buffer_to_rgba(
     });
 }
 
-struct ChampleveFinish {
-    config: ChampleveConfig,
-}
-
-impl ChampleveFinish {
-    fn new(config: ChampleveConfig) -> Self {
-        Self { config }
-    }
-}
-
-impl PostEffect for ChampleveFinish {
-    fn process(
-        &self,
-        input: &PixelBuffer,
-        width: usize,
-        height: usize,
-    ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
-        let mut buffer = input.clone();
-        apply_champleve_iridescence(&mut buffer, width, height, &self.config);
-        Ok(buffer)
-    }
-}
-
-struct AetherFinish {
-    config: AetherConfig,
-}
-
-impl AetherFinish {
-    fn new(config: AetherConfig) -> Self {
-        Self { config }
-    }
-}
-
-impl PostEffect for AetherFinish {
-    fn process(
-        &self,
-        input: &PixelBuffer,
-        width: usize,
-        height: usize,
-    ) -> std::result::Result<PixelBuffer, crate::post_effects::PostEffectError> {
-        let mut buffer = input.clone();
-        apply_aether_weave(&mut buffer, width, height, &self.config);
-        Ok(buffer)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,54 +525,31 @@ mod tests {
             blur_strength: 0.0,
             blur_core_brightness: 1.0,
             dog_config: DogBloomConfig::default(),
-            perceptual_blur_enabled: false,
-            perceptual_blur_config: None,
-            color_grade_enabled: false,
-            color_grade_params: ColorGradeParams::default(),
-            gradient_map_enabled: false,
-            gradient_map_config: GradientMapConfig::default(),
-            champleve_enabled: false,
-            champleve_config: ChampleveConfig::default(),
-            aether_enabled: false,
-            aether_config: AetherConfig::default(),
             chromatic_bloom_enabled: false,
             chromatic_bloom_config: ChromaticBloomConfig::default(),
-            opalescence_enabled: false,
-            opalescence_config: OpalescenceConfig::default(),
-            edge_luminance_enabled: false,
-            edge_luminance_config: EdgeLuminanceConfig::default(),
-            micro_contrast_enabled: false,
-            micro_contrast_config: MicroContrastConfig::default(),
-            glow_enhancement_enabled: false,
-            glow_enhancement_config: GlowEnhancementConfig::default(),
-            atmospheric_depth_enabled: false,
-            atmospheric_depth_config: AtmosphericDepthConfig::default(),
-            fine_texture_enabled: false,
-            fine_texture_config: FineTextureConfig::default(),
         }
     }
 
     #[test]
-    fn test_finish_pipeline_routes_texture_to_image_stage() {
+    fn test_finish_pipeline_keeps_image_stage_empty() {
         let mut config = base_effect_config();
-        config.fine_texture_enabled = true;
+        config.chromatic_bloom_enabled = true;
 
         let pipeline = FinishEffectPipeline::new(config);
 
-        assert_eq!(pipeline.trajectory_len(), 0);
-        assert_eq!(pipeline.image_len(), 1);
+        assert_eq!(pipeline.trajectory_len(), 1);
+        assert_eq!(pipeline.image_len(), 0);
     }
 
     #[test]
-    fn test_finish_pipeline_keeps_trajectory_effects_out_of_image_stage() {
+    fn test_finish_pipeline_routes_bloom_to_trajectory_stage() {
         let mut config = base_effect_config();
-        config.color_grade_enabled = true;
-        config.fine_texture_enabled = true;
+        config.bloom_mode = "dog".to_string();
 
         let pipeline = FinishEffectPipeline::new(config);
 
-        assert!(pipeline.trajectory_len() >= 1);
-        assert_eq!(pipeline.image_len(), 1);
+        assert_eq!(pipeline.trajectory_len(), 1);
+        assert_eq!(pipeline.image_len(), 0);
     }
 
     #[test]

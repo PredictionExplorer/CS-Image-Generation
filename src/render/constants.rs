@@ -133,62 +133,6 @@ pub const DEFAULT_COLOR_GRADE_SHADOW_TINT: [f64; 3] = [-0.08, -0.02, 0.16];
 /// Default warm tint added to highlights during color grading (linear RGB deltas)
 pub const DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT: [f64; 3] = [0.11, 0.05, -0.03];
 
-/// Default cell density for the champlevé effect (cells per normalized unit)
-pub const DEFAULT_CHAMPLEVE_CELL_DENSITY: f64 = 55.0;
-
-/// Influence of luminance on champlevé interference alignment
-pub const DEFAULT_CHAMPLEVE_FLOW_ALIGNMENT: f64 = 0.65;
-
-/// Default interference amplitude for iridescence
-pub const DEFAULT_CHAMPLEVE_INTERFERENCE_AMPLITUDE: f64 = 0.6;
-
-/// Default interference frequency for iridescent striations
-pub const DEFAULT_CHAMPLEVE_INTERFERENCE_FREQUENCY: f64 = 30.0;
-
-/// Default rim intensity for metal inlay
-pub const DEFAULT_CHAMPLEVE_RIM_INTENSITY: f64 = 2.0;
-
-/// Default rim warmth blend factor (0 = original color, 1 = full gold)
-pub const DEFAULT_CHAMPLEVE_RIM_WARMTH: f64 = 0.72;
-
-/// Default rim sharpness exponent
-pub const DEFAULT_CHAMPLEVE_RIM_SHARPNESS: f64 = 4.5;
-
-/// Default interior lift for opaline glow
-pub const DEFAULT_CHAMPLEVE_INTERIOR_LIFT: f64 = 0.70;
-
-/// Default anisotropy strength for brushed-metal sheen
-pub const DEFAULT_CHAMPLEVE_ANISOTROPY: f64 = 0.95;
-
-/// Default centre highlight compression for champlevé cells
-pub const DEFAULT_CHAMPLEVE_CELL_SOFTNESS: f64 = 1.1;
-
-// ========== Aether Effect Constants ==========
-
-/// Default density of filaments in the aether weave
-pub const DEFAULT_AETHER_FILAMENT_DENSITY: f64 = 90.0;
-
-/// Default strength of flow alignment for anisotropic warp
-pub const DEFAULT_AETHER_FLOW_ALIGNMENT: f64 = 0.85;
-
-/// Base intensity of the volumetric scattering effect
-pub const DEFAULT_AETHER_SCATTERING_STRENGTH: f64 = 1.0;
-
-/// Exponent for the scattering falloff curve
-pub const DEFAULT_AETHER_SCATTERING_FALLOFF: f64 = 2.5;
-
-/// Amplitude of the iridescent color shifting
-pub const DEFAULT_AETHER_IRIDESCENCE_AMPLITUDE: f64 = 0.65;
-
-/// Frequency of the iridescent color bands
-pub const DEFAULT_AETHER_IRIDESCENCE_FREQUENCY: f64 = 12.0;
-
-/// Intensity of the negative space caustics
-pub const DEFAULT_AETHER_CAUSTIC_STRENGTH: f64 = 0.35;
-
-/// Softness of the caustic bleed effect
-pub const DEFAULT_AETHER_CAUSTIC_SOFTNESS: f64 = 3.0;
-
 // ========== Special Mode Enhancement Constants ==========
 
 /// Production crisp line base thickness in pixels.

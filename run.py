@@ -502,9 +502,7 @@ def resolve_token_seeds(
     if api_seeds is not None and chain_seeds is not None:
         if set(api_seeds) != set(chain_seeds):
             write_seed_mismatch_report(api_seeds, chain_seeds)
-            raise RuntimeError(
-                "API and blockchain seed lists do not match; refusing to continue"
-            )
+            raise RuntimeError("API and blockchain seed lists do not match; refusing to continue")
         log.info("API and blockchain seed sources match (%d unique seeds)", len(api_seeds))
         return api_seeds, "API verified against blockchain"
 
@@ -528,8 +526,7 @@ def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]
     """List known asset package files beneath the remote asset directory."""
     quoted_dir = shlex.quote(remote_dir)
     remote_cmd = (
-        f"cd {quoted_dir} 2>/dev/null "
-        "&& find . -mindepth 2 -maxdepth 3 -type f -print || true"
+        f"cd {quoted_dir} 2>/dev/null && find . -mindepth 2 -maxdepth 3 -type f -print || true"
     )
     cmd = [*ssh_cmd(ssh_host, ssh_user), remote_cmd]
 
@@ -543,11 +540,7 @@ def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]
         log.warning("SSH find returned rc=%d -- treating remote as empty", result.returncode)
         return set()
 
-    files = {
-        line.strip().removeprefix("./")
-        for line in result.stdout.splitlines()
-        if line.strip()
-    }
+    files = {line.strip().removeprefix("./") for line in result.stdout.splitlines() if line.strip()}
     log.info("Found %d existing package files on remote server", len(files))
     return files
 
@@ -561,9 +554,7 @@ def missing_remote_package_parts(seed: str, remote_files: set[str]) -> list[str]
         f"{package_dir}/spectral_sweep.mp4",
     ]
     missing = [
-        path.removeprefix(f"{package_dir}/")
-        for path in required_files
-        if path not in remote_files
+        path.removeprefix(f"{package_dir}/") for path in required_files if path not in remote_files
     ]
 
     spectral_prefix = f"{package_dir}/spectral/"

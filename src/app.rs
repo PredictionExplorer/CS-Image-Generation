@@ -78,7 +78,7 @@ pub struct GenerationLogConfig {
     pub drift_mode: String,
     /// Visual profile identifier.
     pub visual_profile: String,
-    /// Whether any legacy post-processing effect was enabled.
+    /// Whether any finish effect was enabled.
     pub post_effects_enabled: bool,
     /// Bloom post-processing mode, kept for compatibility with older logs.
     pub bloom_mode: String,
@@ -147,27 +147,6 @@ pub fn parse_seed(seed: &str) -> Result<Vec<u8>> {
 
     hex::decode(hex_seed)
         .map_err(|e| ConfigError::InvalidSeed { seed: seed.to_string(), error: e }.into())
-}
-
-/// Run Borda selection to find the best orbit
-pub fn run_borda_selection(
-    rng: &mut Sha3RandomByteStream,
-    num_sims: usize,
-    num_steps_sim: usize,
-    chaos_weight: f64,
-    equil_weight: f64,
-    escape_threshold: f64,
-) -> Result<(Vec<Body>, TrajectoryResult)> {
-    info!("STAGE 1/7: Borda search over {} random orbits...", num_sims);
-
-    sim::select_best_trajectory(
-        rng,
-        num_sims,
-        num_steps_sim,
-        chaos_weight,
-        equil_weight,
-        escape_threshold,
-    )
 }
 
 /// Winning orbit of the combined Borda + aesthetic selection.
@@ -770,7 +749,6 @@ pub fn render_video(
     output_vid: &str,
     output_png: &str,
     fast_encode: bool,
-    enable_temporal_smoothing: bool,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -803,7 +781,6 @@ pub fn render_video(
                     levels,
                     settings,
                     last_frame_out: &mut last_frame_png,
-                    enable_temporal_smoothing,
                     accum_spd: &mut accum_spd,
                 },
                 |buf_8bit| {
@@ -1089,23 +1066,14 @@ mod tests {
 
         let mut rng = Sha3RandomByteStream::new(seed, 100.0, 300.0, 300.0, 1.0);
 
-        let config = render::randomizable_config::RandomizableEffectConfig {
-            enable_bloom: Some(false),
-            enable_glow: Some(false),
-            enable_chromatic_bloom: Some(false),
-            enable_perceptual_blur: Some(false),
-            enable_micro_contrast: Some(false),
-            enable_gradient_map: Some(false),
-            enable_color_grade: Some(false),
-            enable_champleve: Some(false),
-            enable_aether: Some(false),
-            enable_opalescence: Some(false),
-            enable_edge_luminance: Some(false),
-            enable_atmospheric_depth: Some(false),
-            enable_fine_texture: Some(false),
+        let resolved = render::randomizable_config::ResolvedEffectConfig {
+            width,
+            height,
+            hdr_scale: 0.12,
+            clip_black: 0.01,
+            clip_white: 0.99,
             ..Default::default()
         };
-        let (resolved, _) = config.resolve(&mut rng, width, height);
 
         let (best_bodies, _) =
             crate::sim::select_best_trajectory(&mut rng, num_sims, num_steps, 0.75, 11.0, -0.3)

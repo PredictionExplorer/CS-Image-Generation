@@ -1142,69 +1142,17 @@ fn effect_config_from_parameters(
         width,
         height,
         enable_bloom: parameters.halation_strength > 0.0,
-        enable_glow: false,
         enable_chromatic_bloom: parameters.prism_strength > 0.0,
-        enable_perceptual_blur: false,
-        enable_micro_contrast: false,
-        enable_gradient_map: false,
-        enable_color_grade: false,
-        enable_champleve: false,
-        enable_aether: false,
-        enable_opalescence: false,
-        enable_edge_luminance: false,
-        enable_atmospheric_depth: false,
-        enable_fine_texture: false,
         blur_strength: 0.0,
         blur_radius_scale: 0.0,
         blur_core_brightness: 1.0,
         dog_strength: parameters.halation_strength,
         dog_sigma_scale: parameters.halation_radius_scale,
         dog_ratio: parameters.halation_softness,
-        glow_strength: 0.0,
-        glow_threshold: 1.0,
-        glow_radius_scale: 0.0,
-        glow_sharpness: 1.0,
-        glow_saturation_boost: 0.0,
         chromatic_bloom_strength: parameters.prism_strength,
         chromatic_bloom_radius_scale: parameters.prism_radius_scale,
         chromatic_bloom_separation_scale: parameters.prism_separation_scale,
         chromatic_bloom_threshold: parameters.prism_threshold,
-        perceptual_blur_strength: 0.0,
-        color_grade_strength: 0.0,
-        vignette_strength: 0.0,
-        vignette_softness: 1.0,
-        vibrance: 1.0,
-        clarity_strength: 0.0,
-        tone_curve_strength: 0.0,
-        gradient_map_strength: 0.0,
-        gradient_map_hue_preservation: 1.0,
-        gradient_map_palette: 0,
-        opalescence_strength: 0.0,
-        opalescence_scale: 0.0,
-        opalescence_layers: 1,
-        champleve_flow_alignment: 0.0,
-        champleve_interference_amplitude: 0.0,
-        champleve_rim_intensity: 0.0,
-        champleve_rim_warmth: 0.0,
-        champleve_interior_lift: 0.0,
-        aether_flow_alignment: 0.0,
-        aether_scattering_strength: 0.0,
-        aether_iridescence_amplitude: 0.0,
-        aether_caustic_strength: 0.0,
-        micro_contrast_strength: 0.0,
-        micro_contrast_radius: 1,
-        edge_luminance_strength: 0.0,
-        edge_luminance_threshold: 1.0,
-        edge_luminance_brightness_boost: 0.0,
-        atmospheric_depth_strength: 0.0,
-        atmospheric_desaturation: 0.0,
-        atmospheric_darkening: 0.0,
-        atmospheric_fog_color_r: 0.0,
-        atmospheric_fog_color_g: 0.0,
-        atmospheric_fog_color_b: 0.0,
-        fine_texture_strength: 0.0,
-        fine_texture_scale: 0.0,
-        fine_texture_contrast: 0.0,
         hdr_scale: parameters.hdr_scale,
         clip_black: parameters.clip_black,
         clip_white: parameters.clip_white,
@@ -1333,16 +1281,7 @@ mod tests {
 
         assert_eq!(c.enable_bloom, profile.parameters.halation_strength > 0.0);
         assert_eq!(c.enable_chromatic_bloom, profile.parameters.prism_strength > 0.0);
-        assert!(!c.enable_glow);
-        assert!(!c.enable_perceptual_blur);
-        assert!(!c.enable_gradient_map);
-        assert!(!c.enable_color_grade);
-        assert!(!c.enable_champleve);
-        assert!(!c.enable_aether);
-        assert!(!c.enable_opalescence);
-        assert!(!c.enable_edge_luminance);
-        assert!(!c.enable_atmospheric_depth);
-        assert!(!c.enable_fine_texture);
+        assert!(!c.any_effect_beyond_signature_traits_enabled());
     }
 
     #[test]

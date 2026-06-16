@@ -60,7 +60,7 @@ pub struct LoggedRenderConfig {
     pub alpha_compress: f64,
     /// Visual profile identifier.
     pub visual_profile: String,
-    /// Whether any legacy post-processing effect was enabled.
+    /// Whether any finish effect was enabled.
     pub post_effects_enabled: bool,
     /// Bloom algorithm name (`dog`, `gaussian`, or `none`).
     pub bloom_mode: String,

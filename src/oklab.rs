@@ -6,6 +6,7 @@
 //! This module provides accurate conversions between linear sRGB and `OKLab` color spaces,
 //! with support for batch processing and various gamut mapping strategies.
 
+#[cfg(test)]
 use rayon::prelude::*;
 
 /// Configuration for gamut mapping strategies when converting from `OKLab` back to sRGB.
@@ -17,6 +18,7 @@ pub enum GamutMapMode {
     #[default]
     PreserveHue,
     /// Soft clipping using smooth transitions (reduces harsh edges)
+    #[cfg(test)]
     SoftClip,
 }
 
@@ -62,6 +64,7 @@ pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
 /// * `(r, g, b)` - Linear RGB values (may be outside [0, 1] range)
 #[must_use]
 #[inline]
+#[cfg(test)]
 pub fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     // Step 1: Lab to nonlinear cone response
     let l_prime = l + 0.3963377774 * a + 0.2158037573 * b;
@@ -220,6 +223,7 @@ pub fn max_display_p3_chroma_for_lh(lightness: f64, hue_degrees: f64) -> f64 {
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
 #[must_use]
+#[cfg(test)]
 pub fn linear_srgb_to_oklab_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
     pixels
         .par_iter()
@@ -235,6 +239,7 @@ pub fn linear_srgb_to_oklab_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, 
 /// This function processes multiple pixels in parallel for better performance.
 /// Alpha channel is preserved unchanged.
 #[must_use]
+#[cfg(test)]
 pub fn oklab_to_linear_srgb_batch(pixels: &[(f64, f64, f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
     pixels
         .par_iter()
@@ -304,6 +309,7 @@ impl GamutMapMode {
                 )
             }
 
+            #[cfg(test)]
             GamutMapMode::SoftClip => {
                 // Smooth S-curve mapping for values near boundaries
                 fn soft_clip_channel(x: f64) -> f64 {

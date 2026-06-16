@@ -310,18 +310,6 @@ pub static BIN_XYZ_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
         arr
     });
 
-/// CIE-derived display RGB lookup for diagnostics and legacy callers.
-pub static BIN_COMBINED_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
-    std::sync::LazyLock::new(|| {
-        let mut arr = [(0.0, 0.0, 0.0, 0.0); NUM_BINS];
-        for (i, entry) in arr.iter_mut().enumerate() {
-            let lambda = wavelength_nm_for_bin(i);
-            let (r, g, b) = wavelength_to_rgb(lambda);
-            *entry = (r, g, b, tone_k_for_wavelength(lambda));
-        }
-        arr
-    });
-
 /// Convert an SPD sample (per-bin energy) to linear-sRGB premultiplied RGBA.
 /// Alpha equals total energy (capped at 1.0) so downstream blending treats it
 /// similarly to our old pipeline.
@@ -416,29 +404,29 @@ mod tests {
     }
 
     #[test]
-    fn test_lut_has_correct_size() {
-        assert_eq!(BIN_COMBINED_LUT.len(), NUM_BINS);
+    fn test_xyz_lut_has_correct_size() {
+        assert_eq!(BIN_XYZ_LUT.len(), NUM_BINS);
     }
 
     #[test]
-    fn test_lut_rgb_values_non_negative() {
-        for (i, &(r, g, b, _)) in BIN_COMBINED_LUT.iter().enumerate() {
-            assert!(r >= 0.0, "LUT bin {i}: R negative ({r})");
-            assert!(g >= 0.0, "LUT bin {i}: G negative ({g})");
-            assert!(b >= 0.0, "LUT bin {i}: B negative ({b})");
+    fn test_xyz_lut_values_non_negative() {
+        for (i, &(x, y, z, _)) in BIN_XYZ_LUT.iter().enumerate() {
+            assert!(x >= 0.0, "XYZ LUT bin {i}: X negative ({x})");
+            assert!(y >= 0.0, "XYZ LUT bin {i}: Y negative ({y})");
+            assert!(z >= 0.0, "XYZ LUT bin {i}: Z negative ({z})");
         }
     }
 
     #[test]
-    fn test_lut_tone_k_positive() {
-        for (i, &(_, _, _, k)) in BIN_COMBINED_LUT.iter().enumerate() {
+    fn test_xyz_lut_tone_k_positive() {
+        for (i, &(_, _, _, k)) in BIN_XYZ_LUT.iter().enumerate() {
             assert!(k > 0.0, "LUT bin {i}: k should be positive ({k})");
         }
     }
 
     #[test]
-    fn test_lut_tone_k_is_nearly_hue_neutral() {
-        let (min_k, max_k) = BIN_COMBINED_LUT
+    fn test_xyz_lut_tone_k_is_nearly_hue_neutral() {
+        let (min_k, max_k) = BIN_XYZ_LUT
             .iter()
             .map(|&(_, _, _, k)| k)
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(min_k, max_k), k| {
@@ -540,8 +528,8 @@ mod tests {
     #[test]
     fn test_lut_deep_violet_bins_are_blue_dominant() {
         for bin in 0..8 {
-            let (r, _g, b, _) = BIN_COMBINED_LUT[bin];
             let wl = wavelength_nm_for_bin(bin);
+            let (r, _g, b) = wavelength_to_rgb(wl);
             if wl < 440.0 {
                 assert!(
                     b > r || (r + b > 0.0),
@@ -556,7 +544,7 @@ mod tests {
         for bin in 0..NUM_BINS {
             let wl = wavelength_nm_for_bin(bin);
             if (510.0..570.0).contains(&wl) {
-                let (r, g, b, _) = BIN_COMBINED_LUT[bin];
+                let (r, g, b) = wavelength_to_rgb(wl);
                 assert!(
                     g >= r && g >= b,
                     "bin {bin} ({wl:.0}nm) should be green-dominant: R={r}, G={g}, B={b}"
@@ -568,8 +556,8 @@ mod tests {
     #[test]
     fn test_lut_deep_red_bins_are_red_dominant() {
         for bin in (NUM_BINS - 8)..NUM_BINS {
-            let (r, g, b, _) = BIN_COMBINED_LUT[bin];
             let wl = wavelength_nm_for_bin(bin);
+            let (r, g, b) = wavelength_to_rgb(wl);
             if wl > 645.0 {
                 assert!(
                     r >= g && r >= b,
@@ -581,8 +569,8 @@ mod tests {
 
     #[test]
     fn test_lut_tone_k_decreases_from_blue_to_red() {
-        let k_first = BIN_COMBINED_LUT[0].3;
-        let k_last = BIN_COMBINED_LUT[NUM_BINS - 1].3;
+        let k_first = tone_k_for_wavelength(wavelength_nm_for_bin(0));
+        let k_last = tone_k_for_wavelength(wavelength_nm_for_bin(NUM_BINS - 1));
         assert!(
             k_first > k_last,
             "tone k should decrease from violet to red: first={k_first}, last={k_last}"
@@ -591,8 +579,9 @@ mod tests {
 
     #[test]
     fn test_lut_all_entries_have_at_least_one_nonzero_channel() {
-        for (i, &(r, g, b, _)) in BIN_COMBINED_LUT.iter().enumerate() {
+        for i in 0..NUM_BINS {
             let wl = wavelength_nm_for_bin(i);
+            let (r, g, b) = wavelength_to_rgb(wl);
             if (390.0..=690.0).contains(&wl) {
                 assert!(
                     r > 0.0 || g > 0.0 || b > 0.0,

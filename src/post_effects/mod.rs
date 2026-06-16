@@ -1,7 +1,4 @@
-//! Legacy post-processing effects for optional renderer experiments.
-//!
-//! The default CosmicSignature profile leaves these effects disabled, but the
-//! modules remain available for experiments, benchmarks, and compatibility tests.
+//! Active post-processing effects used by the `CosmicSignature` renderer.
 
 use thiserror::Error;
 
@@ -111,38 +108,16 @@ impl Default for PostEffectChain {
     }
 }
 
-pub mod aether;
-pub mod atmospheric_depth;
-pub mod champleve;
 pub mod chromatic_bloom;
 pub mod color_grade;
 pub mod dog_bloom;
-pub mod edge_luminance;
-pub mod fine_texture;
 pub mod gaussian_bloom;
-pub mod glow_enhancement;
-pub mod gradient_map;
-pub mod micro_contrast;
-pub mod opalescence;
-pub mod perceptual_blur;
-pub mod temporal_smoothing;
 pub(super) mod utils;
 
-pub use aether::{AetherConfig, apply_aether_weave};
-pub use atmospheric_depth::{AtmosphericDepth, AtmosphericDepthConfig};
-pub use champleve::{ChampleveConfig, apply_champleve_iridescence};
 pub use chromatic_bloom::{ChromaticBloom, ChromaticBloomConfig};
 pub use color_grade::{CinematicColorGrade, ColorGradeParams};
 pub use dog_bloom::DogBloom;
-pub use edge_luminance::{EdgeLuminance, EdgeLuminanceConfig};
-pub use fine_texture::{FineTexture, FineTextureConfig};
 pub use gaussian_bloom::GaussianBloom;
-pub use glow_enhancement::{GlowEnhancement, GlowEnhancementConfig};
-pub use gradient_map::{GradientMap, GradientMapConfig, LuxuryPalette};
-pub use micro_contrast::{MicroContrast, MicroContrastConfig};
-pub use opalescence::{Opalescence, OpalescenceConfig};
-pub use perceptual_blur::{PerceptualBlur, PerceptualBlurConfig};
-pub use temporal_smoothing::{TemporalSmoothing, TemporalSmoothingConfig};
 
 #[cfg(test)]
 mod tests {

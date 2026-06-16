@@ -444,7 +444,7 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
 mod tests {
     use super::*;
     use crate::oklab::linear_srgb_to_oklab;
-    use crate::spectrum::BIN_COMBINED_LUT;
+    use crate::spectrum::wavelength_to_rgb;
     use std::sync::atomic::Ordering;
 
     fn wavelength_to_oklab(wavelength_nm: f64, intensity: f64) -> (f64, f64, f64) {
@@ -452,8 +452,8 @@ mod tests {
         let left = bin_f.floor() as usize;
         let right = (left + 1).min(NUM_BINS - 1);
         let mix = bin_f.fract();
-        let (lr, lg, lb, _) = BIN_COMBINED_LUT[left];
-        let (rr, rg, rb, _) = BIN_COMBINED_LUT[right];
+        let (lr, lg, lb) = wavelength_to_rgb(spectral_constants::bin_to_wavelength(left));
+        let (rr, rg, rb) = wavelength_to_rgb(spectral_constants::bin_to_wavelength(right));
         let r = (lr * (1.0 - mix) + rr * mix) * intensity;
         let g = (lg * (1.0 - mix) + rg * mix) * intensity;
         let b = (lb * (1.0 - mix) + rb * mix) * intensity;

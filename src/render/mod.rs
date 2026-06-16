@@ -3,11 +3,7 @@
 //! This module provides a complete rendering pipeline for the three-body problem visualization,
 //! including coordinate transformations, line drawing, post-processing effects, and video output.
 
-use crate::post_effects::{
-    AetherConfig, AtmosphericDepthConfig, ChampleveConfig, ChromaticBloomConfig,
-    EdgeLuminanceConfig, FineTextureConfig, GradientMapConfig, LuxuryPalette, MicroContrastConfig,
-    OpalescenceConfig, PerceptualBlurConfig,
-};
+use crate::post_effects::ChromaticBloomConfig;
 use crate::spectrum::{NUM_BINS, linear_rec2020_to_display_p3};
 use crate::utils::f64_to_usize_saturating;
 use nalgebra::Vector3;
@@ -79,16 +75,6 @@ pub enum BloomMode {
 }
 
 impl BloomMode {
-    /// Parse a bloom mode from a CLI argument string (case-insensitive).
-    #[must_use]
-    pub fn from_arg(value: &str) -> Self {
-        match value {
-            v if v.eq_ignore_ascii_case("gaussian") => Self::Gaussian,
-            v if v.eq_ignore_ascii_case("none") => Self::None,
-            _ => Self::Dog,
-        }
-    }
-
     /// Return the canonical lowercase string representation of this bloom mode.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -405,39 +391,13 @@ pub fn estimate_full_spd_bytes(width: u32, height: u32) -> u128 {
 
 // ====================== HELPER FUNCTIONS ===========================
 
-/// Derive the perceptual-blur radius (in pixels) after accounting for the combined
-/// softness of all enabled blur/bloom effects. Returns `None` when blur is disabled.
-#[must_use]
-pub fn compute_softness_radius(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    bloom_mode: BloomMode,
-) -> Option<usize> {
-    if !resolved.enable_perceptual_blur {
-        return None;
-    }
-
-    let use_gaussian_bloom = bloom_mode == BloomMode::Gaussian && resolved.enable_bloom;
-    let softness_stack_score = (if use_gaussian_bloom { 1.0 } else { 0.0 })
-        + if resolved.enable_chromatic_bloom { 0.8 } else { 0.0 }
-        + if resolved.enable_perceptual_blur { 0.85 } else { 0.0 }
-        + if resolved.enable_glow { 0.55 } else { 0.0 }
-        + if resolved.enable_atmospheric_depth { 0.35 } else { 0.0 };
-    let radius_scale = if softness_stack_score >= 2.0 { 0.0030 } else { 0.0036 };
-    let min_dim = resolved.width.min(resolved.height);
-
-    Some(f64_to_usize_saturating((radius_scale * f64::from(min_dim)).round().max(1.0)))
-}
-
 fn build_dog_config(
     resolved: &randomizable_config::ResolvedEffectConfig,
     min_dim: usize,
 ) -> DogBloomConfig {
     let dog_inner_sigma = resolved.dog_sigma_scale * min_dim as f64;
-    let dog_threshold = (0.012_f64
-        + if resolved.enable_glow { 0.003_f64 } else { 0.0 }
-        + if resolved.enable_chromatic_bloom { 0.004_f64 } else { 0.0 }
-        + if resolved.enable_perceptual_blur { 0.004_f64 } else { 0.0 })
-    .min(0.028_f64);
+    let dog_threshold =
+        (0.012_f64 + if resolved.enable_chromatic_bloom { 0.004_f64 } else { 0.0 }).min(0.028_f64);
 
     DogBloomConfig {
         inner_sigma: dog_inner_sigma,
@@ -445,18 +405,6 @@ fn build_dog_config(
         strength: resolved.dog_strength,
         threshold: dog_threshold,
     }
-}
-
-fn build_perceptual_blur_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    bloom_mode: BloomMode,
-) -> Option<PerceptualBlurConfig> {
-    use crate::oklab::GamutMapMode;
-    compute_softness_radius(resolved, bloom_mode).map(|radius| PerceptualBlurConfig {
-        radius,
-        strength: resolved.perceptual_blur_strength,
-        gamut_mode: GamutMapMode::PreserveHue,
-    })
 }
 
 fn build_chromatic_bloom_config(
@@ -474,151 +422,12 @@ fn build_chromatic_bloom_config(
     }
 }
 
-fn build_color_grade_params(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    min_dim: usize,
-) -> crate::post_effects::ColorGradeParams {
-    crate::post_effects::ColorGradeParams {
-        strength: resolved.color_grade_strength,
-        vignette_strength: resolved.vignette_strength,
-        vignette_softness: resolved.vignette_softness,
-        vibrance: resolved.vibrance,
-        clarity_strength: resolved.clarity_strength,
-        clarity_radius: (0.0028 * min_dim as f64).round().max(1.0) as usize,
-        tone_curve: resolved.tone_curve_strength,
-        shadow_tint: constants::DEFAULT_COLOR_GRADE_SHADOW_TINT,
-        highlight_tint: constants::DEFAULT_COLOR_GRADE_HIGHLIGHT_TINT,
-        palette_wave_strength: 0.25,
-    }
-}
-
-fn build_glow_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    min_dim: usize,
-) -> crate::post_effects::GlowEnhancementConfig {
-    let glow_radius = (resolved.glow_radius_scale * min_dim as f64).round() as usize;
-    crate::post_effects::GlowEnhancementConfig {
-        strength: resolved.glow_strength,
-        threshold: resolved.glow_threshold,
-        radius: glow_radius,
-        sharpness: resolved.glow_sharpness,
-        saturation_boost: resolved.glow_saturation_boost,
-    }
-}
-
-fn build_champleve_config(resolved: &randomizable_config::ResolvedEffectConfig) -> ChampleveConfig {
-    ChampleveConfig {
-        cell_density: constants::DEFAULT_CHAMPLEVE_CELL_DENSITY,
-        flow_alignment: resolved.champleve_flow_alignment,
-        interference_amplitude: resolved.champleve_interference_amplitude,
-        interference_frequency: constants::DEFAULT_CHAMPLEVE_INTERFERENCE_FREQUENCY,
-        rim_intensity: resolved.champleve_rim_intensity,
-        rim_warmth: resolved.champleve_rim_warmth,
-        rim_sharpness: constants::DEFAULT_CHAMPLEVE_RIM_SHARPNESS,
-        interior_lift: resolved.champleve_interior_lift,
-        anisotropy: constants::DEFAULT_CHAMPLEVE_ANISOTROPY,
-        cell_softness: constants::DEFAULT_CHAMPLEVE_CELL_SOFTNESS,
-    }
-}
-
-fn build_aether_config(resolved: &randomizable_config::ResolvedEffectConfig) -> AetherConfig {
-    AetherConfig {
-        filament_density: constants::DEFAULT_AETHER_FILAMENT_DENSITY,
-        flow_alignment: resolved.aether_flow_alignment,
-        scattering_strength: resolved.aether_scattering_strength,
-        scattering_falloff: constants::DEFAULT_AETHER_SCATTERING_FALLOFF,
-        iridescence_amplitude: resolved.aether_iridescence_amplitude,
-        iridescence_frequency: constants::DEFAULT_AETHER_IRIDESCENCE_FREQUENCY,
-        caustic_strength: resolved.aether_caustic_strength,
-        caustic_softness: constants::DEFAULT_AETHER_CAUSTIC_SOFTNESS,
-        luxury_mode: true,
-    }
-}
-
-fn build_opalescence_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    width: usize,
-    height: usize,
-) -> OpalescenceConfig {
-    let scale_abs = resolved.opalescence_scale * ((width * height) as f64).sqrt();
-    OpalescenceConfig {
-        strength: resolved.opalescence_strength,
-        scale: scale_abs,
-        layers: resolved.opalescence_layers,
-        chromatic_shift: 0.5,
-        angle_sensitivity: 0.8,
-        pearl_sheen: 0.3,
-    }
-}
-
-fn build_edge_luminance_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-) -> EdgeLuminanceConfig {
-    EdgeLuminanceConfig {
-        strength: resolved.edge_luminance_strength,
-        threshold: resolved.edge_luminance_threshold,
-        brightness_boost: resolved.edge_luminance_brightness_boost,
-        bright_edges_only: true,
-        min_luminance: 0.2,
-    }
-}
-
-fn build_micro_contrast_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-) -> MicroContrastConfig {
-    MicroContrastConfig {
-        strength: resolved.micro_contrast_strength,
-        radius: resolved.micro_contrast_radius,
-        edge_threshold: 0.15,
-        luminance_weight: 0.7,
-    }
-}
-
-fn build_atmospheric_depth_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-) -> AtmosphericDepthConfig {
-    AtmosphericDepthConfig {
-        strength: resolved.atmospheric_depth_strength,
-        fog_color: (
-            resolved.atmospheric_fog_color_r,
-            resolved.atmospheric_fog_color_g,
-            resolved.atmospheric_fog_color_b,
-        ),
-        density_threshold: 0.15,
-        desaturation: resolved.atmospheric_desaturation,
-        darkening: resolved.atmospheric_darkening,
-        density_radius: 3,
-    }
-}
-
-fn build_fine_texture_config(
-    resolved: &randomizable_config::ResolvedEffectConfig,
-    output_mode: FinishOutputMode,
-) -> (bool, FineTextureConfig) {
-    let width = resolved.width as usize;
-    let height = resolved.height as usize;
-    let scale_abs = resolved.fine_texture_scale * ((width * height) as f64).sqrt();
-    let min_dim = resolved.width.min(resolved.height);
-    let enabled = resolved.enable_fine_texture && min_dim >= 720;
-    let strength_scale = if output_mode == FinishOutputMode::Video { 0.6 } else { 1.0 };
-    (
-        enabled,
-        FineTextureConfig {
-            strength: resolved.fine_texture_strength * strength_scale,
-            scale: scale_abs,
-            contrast: resolved.fine_texture_contrast,
-            anisotropy: 0.3,
-            angle: 0.0,
-        },
-    )
-}
-
 /// Build a fully populated [`EffectConfig`] from resolved parameters and render settings.
 #[must_use]
 pub fn build_effect_config_from_resolved(
     resolved: &randomizable_config::ResolvedEffectConfig,
     render_config: &RenderConfig,
-    output_mode: FinishOutputMode,
+    _output_mode: FinishOutputMode,
 ) -> EffectConfig {
     let width = resolved.width as usize;
     let height = resolved.height as usize;
@@ -633,8 +442,6 @@ pub fn build_effect_config_from_resolved(
     } else {
         0
     };
-    let (fine_texture_enabled, fine_texture_config) =
-        build_fine_texture_config(resolved, output_mode);
 
     EffectConfig {
         bloom_mode: if use_dog_bloom {
@@ -648,38 +455,8 @@ pub fn build_effect_config_from_resolved(
         blur_strength: resolved.blur_strength,
         blur_core_brightness: resolved.blur_core_brightness,
         dog_config: build_dog_config(resolved, min_dim),
-        perceptual_blur_enabled: resolved.enable_perceptual_blur,
-        perceptual_blur_config: build_perceptual_blur_config(resolved, render_config.bloom_mode),
-
-        color_grade_enabled: resolved.enable_color_grade,
-        color_grade_params: build_color_grade_params(resolved, min_dim),
-        gradient_map_enabled: resolved.enable_gradient_map,
-        gradient_map_config: GradientMapConfig {
-            palette: LuxuryPalette::from_index(resolved.gradient_map_palette),
-            strength: resolved.gradient_map_strength,
-            hue_preservation: resolved.gradient_map_hue_preservation,
-        },
-
-        champleve_enabled: resolved.enable_champleve,
-        champleve_config: build_champleve_config(resolved),
-        aether_enabled: resolved.enable_aether,
-        aether_config: build_aether_config(resolved),
         chromatic_bloom_enabled: resolved.enable_chromatic_bloom,
         chromatic_bloom_config: build_chromatic_bloom_config(resolved, min_dim),
-        opalescence_enabled: resolved.enable_opalescence,
-        opalescence_config: build_opalescence_config(resolved, width, height),
-
-        edge_luminance_enabled: resolved.enable_edge_luminance,
-        edge_luminance_config: build_edge_luminance_config(resolved),
-        micro_contrast_enabled: resolved.enable_micro_contrast,
-        micro_contrast_config: build_micro_contrast_config(resolved),
-        glow_enhancement_enabled: resolved.enable_glow,
-        glow_enhancement_config: build_glow_config(resolved, min_dim),
-
-        atmospheric_depth_enabled: resolved.enable_atmospheric_depth,
-        atmospheric_depth_config: build_atmospheric_depth_config(resolved),
-        fine_texture_enabled,
-        fine_texture_config,
     }
 }
 
@@ -1811,8 +1588,6 @@ pub struct Pass2Params<'a> {
     pub settings: SpectralRenderSettings<'a>,
     /// Receives the final frame as 16-bit RGB when the pass completes.
     pub last_frame_out: &'a mut Option<ImageBuffer<Rgb<u16>, Vec<u16>>>,
-    /// When true, blends consecutive display frames to reduce temporal noise.
-    pub enable_temporal_smoothing: bool,
     /// Scratch buffer for per-pixel spectral power distributions (reused across checkpoints).
     pub accum_spd: &'a mut Vec<[f64; NUM_BINS]>,
 }
@@ -1839,15 +1614,7 @@ fn pass_2_write_frames_spectral_with_backend(
     mut frame_sink: impl FnMut(&[u8]) -> Result<()>,
     backend: AccumulationBackend,
 ) -> Result<()> {
-    let Pass2Params {
-        scene,
-        frame_interval,
-        levels,
-        settings,
-        last_frame_out,
-        enable_temporal_smoothing,
-        accum_spd,
-    } = params;
+    let Pass2Params { scene, frame_interval, levels, settings, last_frame_out, accum_spd } = params;
     let SpectralRenderSettings { resolved_config, render_config, aspect_correction, .. } = settings;
     let width = resolved_config.width;
     let height = resolved_config.height;
@@ -1868,15 +1635,6 @@ fn pass_2_write_frames_spectral_with_backend(
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
-    use crate::post_effects::{TemporalSmoothing, TemporalSmoothingConfig};
-    let temporal_smoother = if enable_temporal_smoothing {
-        Some(TemporalSmoothing::new(TemporalSmoothingConfig {
-            blend_factor: 0.10,
-            alpha_threshold: 0.01,
-        }))
-    } else {
-        None
-    };
     let mut step_start = 0;
 
     for &checkpoint_step in &checkpoints {
@@ -1925,13 +1683,8 @@ fn pass_2_write_frames_spectral_with_backend(
         trajectory_pixels.resize(ctx.pixel_count(), (0.0, 0.0, 0.0, 0.0));
         accum_rgba = trajectory_pixels;
 
-        let smoothed_display = match &temporal_smoother {
-            Some(smoother) => smoother.process_frame(display_buffer),
-            None => display_buffer,
-        };
-
         let final_display = finish_pipeline
-            .process_image(smoothed_display, width as usize, height as usize, &frame_params)
+            .process_image(display_buffer, width as usize, height as usize, &frame_params)
             .map_err(|e| RenderError::EffectChain {
                 effect_name: "image_chain".into(),
                 reason: e.to_string(),
@@ -2319,69 +2072,17 @@ mod tests {
             width,
             height,
             enable_bloom: false,
-            enable_glow: false,
             enable_chromatic_bloom: false,
-            enable_perceptual_blur: false,
-            enable_micro_contrast: false,
-            enable_gradient_map: false,
-            enable_color_grade: false,
-            enable_champleve: false,
-            enable_aether: false,
-            enable_opalescence: false,
-            enable_edge_luminance: false,
-            enable_atmospheric_depth: false,
-            enable_fine_texture: false,
             blur_strength: 4.0,
             blur_radius_scale: 0.006,
             blur_core_brightness: 10.0,
             dog_strength: 0.3,
             dog_sigma_scale: 0.005,
             dog_ratio: 2.6,
-            glow_strength: 0.25,
-            glow_threshold: 0.7,
-            glow_radius_scale: 0.003,
-            glow_sharpness: 2.6,
-            glow_saturation_boost: 0.2,
             chromatic_bloom_strength: 0.4,
             chromatic_bloom_radius_scale: 0.005,
             chromatic_bloom_separation_scale: 0.001,
             chromatic_bloom_threshold: 0.2,
-            perceptual_blur_strength: 0.45,
-            color_grade_strength: 0.55,
-            vignette_strength: 0.35,
-            vignette_softness: 2.5,
-            vibrance: 1.2,
-            clarity_strength: 0.3,
-            tone_curve_strength: 0.6,
-            gradient_map_strength: 0.25,
-            gradient_map_hue_preservation: 0.6,
-            gradient_map_palette: 0,
-            opalescence_strength: 0.08,
-            opalescence_scale: 0.01,
-            opalescence_layers: 2,
-            champleve_flow_alignment: 0.6,
-            champleve_interference_amplitude: 0.5,
-            champleve_rim_intensity: 1.8,
-            champleve_rim_warmth: 0.6,
-            champleve_interior_lift: 0.65,
-            aether_flow_alignment: 0.7,
-            aether_scattering_strength: 0.9,
-            aether_iridescence_amplitude: 0.6,
-            aether_caustic_strength: 0.3,
-            micro_contrast_strength: 0.25,
-            micro_contrast_radius: 4,
-            edge_luminance_strength: 0.3,
-            edge_luminance_threshold: 0.2,
-            edge_luminance_brightness_boost: 0.4,
-            atmospheric_depth_strength: 0.1,
-            atmospheric_desaturation: 0.12,
-            atmospheric_darkening: 0.06,
-            atmospheric_fog_color_r: 0.04,
-            atmospheric_fog_color_g: 0.07,
-            atmospheric_fog_color_b: 0.12,
-            fine_texture_strength: 0.12,
-            fine_texture_scale: 0.0018,
-            fine_texture_contrast: 0.35,
             hdr_scale: 0.12,
             clip_black: 0.01,
             clip_white: 0.99,
@@ -2502,18 +2203,7 @@ mod tests {
     fn stylized_resolved_config(width: u32, height: u32) -> ResolvedEffectConfig {
         ResolvedEffectConfig {
             enable_bloom: true,
-            enable_glow: true,
             enable_chromatic_bloom: true,
-            enable_perceptual_blur: true,
-            enable_micro_contrast: true,
-            enable_gradient_map: true,
-            enable_color_grade: true,
-            enable_champleve: true,
-            enable_aether: true,
-            enable_opalescence: true,
-            enable_edge_luminance: true,
-            enable_atmospheric_depth: true,
-            enable_fine_texture: false,
             ..baseline_resolved_config(width, height)
         }
     }
@@ -2550,7 +2240,6 @@ mod tests {
         frame_interval: usize,
         levels: &ChannelLevels,
         settings: SpectralRenderSettings<'_>,
-        enable_temporal_smoothing: bool,
         serial_reference: bool,
         thread_count: usize,
     ) -> CapturedFrameResult {
@@ -2574,7 +2263,6 @@ mod tests {
                     levels,
                     settings,
                     last_frame_out: &mut last_frame,
-                    enable_temporal_smoothing,
                     accum_spd: &mut spd_buf,
                 };
                 if serial_reference {
@@ -2723,52 +2411,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_effect_config_disables_texture_for_proxy_resolution() {
-        let resolved = ResolvedEffectConfig {
-            enable_fine_texture: true,
-            ..baseline_resolved_config(640, 360)
-        };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
-
-        let effect_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
-
-        assert!(!effect_config.fine_texture_enabled, "proxy-sized renders should skip texture");
-    }
-
-    #[test]
-    fn test_build_effect_config_scales_texture_for_video() {
-        let resolved = ResolvedEffectConfig {
-            enable_fine_texture: true,
-            fine_texture_strength: 0.2,
-            ..baseline_resolved_config(1920, 1080)
-        };
-        let render_config =
-            RenderConfig { hdr_scale: resolved.hdr_scale, bloom_mode: BloomMode::Dog };
-
-        let still_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
-        let video_config =
-            build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Video);
-
-        assert!(still_config.fine_texture_enabled);
-        assert!(video_config.fine_texture_enabled);
-        assert!(
-            (video_config.fine_texture_config.strength
-                - still_config.fine_texture_config.strength * 0.6)
-                .abs()
-                < 1e-9
-        );
-    }
-
-    #[test]
-    fn test_build_effect_config_tightens_softness_stack_settings() {
+    fn test_build_effect_config_raises_dog_threshold_for_prism_trait() {
         let resolved = ResolvedEffectConfig {
             enable_bloom: true,
-            enable_glow: true,
             enable_chromatic_bloom: true,
-            enable_perceptual_blur: true,
             ..baseline_resolved_config(1920, 1080)
         };
         let render_config =
@@ -2776,16 +2422,10 @@ mod tests {
 
         let effect_config =
             build_effect_config_from_resolved(&resolved, &render_config, FinishOutputMode::Still);
-        let perceptual =
-            effect_config.perceptual_blur_config.expect("perceptual blur should remain configured");
 
         assert!(
             effect_config.dog_config.threshold > 0.012,
-            "softness stacks should raise the DoG threshold"
-        );
-        assert!(
-            perceptual.radius < (0.0036_f64 * 1080.0).round() as usize,
-            "softness stacks should tighten perceptual blur radius"
+            "prism trait should raise the DoG threshold"
         );
     }
 
@@ -3085,54 +2725,6 @@ mod tests {
     }
 
     #[test]
-    fn test_histogram_pass_is_finish_aware() {
-        let positions = vec![
-            vec![Vector3::new(0.1, 0.1, 0.0), Vector3::new(0.2, 0.2, 0.0)],
-            vec![Vector3::new(0.9, 0.1, 0.0), Vector3::new(0.8, 0.2, 0.0)],
-            vec![Vector3::new(0.5, 0.9, 0.0), Vector3::new(0.5, 0.8, 0.0)],
-        ];
-        let colors = vec![
-            vec![(0.7, 0.2, 0.1), (0.72, 0.18, 0.12)],
-            vec![(0.68, -0.15, 0.2), (0.70, -0.12, 0.18)],
-            vec![(0.65, 0.04, -0.18), (0.67, 0.05, -0.16)],
-        ];
-        let body_alphas = vec![0.8, 0.9, 1.0];
-        let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::Dog };
-
-        let clean = baseline_resolved_config(48, 48);
-        let stylized = ResolvedEffectConfig {
-            enable_bloom: true,
-            enable_glow: true,
-            enable_chromatic_bloom: true,
-            enable_perceptual_blur: true,
-            enable_micro_contrast: true,
-            enable_gradient_map: true,
-            enable_color_grade: true,
-            enable_champleve: true,
-            enable_aether: true,
-            enable_opalescence: true,
-            enable_edge_luminance: true,
-            enable_atmospheric_depth: true,
-            enable_fine_texture: true,
-            ..baseline_resolved_config(48, 48)
-        };
-
-        let clean_hist = pass_1_build_histogram_spectral(
-            SpectralScene::new(&positions, &colors, &body_alphas),
-            1,
-            SpectralRenderSettings::new(&clean, &render_config, false),
-        );
-
-        let styled_hist = pass_1_build_histogram_spectral(
-            SpectralScene::new(&positions, &colors, &body_alphas),
-            1,
-            SpectralRenderSettings::new(&stylized, &render_config, false),
-        );
-
-        assert_ne!(clean_hist.data(), styled_hist.data());
-    }
-
-    #[test]
     fn test_histogram_pass_parallel_matches_serial_reference_bits() {
         let (positions, colors, body_alphas) = sample_scene();
         let scene = SpectralScene::new(&positions, &colors, &body_alphas);
@@ -3261,7 +2853,7 @@ mod tests {
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
 
         let (serial_frames, serial_last_frame) =
-            capture_frame_bytes_with_pool(scene, frame_interval, &levels, settings, false, true, 1);
+            capture_frame_bytes_with_pool(scene, frame_interval, &levels, settings, true, 1);
         let serial_last_frame = serial_last_frame.expect("serial path should capture last frame");
 
         for thread_count in [1usize, 2, 3, 4] {
@@ -3270,7 +2862,6 @@ mod tests {
                 frame_interval,
                 &levels,
                 settings,
-                false,
                 false,
                 thread_count,
             );
@@ -3300,7 +2891,7 @@ mod tests {
         let levels = derived_levels_from_serial_histogram(scene, frame_interval, settings);
 
         let (serial_frames, serial_last_frame) =
-            capture_frame_bytes_with_pool(scene, frame_interval, &levels, settings, true, true, 1);
+            capture_frame_bytes_with_pool(scene, frame_interval, &levels, settings, true, 1);
         let serial_last_frame = serial_last_frame.expect("serial path should capture last frame");
 
         for thread_count in [1usize, 2, 3, 4] {
@@ -3309,7 +2900,6 @@ mod tests {
                 frame_interval,
                 &levels,
                 settings,
-                true,
                 false,
                 thread_count,
             );
@@ -3344,41 +2934,5 @@ mod tests {
             v.iter().sum::<u64>()
         });
         assert_eq!(result, (0..1024u64).sum::<u64>());
-    }
-
-    #[test]
-    fn test_compute_softness_radius_disabled() {
-        let mut cfg = baseline_resolved_config(1920, 1080);
-        cfg.enable_perceptual_blur = false;
-        assert!(compute_softness_radius(&cfg, BloomMode::Dog).is_none());
-    }
-
-    #[test]
-    fn test_compute_softness_radius_enabled_returns_some() {
-        let mut cfg = baseline_resolved_config(1920, 1080);
-        cfg.enable_perceptual_blur = true;
-        let radius = compute_softness_radius(&cfg, BloomMode::Dog);
-        assert!(radius.is_some());
-        assert!(radius.expect("softness radius should be some") >= 1);
-    }
-
-    #[test]
-    fn test_compute_softness_radius_high_softness_uses_smaller_scale() {
-        let mut low = baseline_resolved_config(1920, 1080);
-        low.enable_perceptual_blur = true;
-
-        let mut high = low.clone();
-        high.enable_chromatic_bloom = true;
-        high.enable_glow = true;
-        high.enable_atmospheric_depth = true;
-
-        let r_low = compute_softness_radius(&low, BloomMode::Dog)
-            .expect("low softness radius should resolve");
-        let r_high = compute_softness_radius(&high, BloomMode::Dog)
-            .expect("high softness radius should resolve");
-        assert!(
-            r_high <= r_low,
-            "higher softness stack should produce equal or smaller radius: {r_high} vs {r_low}",
-        );
     }
 }

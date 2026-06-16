@@ -1,6 +1,6 @@
 # CI Infrastructure
 
-This directory contains the continuous integration setup for the Three Body Problem simulator.
+This directory contains CI support files and manual reference-image tooling for the Three Body Problem simulator.
 
 ## Structure
 
@@ -10,7 +10,7 @@ This directory contains the continuous integration setup for the Three Body Prob
 
 ## Reference Images
 
-Reference images are used to ensure the simulator produces deterministic output across different runs and platforms. To generate or update reference images:
+Reference images are used for manual deterministic-output checks. They are not run automatically by the GitHub Actions workflow today. To generate or update reference images:
 
 ```bash
 cd ci/reference
@@ -29,7 +29,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 2. **Formatting** — `cargo fmt --all -- --check`
 3. **Linting** — `cargo clippy --all-targets -- -D warnings`
 4. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
-5. **Benchmarks** — compile-check with `cargo bench --no-run`
+5. **Benchmarks** — compile-check benchmark targets with `cargo bench --no-run`
 6. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
 7. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
 8. **Coverage** — `cargo-llvm-cov` with LCOV output uploaded as artifact

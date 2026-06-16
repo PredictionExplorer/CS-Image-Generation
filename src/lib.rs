@@ -11,7 +11,7 @@
 //! - [`drift_config`] -- drift parameter resolution and validation.
 //! - [`error`] -- error types and the crate-wide [`Result`] alias.
 //! - [`generation_log`] -- persistent JSON generation log.
-//! - [`post_effects`] -- legacy optional image post-processing effects.
+//! - [`post_effects`] -- active bloom, prism, and spectral-sweep post effects.
 //! - [`render`] -- rendering pipeline (histogram, tonemapping, effects, video).
 //! - [`sim`] -- N-body gravitational simulation with RNG.
 //! - [`spectral_constants`] -- wavelength/bin conversion constants.
@@ -36,7 +36,7 @@ pub mod error;
 /// Persistent JSON generation log for tracking produced seeds.
 pub mod generation_log;
 pub(crate) mod oklab;
-/// Composable image post-processing effect pipeline.
+/// Active post-processing effects and composable effect-chain traits.
 pub mod post_effects;
 /// Rendering pipeline: histogram passes, tonemapping, effects, and video output.
 pub mod render;
