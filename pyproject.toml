@@ -61,5 +61,6 @@ files = [
     "contact_sheet.py",
     "run.py",
     "run-test-images.py",
+    "run_viz_batch.py",
     "ci/verify_reference.py",
 ]

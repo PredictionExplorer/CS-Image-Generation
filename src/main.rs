@@ -7,7 +7,7 @@ use three_body_problem::{
     error::{self, Result},
     render::{self, RenderConfig},
     sim::Sha3RandomByteStream,
-    spectrum_simd,
+    spectrum_simd, viz,
 };
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -58,6 +58,22 @@ enum DriftModeArg {
     Linear,
     Brownian,
     Elliptical,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum VizQualityArg {
+    Draft,
+    #[default]
+    Final,
+}
+
+impl VizQualityArg {
+    fn to_viz(self) -> viz::context::VizQuality {
+        match self {
+            Self::Draft => viz::context::VizQuality::Draft,
+            Self::Final => viz::context::VizQuality::Final,
+        }
+    }
 }
 
 impl DriftModeArg {
@@ -128,6 +144,20 @@ struct Args {
     /// --resolution, rounded down to even dimensions).
     #[arg(long, value_parser = parse_resolution)]
     orbit_resolution: Option<OutputResolution>,
+
+    /// Visualization modes to render after the main outputs. Accepts mode
+    /// flags, category names, or `all`; repeatable and comma-separable
+    /// (see `--viz-list` and `docs/VIZ_MASTER_PLAN.md`).
+    #[arg(long, action = clap::ArgAction::Append)]
+    viz: Vec<String>,
+
+    /// Print the visualization mode catalog and exit.
+    #[arg(long, default_value_t = false)]
+    viz_list: bool,
+
+    /// Artifact quality for visualization modes.
+    #[arg(long, value_enum, default_value_t = VizQualityArg::Final)]
+    viz_quality: VizQualityArg,
 
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
@@ -317,6 +347,13 @@ fn main() -> Result<()> {
 
     setup_logging(&args.log_level);
 
+    if args.viz_list {
+        print!("{}", viz::catalog::render_list());
+        return Ok(());
+    }
+    // Validate viz selection before any heavy work so typos fail fast.
+    let viz_selection = viz::VizSelection::resolve(&args.viz)?;
+
     let enhancements = app::Enhancements::default();
     spectrum_simd::SAT_BOOST_ENABLED
         .store(enhancements.sat_boost, std::sync::atomic::Ordering::Relaxed);
@@ -477,6 +514,17 @@ fn main() -> Result<()> {
     )
     .with_traits(scene_traits);
 
+    let mut viz_tap_collector = if viz_selection.needs_frame_tap() && !args.image_only {
+        let centroid = viz::context::trajectory_centroid_px(&positions, &render_ctx);
+        Some(viz::context::FrameTapCollector::new(
+            args.resolution.width,
+            args.resolution.height,
+            centroid,
+        ))
+    } else {
+        None
+    };
+
     if args.image_only {
         app::render_still_image(
             render::SpectralScene::new(&positions, &colors, &body_alphas),
@@ -485,6 +533,11 @@ fn main() -> Result<()> {
             image_outputs,
         )?;
     } else {
+        let mut tap_observe = |frame: &[u8]| {
+            if let Some(collector) = viz_tap_collector.as_mut() {
+                collector.observe(frame);
+            }
+        };
         let accum_spd = app::render_video(
             render::SpectralScene::new(&positions, &colors, &body_alphas),
             &levels,
@@ -492,6 +545,7 @@ fn main() -> Result<()> {
             main_video_outputs,
             image_outputs,
             args.fast_encode,
+            viz_selection.needs_frame_tap().then_some(&mut tap_observe),
         )?;
 
         let spectral_dir = format!("{seed_dir}/spectral");
@@ -566,6 +620,29 @@ fn main() -> Result<()> {
         Some(&format!("{seed_dir}/metadata/generation.json")),
     ) {
         warn!("Generation logging failed (non-fatal): {e}");
+    }
+
+    // Viz stage runs last: the core package above is complete regardless of
+    // any visualization failure, which is still reported via the exit code.
+    if !viz_selection.is_empty() {
+        let tap_data = viz_tap_collector.map(viz::context::FrameTapCollector::finish);
+        let viz_ctx = viz::context::VizContext::new(
+            &positions,
+            &colors,
+            &body_alphas,
+            &selection.bodies,
+            &levels,
+            spectral_settings,
+            args.resolution.width,
+            args.resolution.height,
+            hex_seed,
+            &seed_dir,
+            args.viz_quality.to_viz(),
+            args.fast_encode,
+            tap_data,
+            &rng,
+        );
+        viz::run_viz_stage(&viz_ctx, &viz_selection)?;
     }
 
     Ok(())

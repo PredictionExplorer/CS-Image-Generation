@@ -1,0 +1,285 @@
+//! Shared context handed to every visualization mode: borrowed run data plus
+//! lazily computed derived series (kinematics, events) and the frame-tap
+//! data collected during the main video render.
+
+use crate::render::{ChannelLevels, OklabColor, SpectralRenderSettings};
+use crate::sim::{Body, Sha3RandomByteStream};
+use crate::viz::common::events::Events;
+use crate::viz::common::kinematics::Kinematics;
+use nalgebra::Vector3;
+use std::sync::OnceLock;
+
+/// Output quality for viz artifacts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VizQuality {
+    /// Development aid: halved canvases, quartered frame counts.
+    Draft,
+    /// Full masterpiece-bar output (default).
+    Final,
+}
+
+impl VizQuality {
+    /// Scale a pixel dimension for this quality (even-rounded).
+    #[must_use]
+    pub fn scale_dim(self, value: u32) -> u32 {
+        match self {
+            Self::Draft => ((value / 2) & !1).max(16),
+            Self::Final => value,
+        }
+    }
+
+    /// Scale a frame or sample count for this quality.
+    #[must_use]
+    pub fn scale_count(self, value: usize) -> usize {
+        match self {
+            Self::Draft => (value / 4).max(1),
+            Self::Final => value,
+        }
+    }
+}
+
+/// Frames observed from the main video render for tap-consuming modes.
+pub struct FrameTapData {
+    /// Number of frames observed.
+    pub frames: usize,
+    /// Source frame width in pixels.
+    pub width: u32,
+    /// Source frame height in pixels.
+    pub height: u32,
+    /// Sampled column x (trajectory density centroid).
+    pub column_x: u32,
+    /// Per-frame column samples, `frames * height * 3` u16 values.
+    pub linear: Vec<u16>,
+    /// Number of samples along the ring.
+    pub ring_samples: usize,
+    /// Per-frame ring samples, `frames * ring_samples * 3` u16 values.
+    pub ring: Vec<u16>,
+}
+
+/// Collector wired into the main render's frame sink.
+pub struct FrameTapCollector {
+    data: FrameTapData,
+    center: (f32, f32),
+    radius: f32,
+}
+
+/// Read one u16 sample from a native-endian `rgb48` byte stream.
+#[inline]
+fn frame_u16(bytes: &[u8], index: usize) -> u16 {
+    u16::from_ne_bytes([bytes[2 * index], bytes[2 * index + 1]])
+}
+
+impl FrameTapCollector {
+    /// Number of samples taken along the slit ring.
+    pub const RING_SAMPLES: usize = 2048;
+
+    /// Create a collector for frames of the given size.
+    ///
+    /// `centroid` is the trajectory density centroid in pixel coordinates;
+    /// the linear slit is the column through it, the ring is centred on it.
+    #[must_use]
+    pub fn new(width: u32, height: u32, centroid: (f32, f32)) -> Self {
+        let column_x = (centroid.0.round() as u32).min(width.saturating_sub(1));
+        let radius = 0.38 * f64::from(width.min(height)) as f32;
+        Self {
+            data: FrameTapData {
+                frames: 0,
+                width,
+                height,
+                column_x,
+                linear: Vec::new(),
+                ring_samples: Self::RING_SAMPLES,
+                ring: Vec::new(),
+            },
+            center: centroid,
+            radius,
+        }
+    }
+
+    /// Observe one `rgb48` (native-endian) frame from the encoder stream.
+    pub fn observe(&mut self, frame_bytes: &[u8]) {
+        let width = self.data.width as usize;
+        let height = self.data.height as usize;
+        debug_assert_eq!(frame_bytes.len(), width * height * 6);
+
+        // Linear slit: copy the centroid column.
+        let column = self.data.column_x as usize;
+        for row in 0..height {
+            let pixel = row * width + column;
+            for channel in 0..3 {
+                self.data.linear.push(frame_u16(frame_bytes, pixel * 3 + channel));
+            }
+        }
+
+        // Radial slit: bilinear ring samples.
+        let sample_bilinear = |x: f32, y: f32, channel: usize| -> u16 {
+            let xc = x.clamp(0.0, (width - 1) as f32);
+            let yc = y.clamp(0.0, (height - 1) as f32);
+            let x0 = xc.floor() as usize;
+            let y0 = yc.floor() as usize;
+            let x1 = (x0 + 1).min(width - 1);
+            let y1 = (y0 + 1).min(height - 1);
+            let fx = f64::from(xc) - x0 as f64;
+            let fy = f64::from(yc) - y0 as f64;
+            let at = |px: usize, py: usize| -> f64 {
+                f64::from(frame_u16(frame_bytes, (py * width + px) * 3 + channel))
+            };
+            let top = at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx;
+            let bottom = at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx;
+            (top * (1.0 - fy) + bottom * fy).round() as u16
+        };
+        for sample in 0..self.data.ring_samples {
+            let theta = sample as f64 / self.data.ring_samples as f64 * std::f64::consts::TAU;
+            let x = self.center.0 + self.radius * theta.cos() as f32;
+            let y = self.center.1 + self.radius * theta.sin() as f32;
+            for channel in 0..3 {
+                self.data.ring.push(sample_bilinear(x, y, channel));
+            }
+        }
+
+        self.data.frames += 1;
+    }
+
+    /// Finish collection, returning the tap data for the viz stage.
+    #[must_use]
+    pub fn finish(self) -> FrameTapData {
+        self.data
+    }
+}
+
+/// Trajectory density centroid in pixel space (strided, deterministic).
+#[must_use]
+pub fn trajectory_centroid_px(
+    positions: &[Vec<Vector3<f64>>],
+    ctx: &crate::render::context::RenderContext,
+) -> (f32, f32) {
+    let mut sum_x = 0.0_f64;
+    let mut sum_y = 0.0_f64;
+    let mut count = 0.0_f64;
+    for body in positions {
+        for point in body.iter().step_by(211) {
+            let (px, py) = ctx.to_pixel(point.x, point.y);
+            sum_x += f64::from(px);
+            sum_y += f64::from(py);
+            count += 1.0;
+        }
+    }
+    if count == 0.0 {
+        return (0.0, 0.0);
+    }
+    ((sum_x / count) as f32, (sum_y / count) as f32)
+}
+
+/// Borrowed run data plus lazy derived state, handed to every mode.
+pub struct VizContext<'a> {
+    /// Projected per-body trajectories (`[body][step]`).
+    pub positions: &'a [Vec<Vector3<f64>>],
+    /// Per-body `OkLab` color sequences.
+    pub colors: &'a [Vec<OklabColor>],
+    /// Per-body base opacities.
+    pub body_alphas: &'a [f64],
+    /// Initial body states of the winning candidate (masses).
+    pub bodies: &'a [Body],
+    /// Frozen tonemap levels from pass 1.
+    pub levels: &'a ChannelLevels,
+    /// Spectral render settings of the main render.
+    pub settings: SpectralRenderSettings<'a>,
+    /// Main output width in pixels.
+    pub width: u32,
+    /// Main output height in pixels.
+    pub height: u32,
+    /// Seed as lowercase hex (no `0x` prefix).
+    pub seed_hex: &'a str,
+    /// Seed package directory (`output/<name>`).
+    pub seed_dir: &'a str,
+    /// Requested artifact quality.
+    pub quality: VizQuality,
+    /// Whether fast video encoding was requested.
+    pub fast_encode: bool,
+    /// Frame tap data if a tap-consuming mode was requested (video runs only).
+    pub frame_tap: Option<FrameTapData>,
+    base_rng: &'a Sha3RandomByteStream,
+    kinematics: OnceLock<Kinematics>,
+    events: OnceLock<Events>,
+}
+
+impl<'a> VizContext<'a> {
+    /// Bundle borrowed run data into a context.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        positions: &'a [Vec<Vector3<f64>>],
+        colors: &'a [Vec<OklabColor>],
+        body_alphas: &'a [f64],
+        bodies: &'a [Body],
+        levels: &'a ChannelLevels,
+        settings: SpectralRenderSettings<'a>,
+        width: u32,
+        height: u32,
+        seed_hex: &'a str,
+        seed_dir: &'a str,
+        quality: VizQuality,
+        fast_encode: bool,
+        frame_tap: Option<FrameTapData>,
+        base_rng: &'a Sha3RandomByteStream,
+    ) -> Self {
+        Self {
+            positions,
+            colors,
+            body_alphas,
+            bodies,
+            levels,
+            settings,
+            width,
+            height,
+            seed_hex,
+            seed_dir,
+            quality,
+            fast_encode,
+            frame_tap,
+            base_rng,
+            kinematics: OnceLock::new(),
+            events: OnceLock::new(),
+        }
+    }
+
+    /// Derived kinematic series (computed once on first use).
+    pub fn kinematics(&self) -> &Kinematics {
+        self.kinematics.get_or_init(|| Kinematics::compute(self.positions, self.bodies))
+    }
+
+    /// Detected orbit events (computed once on first use).
+    pub fn events(&self) -> &Events {
+        self.events.get_or_init(|| Events::detect(self.positions, self.kinematics()))
+    }
+
+    /// Fork a deterministic RNG for a mode (`domain = viz/<flag>/v1`).
+    #[must_use]
+    pub fn fork_rng(&self, mode_flag: &str) -> Sha3RandomByteStream {
+        let domain = format!("viz/{mode_flag}/v1");
+        self.base_rng.fork(domain.as_bytes())
+    }
+
+    /// Mean `OkLab` color of one body's sequence.
+    #[must_use]
+    pub fn mean_color(&self, body: usize) -> OklabColor {
+        let sequence = &self.colors[body];
+        if sequence.is_empty() {
+            return (0.75, 0.0, 0.0);
+        }
+        let mut sum = (0.0, 0.0, 0.0);
+        for &(l, a, b) in sequence.iter().step_by(101) {
+            sum.0 += l;
+            sum.1 += a;
+            sum.2 += b;
+        }
+        let count = sequence.iter().step_by(101).count().max(1) as f64;
+        (sum.0 / count, sum.1 / count, sum.2 / count)
+    }
+
+    /// Number of simulation steps.
+    #[must_use]
+    pub fn step_count(&self) -> usize {
+        self.positions.first().map_or(0, Vec::len)
+    }
+}

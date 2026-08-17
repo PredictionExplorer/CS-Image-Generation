@@ -49,6 +49,8 @@ pub mod spectrum;
 /// SIMD-accelerated spectral conversion with AVX2, NEON, and scalar fallback.
 pub mod spectrum_simd;
 pub(crate) mod utils;
+/// Visualization subsystem (69 planned modes; see `docs/VIZ_MASTER_PLAN.md`).
+pub mod viz;
 
 /// Re-exported common types for convenience.
 pub use error::{AppError, AppRenderError, ConfigError, Result, SimulationError};

@@ -1004,6 +1004,10 @@ pub fn build_histogram_and_levels(
 }
 
 /// Render full video, returning the fully accumulated SPD buffer for spectral outputs.
+///
+/// `frame_tap`, when provided, observes every encoded `rgb48` frame (native
+/// endian bytes) before it is written to the encoders; used by frame-tap
+/// visualization modes such as slit-scan.
 pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -1011,6 +1015,7 @@ pub fn render_video(
     output_videos: VideoOutputPaths<'_>,
     output_images: ImageOutputPaths<'_>,
     fast_encode: bool,
+    mut frame_tap: Option<&mut dyn FnMut(&[u8])>,
 ) -> Result<Vec<[f64; crate::spectrum::NUM_BINS]>> {
     if fast_encode {
         info!("STAGE 7/7: PASS 2 => final frames => video (FAST ENCODE MODE)...");
@@ -1056,6 +1061,9 @@ pub fn render_video(
                     accum_spd: &mut accum_spd,
                 },
                 |buf_8bit| {
+                    if let Some(tap) = frame_tap.as_deref_mut() {
+                        tap(buf_8bit);
+                    }
                     out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
                     Ok(())
                 },

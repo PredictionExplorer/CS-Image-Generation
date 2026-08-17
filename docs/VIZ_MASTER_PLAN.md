@@ -41,19 +41,19 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V04 | `prism-portrait` | Spectral | still | A | SPD | `[ ]` |
 | V05 | `spectrum-card` | Spectral | poster | A | SPD, text | `[ ]` |
 | V06 | `thin-film` | Spectral | still | A | SPD | `[ ]` |
-| V07 | `braid` | Physics | tall still + video | A | kinematics | `[ ]` |
+| V07 | `braid` | Physics | tall still + video | A | kinematics | `[x]` |
 | V08 | `shape-sphere` | Physics | still + video | B | kinematics | `[ ]` |
-| V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[ ]` |
+| V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[x]` |
 | V10 | `sonification` | Physics | WAV + remuxed videos | B | kinematics, audio | `[ ]` |
 | V11 | `recurrence` | Physics | still | B | kinematics | `[ ]` |
 | V12 | `field-lines` | Physics | still + video | B | fields | `[ ]` |
-| V13 | `syzygy-wheel` | Physics | still | A | events, text | `[ ]` |
+| V13 | `syzygy-wheel` | Physics | still | A | events, text | `[x]` |
 | V14 | `triangle-centers` | Physics | still + video | B | kinematics | `[ ]` |
 | V15 | `medial-recursion` | Physics | still + video | B | — | `[ ]` |
 | V16 | `chord-progression` | Physics | poster + video + WAV | B | kinematics, audio, text | `[ ]` |
 | V17 | `epicycles` | Physics | video | B | rustfft | `[ ]` |
 | V18 | `chrono-grid` | Time | poster | B | frame tap | `[ ]` |
-| V19 | `slit-scan` | Time | 2 stills | A | frame tap | `[ ]` |
+| V19 | `slit-scan` | Time | 2 stills | A | frame tap | `[x]` |
 | V20 | `strobe` | Time | still + video | B | accumulation | `[ ]` |
 | V21 | `comet` | Time | video | C | accumulation | `[ ]` |
 | V22 | `editorial-retime` | Time | video | C | events, accumulation | `[ ]` |
@@ -75,20 +75,20 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V38 | `galaxy-collision` | Matter | video + still | C | resim-lite, accumulation | `[ ]` |
 | V39 | `reconnection` | Matter | video | C | fields, events | `[ ]` |
 | V40 | `aurora` | Matter | video | C | tube_render | `[ ]` |
-| V41 | `winding-glass` | Topology | still | B | kinematics | `[ ]` |
+| V41 | `winding-glass` | Topology | still | B | kinematics | `[x]` |
 | V42 | `basin-map` | Topology | poster + data | D | resim | `[ ]` |
 | V43 | `worldtube` | Topology | still + video | C | tube_render | `[ ]` |
 | V44 | `neon` | 3D scene | still | C | tube_render | `[ ]` |
 | V45 | `chandelier` | 3D scene | still + video | D | tube_render, energy field | `[ ]` |
-| V46 | `turntable` | 3D scene | video | A | existing orbit.rs | `[e]` |
+| V46 | `turntable` | 3D scene | video | A | existing orbit.rs | `[x]` |
 | V47 | `trailer` | Cinema | video | C | compositor, events | `[ ]` |
 | V48 | `mission-control` | Cinema | video | C | text, kinematics, events | `[ ]` |
 | V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[ ]` |
 | V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[ ]` |
-| V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[ ]` |
+| V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[x]` |
 | V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[ ]` |
 | V53 | `webgl-viewer` | Exports | JSON + HTML | B | vector_export | `[ ]` |
-| V54 | `oscilloscope` | Exports | WAV + video | B | audio | `[ ]` |
+| V54 | `oscilloscope` | Exports | WAV + video | B | audio | `[x]` |
 | V55 | `hologram` | Exports | huge still | D | rustfft | `[ ]` |
 | V56 | `tilt` | Exports | print PNGs | B | frame tap, V52 | `[ ]` |
 | V57 | `instrument` | Exports | HTML + JSON + WAV | C | V53, V54, V16 | `[ ]` |
@@ -106,6 +106,36 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V69 | `pond` | Combos | video | D | V32, V36, V09 | `[ ]` |
 
 ---
+
+# Wave 0/1 Implementation Notes (2026-08-17)
+
+Wave 0 (framework) and Wave 1 (eight modes) are implemented. Recorded
+deviations from the original specs, to be resolved in later waves:
+
+- **Viz manifest:** artifacts are recorded in `viz/manifest.json` instead of
+  a `viz` section inside `metadata/assets.json` (keeps the production asset
+  schema untouched until the website integrates viz outputs).
+- **Typography:** `common/text.rs` (ab_glyph + bundled font) is deferred to
+  the posters wave. Wave-1 artifacts ship text-free variants with JSON
+  sidecars carrying the data that captions would have shown.
+- **CLI shape:** modes are selected via `--viz <flag>` (repeatable, comma
+  lists, categories, `all`) plus `--viz-list` and `--viz-quality`, rather
+  than 69 separate boolean flags.
+- **V07 braid:** the optional top-to-bottom reveal video is deferred; the
+  braid word ships as `braid_word.txt` + `crossings.json`.
+- **V19 slit-scan:** under `--image-only` the mode logs a warning and skips
+  (no frame stream exists); the centroid column is the trajectory density
+  centroid rather than an energy-weighted image centroid.
+- **V41 winding-glass:** vertical span edges are exact per-scanline
+  (horizontal edges antialiased analytically; no 2x supersample), and the
+  color legend ships as `winding_histogram.json`.
+- **V46 turntable:** implemented as an adapter over `render_orbit_video`
+  with viz-standard paths; `--orbit-video` remains available and unchanged.
+- **V51 plotter-svg:** embroidery variant and low-energy segment dropping
+  deferred; stats sidecar included.
+- **Frame tap:** implemented as an optional observer parameter on
+  `app::render_video`, not a general fan-out registry (sufficient until
+  more tap consumers exist).
 
 # Part I — Subsystem Architecture
 
@@ -836,7 +866,7 @@ window 300 steps (dedupe chatter).
       braid).
 - [ ] Strand color identity readable end to end.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1; reveal video deferred)
 
 ---
 
@@ -925,7 +955,7 @@ library call for V63/V65/V68 soundtracks.
 - [ ] Audio free of clicks (windowed resample verified).
 - [ ] Poster passes physics-figure credibility check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1; typeset captions deferred to text.rs)
 
 ---
 
@@ -1098,7 +1128,7 @@ constellation of rhythm); collectors can compare wheels at a glance.
 - [ ] Cluster bloom legible, not blown out.
 - [ ] JSON matches ticks 1:1.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1; step labels deferred to text.rs)
 
 ---
 
@@ -1362,7 +1392,7 @@ phase + trivial assembly.
 - [ ] No tap-induced frame drops in the main encode (perf assert).
 - [ ] Radial version's seam (θ = 0) invisible in print.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1)
 
 ---
 
@@ -2386,7 +2416,7 @@ triples → colors), `winding_histogram.json`.
       (topological sanity audit).
 - [ ] Blind viewer parses it as intentional hard-edge art (curation check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1; legend PNG shipped as winding_histogram.json until text.rs)
 
 ---
 
@@ -2608,7 +2638,7 @@ existing defaults). No renderer changes.
 - [ ] Byte-identical frames vs `--orbit-video` at equal config (regression).
 - [ ] Manifest entry present.
 
-**Status:** `[e]` (adapter pending)
+**Status:** `[x]` implemented (Wave 1 adapter over orbit.rs)
 
 ---
 
@@ -2846,7 +2876,7 @@ be digitized.
 - [ ] Pen-up travel < 35% of pen-down (stats test).
 - [ ] Embroidery density audit passes.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1; embroidery variant deferred)
 
 ---
 
@@ -2984,7 +3014,7 @@ owners confirm parity.
 - [ ] No slew violations in WAV (test).
 - [ ] Multiplexed traces stable (no rolling).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 1)
 
 ---
 

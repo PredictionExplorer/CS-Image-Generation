@@ -366,7 +366,10 @@ pub fn save_image_as_png_16bit(
     Ok(())
 }
 
-fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> PixelBuffer {
+pub(crate) fn tonemap_to_display_buffer(
+    pixels: &PixelBuffer,
+    levels: &ChannelLevels,
+) -> PixelBuffer {
     pixels
         .par_iter()
         .map(|&(fr, fg, fb, fa)| {
@@ -376,7 +379,7 @@ fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> Pi
         .collect()
 }
 
-fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
+pub(crate) fn quantize_display_buffer_to_16bit(pixels: &PixelBuffer) -> Vec<u16> {
     let mut buf_16bit = vec![0u16; pixels.len() * 3];
     buf_16bit.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b, _a))| {
         let (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b);
