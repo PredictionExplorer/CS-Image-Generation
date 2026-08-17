@@ -32,7 +32,7 @@ SCRIPT_NAME = "viz_batch.sh"
 BATCH_TEMPLATE = """#!/usr/bin/env bash
 set -u
 echo "=== viz batch started $(date -u '+%Y-%m-%d %H:%M:%S') on $(hostname) ==="
-echo "=== seeds: {seeds_display} ==="
+echo "=== seeds (run concurrently): {seeds_display} ==="
 
 if ! command -v cargo >/dev/null 2>&1; then
   if [ -f "$HOME/.cargo/env" ]; then
@@ -59,12 +59,30 @@ echo "=== building release binary ($(nproc) cores) ==="
 cargo build --release || {{ echo "FATAL: build failed"; exit 1; }}
 
 BIN=./target/release/three_body_problem
-FAILURES=0
+CORES=$(nproc)
+SEED_COUNT={seed_count}
+THREADS=$(( CORES / SEED_COUNT ))
+if [ "$THREADS" -lt 8 ]; then THREADS=8; fi
+echo "=== launching ${{SEED_COUNT}} concurrent runs, RAYON_NUM_THREADS=${{THREADS}} each ==="
+
+declare -a PIDS=()
+declare -a NAMES=()
 for SEED in {seeds_shell}; do
   NAME="viz-${{SEED}}"
-  echo "=== [$(date -u '+%H:%M:%S')] seed ${{SEED}} -> output/${{NAME}} ==="
-  if ! "$BIN" --seed "${{SEED}}" --viz all --output "${{NAME}}"; then
-    echo "WARN: seed ${{SEED}} failed"
+  echo "=== [$(date -u '+%H:%M:%S')] launching seed ${{SEED}} -> output/${{NAME}} \\
+(log: ${{NAME}}.log) ==="
+  RAYON_NUM_THREADS="$THREADS" "$BIN" --seed "${{SEED}}" --viz all --output "${{NAME}}" \\
+    > "${{NAME}}.log" 2>&1 &
+  PIDS+=($!)
+  NAMES+=("$NAME")
+done
+
+FAILURES=0
+for INDEX in "${{!PIDS[@]}}"; do
+  if wait "${{PIDS[$INDEX]}}"; then
+    echo "=== [$(date -u '+%H:%M:%S')] ${{NAMES[$INDEX]}} finished OK ==="
+  else
+    echo "WARN: ${{NAMES[$INDEX]}} failed (see ${{NAMES[$INDEX]}}.log)"
     FAILURES=$((FAILURES + 1))
   fi
 done
@@ -126,6 +144,7 @@ def upload_batch_script(host: str, remote_dir: str, seeds: list[str], dry_run: b
     script = BATCH_TEMPLATE.format(
         seeds_display=" ".join(seeds),
         seeds_shell=" ".join(seeds),
+        seed_count=len(seeds),
     )
     if dry_run:
         print(f"  (would write {len(script)} bytes to {remote_dir}/{SCRIPT_NAME})")
@@ -158,12 +177,18 @@ def launch(host: str, remote_dir: str, dry_run: bool) -> None:
 
 
 def status(host: str, remote_dir: str) -> None:
-    """Show the tail of the remote log and any running batch processes."""
+    """Show batch log, per-seed progress, load, and running processes."""
     run(
         ssh_cmd(
             host,
-            f"tail -n 40 {remote_dir}/{LOG_NAME} 2>/dev/null; echo '--- processes ---'; "
-            "pgrep -af 'viz_batch.sh|three_body_problem' || echo '(none running)'",
+            f"cd {remote_dir} 2>/dev/null || exit 0; "
+            f"tail -n 12 {LOG_NAME} 2>/dev/null; "
+            "echo '--- per-seed (last line each) ---'; "
+            'for f in viz-0x*.log; do [ -f "$f" ] && '
+            'echo "$f: $(tail -n 1 "$f" | cut -c1-120)"; done; '
+            "echo '--- load ---'; uptime; "
+            "echo '--- processes ---'; "
+            "pgrep -af 'viz_batch.sh|three_body_problem' | head -8 || echo '(none running)'",
         ),
         dry_run=False,
         check=False,
