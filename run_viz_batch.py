@@ -162,7 +162,8 @@ def launch(host: str, remote_dir: str, dry_run: bool) -> None:
     print("[4/4] launch batch in background (nohup; safe to disconnect)")
     command = (
         f"cd {remote_dir} && rm -f {LOG_NAME} && "
-        f"setsid nohup bash {SCRIPT_NAME} > {LOG_NAME} 2>&1 < /dev/null & echo launched pid=$!"
+        f"(setsid nohup bash {SCRIPT_NAME} > {LOG_NAME} 2>&1 < /dev/null &) && "
+        "echo launched; exit 0"
     )
     run(ssh_cmd(host, command), dry_run=dry_run)
     if dry_run:
