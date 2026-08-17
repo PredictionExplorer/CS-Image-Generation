@@ -39,6 +39,17 @@ impl RenderContext {
             bounds.apply_aspect_correction(width, height);
         }
 
+        Self::with_bounds(width, height, bounds)
+    }
+
+    /// Creates a render context from an explicit, precomputed bounding box.
+    ///
+    /// Camera passes that re-project the scene many times (e.g. the orbit
+    /// video) must hold one fixed framing across every view instead of
+    /// refitting per projection; they compute their own view-invariant bounds
+    /// and construct the context directly from them.
+    #[must_use]
+    pub fn with_bounds(width: u32, height: u32, bounds: BoundingBox) -> Self {
         Self { width, height, width_usize: width as usize, height_usize: height as usize, bounds }
     }
 
@@ -294,5 +305,32 @@ mod tests {
         let positions = make_positions(&[(0.0, 0.0), (10.0, 10.0)]);
         let ctx = RenderContext::new(1920, 1080, &positions, false);
         assert_eq!(ctx.pixel_count(), 1920 * 1080);
+    }
+
+    #[test]
+    fn test_with_bounds_uses_explicit_bounding_box() {
+        let bounds = BoundingBox {
+            min_x: -4.0,
+            max_x: 4.0,
+            min_y: -2.0,
+            max_y: 2.0,
+            width: 8.0,
+            height: 4.0,
+        };
+        let ctx = RenderContext::with_bounds(640, 320, bounds);
+
+        assert_eq!(ctx.pixel_count(), 640 * 320);
+        let (px, py) = ctx.to_pixel(-4.0, -2.0);
+        assert!(px.abs() < 1e-3 && py.abs() < 1e-3, "min corner should map to (0, 0)");
+        let (px, py) = ctx.to_pixel(4.0, 2.0);
+        assert!(
+            (px - 640.0).abs() < 1e-3 && (py - 320.0).abs() < 1e-3,
+            "max corner should map to (width, height)"
+        );
+        let (px, py) = ctx.to_pixel(0.0, 0.0);
+        assert!(
+            (px - 320.0).abs() < 1e-3 && (py - 160.0).abs() < 1e-3,
+            "center should map to the frame center"
+        );
     }
 }

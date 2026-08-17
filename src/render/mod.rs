@@ -28,6 +28,7 @@ pub mod effect_randomizer;
 pub mod effects;
 pub mod error;
 pub mod histogram;
+pub mod orbit;
 pub mod parameter_descriptors;
 pub mod randomizable_config;
 pub mod spectral_output;

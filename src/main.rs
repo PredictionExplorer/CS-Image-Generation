@@ -101,6 +101,34 @@ struct Args {
     #[arg(long, default_value_t = false)]
     image_only: bool,
 
+    /// Render an experimental 360-degree orbit (turntable) video of the
+    /// finished sculpture to videos/web/orbit.mp4 and videos/hq/orbit.mp4.
+    #[arg(long, default_value_t = false)]
+    orbit_video: bool,
+
+    /// Duration of the full 360-degree orbit sweep in seconds.
+    #[arg(long, default_value_t = 12.0)]
+    orbit_seconds: f64,
+
+    /// Orbit video frame rate in frames per second.
+    #[arg(long, default_value_t = 30)]
+    orbit_fps: u32,
+
+    /// Camera elevation above the sculpture's equator during the orbit,
+    /// in degrees (avoids fully edge-on passes for near-planar orbits).
+    #[arg(long, default_value_t = 18.0)]
+    orbit_tilt_deg: f64,
+
+    /// Keep every Nth simulation step for orbit frames (energy-compensated;
+    /// higher values render faster with slightly coarser strokes).
+    #[arg(long, default_value_t = 2, value_parser = parse_bounded_stride)]
+    orbit_step_stride: usize,
+
+    /// Orbit video resolution as `WIDTHxHEIGHT` (default: half of
+    /// --resolution, rounded down to even dimensions).
+    #[arg(long, value_parser = parse_resolution)]
+    orbit_resolution: Option<OutputResolution>,
+
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
 
@@ -129,6 +157,44 @@ fn parse_bounded_steps(value: &str) -> std::result::Result<usize, String> {
         return Err(format!("steps must be between 1 and {MAX_NUM_STEPS}"));
     }
     Ok(n)
+}
+
+const MAX_ORBIT_STEP_STRIDE: usize = 1024;
+
+fn parse_bounded_stride(value: &str) -> std::result::Result<usize, String> {
+    let n: usize =
+        value.parse().map_err(|_| "orbit step stride must be a positive integer".to_string())?;
+    if n == 0 || n > MAX_ORBIT_STEP_STRIDE {
+        return Err(format!("orbit step stride must be between 1 and {MAX_ORBIT_STEP_STRIDE}"));
+    }
+    Ok(n)
+}
+
+/// Round a dimension down to the nearest even value (required by yuv420p),
+/// clamped to a sane minimum.
+fn even_dimension(value: u32) -> u32 {
+    (value & !1).max(16)
+}
+
+/// Resolve the orbit output resolution: explicit value (rounded to even with
+/// a warning if needed) or half of the main resolution.
+fn resolve_orbit_resolution(
+    explicit: Option<OutputResolution>,
+    main_resolution: OutputResolution,
+) -> OutputResolution {
+    let raw = explicit.unwrap_or(OutputResolution {
+        width: main_resolution.width / 2,
+        height: main_resolution.height / 2,
+    });
+    let even =
+        OutputResolution { width: even_dimension(raw.width), height: even_dimension(raw.height) };
+    if explicit.is_some() && (even.width != raw.width || even.height != raw.height) {
+        warn!(
+            "orbit resolution {}x{} adjusted to {}x{} (even dimensions required by yuv420p)",
+            raw.width, raw.height, even.width, even.height
+        );
+    }
+    even
 }
 
 fn setup_logging(level: &str) {
@@ -452,6 +518,29 @@ fn main() -> Result<()> {
         )?;
     }
 
+    if args.orbit_video {
+        let orbit_resolution = resolve_orbit_resolution(args.orbit_resolution, args.resolution);
+        error::validation::validate_dimensions(orbit_resolution.width, orbit_resolution.height)?;
+        let orbit_config = render::orbit::OrbitVideoConfig {
+            width: orbit_resolution.width,
+            height: orbit_resolution.height,
+            fps: args.orbit_fps,
+            seconds: args.orbit_seconds,
+            tilt_deg: args.orbit_tilt_deg,
+            step_stride: args.orbit_step_stride,
+        };
+        let orbit_web_video = format!("{seed_dir}/videos/web/orbit.mp4");
+        let orbit_hq_video = format!("{seed_dir}/videos/hq/orbit.mp4");
+        app::render_orbit_video(
+            render::SpectralScene::new(&positions, &colors, &body_alphas),
+            &levels,
+            spectral_settings,
+            &orbit_config,
+            app::VideoOutputPaths { web: &orbit_web_video, high_quality: &orbit_hq_video },
+            args.fast_encode,
+        )?;
+    }
+
     app::write_asset_manifest(
         &seed_dir,
         args.resolution.width,
@@ -597,5 +686,62 @@ mod tests {
     fn test_reject_invalid_resolution() {
         let result = Args::try_parse_from(["three_body_problem", "--resolution", "wide-by-tall"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_orbit_defaults() {
+        let args = Args::parse_from(["three_body_problem"]);
+        assert!(!args.orbit_video);
+        assert_eq!(args.orbit_seconds, 12.0);
+        assert_eq!(args.orbit_fps, 30);
+        assert_eq!(args.orbit_tilt_deg, 18.0);
+        assert_eq!(args.orbit_step_stride, 2);
+        assert!(args.orbit_resolution.is_none());
+    }
+
+    #[test]
+    fn test_parse_orbit_flags() {
+        let args = Args::parse_from([
+            "three_body_problem",
+            "--orbit-video",
+            "--orbit-seconds",
+            "8",
+            "--orbit-fps",
+            "24",
+            "--orbit-tilt-deg",
+            "25.5",
+            "--orbit-step-stride",
+            "4",
+            "--orbit-resolution",
+            "1280x828",
+        ]);
+        assert!(args.orbit_video);
+        assert_eq!(args.orbit_seconds, 8.0);
+        assert_eq!(args.orbit_fps, 24);
+        assert_eq!(args.orbit_tilt_deg, 25.5);
+        assert_eq!(args.orbit_step_stride, 4);
+        assert_eq!(args.orbit_resolution, Some(OutputResolution { width: 1280, height: 828 }));
+    }
+
+    #[test]
+    fn test_reject_zero_orbit_stride() {
+        let result = Args::try_parse_from(["three_body_problem", "--orbit-step-stride", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_orbit_resolution_defaults_to_even_half() {
+        let resolved =
+            resolve_orbit_resolution(None, OutputResolution { width: 3456, height: 2234 });
+        assert_eq!(resolved, OutputResolution { width: 1728, height: 1116 });
+    }
+
+    #[test]
+    fn test_resolve_orbit_resolution_rounds_explicit_odd_dimensions() {
+        let resolved = resolve_orbit_resolution(
+            Some(OutputResolution { width: 1281, height: 829 }),
+            OutputResolution { width: 3456, height: 2234 },
+        );
+        assert_eq!(resolved, OutputResolution { width: 1280, height: 828 });
     }
 }

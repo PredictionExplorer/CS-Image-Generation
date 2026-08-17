@@ -1076,6 +1076,40 @@ pub fn render_video(
     Ok(accum_spd)
 }
 
+/// Render the experimental 360-degree orbit (turntable) video.
+///
+/// Re-renders the fully accumulated sculpture from a camera sweeping one full
+/// turn, reusing the frozen tonemap `levels` from pass 1 so exposure stays
+/// stable across the loop. Writes a web H.264 MP4 plus an HQ HEVC MP4 (the HQ
+/// encode switches to the fast hardware path when `fast_encode` is set).
+pub fn render_orbit_video(
+    scene: SpectralScene<'_>,
+    levels: &ChannelLevels,
+    settings: SpectralRenderSettings<'_>,
+    config: &render::orbit::OrbitVideoConfig,
+    output_videos: VideoOutputPaths<'_>,
+    fast_encode: bool,
+) -> Result<()> {
+    info!("STAGE 8: ORBIT => 360 degree turntable video ({} frames)...", config.frame_count());
+    let hq_options = if fast_encode {
+        VideoEncodingOptions::fast_encode()
+    } else {
+        VideoEncodingOptions::high_quality()
+    };
+    let outputs = [
+        VideoOutputSpec {
+            output_file: output_videos.web.to_string(),
+            options: VideoEncodingOptions::web_compatible(),
+        },
+        VideoOutputSpec {
+            output_file: output_videos.high_quality.to_string(),
+            options: hq_options,
+        },
+    ];
+    render::orbit::render_orbit_video(scene, levels, settings, config, &outputs)?;
+    Ok(())
+}
+
 /// Render only the fully accumulated still image, skipping all video outputs.
 ///
 /// This is the fast-iteration path for parameter-tuning batches: the still is
