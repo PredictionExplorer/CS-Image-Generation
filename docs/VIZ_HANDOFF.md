@@ -5,13 +5,31 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~01:00 EST (2026-08-18 ~06:00 UTC).
+Last updated: 2026-08-18 ~01:30 EST (2026-08-18 ~06:30 UTC).
 
 ---
 
+## Immediate next actions (fresh session, start here)
+
+1. **Check the server batch** (`python3 run_viz_batch.py --status`). A
+   Wave-1-only batch over 5 seeds has been running since 2026-08-17
+   23:54 UTC; as of ~06:15 UTC all five seeds were inside `turntable`
+   (V46 — the full-res orbit re-render, by far the longest mode) with only
+   `plotter-svg` and `oscilloscope` left after it. When `viz_batch.log`
+   shows `COMPLETE`:
+   - `python3 run_viz_batch.py --fetch viz-results` (downloads
+     `output/viz-*` for curation; several GB), then
+   - `python3 run_viz_batch.py` to relaunch the same 5 seeds from HEAD —
+     they will regenerate with all **36** modes (fully seed-deterministic,
+     so Wave-1 artifacts reproduce identically).
+2. **Start Wave 6** (3D scene family) per the plan below — independent of
+   the batch; local work never touches the server checkout.
+
 ## Where we are
 
-- **Branch:** `viz-master-plan` (pushed to `origin`). All work happens here.
+- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 5 landed as
+  `27eee5e`; every wave is one `feat:` commit plus this handoff kept in
+  sync. All gates were green at the Wave 5 commit.
 - **Progress:** 36 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
@@ -77,14 +95,22 @@ Last updated: 2026-08-18 ~01:00 EST (2026-08-18 ~06:00 UTC).
 - **Batch in flight right now:** launched 2026-08-17 23:54 UTC from commit
   `e0066a9` (Wave 1 only, 8 modes), seeds `0xCAFE 0xBEEF 0xC0DE 0xFACE
   0x1357`, max quality (default resolution/sims/steps, HQ encodes,
-  `--viz all`). As of ~02:10 UTC no seed had finished (full-res HEVC
-  `slower` encodes dominate); 4 of 5 seeds in STAGE 7/7, `0xCAFE` trailing
-  in STAGE 5/7. When `viz_batch.log` shows `COMPLETE`: fetch the Wave-1
-  artifacts (`python3 run_viz_batch.py --fetch viz-results`), then relaunch
-  `python3 run_viz_batch.py` to regenerate the same 5 seeds against HEAD
-  with all 29 modes (Wave 1 outputs reproduce identically — everything is
-  seed-deterministic; budget roughly +60–80 min per seed over the
-  Wave-1-only run now that Waves 2–4 are in).
+  `--viz all`). Progress timeline: main videos finished ~03-05 UTC (HEVC
+  `slower` encodes dominate the core package); as of ~06:15 UTC every seed
+  sat inside `turntable` (V46), which re-renders the sculpture from 360
+  angles at full res and dwarfs every other Wave-1 mode; `plotter-svg` and
+  `oscilloscope` (both cheap) remain after it. Follow-through when
+  `viz_batch.log` shows `COMPLETE` is step 1 of "Immediate next actions"
+  above. Budget note for the relaunch: Waves 2-5 add roughly 1.5-2.5 h per
+  seed at max quality (re-accumulation videos, the V31/V38 particle sims,
+  V33 physarum, and V32's wave grid are the big contributors), on top of
+  the Wave-1-only footprint this batch is finishing.
+- **Useful deep probe** (per-seed mode completion, beyond `--status`):
+
+  ```bash
+  ssh user@100.76.88.48 'cd viz-batch/CS-Image-Generation/output && \
+    for d in viz-0x*; do echo "== $d"; ls "$d/viz" | tr "\n" " "; echo; done'
+  ```
 
 ## Local workflow cheat sheet
 
@@ -146,13 +172,22 @@ call inside the video branch, trajectory phase at the end),
 - `--viz-quality draft` exists for development only; server batches run
   `final` (the default).
 
-## Open items beyond Wave 4
+## Open items beyond Wave 5
 
 - `common/text.rs` (ab_glyph + bundled OFL font) — unblocks poster
   typography (Wave 8 per the build order; deferred captions noted in
   addendums).
 - `render_still_image` does not return the SPD, so `--image-only` skips
-  SPD-phase modes (warning logged).
+  SPD-phase modes (warning logged); V33/V34 fall back to a trajectory
+  splat-density food map in that case.
 - assets.json `viz` section (currently a separate `viz/manifest.json`).
+- **Wave 5 aesthetic constants were tuned on the draft smoke only** and
+  should be re-reviewed on golden seeds at final quality during curation:
+  physarum trail normalization (16x steady state), marbling dye knee /
+  stir impulse, frost sparkle weights, dust-nebula stroke energy. The
+  draft smoke also hits draft-only artifacts by design: frost's 50%
+  fill-limit truncates growth on tiny grids, and dust barely drifts in a
+  30k-step run — judge both at final only.
 - The user curates favorites from batch outputs; deep-polish passes on
-  chosen modes follow the wave completions.
+  chosen modes follow the wave completions (V37/V39 full-res stills are
+  queued behind that shortlist, per the Wave 4 addendum).
