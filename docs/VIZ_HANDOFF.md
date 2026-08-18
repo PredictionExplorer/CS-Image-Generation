@@ -5,14 +5,14 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-17 ~21:00 EST (2026-08-18 ~01:00 UTC).
+Last updated: 2026-08-17 ~22:15 EST (2026-08-18 ~02:15 UTC).
 
 ---
 
 ## Where we are
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). All work happens here.
-- **Progress:** 24 of 69 modes implemented (`--viz-list` prints the live
+- **Progress:** 29 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
     kinematics/events/energy-field), `ArtifactSink` + `viz/manifest.json`,
@@ -26,11 +26,20 @@ Last updated: 2026-08-17 ~21:00 EST (2026-08-18 ~01:00 UTC).
   - **Wave 3** (9, re-accumulation family): triangle-centers,
     medial-recursion, chrono-grid, strobe, comet, three-shadows, ride-along,
     retarded-time, depth-pack.
-- **Next up:** **Wave 4 — fields & frames** per the build order in the
-  master plan Part IV.2: V12 `field-lines`, V26 `corotating`, V30 `lensing`,
-  V37 `roche`, V39 `reconnection`. Requires `common/fields.rs` (potential
-  grids, equipotentials via the existing `common/contours.rs`, Jobard–Lefer
-  streamlines) — see Part II.4 of the master plan.
+  - **Wave 4** (5, fields & frames): field-lines, corotating, lensing,
+    roche, reconnection — plus `common/fields.rs` (potential grids, asinh
+    equipotentials, Jobard–Lefer streamlines, `RochePotential` with the L1
+    saddle, all unit-tested against analytic two-body cases). Notable
+    wave-wide deviation: the frame tap is *not* used (full-frame retention
+    is memory-prohibitive at default res); ghosts/sources come from
+    half-res re-accumulation and master.png. Details in the Wave 4
+    addendum.
+- **Next up:** **Wave 5 — particles, agents, media** per the build order in
+  the master plan Part IV.2: V31 `dust-nebula`, V38 `galaxy-collision`
+  (shared particle core), V33 `physarum`, V34 `frost`, V35 `lightning`,
+  V36 `marbling`, V32 `light-echoes`. Requires `common/agents.rs` (II.5),
+  `common/fluid.rs` (II.6), `common/wave.rs` (II.7), and a shared
+  test-particle integrator for V31/V38.
 - **Deviations from specs** are recorded in the "Wave N addendum" sections
   at the top of the master plan (single viz manifest instead of an
   assets.json section; typography/text.rs deferred to the posters wave;
@@ -61,12 +70,14 @@ Last updated: 2026-08-17 ~21:00 EST (2026-08-18 ~01:00 UTC).
 - **Batch in flight right now:** launched 2026-08-17 23:54 UTC from commit
   `e0066a9` (Wave 1 only, 8 modes), seeds `0xCAFE 0xBEEF 0xC0DE 0xFACE
   0x1357`, max quality (default resolution/sims/steps, HQ encodes,
-  `--viz all`). As of ~01:51 UTC no seed had finished (full-res HEVC
-  `slower` encodes dominate); `0xFACE` furthest along. When
-  `viz_batch.log` shows `COMPLETE`, relaunch `python3 run_viz_batch.py`
-  to regenerate the same 5 seeds against HEAD with all 24 modes
-  (Wave 1 outputs reproduce identically — everything is seed-deterministic;
-  budget roughly +40–50 min per seed over the Wave-1-only run).
+  `--viz all`). As of ~02:10 UTC no seed had finished (full-res HEVC
+  `slower` encodes dominate); 4 of 5 seeds in STAGE 7/7, `0xCAFE` trailing
+  in STAGE 5/7. When `viz_batch.log` shows `COMPLETE`: fetch the Wave-1
+  artifacts (`python3 run_viz_batch.py --fetch viz-results`), then relaunch
+  `python3 run_viz_batch.py` to regenerate the same 5 seeds against HEAD
+  with all 29 modes (Wave 1 outputs reproduce identically — everything is
+  seed-deterministic; budget roughly +60–80 min per seed over the
+  Wave-1-only run now that Waves 2–4 are in).
 
 ## Local workflow cheat sheet
 
@@ -88,7 +99,8 @@ cargo test --release                          # ~500 tests
 ```
 
 Smoke outputs (`output/…`) are gitignored. Local smoke dirs so far:
-`viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3).
+`viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3),
+`viz-smoke4` (Wave 4).
 
 ## Code map (viz subsystem)
 
@@ -98,9 +110,10 @@ src/viz/catalog.rs    all 69 modes; ledger-consistency test (include_str!)
 src/viz/context.rs    VizContext, FrameTapCollector, VizQuality
 src/viz/sink.rs       ArtifactSink, viz/manifest.json writer
 src/viz/common/       accum (production re-accumulation), display (graders,
-                      SpdCanvas), kinematics, events, spd, contours, raster,
+                      SpdCanvas), fields (potential grids, streamlines,
+                      Roche/L1), kinematics, events, spd, contours, raster,
                       audio (WAV), vector_export (SVG/RDP)
-src/viz/modes/        one file per implemented mode (24)
+src/viz/modes/        one file per implemented mode (29)
 ```
 
 Integration points in the core pipeline: `src/main.rs` (flags, SPD-phase

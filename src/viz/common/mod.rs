@@ -7,6 +7,7 @@ pub mod audio;
 pub mod contours;
 pub mod display;
 pub mod events;
+pub mod fields;
 pub mod kinematics;
 pub mod raster;
 pub mod spd;

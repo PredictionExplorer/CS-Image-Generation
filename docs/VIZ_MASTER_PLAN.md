@@ -46,7 +46,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[x]` |
 | V10 | `sonification` | Physics | WAV + remuxed videos | B | kinematics, audio | `[ ]` |
 | V11 | `recurrence` | Physics | still | B | kinematics | `[ ]` |
-| V12 | `field-lines` | Physics | still + video | B | fields | `[ ]` |
+| V12 | `field-lines` | Physics | still + video | B | fields | `[x]` |
 | V13 | `syzygy-wheel` | Physics | still | A | events, text | `[x]` |
 | V14 | `triangle-centers` | Physics | still + video | B | kinematics | `[x]` |
 | V15 | `medial-recursion` | Physics | still + video | B | — | `[x]` |
@@ -60,20 +60,20 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V23 | `epilogue` | Time | video | C | resim | `[ ]` |
 | V24 | `multiverse` | Time | poster + video | C | resim | `[ ]` |
 | V25 | `three-shadows` | Frames | triptych | B | accumulation | `[x]` |
-| V26 | `corotating` | Frames | diptych + video | C | kinematics, accumulation | `[ ]` |
+| V26 | `corotating` | Frames | diptych + video | C | kinematics, accumulation | `[x]` |
 | V27 | `ride-along` | Frames | video | C | kinematics, accumulation | `[x]` |
 | V28 | `bullet-time` | Frames | video | C | events, orbit camera | `[ ]` |
 | V29 | `retarded-time` | Frames | still + video | B | kinematics | `[x]` |
-| V30 | `lensing` | Frames | still + video | B | fields | `[ ]` |
+| V30 | `lensing` | Frames | still + video | B | fields | `[x]` |
 | V31 | `dust-nebula` | Matter | video + still | C | fields, accumulation | `[ ]` |
 | V32 | `light-echoes` | Matter | video | C | wave grid | `[ ]` |
 | V33 | `physarum` | Matter | video + still | C | agents, energy field | `[ ]` |
 | V34 | `frost` | Matter | video + still | C | agents, energy field | `[ ]` |
 | V35 | `lightning` | Matter | still + video | C | events, agents | `[ ]` |
 | V36 | `marbling` | Matter | video + still | C | fluid | `[ ]` |
-| V37 | `roche` | Matter | video | C | fields | `[ ]` |
+| V37 | `roche` | Matter | video | C | fields | `[x]` |
 | V38 | `galaxy-collision` | Matter | video + still | C | resim-lite, accumulation | `[ ]` |
-| V39 | `reconnection` | Matter | video | C | fields, events | `[ ]` |
+| V39 | `reconnection` | Matter | video | C | fields, events | `[x]` |
 | V40 | `aurora` | Matter | video | C | tube_render | `[ ]` |
 | V41 | `winding-glass` | Topology | still | B | kinematics | `[x]` |
 | V42 | `basin-map` | Topology | poster + data | D | resim | `[ ]` |
@@ -183,6 +183,58 @@ deviations:
 - **V52 depth-pack** uses bilinear gather reprojection (no explicit
   disocclusion dilation; thin-strand holes are negligible at the 1.2%
   shift budget) and loads the finished master.png from the package.
+
+## Wave 4 addendum (2026-08-17)
+
+Wave 4 (fields & frames: V12, V26, V30, V37, V39) is implemented -- 29 of
+69 modes. New shared infrastructure and deviations:
+
+- **`common/fields.rs`:** `PotentialGrid` (pixel-aligned Plummer-softened
+  potential over any `RenderContext`, bilinear value/gradient, asinh level
+  picker between the p01/p99.5 percentiles), `equipotentials` (marching
+  squares stitched into polylines), `streamlines` (Jobard-Lefer with RK2
+  midpoint tracing, half-spacing termination, 1.5 px boundary margin where
+  central differences degrade), and `RochePotential` (analytic co-rotating
+  effective potential with optional third-body perturber; L1 via golden
+  section + guarded 2D Newton, validated against the equal-mass midpoint
+  and the Hill-radius limit). Potentials include the production `G`.
+- **Frame tap not used.** The tap stores slit samples only; retaining full
+  frames at default resolution (1800 x 3456x2234 rgb48) is memory-
+  prohibitive. V12's video ghost and V30's video source are instead
+  re-accumulated at half resolution via `common/accum.rs` (the Wave 3
+  convention), and the stills composite over the finished master.png
+  (decoded with gamma 2.2).
+- **Display-ink compositing:** V12/V37 draw hairlines into the tonemapped
+  display buffer via `raster::draw_line_rgba` (ink gamma-encoded 1/2.2);
+  energy-space ghosts are scaled before the tonemap (12% / 8%).
+- **V26 corotating:** the morph is the spec'd SPD restart: segment A
+  freezes at morph start and crossfades energy-linearly into a co-rotating
+  exposure regrowing 6x time-compressed; one fixed grade from the
+  co-rotating scene serves the whole reveal (no grade popping). L4/L5
+  sigils are drawn at the mean-separation positions as quiet energy
+  strokes. The transform is exported for V37/V49/V65.
+- **V30 lensing:** inverse ray map (sample the image plane, read the
+  source) rather than forward splatting -- surface-brightness conserving
+  by construction; global flux audited in `lens_params.json` (unit-tested
+  within 2% on an analytic case). Jitter is a seeded stratified 64x64
+  tile, not true blue noise.
+- **V37 roche:** the spec's lobe-fill fraction is undefined for point
+  masses; mass transfer triggers when the pair separation drops below its
+  5th percentile / 0.98 (streams coincide with periapses). Stream
+  ballistics include the Coriolis term. Two accumulation passes (levels,
+  then incremental replay) put the mode near ~12 min, above the spec's
+  ~6 min estimate. `roche_touch.png` is captured from the video stream at
+  video resolution.
+- **V39 reconnection:** chromatic bloom runs only on frames with an active
+  flare (whole-frame bloom every frame would triple the mode's budget);
+  the max-flare still is captured from the video stream at video
+  resolution. Loop physics is a damped Verlet spring chain (48 nodes),
+  snap at the max-curvature node with elastic recoil, retraction via rest-
+  length decay.
+- **Stills at video resolution:** V37/V39 stills are by definition single
+  video frames; the full-res re-render (a second full-resolution ghost
+  accumulation each) is deferred to the curation pass if those modes make
+  the shortlist.
 
 # Part I — Subsystem Architecture
 
@@ -1135,7 +1187,7 @@ for the ghost only).
 - [ ] Video breathing is smooth; no line popping.
 - [ ] Engraving credibility check (hairline weights per `style.rs`).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 4; ghost from master.png / re-accumulation instead of the frame tap, labels in JSON sidecar)
 
 ---
 
@@ -1758,7 +1810,7 @@ The transform fn is exported for V49/V65.
 - [ ] L4/L5 sigils verifiably stationary post-morph.
 - [ ] Morph reads as one continuous shot.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 4; morph = energy-linear SPD crossfade into a 6x regrown co-rotating exposure, single fixed grade)
 
 ---
 
@@ -1939,7 +1991,7 @@ quarters it. Tap + trajectory phases.
 - [ ] At least one caustic crossing event per golden seed.
 - [ ] No Moiré on arcs at HQ encode.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 4; inverse ray map, video lenses the re-accumulated artwork instead of tapped frames)
 
 ---
 
@@ -2271,7 +2323,7 @@ frame).
 - [ ] Touch/stream events coincide with periapses.
 - [ ] Third-body wobble perceptible but not noisy.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 4; point-mass lobe-fill proxy from separation percentile, touch still at video resolution)
 
 ---
 
@@ -2365,7 +2417,7 @@ palette.
 - [ ] Recoil animation reads as elastic (no teleporting).
 - [ ] Flares punctuate without whiting out the frame.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 4; bloom applied on flare frames only, max-flare still at video resolution)
 
 ---
 

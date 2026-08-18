@@ -1,18 +1,23 @@
-//! Implemented visualization modes (Waves 1-3 of `docs/VIZ_MASTER_PLAN.md`).
+//! Implemented visualization modes (Waves 1-4 of `docs/VIZ_MASTER_PLAN.md`).
 
 pub mod alien_vision;
 pub mod braid;
 pub mod chrono_grid;
 pub mod comet;
+pub mod corotating;
 pub mod depth_pack;
 pub mod dwell_nebula;
+pub mod field_lines;
 pub mod gw_chirp;
+pub mod lensing;
 pub mod medial_recursion;
 pub mod oscilloscope;
 pub mod plotter_svg;
 pub mod prism_portrait;
+pub mod reconnection;
 pub mod retarded_time;
 pub mod ride_along;
+pub mod roche;
 pub mod slit_scan;
 pub mod spectral_centroid;
 pub mod spectrum_card;
@@ -55,6 +60,11 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "dwell-nebula" => Some(Box::new(dwell_nebula::DwellNebula)),
         "topo-contours" => Some(Box::new(topo_contours::TopoContours)),
         "depth-pack" => Some(Box::new(depth_pack::DepthPack)),
+        "field-lines" => Some(Box::new(field_lines::FieldLines)),
+        "corotating" => Some(Box::new(corotating::Corotating)),
+        "lensing" => Some(Box::new(lensing::Lensing)),
+        "roche" => Some(Box::new(roche::Roche)),
+        "reconnection" => Some(Box::new(reconnection::Reconnection)),
         _ => None,
     }
 }

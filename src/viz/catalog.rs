@@ -48,7 +48,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V09", "gw-chirp", "The Sound of Spacetime", "physics", 'A', true),
     entry("V10", "sonification", "The Orbit's Score", "physics", 'B', false),
     entry("V11", "recurrence", "Fingerprint of Chaos", "physics", 'B', false),
-    entry("V12", "field-lines", "The Gravitational Engraving", "physics", 'B', false),
+    entry("V12", "field-lines", "The Gravitational Engraving", "physics", 'B', true),
     entry("V13", "syzygy-wheel", "The Rhythm Clock", "physics", 'A', true),
     entry("V14", "triangle-centers", "The Constellation of Centers", "physics", 'B', true),
     entry("V15", "medial-recursion", "Vortex of Triangles", "physics", 'B', true),
@@ -62,20 +62,20 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V23", "epilogue", "How This Artwork Dies", "time", 'C', false),
     entry("V24", "multiverse", "The Garden of Forking Orbits", "time", 'C', false),
     entry("V25", "three-shadows", "The Cave Wall Triptych", "frames", 'B', true),
-    entry("V26", "corotating", "The Same Dance from the Dance Floor", "frames", 'C', false),
+    entry("V26", "corotating", "The Same Dance from the Dance Floor", "frames", 'C', true),
     entry("V27", "ride-along", "What Body Three Sees", "frames", 'C', true),
     entry("V28", "bullet-time", "The Held Breath", "frames", 'C', false),
     entry("V29", "retarded-time", "Where Their Light Says They Are", "frames", 'B', true),
-    entry("V30", "lensing", "Gravity Bends the Gallery", "frames", 'B', false),
+    entry("V30", "lensing", "Gravity Bends the Gallery", "frames", 'B', true),
     entry("V31", "dust-nebula", "Gravity's Weather", "matter", 'C', false),
     entry("V32", "light-echoes", "Three Boats on a Dark Pond", "matter", 'C', false),
     entry("V33", "physarum", "The Organism Rediscovers the Orbit", "matter", 'C', false),
     entry("V34", "frost", "Winter Claims the Window", "matter", 'C', false),
     entry("V35", "lightning", "The Storm Record", "matter", 'C', false),
     entry("V36", "marbling", "Suminagashi Stirred by Gravity", "matter", 'C', false),
-    entry("V37", "roche", "Lobes That Touch", "matter", 'C', false),
+    entry("V37", "roche", "Lobes That Touch", "matter", 'C', true),
     entry("V38", "galaxy-collision", "The Antennae, Choreographed", "matter", 'C', false),
-    entry("V39", "reconnection", "Field Lines That Snap", "matter", 'C', false),
+    entry("V39", "reconnection", "Field Lines That Snap", "matter", 'C', true),
     entry("V40", "aurora", "Curtains Over the Void", "matter", 'C', false),
     entry("V41", "winding-glass", "Topological Stained Glass", "topology", 'B', true),
     entry("V42", "basin-map", "Where Your Artwork Lives in Chaos", "topology", 'D', false),
@@ -224,10 +224,16 @@ mod tests {
             "ride-along",
             "retarded-time",
             "depth-pack",
+            // Wave 4 (fields & frames)
+            "field-lines",
+            "corotating",
+            "lensing",
+            "roche",
+            "reconnection",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 24);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 29);
     }
 }
