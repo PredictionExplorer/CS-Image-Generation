@@ -149,7 +149,7 @@ fn smoothstep(t: f64) -> f64 {
     x * x * (3.0 - 2.0 * x)
 }
 
-type SpectralKernel = SmallVec<[(usize, f64); 16]>;
+pub(crate) type SpectralKernel = SmallVec<[(usize, f64); 16]>;
 
 fn add_gaussian_lobe(
     kernel: &mut SpectralKernel,
@@ -196,7 +196,7 @@ fn lightness_energy_factor(lightness: f64) -> f64 {
     LIGHTNESS_ENERGY_FLOOR + LIGHTNESS_ENERGY_SPAN * t.powf(LIGHTNESS_ENERGY_GAMMA)
 }
 
-fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
+pub(crate) fn spectral_kernel_for_oklab(color: OklabColor) -> SpectralKernel {
     let (l, a, b) = color;
     let chroma = (a * a + b * b).sqrt();
     let purity = (chroma / 0.34).clamp(0.0, 1.0);
@@ -296,6 +296,44 @@ pub fn parallel_blur_2d_rgba(
     });
 }
 
+/// Doppler-transport a spectral kernel: every lobe's wavelength is scaled
+/// by `wavelength_factor` (`lambda' = lambda * (1 + v_r/c)`, recession
+/// positive) and re-binned with a fractional linear split between the two
+/// neighboring bins. Energy pushed past either end of the visible range
+/// accumulates in the boundary bin, so total kernel energy is exactly
+/// conserved (the V65 invariant).
+#[must_use]
+pub(crate) fn shift_spectral_kernel(
+    kernel: &SpectralKernel,
+    wavelength_factor: f64,
+) -> SpectralKernel {
+    if (wavelength_factor - 1.0).abs() < 1e-15 {
+        return kernel.clone();
+    }
+    let mut shifted = SpectralKernel::new();
+    let mut add = |bin: isize, value: f64| {
+        if value <= 0.0 {
+            return;
+        }
+        let clamped = bin.clamp(0, NUM_BINS as isize - 1) as usize;
+        if let Some((_, existing)) = shifted.iter_mut().find(|(idx, _)| *idx == clamped) {
+            *existing += value;
+        } else {
+            shifted.push((clamped, value));
+        }
+    };
+    for &(bin, weight) in kernel {
+        let wavelength = spectral_constants::bin_to_wavelength(bin) * wavelength_factor;
+        // Unclamped fractional bin so out-of-range energy piles at the edge.
+        let target = (wavelength - spectral_constants::bin_to_wavelength(0)) / BIN_WIDTH;
+        let base = target.floor();
+        let fraction = target - base;
+        add(base as isize, weight * (1.0 - fraction));
+        add(base as isize + 1, weight * fraction);
+    }
+    shifted
+}
+
 /// Draw anti-aliased line segment for spectral rendering using Z-depth aware SDF Splatting
 pub fn draw_line_segment_aa_spectral(
     accum: &mut [[f64; NUM_BINS]],
@@ -315,13 +353,34 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     row_end: usize,
     segment: SpectralLineSegment,
 ) {
+    let kernel0 = spectral_kernel_for_oklab(segment.start.color);
+    let kernel1 = spectral_kernel_for_oklab(segment.end.color);
+    draw_line_segment_aa_spectral_rows_with_kernels(
+        accum, width, height, row_start, row_end, segment, &kernel0, &kernel1,
+    );
+}
+
+/// Row-band rasterizer taking precomputed vertex kernels (the Doppler path:
+/// V65 shifts the kernels before splatting; everything else uses the color
+/// kernels unchanged via [`draw_line_segment_aa_spectral_rows`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_line_segment_aa_spectral_rows_with_kernels(
+    accum: &mut [[f64; NUM_BINS]],
+    width: u32,
+    height: u32,
+    row_start: usize,
+    row_end: usize,
+    segment: SpectralLineSegment,
+    kernel0: &SpectralKernel,
+    kernel1: &SpectralKernel,
+) {
     let row_end = row_end.min(height as usize);
     if row_start >= row_end || width == 0 || height == 0 {
         return;
     }
 
-    let LineVertex { x: x0, y: y0, z: z0, color: col0, alpha: alpha0 } = segment.start;
-    let LineVertex { x: x1, y: y1, z: z1, color: col1, alpha: alpha1 } = segment.end;
+    let LineVertex { x: x0, y: y0, z: z0, color: _, alpha: alpha0 } = segment.start;
+    let LineVertex { x: x1, y: y1, z: z1, color: _, alpha: alpha1 } = segment.end;
     let hdr_scale = segment.hdr_scale;
     let dx = x1 - x0;
     let dy = y1 - y0;
@@ -370,9 +429,6 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
     if min_x > max_x || min_y > max_y {
         return;
     }
-
-    let kernel0 = spectral_kernel_for_oklab(col0);
-    let kernel1 = spectral_kernel_for_oklab(col1);
 
     // Energy conservation: wider lines due to DOF should distribute same total energy
     let energy_conservation = thickness / effective_thickness;
@@ -430,10 +486,10 @@ pub(crate) fn draw_line_segment_aa_spectral_rows(
             let idx = (py as usize - row_start) * width as usize + px as usize;
             let energy_scale = base_energy_mult / subpixel_count;
 
-            for &(bin, weight) in &kernel0 {
+            for &(bin, weight) in kernel0 {
                 accum[idx][bin] += energy_scale * start_energy_sum * weight;
             }
-            for &(bin, weight) in &kernel1 {
+            for &(bin, weight) in kernel1 {
                 accum[idx][bin] += energy_scale * end_energy_sum * weight;
             }
         }
@@ -555,6 +611,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn shift_kernel_unit_factor_is_identity() {
+        let kernel = spectral_kernel_for_oklab((0.7, 0.12, -0.06));
+        let shifted = shift_spectral_kernel(&kernel, 1.0);
+        assert_eq!(kernel.len(), shifted.len());
+        for (&(bin_a, weight_a), &(bin_b, weight_b)) in kernel.iter().zip(shifted.iter()) {
+            assert_eq!(bin_a, bin_b);
+            assert!((weight_a - weight_b).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn shift_kernel_conserves_total_energy() {
+        let kernel = spectral_kernel_for_oklab((0.65, -0.08, 0.11));
+        let total: f64 = kernel.iter().map(|(_, w)| *w).sum();
+        for factor in [0.5, 0.78, 0.95, 1.0, 1.05, 1.22, 2.0] {
+            let shifted = shift_spectral_kernel(&kernel, factor);
+            let shifted_total: f64 = shifted.iter().map(|(_, w)| *w).sum();
+            assert!(
+                (shifted_total - total).abs() < total * 1e-12,
+                "factor {factor} lost energy: {shifted_total} vs {total}"
+            );
+            assert!(shifted.iter().all(|&(bin, _)| bin < NUM_BINS));
+        }
+    }
+
+    #[test]
+    fn shift_kernel_moves_the_centroid_to_the_scaled_wavelength() {
+        // A narrow mid-spectrum kernel lands on the scaled wavelength.
+        let kernel = spectral_kernel_for_oklab(wavelength_to_oklab(550.0, 0.9));
+        let centroid_nm = |k: &SpectralKernel| -> f64 {
+            let total: f64 = k.iter().map(|(_, w)| *w).sum();
+            k.iter().map(|&(bin, w)| spectral_constants::bin_to_wavelength(bin) * w).sum::<f64>()
+                / total
+        };
+        let base = centroid_nm(&kernel);
+        for factor in [0.92, 0.97, 1.04, 1.10] {
+            let moved = centroid_nm(&shift_spectral_kernel(&kernel, factor));
+            let expected = base * factor;
+            assert!(
+                (moved - expected).abs() < BIN_WIDTH,
+                "centroid {moved:.1} nm, expected {expected:.1} nm at factor {factor}"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_kernel_clamps_at_bin_edges_without_loss() {
+        let kernel = spectral_kernel_for_oklab(wavelength_to_oklab(400.0, 0.8));
+        let total: f64 = kernel.iter().map(|(_, w)| *w).sum();
+        // A violent blueshift piles everything into the violet edge bin.
+        let shifted = shift_spectral_kernel(&kernel, 0.05);
+        let shifted_total: f64 = shifted.iter().map(|(_, w)| *w).sum();
+        assert!((shifted_total - total).abs() < total * 1e-12);
+        assert_eq!(shifted.len(), 1);
+        assert_eq!(shifted[0].0, 0);
     }
 
     /// Energy-weighted histogram of rendered hues across many seeds, for the

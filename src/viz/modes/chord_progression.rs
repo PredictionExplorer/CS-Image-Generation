@@ -29,7 +29,8 @@ const SEMITONE_CLAMP: f64 = 24.0;
 /// Quantization hysteresis in cents.
 const HYSTERESIS_CENTS: f64 = 60.0;
 /// Just-intonation lattice (odd-limit 9), one octave.
-const JI_LATTICE: [(u32, u32); 13] = [
+/// Exported with the score builder for V57/V64/V65/V49 (one truth).
+pub(crate) const JI_LATTICE: [(u32, u32); 13] = [
     (1, 1),
     (10, 9),
     (9, 8),
@@ -49,24 +50,24 @@ const SEGMENT_HOPS: usize = 1_200;
 
 /// One quantized note segment for a voice.
 #[derive(Clone, Copy, Debug)]
-struct Note {
+pub(crate) struct Note {
     /// Start position in [0, 1] run time.
-    start: f64,
+    pub(crate) start: f64,
     /// End position in [0, 1].
-    end: f64,
+    pub(crate) end: f64,
     /// Lattice index.
-    ratio: usize,
+    pub(crate) ratio: usize,
     /// Octave offset.
-    octave: i32,
+    pub(crate) octave: i32,
 }
 
 /// Tenney height of a lattice ratio.
-fn tenney(ratio: (u32, u32)) -> f64 {
+pub(crate) fn tenney(ratio: (u32, u32)) -> f64 {
     f64::from(ratio.0 * ratio.1).log2()
 }
 
 /// Quantize a semitone offset to (lattice index, octave) in log space.
-fn quantize(semitones: f64) -> (usize, i32) {
+pub(crate) fn quantize(semitones: f64) -> (usize, i32) {
     let octave = (semitones / 12.0).floor() as i32;
     let folded = semitones - f64::from(octave) * 12.0;
     let mut best = (0usize, f64::INFINITY);
@@ -78,6 +79,91 @@ fn quantize(semitones: f64) -> (usize, i32) {
         }
     }
     (best.0, octave)
+}
+
+/// The quantized three-voice score of a run: per-pair note segments, the
+/// normalized consonance curve (1 = most consonant), and the palette root.
+/// Exported for V57 `instrument` (embedded data), V64/V49 (final chords),
+/// and V65 `witness` (Doppler voices) -- the "one truth" mapping.
+pub(crate) struct VoiceScore {
+    /// Note segments per pairwise voice (R12, R13, R23).
+    pub(crate) voices: Vec<Vec<Note>>,
+    /// Per-hop consonance in [0, 1] over [`SEGMENT_HOPS`] hops.
+    pub(crate) consonance: Vec<f64>,
+    /// Root frequency in Hz derived from the palette anchor hue.
+    pub(crate) root_hz: f64,
+}
+
+/// Number of quantization hops in a [`VoiceScore`].
+pub(crate) const SCORE_HOPS: usize = SEGMENT_HOPS;
+
+/// Frequency of a note over a root (the audio synthesis formula).
+pub(crate) fn note_frequency(root_hz: f64, note: &Note) -> f64 {
+    let ratio = &JI_LATTICE[note.ratio];
+    (root_hz * f64::from(ratio.0) / f64::from(ratio.1) * 2.0_f64.powi(note.octave.clamp(-1, 1)))
+        .clamp(40.0, 2_000.0)
+}
+
+/// Build the quantized just-intonation score for a run (V16's exact mapping).
+pub(crate) fn quantized_score(ctx: &VizContext<'_>) -> VoiceScore {
+    let steps = ctx.step_count();
+    let kinematics = ctx.kinematics();
+
+    // Root frequency from the palette anchor hue.
+    let root_hz = {
+        let mean = ctx.mean_color(0);
+        let (_, _, hue) = oklab_to_oklch(mean.0, mean.1, mean.2);
+        110.0 * 2.0_f64.powf((hue / 360.0 * 12.0).floor() / 12.0)
+    };
+
+    // Quantized note segments per voice, with hysteresis.
+    let mut voices: Vec<Vec<Note>> = Vec::with_capacity(3);
+    let mut consonance = vec![0.0f64; SEGMENT_HOPS];
+    let mut held: [(usize, i32); 3] = [(0, 0); 3];
+    #[allow(clippy::needless_range_loop)]
+    for pair in 0..3 {
+        let series = &kinematics.pairwise[pair];
+        let mut sorted: Vec<f64> = series.iter().step_by(37).copied().collect();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[sorted.len() / 2].max(1e-12);
+        let mut notes: Vec<Note> = Vec::new();
+        for hop in 0..SEGMENT_HOPS {
+            let step = (hop * steps / SEGMENT_HOPS).min(steps - 1);
+            let semis =
+                (-24.0 * (series[step] / median).log2()).clamp(-SEMITONE_CLAMP, SEMITONE_CLAMP);
+            let candidate = quantize(semis);
+            let current = if hop == 0 { candidate } else { held[pair] };
+            let current_cents =
+                (f64::from(JI_LATTICE[current.0].0) / f64::from(JI_LATTICE[current.0].1)).log2()
+                    * 1200.0
+                    + f64::from(current.1) * 1200.0;
+            let chosen = if (semis * 100.0 - current_cents).abs() > HYSTERESIS_CENTS {
+                candidate
+            } else {
+                current
+            };
+            held[pair] = chosen;
+            let position = hop as f64 / SEGMENT_HOPS as f64;
+            match notes.last_mut() {
+                Some(last) if last.ratio == chosen.0 && last.octave == chosen.1 => {
+                    last.end = position + 1.0 / SEGMENT_HOPS as f64;
+                }
+                _ => notes.push(Note {
+                    start: position,
+                    end: position + 1.0 / SEGMENT_HOPS as f64,
+                    ratio: chosen.0,
+                    octave: chosen.1,
+                }),
+            }
+            consonance[hop] += tenney(JI_LATTICE[chosen.0]);
+        }
+        voices.push(notes);
+    }
+    let consonance_max = consonance.iter().copied().fold(1e-9, f64::max);
+    for value in &mut consonance {
+        *value = 1.0 - *value / consonance_max;
+    }
+    VoiceScore { voices, consonance, root_hz }
 }
 
 /// The chord-progression mode.
@@ -95,63 +181,8 @@ impl VizMode for ChordProgression {
             warn!("chord-progression skipped: trajectory too short");
             return Ok(());
         }
-        let kinematics = ctx.kinematics();
 
-        // Root frequency from the palette anchor hue.
-        let root_hz = {
-            let mean = ctx.mean_color(0);
-            let (_, _, hue) = oklab_to_oklch(mean.0, mean.1, mean.2);
-            110.0 * 2.0_f64.powf((hue / 360.0 * 12.0).floor() / 12.0)
-        };
-
-        // --- Quantized note segments per voice, with hysteresis.
-        let mut voices: Vec<Vec<Note>> = Vec::with_capacity(3);
-        let mut consonance = vec![0.0f64; SEGMENT_HOPS];
-        let mut held: [(usize, i32); 3] = [(0, 0); 3];
-        #[allow(clippy::needless_range_loop)]
-        for pair in 0..3 {
-            let series = &kinematics.pairwise[pair];
-            let mut sorted: Vec<f64> = series.iter().step_by(37).copied().collect();
-            sorted.sort_by(f64::total_cmp);
-            let median = sorted[sorted.len() / 2].max(1e-12);
-            let mut notes: Vec<Note> = Vec::new();
-            for hop in 0..SEGMENT_HOPS {
-                let step = (hop * steps / SEGMENT_HOPS).min(steps - 1);
-                let semis =
-                    (-24.0 * (series[step] / median).log2()).clamp(-SEMITONE_CLAMP, SEMITONE_CLAMP);
-                let candidate = quantize(semis);
-                let current = if hop == 0 { candidate } else { held[pair] };
-                let current_cents = (f64::from(JI_LATTICE[current.0].0)
-                    / f64::from(JI_LATTICE[current.0].1))
-                .log2()
-                    * 1200.0
-                    + f64::from(current.1) * 1200.0;
-                let chosen = if (semis * 100.0 - current_cents).abs() > HYSTERESIS_CENTS {
-                    candidate
-                } else {
-                    current
-                };
-                held[pair] = chosen;
-                let position = hop as f64 / SEGMENT_HOPS as f64;
-                match notes.last_mut() {
-                    Some(last) if last.ratio == chosen.0 && last.octave == chosen.1 => {
-                        last.end = position + 1.0 / SEGMENT_HOPS as f64;
-                    }
-                    _ => notes.push(Note {
-                        start: position,
-                        end: position + 1.0 / SEGMENT_HOPS as f64,
-                        ratio: chosen.0,
-                        octave: chosen.1,
-                    }),
-                }
-                consonance[hop] += tenney(JI_LATTICE[chosen.0]);
-            }
-            voices.push(notes);
-        }
-        let consonance_max = consonance.iter().copied().fold(1e-9, f64::max);
-        for value in &mut consonance {
-            *value = 1.0 - *value / consonance_max;
-        }
+        let VoiceScore { voices, consonance, root_hz } = quantized_score(ctx);
         info!(
             "   chord-progression: {} + {} + {} note segments, root {root_hz:.1} Hz",
             voices[0].len(),
@@ -281,10 +312,7 @@ impl VizMode for ChordProgression {
                     .find(|n| position >= n.start && position < n.end)
                     .or_else(|| notes.last())
                     .expect("voice has notes");
-                let ratio = &JI_LATTICE[note.ratio];
-                let frequency = (root_hz * f64::from(ratio.0) / f64::from(ratio.1)
-                    * 2.0_f64.powi(note.octave.clamp(-1, 1)))
-                .clamp(40.0, 2_000.0);
+                let frequency = note_frequency(root_hz, note);
                 let mut voice = 0.0;
                 for (partial, gain) in [(1.0, 1.0), (2.0, 0.25), (3.0, 0.12)] {
                     let slot = pair * 3 + (partial as usize - 1);

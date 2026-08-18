@@ -22,9 +22,11 @@ use crate::viz::sink::ArtifactSink;
 use tracing::{info, warn};
 
 /// Sculpture height as a multiple of the xy bounding-box diagonal.
-const HEIGHT_FACTOR: f64 = 1.6;
+/// Exported for V68 `reliquary` (same worldtube space).
+pub(crate) const HEIGHT_FACTOR: f64 = 1.6;
 /// Tube radius as a fraction of the sculpture height.
-const RADIUS_FRACTION: f64 = 0.0035;
+/// Exported for V68 `reliquary`.
+pub(crate) const RADIUS_FRACTION: f64 = 0.0035;
 /// Decimation target per body after simplification.
 const TARGET_POINTS: usize = 12_000;
 /// RDP tolerance as a fraction of the sculpture height.

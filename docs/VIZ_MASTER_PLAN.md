@@ -83,7 +83,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V46 | `turntable` | 3D scene | video | A | existing orbit.rs | `[x]` |
 | V47 | `trailer` | Cinema | video | C | compositor, events | `[x]` |
 | V48 | `mission-control` | Cinema | video | C | text, kinematics, events | `[x]` |
-| V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[ ]` |
+| V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[x]` |
 | V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[x]` |
 | V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[x]` |
 | V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[x]` |
@@ -91,19 +91,19 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V54 | `oscilloscope` | Exports | WAV + video | B | audio | `[x]` |
 | V55 | `hologram` | Exports | huge still | D | rustfft | `[x]` |
 | V56 | `tilt` | Exports | print PNGs | B | frame tap, V52 | `[x]` |
-| V57 | `instrument` | Exports | HTML + JSON + WAV | C | V53, V54, V16 | `[ ]` |
+| V57 | `instrument` | Exports | HTML + JSON + WAV | C | V53, V54, V16 | `[x]` |
 | V58 | `ephemeris-poster` | Posters | poster | B | text, metadata | `[x]` |
 | V59 | `blueprint` | Posters | 2 stills | B | accumulation restyle | `[x]` |
 | V60 | `dwell-nebula` | Posters | still | B | density splat | `[x]` |
 | V61 | `topo-contours` | Posters | still | B | energy field | `[x]` |
 | V62 | `terra` | Posters | poster + video | C | V08, V42-lite, text | `[x]` |
 | V63 | `celestial-atlas` | Posters | poster | C | multi-seed input, text | `[x]` |
-| V64 | `powers-of-fate` | Combos | video | D | V42, compositor | `[ ]` |
-| V65 | `witness` | Combos | video | D | V26, V27, V29, V30, V16, audio | `[ ]` |
-| V66 | `rose-window` | Combos | video + still | D | V41, fields | `[ ]` |
-| V67 | `vanitas` | Combos | long video | D | V33, V34, V35, V23, compositor | `[ ]` |
-| V68 | `reliquary` | Combos | video | D | V43, V24, V09 | `[ ]` |
-| V69 | `pond` | Combos | video | D | V32, V36, V09 | `[ ]` |
+| V64 | `powers-of-fate` | Combos | video | D | V42, compositor | `[x]` |
+| V65 | `witness` | Combos | video | D | V26, V27, V29, V30, V16, audio | `[x]` |
+| V66 | `rose-window` | Combos | video + still | D | V41, fields | `[x]` |
+| V67 | `vanitas` | Combos | long video | D | V33, V34, V35, V23, compositor | `[x]` |
+| V68 | `reliquary` | Combos | video | D | V43, V24, V09 | `[x]` |
+| V69 | `pond` | Combos | video | D | V32, V36, V09 | `[x]` |
 
 ---
 
@@ -469,6 +469,98 @@ wave so the ledger sums to 69. New infrastructure and deviations:
   embedding is a deterministic power-iteration PCA + 200 repulsion
   passes; without `--viz-seeds-dir` the chart degenerates to one crowned
   star. Constellation names come from a small curated epithet table.
+
+## Wave 9 addendum (2026-08-18)
+
+Wave 9 (grand combos: V57, V49, V64, V65, V66, V68, V69, V67) is
+implemented -- **69 of 69 modes; the catalog is complete.** The wave's
+"exported for Vx" earmarks were promoted to `pub(crate)` where they were
+still mode-private (retarded solver + virtual c, retime schedule builder,
+V16 interval math as `quantized_score`, GW `strain_series`, winding
+crossings/pane colors, bolt growth, lensing deflectors, worldtube scale
+constants, multiverse ensemble constants, V42 grid parameters and fate
+colors, V53 orbit packing). New shared infrastructure and deviations:
+
+- **Doppler bin transport** (V65): implemented at the kernel level --
+  `shift_spectral_kernel` in `render/drawing.rs` scales every lobe's
+  wavelength by `1 + v_r/c` and re-bins with an energy-conserving
+  fractional split (edge bins absorb out-of-range energy); the row
+  rasterizer gained a `_with_kernels` variant and `SpdCanvas` a
+  `draw_stroke_shifted`. The spec's linear `Δbin = bin·v_r/c` was upgraded
+  to the exact wavelength transport (bins are offset from 380 nm); the
+  spec's per-frame granularity is preserved. `spectrum_simd` itself is
+  untouched (the shift lives one level up, where kernels are built).
+- **`GlassBlock`** in `tube_render`: rounded-box SDF enclosure refracting
+  primary rays once on entry (Snell, IOR 1.5), Schlick-Fresnel sheen and
+  polished-face emitter glints; rays starting inside are unaffected.
+  Unit-tested (SDF surface points, Snell angle, inside/miss cases).
+- **V49:** the five-act film is assembled by the compositor from upstream
+  artifacts (mission-control, main+retimed, reveal, bullet-time, epilogue)
+  with match cuts chosen by a shape-space pose search over each act's
+  reproduced frame->step schedule; the whole score is baked into ONE
+  continuous WAV (bed arcs per act, strain sidechained from Act IV, a
+  silence beat, the V16 triad on the title card), so the deferred
+  `amix`/`adelay` compositor graphs remain unnecessary -- that open item
+  is closed, not implemented. Missing sources skip the film with a
+  warning. Act II is main-render + retimed joined by an in-act crossfade
+  (the implemented retime is 30 s, not the spec's 55 s trim).
+- **V64:** L0 prefers `basin_raw.png`/`basin.json` (artifact-first, the
+  trailer precedent) and falls back to a reduced 192^2 lattice recomputed
+  with V42's exact `grid_params` + `fate_color`. Micro-renders composite
+  in encoded display space so the landing frame samples `master.png`
+  directly (pixel-exact up to the video downscale). L1 is 64x64 at 96 px
+  and L2 8x8 at 512 px around the crosshair cell; the dive rate derives
+  from `log2(n)` octaves over the 53 s dive (5.53 s/octave at n = 768,
+  matching the spec's 5.5).
+- **V65:** the 45 s window is the top-drama contiguous 75% of the run (a
+  60 s witness clock over the whole trajectory); beaming uses the exact
+  Doppler factor `D^4 = (1 + v_r/c)^-4`, clamped to [1/2.5, 2.5];
+  the lens pass is single-sample bilinear per frame (motion hides what
+  the V30 still-mode supersampler removes); levels use the comet recipe
+  (scene levels, exposure x1.45 for the decayed steady state).
+- **V66:** incremental winding is event-fed (crossings applied to a
+  persistent image as their steps arrive) with the dynamic loop-closure
+  applied to a per-frame copy, rather than re-sweeping buckets per frame;
+  transient closure boundaries are masked within 2.5 px of the closure
+  segments. The finale is a bespoke projective tracer inside the mode
+  (emissive window quad + light-cone floor pool) instead of a tube_render
+  scene -- two rectangles did not justify a sphere-traced setup; the
+  crane starts head-on at the exact build-phase framing so the cut is
+  seamless. The full-res still reuses `winding_triples(u32::MAX)`, so the
+  came network equals V41's boundaries by construction.
+- **V67:** rendered as ONE continuous stream -- the acts hand off inside
+  a shared frame buffer (summer's last frame is autumn's ghost, autumn's
+  trail nucleates winter), so the spec's compositor assembly is
+  unnecessary and no cut exists to hide. Bolts fire where the retime
+  schedule crosses their periapsis steps; the last bolt's endpoints seed
+  the scouts (handoff one verified in `vanitas.json`), vein junctions =
+  top spaced trail cells (handoff two). The cold shift is exact OkLab
+  (b -0.03, L x0.90 at full winter, monotone by construction; the mean-b
+  arc is sampled into the sidecar). RNG uses the upstream domains
+  (`lightning`, `physarum`, `frost`) per the spec.
+- **V68:** re-derives V24's exact nine universes (same `multiverse` RNG
+  domain, same epsilon/count constants) and dresses them with the same
+  Kabsch rotation; divergence tint interpolates toward glass-gray in
+  OkLab; the fray ring engraves where the *median* sibling divergence
+  crosses 1% bbox (`divergence_profile.json` carries per-sibling series).
+  Siblings render at 0.7x radius and 0.55x emission with ~2.2k points per
+  body against the true history's 6k (the "9x capsule" budget, tamed).
+- **V69:** the cymatic term is superposed (`A·h(t)·Χ`, driven, not
+  injected into the leapfrog) so the correlation with strain spikes is
+  exact by construction; the crescendo still selector is the normalized
+  *projection onto the driven eigenmode* rather than a raw spatial
+  autocorrelation (same coherence intent, deterministic and testable;
+  recorded in `pond_params.json`). The fluid gained
+  `add_velocity_field` for the one-way grad-H coupling.
+- **V57:** `assets/viewer/instrument.html` extends the V53 template;
+  voices are a WebAudio `PeriodicWave` with V16's exact partial stack
+  (1, 0.25, 0.12) at the embedded just-intonation segments (score built
+  by the same `quantized_score` as V16 -- one truth by construction);
+  consonance ships delta-encoded u8 + base64; the recorder re-encodes
+  MediaRecorder output to WAV via `decodeAudioData` + inline PCM.
+  Latency structure: `latencyHint: "interactive"` + 10 ms parameter
+  ramps; the < 30 ms trace and file:// cross-browser checks remain
+  curation-pass items, as does V49's cold-viewer comprehension test.
 
 # Part I — Subsystem Architecture
 
@@ -3125,7 +3217,7 @@ Assembly phase (planner enforces ordering).
 - [ ] Continuous audio (no level jumps > 1.5 dB at cuts).
 - [ ] Cold-viewer comprehension test: they can retell the story.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; single-WAV score, see addendum)
 
 ---
 
@@ -3495,7 +3587,7 @@ plays with it for over a minute (the only metric that matters).
 - [ ] Sound identity with V16 stems (spectral diff on a fixed gesture).
 - [ ] File:// operation confirmed cross-browser.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9)
 
 ---
 
@@ -3839,7 +3931,7 @@ audio, `compositor.mux`.
 - [ ] Landing frame pixel-matches master render start.
 - [ ] Micro-renders visibly *are* orbit artworks at L1 scale.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; artifact-first L0, see addendum)
 
 ---
 
@@ -3895,7 +3987,7 @@ Trajectory phase, after its dependency modules exist (planner ordering).
 - [ ] Doppler color visibly leads/trails at periapsis (the money shot).
 - [ ] Audio Doppler congruent with visuals (same v_r series).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; kernel-level bin transport, see addendum)
 
 ---
 
@@ -3949,7 +4041,7 @@ reuse); the 3D final shot ~2 min; total ~8–12 min. Trajectory phase.
 - [ ] Came network at final frame == V41 still's boundaries (consistency).
 - [ ] The crane-down ending gets the reverence reaction (curation).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; projective finale in-mode, see addendum)
 
 ---
 
@@ -4010,7 +4102,7 @@ with shortened acts. Assembly phase.
       monotonically after SUMMER).
 - [ ] Test audience reports emotional response to the ending (the metric).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; single-stream acts, see addendum)
 
 ---
 
@@ -4060,7 +4152,7 @@ half res + hero full res. Assembly phase after V24/V43.
 - [ ] Below-ring section visually indistinguishable tubes (validates ε).
 - [ ] Glass reads as glass at hero resolution (material gut check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; glass block in tube_render, see addendum)
 
 ---
 
@@ -4112,7 +4204,7 @@ res).
 - [ ] Cymatic roses appear only at strain spikes (correlation test).
 - [ ] Crescendo still is exhibition-grade (curation).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 9; eigenmode-projection still selector, see addendum)
 
 ---
 

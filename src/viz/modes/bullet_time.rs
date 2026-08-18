@@ -60,6 +60,33 @@ fn ease(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// The simulation steps shown by the film's first and last frames, from
+/// the mode's own schedule constants. Exported for V49 `broadcast` (its
+/// Act III/V match cuts need the poses at bullet-time's fixed ends).
+pub(crate) fn boundary_steps(ctx: &VizContext<'_>, quality_frames: usize) -> (usize, usize) {
+    let steps = ctx.step_count();
+    if steps < 100 {
+        return (0, steps.saturating_sub(1));
+    }
+    let freeze_step = ctx.events().closest_triple.clamp(steps / 20, steps - 2);
+    let stride = (3 * freeze_step / SPLAT_BUDGET).max(1);
+    let strided_steps = steps.div_ceil(stride);
+    let freeze_strided = (freeze_step / stride).min(strided_steps - 1);
+    let total_seconds = SEGMENT_SECONDS.0 + SEGMENT_SECONDS.1 + SEGMENT_SECONDS.2;
+    let a_frames =
+        ((quality_frames as f64 * SEGMENT_SECONDS.0 / total_seconds).round() as usize).max(1);
+    let b_frames =
+        ((quality_frames as f64 * SEGMENT_SECONDS.1 / total_seconds).round() as usize).max(1);
+    let c_frames = quality_frames.saturating_sub(a_frames + b_frames).max(1);
+    let rate = (strided_steps as f64 / (NORMAL_TIME_SECONDS * 60.0)).max(1.0 / 240.0);
+    let approach_span = ((a_frames as f64 * rate) as usize).min(freeze_strided);
+    let opening = (freeze_strided - approach_span) * stride;
+    let closing = ((freeze_strided + (c_frames as f64 * rate * RELEASE_RATE) as usize)
+        .min(strided_steps.saturating_sub(1)))
+        * stride;
+    (opening.min(steps - 1), closing.min(steps - 1))
+}
+
 /// The bullet-time mode.
 pub struct BulletTime;
 

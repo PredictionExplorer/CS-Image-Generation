@@ -37,7 +37,6 @@ pub fn wavelength_to_bin(wavelength: f64) -> f64 {
 ///
 /// # Returns
 /// Center wavelength of the bin in nanometers
-#[cfg(test)]
 #[must_use]
 #[inline]
 pub fn bin_to_wavelength(bin: usize) -> f64 {

@@ -54,6 +54,52 @@ fn second_derivative(series: &[f64], h: f64) -> Vec<f64> {
         .collect()
 }
 
+/// Quadrupole-formula strain of the run on a [`QUAD_STRIDE`]-strided time
+/// grid: `(h_plus, h_cross)` with stencil edges trimmed. Exported for V49
+/// `broadcast`, V68 `reliquary`, and V69 `pond` (their scores and drivers).
+pub(crate) fn strain_series(
+    positions: &[Vec<nalgebra::Vector3<f64>>],
+    masses: &[f64; 3],
+) -> (Vec<f64>, Vec<f64>) {
+    let steps = positions.first().map_or(0, Vec::len);
+    let sample_count = steps / QUAD_STRIDE;
+    let mut i_xx = Vec::with_capacity(sample_count);
+    let mut i_yy = Vec::with_capacity(sample_count);
+    let mut i_xy = Vec::with_capacity(sample_count);
+    for sample in 0..sample_count {
+        let step = sample * QUAD_STRIDE;
+        let mut xx = 0.0;
+        let mut yy = 0.0;
+        let mut xy = 0.0;
+        for (&mass, path) in masses.iter().zip(positions.iter()) {
+            let point = path[step];
+            xx += mass * point.x * point.x;
+            yy += mass * point.y * point.y;
+            xy += mass * point.x * point.y;
+        }
+        i_xx.push(xx);
+        i_yy.push(yy);
+        i_xy.push(xy);
+    }
+
+    let h = QUAD_STRIDE as f64 * DEFAULT_DT;
+    let diff: Vec<f64> = i_xx.iter().zip(i_yy.iter()).map(|(&xx, &yy)| xx - yy).collect();
+    let mut h_plus = second_derivative(&diff, h);
+    let mut h_cross: Vec<f64> =
+        second_derivative(&i_xy, h).iter().map(|&value| 2.0 * value).collect();
+    // Trim stencil edges.
+    for series in [&mut h_plus, &mut h_cross] {
+        let n = series.len();
+        if n > 4 {
+            series[0] = series[2];
+            series[1] = series[2];
+            series[n - 1] = series[n - 3];
+            series[n - 2] = series[n - 3];
+        }
+    }
+    (h_plus, h_cross)
+}
+
 impl VizMode for GwChirp {
     fn entry(&self) -> &'static ModeEntry {
         catalog::find("gw-chirp").expect("gw-chirp is in the catalog")
@@ -63,43 +109,7 @@ impl VizMode for GwChirp {
     fn run(&self, ctx: &VizContext<'_>, sink: &mut ArtifactSink) -> Result<()> {
         let steps = ctx.step_count();
         let masses = ctx.kinematics().masses;
-
-        // Quadrupole components on a strided time grid.
-        let sample_count = steps / QUAD_STRIDE;
-        let mut i_xx = Vec::with_capacity(sample_count);
-        let mut i_yy = Vec::with_capacity(sample_count);
-        let mut i_xy = Vec::with_capacity(sample_count);
-        for sample in 0..sample_count {
-            let step = sample * QUAD_STRIDE;
-            let mut xx = 0.0;
-            let mut yy = 0.0;
-            let mut xy = 0.0;
-            for (&mass, path) in masses.iter().zip(ctx.positions.iter()) {
-                let point = path[step];
-                xx += mass * point.x * point.x;
-                yy += mass * point.y * point.y;
-                xy += mass * point.x * point.y;
-            }
-            i_xx.push(xx);
-            i_yy.push(yy);
-            i_xy.push(xy);
-        }
-
-        let h = QUAD_STRIDE as f64 * DEFAULT_DT;
-        let diff: Vec<f64> = i_xx.iter().zip(i_yy.iter()).map(|(&xx, &yy)| xx - yy).collect();
-        let mut h_plus = second_derivative(&diff, h);
-        let mut h_cross: Vec<f64> =
-            second_derivative(&i_xy, h).iter().map(|&value| 2.0 * value).collect();
-        // Trim stencil edges.
-        for series in [&mut h_plus, &mut h_cross] {
-            let n = series.len();
-            if n > 4 {
-                series[0] = series[2];
-                series[1] = series[2];
-                series[n - 1] = series[n - 3];
-                series[n - 2] = series[n - 3];
-            }
-        }
+        let (h_plus, h_cross) = strain_series(ctx.positions, &masses);
 
         // --- Audio: resample, condition, write.
         let total_samples = AUDIO_SECONDS * audio::SAMPLE_RATE as usize;

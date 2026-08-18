@@ -91,6 +91,15 @@ impl Fluid {
         }
     }
 
+    /// Add a whole-field velocity increment (V69's one-way wave coupling:
+    /// the surface gradient pushes the dye). Slices must match the grid.
+    pub fn add_velocity_field(&mut self, u_add: &[f32], v_add: &[f32]) {
+        debug_assert_eq!(u_add.len(), self.u.len());
+        debug_assert_eq!(v_add.len(), self.v.len());
+        self.u.par_iter_mut().zip(u_add.par_iter()).for_each(|(u, &add)| *u += add);
+        self.v.par_iter_mut().zip(v_add.par_iter()).for_each(|(v, &add)| *v += add);
+    }
+
     /// Inject dye into one field in a soft disc.
     pub fn inject_dye(&mut self, field: usize, x: f32, y: f32, radius: f32, amount: f32) {
         let r_cells = radius.max(1.0);

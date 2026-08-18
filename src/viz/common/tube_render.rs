@@ -115,6 +115,77 @@ pub struct Emitter {
     pub power: Rgb64,
 }
 
+/// A rounded glass enclosure refracting primary rays once on entry
+/// (single-bounce IOR per the V68 `reliquary` spec) with Fresnel sheen and
+/// polished-face emitter glints. Rays starting inside are unaffected.
+#[derive(Clone, Copy, Debug)]
+pub struct GlassBlock {
+    /// Block center.
+    pub center: Vec3,
+    /// Half-extents of the rounded box.
+    pub half: Vec3,
+    /// Corner/edge rounding radius.
+    pub round: f64,
+    /// Index of refraction applied at the entry face.
+    pub ior: f64,
+    /// Additive sheen color scaled by the Fresnel term (face readability).
+    pub sheen: Rgb64,
+    /// Specular glint strength from the scene emitters.
+    pub glint: f64,
+}
+
+impl GlassBlock {
+    /// Signed distance to the rounded box surface.
+    #[must_use]
+    pub fn sdf(&self, point: Vec3) -> f64 {
+        let local = point - self.center;
+        let q = Vec3::new(
+            local.x.abs() - self.half.x + self.round,
+            local.y.abs() - self.half.y + self.round,
+            local.z.abs() - self.half.z + self.round,
+        );
+        let outside = Vec3::new(q.x.max(0.0), q.y.max(0.0), q.z.max(0.0)).norm();
+        let inside = q.x.max(q.y.max(q.z)).min(0.0);
+        outside + inside - self.round
+    }
+
+    /// Outward surface normal by SDF central differences.
+    #[must_use]
+    pub fn normal(&self, point: Vec3) -> Vec3 {
+        let eps = 1e-4 * self.half.norm().max(1e-6);
+        Vec3::new(
+            self.sdf(point + Vec3::new(eps, 0.0, 0.0)) - self.sdf(point - Vec3::new(eps, 0.0, 0.0)),
+            self.sdf(point + Vec3::new(0.0, eps, 0.0)) - self.sdf(point - Vec3::new(0.0, eps, 0.0)),
+            self.sdf(point + Vec3::new(0.0, 0.0, eps)) - self.sdf(point - Vec3::new(0.0, 0.0, eps)),
+        )
+        .normalize()
+    }
+
+    /// Sphere-trace the entry hit from outside; `None` when the ray misses
+    /// or starts inside.
+    #[must_use]
+    pub fn entry_hit(&self, ray: &Ray, max_steps: u32) -> Option<f64> {
+        if self.sdf(ray.origin) <= 0.0 {
+            return None;
+        }
+        // Conservative bracket via the bounding box of the rounded box.
+        let (t_enter, t_exit) = ray_box(ray, self.center - self.half, self.center + self.half)?;
+        let mut t = t_enter.max(0.0);
+        let hit_eps = 1e-5 * self.half.norm().max(1e-6);
+        for _ in 0..max_steps {
+            let d = self.sdf(ray.origin + ray.dir * t);
+            if d < hit_eps {
+                return Some(t);
+            }
+            t += d;
+            if t > t_exit + self.round {
+                return None;
+            }
+        }
+        None
+    }
+}
+
 /// Uniform grid over capsule indices for local SDF queries, with a
 /// Chebyshev distance transform for long empty-space steps.
 struct UniformGrid {
@@ -430,6 +501,8 @@ pub struct Scene {
     pub glass_rim: f64,
     /// K brightest emitters for fog scattering and plane lighting.
     pub emitters: Vec<Emitter>,
+    /// Optional refracting glass enclosure around the capsules (V68).
+    pub glass_block: Option<GlassBlock>,
 }
 
 /// Luminance of a linear color (Rec.2020 weights, approximate).
@@ -452,6 +525,7 @@ impl Scene {
             background: (0.0, 0.0, 0.0),
             glass_rim: 0.0,
             emitters,
+            glass_block: None,
         }
     }
 }
@@ -1048,7 +1122,52 @@ pub fn render(scene: &Scene, camera: &Camera, params: &RenderParams) -> Vec<Rgb6
             let mut sum = (0.0f64, 0.0f64, 0.0f64);
             for sample in 0..params.spp {
                 let jitter = sample_jitter(pixel_index, sample, params.jitter_seed);
-                let ray = camera.ray(col as f64, row as f64, params.width, params.height, jitter);
+                let eye_ray =
+                    camera.ray(col as f64, row as f64, params.width, params.height, jitter);
+                // Optional glass enclosure: refract once on entry, collect
+                // the Fresnel sheen and polished-face glints, then trace the
+                // interior with the bent ray (single-bounce contract).
+                let mut glass_add = (0.0f64, 0.0f64, 0.0f64);
+                let ray = match &scene.glass_block {
+                    Some(block) => match block.entry_hit(&eye_ray, params.max_steps) {
+                        Some(t_glass) => {
+                            let hit_point = eye_ray.origin + eye_ray.dir * t_glass;
+                            let normal = block.normal(hit_point);
+                            let cos_in = (-eye_ray.dir.dot(&normal)).clamp(0.0, 1.0);
+                            let r0 = ((1.0 - block.ior) / (1.0 + block.ior)).powi(2);
+                            let fresnel = r0 + (1.0 - r0) * (1.0 - cos_in).powi(5);
+                            glass_add.0 += block.sheen.0 * fresnel;
+                            glass_add.1 += block.sheen.1 * fresnel;
+                            glass_add.2 += block.sheen.2 * fresnel;
+                            if block.glint > 0.0 {
+                                let reflect =
+                                    eye_ray.dir - normal * (2.0 * eye_ray.dir.dot(&normal));
+                                for emitter in &scene.emitters {
+                                    let to_emitter = emitter.position - hit_point;
+                                    let dist_sq = to_emitter.norm_squared().max(1e-12);
+                                    let lobe = reflect
+                                        .dot(&(to_emitter / dist_sq.sqrt()))
+                                        .max(0.0)
+                                        .powi(200);
+                                    let weight = block.glint * fresnel * lobe / dist_sq;
+                                    glass_add.0 += emitter.power.0 * weight;
+                                    glass_add.1 += emitter.power.1 * weight;
+                                    glass_add.2 += emitter.power.2 * weight;
+                                }
+                            }
+                            // Snell refraction into the denser medium.
+                            let eta = 1.0 / block.ior;
+                            let k = 1.0 - eta * eta * (1.0 - cos_in * cos_in);
+                            let bent = (eye_ray.dir * eta
+                                + normal * (eta * cos_in - k.max(0.0).sqrt()))
+                            .normalize();
+                            let inset = 1e-4 * block.half.norm().max(1e-6);
+                            Ray { origin: hit_point + bent * inset, dir: bent }
+                        }
+                        None => eye_ray,
+                    },
+                    None => eye_ray,
+                };
                 let hit = trace(scene, &ray, params);
                 let (surface, t_hit) = match hit {
                     Hit::Capsule { t, index, axis_t } => {
@@ -1074,9 +1193,9 @@ pub fn render(scene: &Scene, camera: &Camera, params: &RenderParams) -> Vec<Rgb6
                     color.1 += inscatter.1;
                     color.2 += inscatter.2;
                 }
-                sum.0 += color.0;
-                sum.1 += color.1;
-                sum.2 += color.2;
+                sum.0 += color.0 + glass_add.0;
+                sum.1 += color.1 + glass_add.1;
+                sum.2 += color.2 + glass_add.2;
             }
             let inv = 1.0 / f64::from(params.spp.max(1));
             *pixel = (sum.0 * inv, sum.1 * inv, sum.2 * inv);
@@ -1448,6 +1567,66 @@ mod tests {
         assert!((capsule_sdf(Vec3::new(0.0, 0.5, 0.0), a, b, 0.2) - 0.3).abs() < 1e-12);
         assert!((capsule_sdf(Vec3::new(2.0, 0.0, 0.0), a, b, 0.2) - 0.8).abs() < 1e-12);
         assert!(capsule_sdf(Vec3::new(0.0, 0.0, 0.0), a, b, 0.2) < 0.0);
+    }
+
+    #[test]
+    fn glass_block_sdf_and_entry_are_consistent() {
+        let block = GlassBlock {
+            center: Vec3::new(0.0, 1.0, 0.0),
+            half: Vec3::new(1.0, 2.0, 1.0),
+            round: 0.1,
+            ior: 1.5,
+            sheen: (0.02, 0.02, 0.03),
+            glint: 1.0,
+        };
+        // Face centers sit on the surface; the center is deep inside.
+        assert!(block.sdf(Vec3::new(1.0, 1.0, 0.0)).abs() < 1e-9);
+        assert!(block.sdf(Vec3::new(0.0, 3.0, 0.0)).abs() < 1e-9);
+        assert!(block.sdf(block.center) < -0.9);
+        // Corners are rounded: the sharp corner point lies outside.
+        assert!(block.sdf(Vec3::new(1.0, 3.0, 1.0)) > 0.0);
+
+        // A frontal ray enters at the +x face.
+        let ray = Ray { origin: Vec3::new(5.0, 1.0, 0.0), dir: Vec3::new(-1.0, 0.0, 0.0) };
+        let t = block.entry_hit(&ray, 256).expect("frontal ray must hit");
+        assert!((t - 4.0).abs() < 1e-3, "entry at t {t}");
+        let normal = block.normal(ray.origin + ray.dir * t);
+        assert!(normal.x > 0.999, "outward +x normal, got {normal:?}");
+
+        // Rays starting inside are unaffected; misses miss.
+        assert!(block.entry_hit(&Ray { origin: block.center, dir: ray.dir }, 256).is_none());
+        let miss = Ray { origin: Vec3::new(5.0, 6.0, 0.0), dir: Vec3::new(-1.0, 0.0, 0.0) };
+        assert!(block.entry_hit(&miss, 256).is_none());
+    }
+
+    #[test]
+    fn glass_block_bends_an_oblique_ray_toward_the_normal() {
+        let block = GlassBlock {
+            center: Vec3::zeros(),
+            half: Vec3::new(1.0, 1.0, 1.0),
+            round: 0.05,
+            ior: 1.5,
+            sheen: (0.0, 0.0, 0.0),
+            glint: 0.0,
+        };
+        // 45-degree incidence on the +x face (hit lands mid-face at
+        // y ~ -0.1, well clear of the rounded edges): Snell gives
+        // asin(sin45 / 1.5).
+        let dir = Vec3::new(-1.0, -1.0, 0.0).normalize();
+        let ray = Ray { origin: Vec3::new(2.0, 0.9, 0.0), dir };
+        let t = block.entry_hit(&ray, 512).expect("oblique ray hits the block");
+        let hit = ray.origin + ray.dir * t;
+        let normal = block.normal(hit);
+        let cos_in = (-dir.dot(&normal)).clamp(0.0, 1.0);
+        let eta = 1.0 / 1.5;
+        let k = 1.0 - eta * eta * (1.0 - cos_in * cos_in);
+        let bent = (dir * eta + normal * (eta * cos_in - k.sqrt())).normalize();
+        let sin_out = bent.cross(&(-normal)).norm();
+        let expected = (std::f64::consts::FRAC_PI_4).sin() / 1.5;
+        assert!(
+            (sin_out - expected).abs() < 1e-3,
+            "Snell violated: sin_out {sin_out} expected {expected}"
+        );
     }
 
     #[test]

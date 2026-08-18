@@ -85,7 +85,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V46", "turntable", "Museum Turntable", "scene3d", 'A', true),
     entry("V47", "trailer", "Sixty Seconds, Auto-Edited", "cinema", 'C', true),
     entry("V48", "mission-control", "The 1969 Broadcast", "cinema", 'C', true),
-    entry("V49", "broadcast", "The Five-Act Short Film", "cinema", 'D', false),
+    entry("V49", "broadcast", "The Five-Act Short Film", "cinema", 'D', true),
     entry("V50", "sculpture-export", "The Printable Object", "exports", 'B', true),
     entry("V51", "plotter-svg", "Ink and Thread", "exports", 'A', true),
     entry("V52", "depth-pack", "The Third Dimension, Packaged", "exports", 'B', true),
@@ -93,19 +93,19 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V54", "oscilloscope", "Sound That Draws", "exports", 'B', true),
     entry("V55", "hologram", "A Recording of the Wavefront", "exports", 'D', true),
     entry("V56", "tilt", "The Poster That Plays", "exports", 'B', true),
-    entry("V57", "instrument", "Play Your Orbit", "exports", 'C', false),
+    entry("V57", "instrument", "Play Your Orbit", "exports", 'C', true),
     entry("V58", "ephemeris-poster", "The Almanac Page", "posters", 'B', true),
     entry("V59", "blueprint", "Two Archival Restylings", "posters", 'B', true),
     entry("V60", "dwell-nebula", "The Ergodic Ghost", "posters", 'B', true),
     entry("V61", "topo-contours", "The Terrain of Light", "posters", 'B', true),
     entry("V62", "terra", "Terra Trium Corporum", "posters", 'C', true),
     entry("V63", "celestial-atlas", "The Collection as a Sky", "posters", 'C', true),
-    entry("V64", "powers-of-fate", "The Dive", "combos", 'D', false),
-    entry("V65", "witness", "First Person, Honest Optics", "combos", 'D', false),
-    entry("V66", "rose-window", "Gravity Builds a Cathedral", "combos", 'D', false),
-    entry("V67", "vanitas", "The Life and Death of an Artwork", "combos", 'D', false),
-    entry("V68", "reliquary", "The Monument to Almost", "combos", 'D', false),
-    entry("V69", "pond", "The Surface of a Dark Pond", "combos", 'D', false),
+    entry("V64", "powers-of-fate", "The Dive", "combos", 'D', true),
+    entry("V65", "witness", "First Person, Honest Optics", "combos", 'D', true),
+    entry("V66", "rose-window", "Gravity Builds a Cathedral", "combos", 'D', true),
+    entry("V67", "vanitas", "The Life and Death of an Artwork", "combos", 'D', true),
+    entry("V68", "reliquary", "The Monument to Almost", "combos", 'D', true),
+    entry("V69", "pond", "The Surface of a Dark Pond", "combos", 'D', true),
 ];
 
 /// Look up a catalog entry by its CLI flag name.
@@ -266,10 +266,19 @@ mod tests {
             "ephemeris-poster",
             "blueprint",
             "celestial-atlas",
+            // Wave 9 (grand combos)
+            "instrument",
+            "broadcast",
+            "powers-of-fate",
+            "witness",
+            "rose-window",
+            "reliquary",
+            "pond",
+            "vanitas",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 61);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 69);
     }
 }

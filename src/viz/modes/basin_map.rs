@@ -32,8 +32,9 @@ const CHECK_INTERVAL: usize = 2_500;
 const INSET_ZOOM: usize = 8;
 
 /// Fate cell color: escaper hue at an earliness-driven value; bound cells
-/// stay deep neutral.
-fn fate_color(outcome: &CellOutcome, cap: usize, hues: &[f64; 3]) -> Rgb64 {
+/// stay deep neutral. Exported for V64 `powers-of-fate` (its L0 fallback
+/// must paint the same colors).
+pub(crate) fn fate_color(outcome: &CellOutcome, cap: usize, hues: &[f64; 3]) -> Rgb64 {
     match outcome.escaper {
         Some(escaper) => {
             let earliness =
@@ -44,6 +45,30 @@ fn fate_color(outcome: &CellOutcome, cap: usize, hues: &[f64; 3]) -> Rgb64 {
             (r.max(0.0), g.max(0.0), blue.max(0.0))
         }
         None => (0.010, 0.011, 0.016),
+    }
+}
+
+/// V42's exact lattice parameters for an `n`-cell edge (the epsilon every
+/// cell perturbation shares). Exported for V64 `powers-of-fate` so its
+/// micro-rendered cells land on the same initial conditions.
+pub(crate) fn grid_params(ctx: &VizContext<'_>, n: usize) -> GridParams {
+    let steps = ctx.step_count();
+    let mean_separation = {
+        let mut sum = 0.0f64;
+        for i in 0..3 {
+            for j in i + 1..3 {
+                sum += (ctx.bodies[i].position - ctx.bodies[j].position).norm();
+            }
+        }
+        (sum / 3.0).max(1e-9)
+    };
+    GridParams {
+        n,
+        epsilon: DELTA_FRACTION * mean_separation,
+        warmup: 0,
+        cap: ((2 * steps) as f64 * CAP_FRACTION) as usize,
+        check_interval: CHECK_INTERVAL,
+        escape_threshold: DEFAULT_ESCAPE_THRESHOLD,
     }
 }
 
@@ -63,23 +88,7 @@ impl VizMode for BasinMap {
             return Ok(());
         }
         let n = ctx.quality.scale_count(GRID_N).max(32);
-        let mean_separation = {
-            let mut sum = 0.0f64;
-            for i in 0..3 {
-                for j in i + 1..3 {
-                    sum += (ctx.bodies[i].position - ctx.bodies[j].position).norm();
-                }
-            }
-            (sum / 3.0).max(1e-9)
-        };
-        let params = GridParams {
-            n,
-            epsilon: DELTA_FRACTION * mean_separation,
-            warmup: 0,
-            cap: ((2 * steps) as f64 * CAP_FRACTION) as usize,
-            check_interval: CHECK_INTERVAL,
-            escape_threshold: DEFAULT_ESCAPE_THRESHOLD,
-        };
+        let params = grid_params(ctx, n);
         info!(
             "   basin-map: {n}x{n} lattice, epsilon {:.3e}, cap {} steps",
             params.epsilon, params.cap

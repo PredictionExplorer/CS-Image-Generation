@@ -19,6 +19,20 @@ use nalgebra::Vector3;
 
 /// Fast segments reach this fraction of the virtual light speed.
 const SPEED_FRACTION_AT_P99: f64 = 0.22;
+
+/// The V29 virtual light speed: p99 pooled speed = 22% of c. Returns
+/// `(c in world units per unit time, c in world units per step)`.
+/// Exported for V65 `witness` ("same c as V29").
+pub(crate) fn virtual_light_speed(
+    kinematics: &crate::viz::common::kinematics::Kinematics,
+) -> (f64, f64) {
+    let mut sample: Vec<f64> =
+        kinematics.speeds.iter().flat_map(|body| body.iter().step_by(97).copied()).collect();
+    sample.sort_by(f64::total_cmp);
+    let p99 = sample[((sample.len() - 1) as f64 * 0.99) as usize];
+    let c_world_per_time = p99 / SPEED_FRACTION_AT_P99;
+    (c_world_per_time, c_world_per_time * crate::render::constants::DEFAULT_DT)
+}
 /// Ghost stroke energy relative to true strokes.
 const GHOST_ENERGY: f64 = 0.22;
 /// Ghost hue shift (degrees, toward violet memory).
@@ -40,7 +54,8 @@ const VIDEO_FRAMES: usize = 1200;
 pub struct RetardedTime;
 
 /// Interpolated position of a body at a fractional step.
-fn position_at(path: &[Vector3<f64>], step: f64) -> Vector3<f64> {
+/// Exported for V65 `witness` (shared retarded-optics core).
+pub(crate) fn position_at(path: &[Vector3<f64>], step: f64) -> Vector3<f64> {
     let clamped = step.clamp(0.0, (path.len() - 1) as f64);
     let base = clamped.floor() as usize;
     let next = (base + 1).min(path.len() - 1);
@@ -51,7 +66,8 @@ fn position_at(path: &[Vector3<f64>], step: f64) -> Vector3<f64> {
 /// Solve the retarded step at which `observer` (at `step`) sees `emitter`.
 ///
 /// `c_steps` is the light speed expressed in world units per simulation step.
-fn retarded_step(
+/// Exported for V65 `witness` (its optics core).
+pub(crate) fn retarded_step(
     observer: Vector3<f64>,
     emitter: &[Vector3<f64>],
     step: usize,
@@ -188,18 +204,7 @@ impl VizMode for RetardedTime {
 
         // Virtual light speed: p99 pooled speed hits 22% of c.
         // Speeds are world-units/time; convert to world-units/step via dt.
-        let (_, p99_speed) = {
-            let mut sample: Vec<f64> = kinematics
-                .speeds
-                .iter()
-                .flat_map(|body| body.iter().step_by(97).copied())
-                .collect();
-            sample.sort_by(f64::total_cmp);
-            let p99 = sample[((sample.len() - 1) as f64 * 0.99) as usize];
-            (0.0, p99)
-        };
-        let c_world_per_time = p99_speed / SPEED_FRACTION_AT_P99;
-        let c_steps = c_world_per_time * crate::render::constants::DEFAULT_DT;
+        let (c_world_per_time, c_steps) = virtual_light_speed(kinematics);
 
         // Full-resolution long-exposure still.
         let mut canvas = SpdCanvas::new(ctx.width, ctx.height);
@@ -238,7 +243,7 @@ impl VizMode for RetardedTime {
         sink.record("retarded_hq.mp4", "video");
 
         let meta = serde_json::json!({
-            "p99_speed": p99_speed,
+            "p99_speed": c_world_per_time * SPEED_FRACTION_AT_P99,
             "virtual_c_world_per_time": c_world_per_time,
             "speed_fraction_at_p99": SPEED_FRACTION_AT_P99,
             "ghost_energy": GHOST_ENERGY,

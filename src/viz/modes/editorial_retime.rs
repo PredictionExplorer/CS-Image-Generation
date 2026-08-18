@@ -32,8 +32,9 @@ const CLAMP: (f64, f64) = (1.0 / 6.0, 8.0);
 
 /// Build the frame -> step schedule: cumulative frame density proportional
 /// to `(drama + eps)^gamma`, clamped per frame and renormalized to land
-/// exactly on the final step.
-fn build_schedule(drama: &[f64], frames: usize) -> Vec<usize> {
+/// exactly on the final step. Exported for V49 `broadcast` and V67
+/// `vanitas` (their retimed acts share this pacing).
+pub(crate) fn build_schedule(drama: &[f64], frames: usize) -> Vec<usize> {
     let steps = drama.len();
     if steps == 0 || frames == 0 {
         return Vec::new();

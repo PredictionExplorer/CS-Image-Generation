@@ -176,6 +176,27 @@ pub fn capped_fate(bodies: &[Body], params: &GridParams) -> CellOutcome {
     )
 }
 
+/// Initial conditions of one lattice cell: body 0's position displaced on
+/// the `n x n` grid spanning `+/- epsilon` (the exact perturbation of
+/// [`perturb_grid`], exported so V64 `powers-of-fate` can micro-render
+/// individual V42 cells).
+#[must_use]
+pub fn grid_cell_bodies(
+    bodies: &[Body],
+    n: usize,
+    epsilon: f64,
+    row: usize,
+    col: usize,
+) -> Vec<Body> {
+    let n = n.max(2);
+    let fx = col as f64 / (n - 1) as f64 * 2.0 - 1.0;
+    let fy = row as f64 / (n - 1) as f64 * 2.0 - 1.0;
+    let mut perturbed = bodies.to_vec();
+    perturbed[0].position.x += fx * epsilon;
+    perturbed[0].position.y += fy * epsilon;
+    perturbed
+}
+
 /// n x n lattice of initial conditions with body 0's position displaced in
 /// the x/y plane; returns row-major outcomes (rayon-parallel).
 #[must_use]
@@ -186,11 +207,7 @@ pub fn perturb_grid(bodies: &[Body], params: &GridParams) -> Vec<CellOutcome> {
         .map(|cell| {
             let row = cell / n;
             let col = cell % n;
-            let fx = col as f64 / (n - 1) as f64 * 2.0 - 1.0;
-            let fy = row as f64 / (n - 1) as f64 * 2.0 - 1.0;
-            let mut perturbed = bodies.to_vec();
-            perturbed[0].position.x += fx * params.epsilon;
-            perturbed[0].position.y += fy * params.epsilon;
+            let perturbed = grid_cell_bodies(bodies, n, params.epsilon, row, col);
             capped_outcome(
                 &perturbed,
                 params.warmup,

@@ -1,10 +1,11 @@
-//! Implemented visualization modes (Waves 1-6 of `docs/VIZ_MASTER_PLAN.md`).
+//! Implemented visualization modes (Waves 1-9 of `docs/VIZ_MASTER_PLAN.md`).
 
 pub mod alien_vision;
 pub mod aurora;
 pub mod basin_map;
 pub mod blueprint;
 pub mod braid;
+pub mod broadcast;
 pub mod bullet_time;
 pub mod celestial_atlas;
 pub mod chandelier;
@@ -25,6 +26,7 @@ pub mod galaxy_collision;
 pub mod gw_chirp;
 pub mod hologram;
 pub mod hyperspectral_flythrough;
+pub mod instrument;
 pub mod lensing;
 pub mod light_echoes;
 pub mod lightning;
@@ -36,12 +38,16 @@ pub mod neon;
 pub mod oscilloscope;
 pub mod physarum;
 pub mod plotter_svg;
+pub mod pond;
+pub mod powers_of_fate;
 pub mod prism_portrait;
 pub mod reconnection;
 pub mod recurrence;
+pub mod reliquary;
 pub mod retarded_time;
 pub mod ride_along;
 pub mod roche;
+pub mod rose_window;
 pub mod sculpture_export;
 pub mod shape_sphere;
 pub mod slit_scan;
@@ -58,8 +64,10 @@ pub mod topo_contours;
 pub mod trailer;
 pub mod triangle_centers;
 pub mod turntable;
+pub mod vanitas;
 pub mod webgl_viewer;
 pub mod winding_glass;
+pub mod witness;
 pub mod worldtube;
 
 use crate::viz::VizMode;
@@ -127,10 +135,18 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "ephemeris-poster" => Some(Box::new(ephemeris_poster::EphemerisPoster)),
         "blueprint" => Some(Box::new(blueprint::Blueprint)),
         "webgl-viewer" => Some(Box::new(webgl_viewer::WebglViewer)),
+        "instrument" => Some(Box::new(instrument::Instrument)),
         "tilt" => Some(Box::new(tilt::Tilt)),
         "hologram" => Some(Box::new(hologram::Hologram)),
         "trailer" => Some(Box::new(trailer::Trailer)),
+        "broadcast" => Some(Box::new(broadcast::Broadcast)),
         "celestial-atlas" => Some(Box::new(celestial_atlas::CelestialAtlas)),
+        "powers-of-fate" => Some(Box::new(powers_of_fate::PowersOfFate)),
+        "witness" => Some(Box::new(witness::Witness)),
+        "rose-window" => Some(Box::new(rose_window::RoseWindow)),
+        "reliquary" => Some(Box::new(reliquary::Reliquary)),
+        "pond" => Some(Box::new(pond::Pond)),
+        "vanitas" => Some(Box::new(vanitas::Vanitas)),
         _ => None,
     }
 }

@@ -32,9 +32,11 @@ use nalgebra::Vector3;
 use tracing::{info, warn};
 
 /// Number of sibling universes.
-const SIBLINGS: usize = 8;
+/// Exported for V68 `reliquary` (it re-derives V24's exact nine universes).
+pub(crate) const SIBLINGS: usize = 8;
 /// Relative perturbation size.
-const EPSILON: f64 = 1e-9;
+/// Exported for V68 `reliquary` (the same 1e-9 sibling perturbation).
+pub(crate) const EPSILON: f64 = 1e-9;
 /// Video frames at final quality (30 s at 30 fps).
 const TOTAL_FRAMES: usize = 900;
 /// Divergence threshold as a fraction of the scene scale.

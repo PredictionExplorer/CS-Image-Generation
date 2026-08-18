@@ -34,7 +34,8 @@ const EXTEND_FACTOR: usize = 8;
 /// Total video frames at final quality (45 s at 30 fps).
 const TOTAL_FRAMES: usize = 1350;
 /// Recap share of the video (15 of 45 seconds).
-const RECAP_FRACTION: f64 = 15.0 / 45.0;
+/// Exported for V49 `broadcast` (its Act V trim must stay inside the recap).
+pub(crate) const RECAP_FRACTION: f64 = 15.0 / 45.0;
 /// Frames per framing segment (bounds recomputed at this cadence).
 const SEGMENT_FRAMES: usize = 60;
 /// Zoom margin around the escaper.

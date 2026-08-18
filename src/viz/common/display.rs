@@ -149,6 +149,48 @@ impl SpdCanvas {
         });
     }
 
+    /// Splat a stroke whose spectral kernels are Doppler-transported by
+    /// `wavelength_factor` (`lambda' = lambda * factor`; < 1 = violet-ward
+    /// approach, V65). Energy-conserving; identical to
+    /// [`Self::draw_stroke`] at factor 1.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_stroke_shifted(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        color_start: OklabColor,
+        color_end: OklabColor,
+        alpha: f64,
+        energy: f64,
+        thickness_factor: f64,
+        wavelength_factor: f64,
+    ) {
+        use crate::render::drawing::{
+            draw_line_segment_aa_spectral_rows_with_kernels, shift_spectral_kernel,
+            spectral_kernel_for_oklab,
+        };
+        let kernel0 =
+            shift_spectral_kernel(&spectral_kernel_for_oklab(color_start), wavelength_factor);
+        let kernel1 =
+            shift_spectral_kernel(&spectral_kernel_for_oklab(color_end), wavelength_factor);
+        let segment = SpectralLineSegment {
+            start: LineVertex { x: from.0, y: from.1, z: 0.0, color: color_start, alpha },
+            end: LineVertex { x: to.0, y: to.1, z: 0.0, color: color_end, alpha },
+            hdr_scale: energy,
+            thickness_factor,
+        };
+        draw_line_segment_aa_spectral_rows_with_kernels(
+            &mut self.spd,
+            self.width,
+            self.height,
+            0,
+            self.height as usize,
+            segment,
+            &kernel0,
+            &kernel1,
+        );
+    }
+
     /// Convert the canvas SPD into an existing linear RGBA buffer.
     pub fn convert_into(&self, rgba: &mut PixelBuffer) {
         let width = self.width as usize;
@@ -171,6 +213,26 @@ impl SpdCanvas {
         for bins in &mut self.spd {
             *bins = [0.0; NUM_BINS];
         }
+    }
+
+    /// Multiply the whole SPD by a decay factor (comet-style memory, V65).
+    pub fn decay_spd(&mut self, factor: f64) {
+        self.spd.par_iter_mut().for_each(|bins| {
+            for value in bins.iter_mut() {
+                *value *= factor;
+            }
+        });
+    }
+
+    /// Add the canvas SPD into an external SPD buffer of the same size
+    /// (V67 burns bolt afterglow into its shared accumulation).
+    pub fn add_into(&self, spd: &mut [[f64; NUM_BINS]]) {
+        debug_assert_eq!(spd.len(), self.spd.len());
+        spd.par_iter_mut().zip(self.spd.par_iter()).for_each(|(dest, source)| {
+            for (d, s) in dest.iter_mut().zip(source.iter()) {
+                *d += s;
+            }
+        });
     }
 
     /// Convert, auto-level, tonemap, and quantize to a 16-bit Display P3
@@ -215,5 +277,41 @@ mod tests {
         let pixels = vec![(1.0, 1.0, 1.0); 4];
         let image = encode_linear_rec2020_png16(&pixels, 2, 2);
         assert!(image.as_raw().iter().all(|&value| value > 65_000));
+    }
+
+    #[test]
+    fn shifted_stroke_conserves_energy_and_moves_the_spectrum() {
+        let color = (0.72, 0.10, 0.02);
+        let total =
+            |canvas: &SpdCanvas| -> f64 { canvas.spd.iter().flat_map(|bins| bins.iter()).sum() };
+        let centroid = |canvas: &SpdCanvas| -> f64 {
+            let mut weighted = 0.0;
+            let mut sum = 0.0;
+            for bins in &canvas.spd {
+                for (bin, &value) in bins.iter().enumerate() {
+                    weighted += bin as f64 * value;
+                    sum += value;
+                }
+            }
+            weighted / sum.max(1e-300)
+        };
+
+        let mut plain = SpdCanvas::new(48, 48);
+        plain.draw_stroke((4.0, 24.0), (44.0, 24.0), color, color, 0.9, 0.05, 1.0);
+        let mut unit = SpdCanvas::new(48, 48);
+        unit.draw_stroke_shifted((4.0, 24.0), (44.0, 24.0), color, color, 0.9, 0.05, 1.0, 1.0);
+        for (a, b) in plain.spd.iter().zip(unit.spd.iter()) {
+            for (lhs, rhs) in a.iter().zip(b.iter()) {
+                assert_eq!(lhs.to_bits(), rhs.to_bits(), "unit factor must match draw_stroke");
+            }
+        }
+
+        let mut violet = SpdCanvas::new(48, 48);
+        violet.draw_stroke_shifted((4.0, 24.0), (44.0, 24.0), color, color, 0.9, 0.05, 1.0, 0.85);
+        assert!((total(&violet) - total(&plain)).abs() < total(&plain) * 1e-9);
+        assert!(
+            centroid(&violet) < centroid(&plain) - 2.0,
+            "an approaching source must move the spectral centroid violet-ward"
+        );
     }
 }

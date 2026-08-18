@@ -37,7 +37,8 @@ pub(crate) fn base64_encode(bytes: &[u8]) -> String {
 }
 
 /// `OkLab` -> sRGB bytes (gamut-clamped).
-fn oklab_to_srgb_bytes(l: f64, a: f64, b: f64) -> [u8; 3] {
+/// Exported for V57 `instrument` (same viewer color path).
+pub(crate) fn oklab_to_srgb_bytes(l: f64, a: f64, b: f64) -> [u8; 3] {
     let (x, y, z) = oklab_to_xyz(l, a, b);
     let lr = 3.240_969_941_904_521 * x - 1.537_383_177_570_093 * y - 0.498_610_760_293_003 * z;
     let lg = -0.969_243_636_280_87 * x + 1.875_967_501_507_72 * y + 0.041_555_057_407_175 * z;
@@ -54,6 +55,88 @@ fn oklab_to_srgb_bytes(l: f64, a: f64, b: f64) -> [u8; 3] {
     [encode(lr), encode(lg), encode(lb)]
 }
 
+/// A packed, decimated trajectory ready for template embedding: the V53
+/// record schema shared verbatim with V57 `instrument`.
+pub(crate) struct PackedOrbit {
+    /// 14-byte little-endian records (`u16 x,y,z,t,speed` + `u8 r,g,b,pad`).
+    pub(crate) bytes: Vec<u8>,
+    /// Points kept per body.
+    pub(crate) counts: [usize; 3],
+    /// Quantization bounding box (lo per axis).
+    pub(crate) lo: [f64; 3],
+    /// Quantization bounding box (hi per axis).
+    pub(crate) hi: [f64; 3],
+    /// Step stride of the decimation.
+    pub(crate) stride: usize,
+    /// JSON duplicate of the per-body points (website schema).
+    pub(crate) json_bodies: Vec<serde_json::Value>,
+}
+
+/// Decimate and pack the trajectory into the shared viewer record schema.
+pub(crate) fn pack_orbit(ctx: &VizContext<'_>) -> PackedOrbit {
+    let steps = ctx.step_count();
+    let per_body = POINTS_PER_BODY.min(steps);
+    let stride = (steps / per_body).max(1);
+    let speed_window = ctx.kinematics().speed_window();
+
+    // Global bbox over the decimated points for 16-bit quantization.
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for body in 0..3 {
+        for step in (0..steps).step_by(stride) {
+            let p = ctx.positions[body][step];
+            for (axis, value) in [p.x, p.y, p.z].into_iter().enumerate() {
+                if value.is_finite() {
+                    lo[axis] = lo[axis].min(value);
+                    hi[axis] = hi[axis].max(value);
+                }
+            }
+        }
+    }
+    let extent: Vec<f64> = (0..3).map(|axis| (hi[axis] - lo[axis]).max(1e-12)).collect();
+
+    // Pack 14-byte records; collect the JSON duplicate alongside.
+    let mut packed: Vec<u8> = Vec::new();
+    let mut counts = [0usize; 3];
+    let mut json_bodies: Vec<serde_json::Value> = Vec::new();
+    #[allow(clippy::needless_range_loop)]
+    for body in 0..3 {
+        let mut json_points: Vec<serde_json::Value> = Vec::new();
+        for step in (0..steps).step_by(stride) {
+            let p = ctx.positions[body][step];
+            let q = |axis: usize, value: f64| -> u16 {
+                (((value - lo[axis]) / extent[axis]).clamp(0.0, 1.0) * 65535.0) as u16
+            };
+            let t = ((step as f64 / (steps - 1) as f64) * 65535.0) as u16;
+            let speed = ctx.kinematics().speeds[body][step];
+            let speed_q = (ctx.kinematics().normalized_speed(speed_window, speed) * 65535.0) as u16;
+            let (cl, ca, cb) = ctx.colors[body][step.min(ctx.colors[body].len() - 1)];
+            let rgb = oklab_to_srgb_bytes(cl, ca, cb);
+            for value in [q(0, p.x), q(1, p.y), q(2, p.z), t, speed_q] {
+                packed.extend_from_slice(&value.to_le_bytes());
+            }
+            packed.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0]);
+            counts[body] += 1;
+            if json_points.len() < POINTS_PER_BODY {
+                json_points.push(serde_json::json!([
+                    (p.x * 1e4).round() / 1e4,
+                    (p.y * 1e4).round() / 1e4,
+                    (p.z * 1e4).round() / 1e4,
+                ]));
+            }
+        }
+        json_bodies.push(serde_json::json!({
+            "points": json_points,
+            "color": oklab_to_srgb_bytes(
+                ctx.mean_color(body).0,
+                ctx.mean_color(body).1,
+                ctx.mean_color(body).2,
+            ),
+        }));
+    }
+    PackedOrbit { bytes: packed, counts, lo, hi, stride, json_bodies }
+}
+
 /// The webgl-viewer mode.
 pub struct WebglViewer;
 
@@ -68,66 +151,7 @@ impl VizMode for WebglViewer {
             warn!("webgl-viewer skipped: trajectory too short");
             return Ok(());
         }
-        let per_body = POINTS_PER_BODY.min(steps);
-        let stride = (steps / per_body).max(1);
-        let speed_window = ctx.kinematics().speed_window();
-
-        // Global bbox over the decimated points for 16-bit quantization.
-        let mut lo = [f64::INFINITY; 3];
-        let mut hi = [f64::NEG_INFINITY; 3];
-        for body in 0..3 {
-            for step in (0..steps).step_by(stride) {
-                let p = ctx.positions[body][step];
-                for (axis, value) in [p.x, p.y, p.z].into_iter().enumerate() {
-                    if value.is_finite() {
-                        lo[axis] = lo[axis].min(value);
-                        hi[axis] = hi[axis].max(value);
-                    }
-                }
-            }
-        }
-        let extent: Vec<f64> = (0..3).map(|axis| (hi[axis] - lo[axis]).max(1e-12)).collect();
-
-        // Pack 14-byte records; collect the JSON duplicate alongside.
-        let mut packed: Vec<u8> = Vec::new();
-        let mut counts = [0usize; 3];
-        let mut json_bodies: Vec<serde_json::Value> = Vec::new();
-        #[allow(clippy::needless_range_loop)]
-        for body in 0..3 {
-            let mut json_points: Vec<serde_json::Value> = Vec::new();
-            for step in (0..steps).step_by(stride) {
-                let p = ctx.positions[body][step];
-                let q = |axis: usize, value: f64| -> u16 {
-                    (((value - lo[axis]) / extent[axis]).clamp(0.0, 1.0) * 65535.0) as u16
-                };
-                let t = ((step as f64 / (steps - 1) as f64) * 65535.0) as u16;
-                let speed = ctx.kinematics().speeds[body][step];
-                let speed_q =
-                    (ctx.kinematics().normalized_speed(speed_window, speed) * 65535.0) as u16;
-                let (cl, ca, cb) = ctx.colors[body][step.min(ctx.colors[body].len() - 1)];
-                let rgb = oklab_to_srgb_bytes(cl, ca, cb);
-                for value in [q(0, p.x), q(1, p.y), q(2, p.z), t, speed_q] {
-                    packed.extend_from_slice(&value.to_le_bytes());
-                }
-                packed.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0]);
-                counts[body] += 1;
-                if json_points.len() < POINTS_PER_BODY {
-                    json_points.push(serde_json::json!([
-                        (p.x * 1e4).round() / 1e4,
-                        (p.y * 1e4).round() / 1e4,
-                        (p.z * 1e4).round() / 1e4,
-                    ]));
-                }
-            }
-            json_bodies.push(serde_json::json!({
-                "points": json_points,
-                "color": oklab_to_srgb_bytes(
-                    ctx.mean_color(body).0,
-                    ctx.mean_color(body).1,
-                    ctx.mean_color(body).2,
-                ),
-            }));
-        }
+        let PackedOrbit { bytes: packed, counts, lo, hi, stride, json_bodies } = pack_orbit(ctx);
         info!(
             "   webgl-viewer: {} points packed ({:.1} MB inline)",
             counts.iter().sum::<usize>(),

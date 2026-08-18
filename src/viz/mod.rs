@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 61);
+        assert_eq!(selection.entries().len(), 69, "the catalog is complete since Wave 9");
         assert!(selection.entries().iter().all(|entry| entry.implemented));
     }
 
@@ -285,9 +285,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_rejects_unknown_and_unimplemented() {
+    fn resolve_rejects_unknown_flags_and_accepts_wave_nine() {
         assert!(VizSelection::resolve(&["no-such-mode".to_string()]).is_err());
-        assert!(VizSelection::resolve(&["witness".to_string()]).is_err());
+        // Every Wave 9 combo resolves now that the catalog is complete.
+        for flag in [
+            "witness",
+            "broadcast",
+            "powers-of-fate",
+            "rose-window",
+            "reliquary",
+            "pond",
+            "vanitas",
+            "instrument",
+        ] {
+            assert!(
+                VizSelection::resolve(&[flag.to_string()]).is_ok(),
+                "{flag} must resolve as implemented"
+            );
+        }
     }
 
     #[test]

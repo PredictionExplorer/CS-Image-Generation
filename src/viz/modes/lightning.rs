@@ -49,18 +49,40 @@ pub struct Lightning;
 type BoltSegment = ((f32, f32), (f32, f32), (f64, f64, f64), f64, f64);
 
 /// One grown bolt, ready to draw.
-struct Bolt {
+/// Exported for V67 `vanitas` (its SUMMER act fires these bolts).
+pub(crate) struct Bolt {
     /// Segments in full-resolution pixel space.
-    segments: Vec<BoltSegment>,
+    pub(crate) segments: Vec<BoltSegment>,
     /// Simulation step of the periapsis (chronology).
-    step: usize,
+    pub(crate) step: usize,
     /// Normalized approach speed (brightness).
-    speed: f64,
+    pub(crate) speed: f64,
+}
+
+impl Bolt {
+    /// Endpoint of the main channel (the arrival point at the struck body),
+    /// in full-resolution pixel space. V67's bolt-to-physarum handoff seeds
+    /// its scouts here.
+    #[must_use]
+    pub(crate) fn endpoints(&self) -> Vec<(f32, f32)> {
+        // Segment list is (cell -> parent); the last grown core segments end
+        // nearest the target. Collect the from-points of the final few core
+        // segments plus the very first (root) point.
+        let mut points = Vec::new();
+        if let Some(&(from, _, _, _, _)) = self.segments.last() {
+            points.push(from);
+        }
+        if let Some(&(_, to, _, _, _)) = self.segments.first() {
+            points.push(to);
+        }
+        points
+    }
 }
 
 /// Draw a bolt into a canvas with an overall energy multiplier and a
 /// pixel-scale factor mapping full-res coordinates to the canvas.
-fn draw_bolt(canvas: &mut SpdCanvas, bolt: &Bolt, energy_scale: f64, pixel_scale: f32) {
+/// Exported for V67 `vanitas`.
+pub(crate) fn draw_bolt(canvas: &mut SpdCanvas, bolt: &Bolt, energy_scale: f64, pixel_scale: f32) {
     for &(from, to, color, energy, thickness) in &bolt.segments {
         canvas.draw_stroke(
             (from.0 * pixel_scale, from.1 * pixel_scale),
@@ -74,6 +96,165 @@ fn draw_bolt(canvas: &mut SpdCanvas, bolt: &Bolt, energy_scale: f64, pixel_scale
     }
 }
 
+/// Grow up to `max_bolts` dielectric-breakdown bolts at the run's deepest
+/// close approaches (chronological order). Shared by V35 and V67; pass the
+/// consuming mode's forked RNG.
+pub(crate) fn grow_bolts(
+    ctx: &VizContext<'_>,
+    rng: &mut crate::sim::Sha3RandomByteStream,
+    max_bolts: usize,
+) -> Vec<Bolt> {
+    let steps = ctx.step_count();
+    if steps == 0 {
+        return Vec::new();
+    }
+    let kinematics = ctx.kinematics();
+    let masses = kinematics.masses;
+
+    // Deepest approaches, then chronological order for the storm.
+    let mut approaches = ctx.events().periapses.clone();
+    approaches.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+    approaches.truncate(max_bolts);
+    if approaches.is_empty() {
+        // Short runs may produce no formal periapsis events; fall back
+        // to each pair's global minimum-separation step.
+        warn!("lightning: no periapsis events; using per-pair minima");
+        for (pair_index, &pair) in crate::viz::common::kinematics::PAIRS.iter().enumerate() {
+            let series = &kinematics.pairwise[pair_index];
+            if let Some(step) = (0..steps).min_by(|&a, &b| series[a].total_cmp(&series[b])) {
+                approaches.push(crate::viz::common::events::Approach {
+                    step,
+                    pair,
+                    distance: series[step],
+                });
+            }
+        }
+    }
+    approaches.sort_by_key(|approach| approach.step);
+    if approaches.is_empty() {
+        return Vec::new();
+    }
+
+    // Approach speed per event: |d separation / dt| around the step.
+    let pair_index_of = |pair: (usize, usize)| {
+        crate::viz::common::kinematics::PAIRS
+            .iter()
+            .position(|&candidate| candidate == pair)
+            .expect("canonical pair")
+    };
+    let speeds: Vec<f64> = approaches
+        .iter()
+        .map(|approach| {
+            let series = &kinematics.pairwise[pair_index_of(approach.pair)];
+            let window = 200usize;
+            let lo = approach.step.saturating_sub(window);
+            let hi = (approach.step + window).min(steps - 1);
+            ((series[lo] - series[approach.step]).max(0.0)
+                + (series[hi] - series[approach.step]).max(0.0))
+                / (window as f64 * crate::render::constants::DEFAULT_DT)
+        })
+        .collect();
+    let speed_reference = speeds.iter().copied().fold(1e-12f64, f64::max);
+
+    // Lattice at half of the full resolution for streamer growth.
+    let lattice_w = ((ctx.width / 2).max(64)) as usize;
+    let lattice_h = ((ctx.height / 2).max(64)) as usize;
+    let lattice_ctx = RenderContext::new(
+        lattice_w as u32,
+        lattice_h as u32,
+        ctx.positions,
+        ctx.settings.aspect_correction,
+    );
+    let lattice_to_full = ctx.width as f32 / lattice_w as f32;
+    let softening = 2.0 * lattice_ctx.bounds().width / lattice_w as f64;
+
+    let mut bolts: Vec<Bolt> = Vec::new();
+    for (event_index, approach) in approaches.iter().enumerate() {
+        let step = approach.step;
+        let (body_a, body_b) = approach.pair;
+        let point_masses: Vec<PointMass> = (0..3)
+            .map(|body| PointMass {
+                x: ctx.positions[body][step].x,
+                y: ctx.positions[body][step].y,
+                mass: masses[body],
+            })
+            .collect();
+        let grid = PotentialGrid::sample(&point_masses, &lattice_ctx, softening);
+
+        let cell_of = |body: usize| {
+            let position = ctx.positions[body][step];
+            let (px, py) = lattice_ctx.to_pixel(position.x, position.y);
+            ((px.max(0.0) as usize).min(lattice_w - 1), (py.max(0.0) as usize).min(lattice_h - 1))
+        };
+        let start = cell_of(body_a);
+        let target = cell_of(body_b);
+        let streamer = grow_streamer(
+            &grid.values,
+            lattice_w,
+            lattice_h,
+            start,
+            target,
+            ETA,
+            TARGET_BIAS,
+            60_000,
+            rng,
+        );
+        if !streamer.reached {
+            warn!("lightning: bolt {event_index} did not arrive; skipping");
+            continue;
+        }
+
+        // Color by position between the pair; energy by approach speed.
+        let speed = (speeds[event_index] / speed_reference).clamp(0.1, 1.0);
+        let color_a = ctx.colors[body_a][step.min(ctx.colors[body_a].len() - 1)];
+        let color_b = ctx.colors[body_b][step.min(ctx.colors[body_b].len() - 1)];
+        let position_a = ctx.positions[body_a][step];
+        let position_b = ctx.positions[body_b][step];
+        let blend_at = |col: u16, row: u16| {
+            let world_x = lattice_ctx.bounds().min_x
+                + (f64::from(col) + 0.5) * lattice_ctx.bounds().width / lattice_w as f64;
+            let world_y = lattice_ctx.bounds().min_y
+                + (f64::from(row) + 0.5) * lattice_ctx.bounds().height / lattice_h as f64;
+            let dist_a = (world_x - position_a.x).hypot(world_y - position_a.y);
+            let dist_b = (world_x - position_b.x).hypot(world_y - position_b.y);
+            let t = dist_a / (dist_a + dist_b).max(1e-12);
+            (
+                color_a.0 + (color_b.0 - color_a.0) * t,
+                color_a.1 + (color_b.1 - color_a.1) * t,
+                color_a.2 + (color_b.2 - color_a.2) * t,
+            )
+        };
+
+        let mut in_channel = vec![false; streamer.cells.len()];
+        for &cell in &streamer.main_channel {
+            in_channel[cell as usize] = true;
+        }
+        let mut segments = Vec::with_capacity(streamer.cells.len());
+        for (cell_index, &(col, row)) in streamer.cells.iter().enumerate().skip(1) {
+            let parent = streamer.parents[cell_index] as usize;
+            let (pcol, prow) = streamer.cells[parent];
+            let is_core = in_channel[cell_index] && in_channel[parent];
+            let energy = if is_core { CORE_ENERGY } else { CORE_ENERGY * BRANCH_RATIO };
+            let thickness = if is_core { 1.1 } else { 0.6 };
+            segments.push((
+                (
+                    (f32::from(col) + 0.5) * lattice_to_full,
+                    (f32::from(row) + 0.5) * lattice_to_full,
+                ),
+                (
+                    (f32::from(pcol) + 0.5) * lattice_to_full,
+                    (f32::from(prow) + 0.5) * lattice_to_full,
+                ),
+                blend_at(col, row),
+                energy * speed,
+                thickness,
+            ));
+        }
+        bolts.push(Bolt { segments, step, speed });
+    }
+    bolts
+}
+
 impl VizMode for Lightning {
     fn entry(&self) -> &'static ModeEntry {
         catalog::find("lightning").expect("lightning is in the catalog")
@@ -85,155 +266,8 @@ impl VizMode for Lightning {
             warn!("lightning skipped: empty trajectory");
             return Ok(());
         }
-        let kinematics = ctx.kinematics();
-        let masses = kinematics.masses;
-
-        // Deepest approaches, then chronological order for the storm.
-        let mut approaches = ctx.events().periapses.clone();
-        approaches.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-        approaches.truncate(MAX_BOLTS);
-        if approaches.is_empty() {
-            // Short runs may produce no formal periapsis events; fall back
-            // to each pair's global minimum-separation step.
-            warn!("lightning: no periapsis events; using per-pair minima");
-            for (pair_index, &pair) in crate::viz::common::kinematics::PAIRS.iter().enumerate() {
-                let series = &kinematics.pairwise[pair_index];
-                if let Some(step) = (0..steps).min_by(|&a, &b| series[a].total_cmp(&series[b])) {
-                    approaches.push(crate::viz::common::events::Approach {
-                        step,
-                        pair,
-                        distance: series[step],
-                    });
-                }
-            }
-        }
-        approaches.sort_by_key(|approach| approach.step);
-        if approaches.is_empty() {
-            warn!("lightning skipped: no approach events available");
-            return Ok(());
-        }
-
-        // Approach speed per event: |d separation / dt| around the step.
-        let pair_index_of = |pair: (usize, usize)| {
-            crate::viz::common::kinematics::PAIRS
-                .iter()
-                .position(|&candidate| candidate == pair)
-                .expect("canonical pair")
-        };
-        let speeds: Vec<f64> = approaches
-            .iter()
-            .map(|approach| {
-                let series = &kinematics.pairwise[pair_index_of(approach.pair)];
-                let window = 200usize;
-                let lo = approach.step.saturating_sub(window);
-                let hi = (approach.step + window).min(steps - 1);
-                ((series[lo] - series[approach.step]).max(0.0)
-                    + (series[hi] - series[approach.step]).max(0.0))
-                    / (window as f64 * crate::render::constants::DEFAULT_DT)
-            })
-            .collect();
-        let speed_reference = speeds.iter().copied().fold(1e-12f64, f64::max);
-
-        // Lattice at half of the full resolution for streamer growth.
-        let lattice_w = ((ctx.width / 2).max(64)) as usize;
-        let lattice_h = ((ctx.height / 2).max(64)) as usize;
-        let lattice_ctx = RenderContext::new(
-            lattice_w as u32,
-            lattice_h as u32,
-            ctx.positions,
-            ctx.settings.aspect_correction,
-        );
-        let lattice_to_full = ctx.width as f32 / lattice_w as f32;
-        let softening = 2.0 * lattice_ctx.bounds().width / lattice_w as f64;
-
         let mut rng = ctx.fork_rng(self.entry().flag);
-        let mut bolts: Vec<Bolt> = Vec::new();
-        for (event_index, approach) in approaches.iter().enumerate() {
-            let step = approach.step;
-            let (body_a, body_b) = approach.pair;
-            let point_masses: Vec<PointMass> = (0..3)
-                .map(|body| PointMass {
-                    x: ctx.positions[body][step].x,
-                    y: ctx.positions[body][step].y,
-                    mass: masses[body],
-                })
-                .collect();
-            let grid = PotentialGrid::sample(&point_masses, &lattice_ctx, softening);
-
-            let cell_of = |body: usize| {
-                let position = ctx.positions[body][step];
-                let (px, py) = lattice_ctx.to_pixel(position.x, position.y);
-                (
-                    (px.max(0.0) as usize).min(lattice_w - 1),
-                    (py.max(0.0) as usize).min(lattice_h - 1),
-                )
-            };
-            let start = cell_of(body_a);
-            let target = cell_of(body_b);
-            let streamer = grow_streamer(
-                &grid.values,
-                lattice_w,
-                lattice_h,
-                start,
-                target,
-                ETA,
-                TARGET_BIAS,
-                60_000,
-                &mut rng,
-            );
-            if !streamer.reached {
-                warn!("lightning: bolt {event_index} did not arrive; skipping");
-                continue;
-            }
-
-            // Color by position between the pair; energy by approach speed.
-            let speed = (speeds[event_index] / speed_reference).clamp(0.1, 1.0);
-            let color_a = ctx.colors[body_a][step.min(ctx.colors[body_a].len() - 1)];
-            let color_b = ctx.colors[body_b][step.min(ctx.colors[body_b].len() - 1)];
-            let position_a = ctx.positions[body_a][step];
-            let position_b = ctx.positions[body_b][step];
-            let blend_at = |col: u16, row: u16| {
-                let world_x = lattice_ctx.bounds().min_x
-                    + (f64::from(col) + 0.5) * lattice_ctx.bounds().width / lattice_w as f64;
-                let world_y = lattice_ctx.bounds().min_y
-                    + (f64::from(row) + 0.5) * lattice_ctx.bounds().height / lattice_h as f64;
-                let dist_a = (world_x - position_a.x).hypot(world_y - position_a.y);
-                let dist_b = (world_x - position_b.x).hypot(world_y - position_b.y);
-                let t = dist_a / (dist_a + dist_b).max(1e-12);
-                (
-                    color_a.0 + (color_b.0 - color_a.0) * t,
-                    color_a.1 + (color_b.1 - color_a.1) * t,
-                    color_a.2 + (color_b.2 - color_a.2) * t,
-                )
-            };
-
-            let mut in_channel = vec![false; streamer.cells.len()];
-            for &cell in &streamer.main_channel {
-                in_channel[cell as usize] = true;
-            }
-            let mut segments = Vec::with_capacity(streamer.cells.len());
-            for (cell_index, &(col, row)) in streamer.cells.iter().enumerate().skip(1) {
-                let parent = streamer.parents[cell_index] as usize;
-                let (pcol, prow) = streamer.cells[parent];
-                let is_core = in_channel[cell_index] && in_channel[parent];
-                let energy = if is_core { CORE_ENERGY } else { CORE_ENERGY * BRANCH_RATIO };
-                let thickness = if is_core { 1.1 } else { 0.6 };
-                segments.push((
-                    (
-                        (f32::from(col) + 0.5) * lattice_to_full,
-                        (f32::from(row) + 0.5) * lattice_to_full,
-                    ),
-                    (
-                        (f32::from(pcol) + 0.5) * lattice_to_full,
-                        (f32::from(prow) + 0.5) * lattice_to_full,
-                    ),
-                    blend_at(col, row),
-                    energy * speed,
-                    thickness,
-                ));
-            }
-            bolts.push(Bolt { segments, step, speed });
-        }
+        let bolts = grow_bolts(ctx, &mut rng, MAX_BOLTS);
         info!("   lightning: {} bolts grown", bolts.len());
         if bolts.is_empty() {
             warn!("lightning skipped: no bolts reached their targets");

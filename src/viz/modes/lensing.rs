@@ -35,15 +35,17 @@ pub struct Lensing;
 
 /// One point lens: image-plane position and squared Einstein radius, in
 /// pixels of the working canvas.
+/// Exported for V65 `witness` (its per-frame lens pass).
 #[derive(Clone, Copy)]
-struct Deflector {
-    x: f64,
-    y: f64,
-    theta_e_sq: f64,
+pub(crate) struct Deflector {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) theta_e_sq: f64,
 }
 
 /// Point-lens deflection: `alpha = sum theta_Ei^2 (theta - theta_i) / |theta - theta_i|^2`.
-fn deflection(deflectors: &[Deflector], x: f64, y: f64) -> (f64, f64) {
+/// Exported for V65 `witness`.
+pub(crate) fn deflection(deflectors: &[Deflector], x: f64, y: f64) -> (f64, f64) {
     let mut ax = 0.0;
     let mut ay = 0.0;
     for lens in deflectors {
@@ -59,7 +61,8 @@ fn deflection(deflectors: &[Deflector], x: f64, y: f64) -> (f64, f64) {
 /// Einstein radii for the three bodies on a canvas with the given short
 /// edge: `theta_E = k sqrt(m_i / sum m)`, k set so the largest is
 /// `MAX_THETA_E_FRACTION` of the short edge.
-fn einstein_radii(masses: [f64; 3], short_edge: f64) -> [f64; 3] {
+/// Exported for V65 `witness` (which halves them: interior-view restraint).
+pub(crate) fn einstein_radii(masses: [f64; 3], short_edge: f64) -> [f64; 3] {
     let total: f64 = masses.iter().sum::<f64>().max(1e-12);
     let largest = masses.iter().copied().fold(0.0f64, f64::max);
     let k = MAX_THETA_E_FRACTION * short_edge / (largest / total).sqrt().max(1e-12);
