@@ -1,7 +1,10 @@
 //! Vector export helpers: Ramer-Douglas-Peucker polyline simplification,
-//! a physical-units SVG writer for pen plotters, and `OkLab` to sRGB hex
-//! conversion for stroke colors.
+//! a physical-units SVG writer for pen plotters, `OkLab` to sRGB hex
+//! conversion for stroke colors, and the binary STL / ASCII PLY writers
+//! used by the 3D export modes (master plan II.12).
 
+use crate::viz::common::tube_render::Mesh;
+use nalgebra::Vector3;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
@@ -150,6 +153,73 @@ pub fn write_svg(path: &str, width_mm: f64, height_mm: f64, layers: &[SvgLayer])
     out.flush()
 }
 
+/// Write an indexed mesh as binary STL (units are whatever the mesh uses;
+/// slicers assume millimeters).
+pub fn write_stl_binary(path: &str, mesh: &Mesh, comment: &str) -> io::Result<()> {
+    let mut out = BufWriter::new(File::create(path)?);
+    let mut header = [0u8; 80];
+    for (slot, byte) in header.iter_mut().zip(comment.bytes()) {
+        *slot = byte;
+    }
+    out.write_all(&header)?;
+    out.write_all(&(mesh.triangles.len() as u32).to_le_bytes())?;
+    for triangle in &mesh.triangles {
+        let a = mesh.vertices[triangle[0] as usize];
+        let b = mesh.vertices[triangle[1] as usize];
+        let c = mesh.vertices[triangle[2] as usize];
+        let normal = (b - a).cross(&(c - a));
+        let unit = if normal.norm() > 1e-18 { normal.normalize() } else { normal };
+        for vector in [unit, a, b, c] {
+            for component in [vector.x, vector.y, vector.z] {
+                // f64→f32: STL is a 32-bit format by definition.
+                out.write_all(&(component as f32).to_le_bytes())?;
+            }
+        }
+        out.write_all(&0u16.to_le_bytes())?;
+    }
+    out.flush()
+}
+
+/// One colored point for PLY export.
+pub struct PlyPoint {
+    /// Position.
+    pub position: Vector3<f64>,
+    /// sRGB color bytes.
+    pub color: (u8, u8, u8),
+    /// Auxiliary intensity in `[0, 1]`.
+    pub intensity: f64,
+}
+
+/// Write an ASCII PLY point cloud with colors and intensity.
+pub fn write_ply_ascii(path: &str, points: &[PlyPoint]) -> io::Result<()> {
+    let mut out = BufWriter::new(File::create(path)?);
+    writeln!(out, "ply")?;
+    writeln!(out, "format ascii 1.0")?;
+    writeln!(out, "element vertex {}", points.len())?;
+    for axis in ["x", "y", "z"] {
+        writeln!(out, "property float {axis}")?;
+    }
+    for channel in ["red", "green", "blue"] {
+        writeln!(out, "property uchar {channel}")?;
+    }
+    writeln!(out, "property float intensity")?;
+    writeln!(out, "end_header")?;
+    for point in points {
+        writeln!(
+            out,
+            "{:.5} {:.5} {:.5} {} {} {} {:.4}",
+            point.position.x,
+            point.position.y,
+            point.position.z,
+            point.color.0,
+            point.color.1,
+            point.color.2,
+            point.intensity.clamp(0.0, 1.0)
+        )?;
+    }
+    out.flush()
+}
+
 /// Convert an `OkLab` color to an sRGB hex string (gamut-clamped).
 #[must_use]
 pub fn oklab_to_srgb_hex(l: f64, a: f64, b: f64) -> String {
@@ -207,5 +277,44 @@ mod tests {
     fn oklab_white_is_near_ffffff() {
         let hex = oklab_to_srgb_hex(1.0, 0.0, 0.0);
         assert_eq!(hex, "#ffffff");
+    }
+
+    #[test]
+    fn stl_binary_has_exact_size() {
+        let mesh = Mesh {
+            vertices: vec![
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                Vector3::new(0.0, 1.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+            ],
+            triangles: vec![[0, 1, 2], [0, 2, 3], [0, 3, 1], [1, 3, 2]],
+        };
+        let path = std::env::temp_dir().join("viz_stl_size_test.stl");
+        let path_str = path.to_str().expect("temp path is utf-8");
+        write_stl_binary(path_str, &mesh, "test tetra").expect("stl writes");
+        let bytes = std::fs::metadata(path_str).expect("stl exists").len();
+        assert_eq!(bytes, 84 + 50 * mesh.triangles.len() as u64);
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn ply_header_and_rows_match_points() {
+        let points = vec![
+            PlyPoint {
+                position: Vector3::new(0.0, 1.0, 2.0),
+                color: (255, 128, 0),
+                intensity: 0.5,
+            },
+            PlyPoint { position: Vector3::new(3.0, 4.0, 5.0), color: (0, 255, 64), intensity: 1.0 },
+        ];
+        let path = std::env::temp_dir().join("viz_ply_test.ply");
+        let path_str = path.to_str().expect("temp path is utf-8");
+        write_ply_ascii(path_str, &points).expect("ply writes");
+        let contents = std::fs::read_to_string(path_str).expect("ply readable");
+        assert!(contents.starts_with("ply\nformat ascii 1.0\nelement vertex 2\n"));
+        assert_eq!(contents.lines().count(), 11 + 2);
+        assert!(contents.contains("255 128 0"));
+        let _ = std::fs::remove_file(path_str);
     }
 }

@@ -36,13 +36,13 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | ID | Flag | Category | Primary artifacts | Cost | Depends on | Status |
 |----|------|----------|-------------------|------|------------|--------|
 | V01 | `alien-vision` | Spectral | 5 stills | A | SPD | `[x]` |
-| V02 | `hyperspectral-flythrough` | Spectral | video | C | SPD, tube_render | `[ ]` |
+| V02 | `hyperspectral-flythrough` | Spectral | video | C | SPD, tube_render | `[x]` |
 | V03 | `spectral-centroid` | Spectral | still | A | SPD | `[x]` |
 | V04 | `prism-portrait` | Spectral | still | A | SPD | `[x]` |
 | V05 | `spectrum-card` | Spectral | poster | A | SPD, text | `[x]` |
 | V06 | `thin-film` | Spectral | still | A | SPD | `[x]` |
 | V07 | `braid` | Physics | tall still + video | A | kinematics | `[x]` |
-| V08 | `shape-sphere` | Physics | still + video | B | kinematics | `[ ]` |
+| V08 | `shape-sphere` | Physics | still + video | B | kinematics | `[x]` |
 | V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[x]` |
 | V10 | `sonification` | Physics | WAV + remuxed videos | B | kinematics, audio | `[ ]` |
 | V11 | `recurrence` | Physics | still | B | kinematics | `[ ]` |
@@ -62,7 +62,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V25 | `three-shadows` | Frames | triptych | B | accumulation | `[x]` |
 | V26 | `corotating` | Frames | diptych + video | C | kinematics, accumulation | `[x]` |
 | V27 | `ride-along` | Frames | video | C | kinematics, accumulation | `[x]` |
-| V28 | `bullet-time` | Frames | video | C | events, orbit camera | `[ ]` |
+| V28 | `bullet-time` | Frames | video | C | events, orbit camera | `[x]` |
 | V29 | `retarded-time` | Frames | still + video | B | kinematics | `[x]` |
 | V30 | `lensing` | Frames | still + video | B | fields | `[x]` |
 | V31 | `dust-nebula` | Matter | video + still | C | fields, accumulation | `[x]` |
@@ -74,17 +74,17 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V37 | `roche` | Matter | video | C | fields | `[x]` |
 | V38 | `galaxy-collision` | Matter | video + still | C | resim-lite, accumulation | `[x]` |
 | V39 | `reconnection` | Matter | video | C | fields, events | `[x]` |
-| V40 | `aurora` | Matter | video | C | tube_render | `[ ]` |
+| V40 | `aurora` | Matter | video | C | tube_render | `[x]` |
 | V41 | `winding-glass` | Topology | still | B | kinematics | `[x]` |
 | V42 | `basin-map` | Topology | poster + data | D | resim | `[ ]` |
-| V43 | `worldtube` | Topology | still + video | C | tube_render | `[ ]` |
-| V44 | `neon` | 3D scene | still | C | tube_render | `[ ]` |
-| V45 | `chandelier` | 3D scene | still + video | D | tube_render, energy field | `[ ]` |
+| V43 | `worldtube` | Topology | still + video | C | tube_render | `[x]` |
+| V44 | `neon` | 3D scene | still | C | tube_render | `[x]` |
+| V45 | `chandelier` | 3D scene | still + video | D | tube_render, energy field | `[x]` |
 | V46 | `turntable` | 3D scene | video | A | existing orbit.rs | `[x]` |
 | V47 | `trailer` | Cinema | video | C | compositor, events | `[ ]` |
 | V48 | `mission-control` | Cinema | video | C | text, kinematics, events | `[ ]` |
 | V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[ ]` |
-| V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[ ]` |
+| V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[x]` |
 | V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[x]` |
 | V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[x]` |
 | V53 | `webgl-viewer` | Exports | JSON + HTML | B | vector_export | `[ ]` |
@@ -285,6 +285,68 @@ implemented -- 36 of 69 modes. New shared infrastructure and deviations:
   time-lapse cadence reads better than 60 fps for growth processes.
 - **README** gained a "Visualization Modes" usage section (flags,
   categories, draft previews, artifact layout).
+
+## Wave 6 addendum (2026-08-18)
+
+Wave 6 (3D scene family: V43, V02, V08, V40, V44, V45, V50, V28) is
+implemented -- 44 of 69 modes. New shared infrastructure and deviations:
+
+- **`common/tube_render.rs`** (II.8): capsule-chain sphere tracer with a
+  uniform grid whose conservative step is `min(local_sdf, cell)` near
+  occupancy and a two-pass Chebyshev chamfer transform for multi-cell
+  empty-space jumps (background rays cross the scene in a few steps
+  instead of ~100). Emitters: the K brightest capsules with a greedy
+  minimum-separation pass, power-boosted so the chosen set carries the
+  union's total power. Volumetrics per spec (equiangular, two samples per
+  emitter). Plane lighting shadow-tests only the `shadow_emitters`
+  brightest clusters. Also hosts `rdp_simplify_3d` and the deterministic
+  marching-tetrahedra mesher (edge-deduplicated, shared-diagonal cube
+  split) with `is_watertight` / `ray_parity_ok` audits.
+- **Budget discipline (the V46 lesson):** every 3D/volumetric video logs
+  measured seconds-per-frame and a projected total after its first frame.
+  Videos render at half resolution; V43/V08/V40 run 30 fps (900 frames
+  per 30 s) instead of 60, and V43's orbit video uses 2 spp (the 4 spp
+  constant is kept for heroes). Verified on the draft smoke before any
+  server batch includes these modes.
+- **V02:** output stays at half resolution (the spec's bicubic upscale to
+  full res is dropped -- a full-res HEVC `slower` encode would dominate an
+  entire batch); the volume grid is a quarter-res-per-axis energy stack
+  with per-slab constant colors; 2x temporal supersample at final only.
+- **V08:** texture is 2048x2048 (square, per the constants); collision
+  sigils are etched circles with an equator tick, poles get cap-and-rays
+  stars; antipodal decimation jumps are skipped when splatting the route.
+- **V28:** the sweep re-splats the frozen set with an *adaptive* stride
+  targeting a 100k-segment budget per frame (energy-compensated via
+  `hdr_scale`), replacing the spec's fixed stride 3 (measured turntable
+  costs made fixed strides unpayable). One SPD buffer serves all three
+  segments; A/B/C share the same strided tilted scene so the freeze cuts
+  land frame-exact. Body cores are production splats with the diffraction
+  -spike finish forced on during the sweep.
+- **V40:** curtains are baked into a shared 256x96x256 emissive voxel grid
+  (striation noise applied at bake time; altitude color against the
+  global H0), then marched emissively; the dolly video runs 1 spp
+  jittered, the hero still 4 spp at the precomputed widest-overlap pose.
+- **V44:** the total-glass-length cap is applied as strand-end trimming
+  (keeps <= 3 strands per body; dropping interior low-energy segments
+  would multiply strands); wall gather is emitter-direct lighting over the
+  procedural brick normal field; the glass shell is a Schlick-style
+  grazing boost; the flicker is loop-periodic hum plus a two-event
+  dropout schedule on one seeded strand.
+- **V45:** the 4k-VPL diffuse bounce is approximated by direct lighting
+  from K = 48 clusters plus the equiangular fog (colored shadows come from
+  the 12 shadow-tested brightest emitters at the 16 spp hero); capsule
+  emission is scaled by the master energy field sampled along the path
+  (p98-normalized), with a flat-emission fallback under `--image-only`.
+- **V50:** voxel remesh via marching tetrahedra over the capsule SDF union
+  (same watertightness guarantee as the spec'd marching cubes, far
+  smaller tables; `mesh_distance` short-circuits far cells through the
+  chamfer transform). The relief plaque is a watertight heightfield box
+  rather than stepped extruded contours. The preview renders the floored
+  capsule source geometry -- silhouette-identical to the meshed SDF. The
+  Euler/edge-manifold and ray-parity audits run at export time and are
+  recorded in `print_notes.txt`. STL (binary) and PLY (ASCII) writers
+  landed in `common/vector_export.rs` per II.12; the n-gon sweep
+  triangulator is superseded by the voxel remesh.
 
 # Part I — Subsystem Architecture
 
@@ -793,7 +855,7 @@ phase (needs BinBuffers). Budget ≈ 10–15 min on 16 cores.
 - [ ] No slab banding (trilinear + jitter verified at HQ).
 - [ ] Loopable end pose (final frame ≈ mirrored first frame framing).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; half-res output, see addendum)
 
 ---
 
@@ -1062,7 +1124,7 @@ trivially fast (< 4 min for 1800 frames). Trajectory phase.
 - [ ] Route brightness encodes dwell (slow arcs glow).
 - [ ] Globe render passes the "instantly a planet" gut check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; 30 fps rotation, see addendum)
 
 ---
 
@@ -1950,7 +2012,7 @@ defaults (~5–8 min) + short A/C segments. Trajectory phase.
 - [ ] Parallax depth readable mid-sweep.
 - [ ] Spike cores luminous but unclipped.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; adaptive sweep stride, see addendum)
 
 ---
 
@@ -2511,7 +2573,7 @@ res).
 - [ ] Altitude color ramp reads (skirt band present).
 - [ ] Dolly speed stately: full crossing ≥ 25 s.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; voxel-baked curtains, see addendum)
 
 ---
 
@@ -2660,7 +2722,7 @@ min for 1800 frames + hero at full res. Trajectory phase, budget-aware.
 - [ ] Tube identity followable through the braid (core lines working).
 - [ ] Hero frame passes the "monument" gut check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; gauge labels deferred to text.rs)
 
 ---
 
@@ -2709,7 +2771,7 @@ Trajectory phase.
 - [ ] Wall wash colors mix physically (two nearby strands blend on brick).
 - [ ] Flicker subtle: no epilepsy-adjacent strobing (rate audit).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; end-trim glass cap, see addendum)
 
 ---
 
@@ -2755,7 +2817,7 @@ scales spp ladder. Trajectory phase.
 - [ ] Floor pools read as caustic-like structure, not blobs.
 - [ ] Push-in maintains noise floor ≤ HQ encode dither (spp audit).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; VPL bounce approximated, see addendum)
 
 ---
 
@@ -2990,7 +3052,7 @@ fast (< 2 min); everything else trivial. Trajectory phase.
 - [ ] Preview faithful (silhouette IoU vs mesh render ≥ 95%).
 - [ ] Point cloud opens in MeshLab with colors intact.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 6; marching tetrahedra, see addendum)
 
 ---
 

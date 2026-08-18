@@ -1,7 +1,10 @@
-//! Implemented visualization modes (Waves 1-4 of `docs/VIZ_MASTER_PLAN.md`).
+//! Implemented visualization modes (Waves 1-6 of `docs/VIZ_MASTER_PLAN.md`).
 
 pub mod alien_vision;
+pub mod aurora;
 pub mod braid;
+pub mod bullet_time;
+pub mod chandelier;
 pub mod chrono_grid;
 pub mod comet;
 pub mod corotating;
@@ -12,11 +15,13 @@ pub mod field_lines;
 pub mod frost;
 pub mod galaxy_collision;
 pub mod gw_chirp;
+pub mod hyperspectral_flythrough;
 pub mod lensing;
 pub mod light_echoes;
 pub mod lightning;
 pub mod marbling;
 pub mod medial_recursion;
+pub mod neon;
 pub mod oscilloscope;
 pub mod physarum;
 pub mod plotter_svg;
@@ -25,6 +30,8 @@ pub mod reconnection;
 pub mod retarded_time;
 pub mod ride_along;
 pub mod roche;
+pub mod sculpture_export;
+pub mod shape_sphere;
 pub mod slit_scan;
 pub mod spectral_centroid;
 pub mod spectrum_card;
@@ -36,6 +43,7 @@ pub mod topo_contours;
 pub mod triangle_centers;
 pub mod turntable;
 pub mod winding_glass;
+pub mod worldtube;
 
 use crate::viz::VizMode;
 
@@ -79,6 +87,16 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "lightning" => Some(Box::new(lightning::Lightning)),
         "marbling" => Some(Box::new(marbling::Marbling)),
         "light-echoes" => Some(Box::new(light_echoes::LightEchoes)),
+        "worldtube" => Some(Box::new(worldtube::Worldtube)),
+        "hyperspectral-flythrough" => {
+            Some(Box::new(hyperspectral_flythrough::HyperspectralFlythrough))
+        }
+        "shape-sphere" => Some(Box::new(shape_sphere::ShapeSphere)),
+        "aurora" => Some(Box::new(aurora::Aurora)),
+        "neon" => Some(Box::new(neon::Neon)),
+        "chandelier" => Some(Box::new(chandelier::Chandelier)),
+        "sculpture-export" => Some(Box::new(sculpture_export::SculptureExport)),
+        "bullet-time" => Some(Box::new(bullet_time::BulletTime)),
         _ => None,
     }
 }

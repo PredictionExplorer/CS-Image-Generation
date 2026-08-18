@@ -38,13 +38,13 @@ const fn entry(
 /// Every mode from the master plan ledger, in ledger order.
 pub const CATALOG: &[ModeEntry] = &[
     entry("V01", "alien-vision", "The Same Light, Other Eyes", "spectral", 'A', true),
-    entry("V02", "hyperspectral-flythrough", "Flying Through the Spectrum", "spectral", 'C', false),
+    entry("V02", "hyperspectral-flythrough", "Flying Through the Spectrum", "spectral", 'C', true),
     entry("V03", "spectral-centroid", "What Color the Light Really Is", "spectral", 'A', true),
     entry("V04", "prism-portrait", "The Artwork Through Glass", "spectral", 'A', true),
     entry("V05", "spectrum-card", "Stellar Classification Card", "spectral", 'A', true),
     entry("V06", "thin-film", "Oil-Slick Twin", "spectral", 'A', true),
     entry("V07", "braid", "The Orbit Is a Braid", "physics", 'A', true),
-    entry("V08", "shape-sphere", "The Planet of Shapes", "physics", 'B', false),
+    entry("V08", "shape-sphere", "The Planet of Shapes", "physics", 'B', true),
     entry("V09", "gw-chirp", "The Sound of Spacetime", "physics", 'A', true),
     entry("V10", "sonification", "The Orbit's Score", "physics", 'B', false),
     entry("V11", "recurrence", "Fingerprint of Chaos", "physics", 'B', false),
@@ -64,7 +64,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V25", "three-shadows", "The Cave Wall Triptych", "frames", 'B', true),
     entry("V26", "corotating", "The Same Dance from the Dance Floor", "frames", 'C', true),
     entry("V27", "ride-along", "What Body Three Sees", "frames", 'C', true),
-    entry("V28", "bullet-time", "The Held Breath", "frames", 'C', false),
+    entry("V28", "bullet-time", "The Held Breath", "frames", 'C', true),
     entry("V29", "retarded-time", "Where Their Light Says They Are", "frames", 'B', true),
     entry("V30", "lensing", "Gravity Bends the Gallery", "frames", 'B', true),
     entry("V31", "dust-nebula", "Gravity's Weather", "matter", 'C', true),
@@ -76,17 +76,17 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V37", "roche", "Lobes That Touch", "matter", 'C', true),
     entry("V38", "galaxy-collision", "The Antennae, Choreographed", "matter", 'C', true),
     entry("V39", "reconnection", "Field Lines That Snap", "matter", 'C', true),
-    entry("V40", "aurora", "Curtains Over the Void", "matter", 'C', false),
+    entry("V40", "aurora", "Curtains Over the Void", "matter", 'C', true),
     entry("V41", "winding-glass", "Topological Stained Glass", "topology", 'B', true),
     entry("V42", "basin-map", "Where Your Artwork Lives in Chaos", "topology", 'D', false),
-    entry("V43", "worldtube", "The Spacetime Sculpture", "topology", 'C', false),
-    entry("V44", "neon", "Signage from the End of the Universe", "scene3d", 'C', false),
-    entry("V45", "chandelier", "The Room Lit by the Orbit", "scene3d", 'D', false),
+    entry("V43", "worldtube", "The Spacetime Sculpture", "topology", 'C', true),
+    entry("V44", "neon", "Signage from the End of the Universe", "scene3d", 'C', true),
+    entry("V45", "chandelier", "The Room Lit by the Orbit", "scene3d", 'D', true),
     entry("V46", "turntable", "Museum Turntable", "scene3d", 'A', true),
     entry("V47", "trailer", "Sixty Seconds, Auto-Edited", "cinema", 'C', false),
     entry("V48", "mission-control", "The 1969 Broadcast", "cinema", 'C', false),
     entry("V49", "broadcast", "The Five-Act Short Film", "cinema", 'D', false),
-    entry("V50", "sculpture-export", "The Printable Object", "exports", 'B', false),
+    entry("V50", "sculpture-export", "The Printable Object", "exports", 'B', true),
     entry("V51", "plotter-svg", "Ink and Thread", "exports", 'A', true),
     entry("V52", "depth-pack", "The Third Dimension, Packaged", "exports", 'B', true),
     entry("V53", "webgl-viewer", "Hold Your Orbit", "exports", 'B', false),
@@ -238,10 +238,19 @@ mod tests {
             "lightning",
             "marbling",
             "light-echoes",
+            // Wave 6 (3D scene family)
+            "worldtube",
+            "hyperspectral-flythrough",
+            "shape-sphere",
+            "aurora",
+            "neon",
+            "chandelier",
+            "sculpture-export",
+            "bullet-time",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 36);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 44);
     }
 }

@@ -5,7 +5,17 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~02:45 EST (~07:45 UTC).
+Last updated: 2026-08-18 ~05:15 EST (~10:15 UTC), at the Wave 6 commit.
+
+> **Smoke-found bug, fixed pre-commit:** the Wave 6 draft smoke caught a
+> NaN-poisoned camera tangent — one-sided dolly look-aheads collapse to a
+> zero vector at clamped path ends, `normalize()` yields NaN, and the
+> ray/box clip fails open (`f64::max(0.0, NaN) = 0`,
+> `min(inf, NaN) = inf`), which spun V02's uncapped marcher forever on
+> its final frames. Fixed with symmetric-difference tangents, finite
+> interval guards, and a 640-step cap (V02 + V40). A full-smoke
+> verification pass on `viz-smoke6` accompanies the commit; treat any
+> non-green smoke as a stop-the-line issue for server batches.
 
 ---
 
@@ -21,29 +31,34 @@ Last updated: 2026-08-18 ~02:45 EST (~07:45 UTC).
      fetch, then relaunch these two seeds with every implemented mode
      **except `turntable`** (they will already have it; there is no
      exclusion syntax — build the comma list from `--viz-list` and pass
-     it via `--viz-flags`).
+     it via `--viz-flags`). Deploying from post-Wave-6 HEAD gives them
+     all 43 remaining modes in one run.
    - **viz-batch2** (`--remote-dir viz-batch2/CS-Image-Generation`):
      seeds `0xBEEF 0xC0DE 0xCAFE` relaunched 2026-08-18 ~07:30 UTC from
-     `77b5c2d` with all **36** modes, including max-quality turntables
-     (decision: keep full quality; measured cost ≈ 2–11 days/seed,
-     turntable-dominated — see the corrected V46 Performance note in the
-     master plan). ETA roughly Aug 24–29. Fetch needs the same
-     `--remote-dir`.
+     `77b5c2d` with all **36** modes of Waves 1-5, including max-quality
+     turntables (decision: keep full quality; measured cost ≈ 2–11
+     days/seed, turntable-dominated — see the corrected V46 Performance
+     note in the master plan). ETA roughly Aug 24–29. Fetch needs the
+     same `--remote-dir`. NOTE: this batch predates Wave 6 — those three
+     seeds will need a Wave-6-only top-up run afterwards (`--viz-flags`
+     with the 8 Wave-6 flags; budget the core re-render ~4-5 h/seed on
+     top).
 2. **Wave-1 partials already fetched** (2026-08-18 ~07:15 UTC) to
    `../CS-viz-results-20260818/` — all 5 seeds' core packages + the 5
    cheap Wave-1 modes each, ready for curation now. NOTE: fetch
    destinations must live **outside the repo** (or be gitignored) —
    an in-repo `viz-results/` blocked a deploy (deploy requires a clean
    tree). Add `viz-results/` to `.gitignore` in the next code commit.
-3. **Start Wave 6** (3D scene family) per the plan below — independent of
-   the batches; local work never touches the server checkouts.
+3. **Wave 6 is implemented** (this session; 44/69). **Start Wave 7**
+   (ensembles & cartography) per the plan below — independent of the
+   batches; local work never touches the server checkouts.
 
 ## Where we are
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). Wave 5 landed as
-  `27eee5e`; every wave is one `feat:` commit plus this handoff kept in
-  sync. All gates were green at the Wave 5 commit.
-- **Progress:** 36 of 69 modes implemented (`--viz-list` prints the live
+  `27eee5e`, Wave 6 as the latest `feat:` commit; every wave is one
+  `feat:` commit plus this handoff kept in sync. All gates green.
+- **Progress:** 44 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
     kinematics/events/energy-field), `ArtifactSink` + `viz/manifest.json`,
@@ -73,11 +88,17 @@ Last updated: 2026-08-18 ~02:45 EST (~07:45 UTC).
     `common/wave.rs` (leapfrog + sponge), and energy-field retention into
     the trajectory phase (`VizMode::needs_energy_field`). Deviations in
     the Wave 5 addendum. README gained a "Visualization Modes" section.
-- **Next up:** **Wave 6 — 3D scene family** per the build order in the
-  master plan Part IV.2: `common/tube_render.rs` (CPU sphere-traced capsule
-  chains, II.8) first, then V43 `worldtube`, V02
-  `hyperspectral-flythrough`, V08 `shape-sphere`, V40 `aurora`, V44 `neon`,
-  V45 `chandelier`, V50 `sculpture-export`, V28 `bullet-time`.
+  - **Wave 6** (8, 3D scene family): worldtube, hyperspectral-flythrough,
+    shape-sphere, aurora, neon, chandelier, sculpture-export, bullet-time
+    — plus `common/tube_render.rs` (capsule sphere tracer with chamfer
+    empty-space skipping, textured spheres, brick/matte planes,
+    equiangular fog, orbit/dolly rigs, and the marching-tetrahedra SDF
+    mesher) and STL/PLY writers in `common/vector_export.rs`. Every 3D
+    video logs measured s/frame + a projected total after frame 0 (the
+    V46 lesson institutionalized). Deviations in the Wave 6 addendum.
+- **Next up:** **Wave 7 — Ensembles & cartography** per the build order in
+  the master plan Part IV.2: `resim` first, then V23 `epilogue`, V24
+  `multiverse`, V22 `editorial-retime`, V42 `basin-map`, V62 `terra`.
 - **Deviations from specs** are recorded in the "Wave N addendum" sections
   at the top of the master plan (single viz manifest instead of an
   assets.json section; typography/text.rs deferred to the posters wave;
@@ -154,7 +175,10 @@ cargo test --release                          # ~500 tests
 
 Smoke outputs (`output/…`) are gitignored. Local smoke dirs so far:
 `viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3),
-`viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5).
+`viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5), `viz-smoke6` (Wave 6).
+CAUTION: never launch the smoke twice concurrently — two runs share
+`output/<name>` and their encoders fight over the same mp4 paths (this
+deadlocked a Wave 6 smoke until the duplicate was killed).
 
 ## Code map (viz subsystem)
 
@@ -167,9 +191,11 @@ src/viz/common/       accum (production re-accumulation), display (graders,
                       SpdCanvas), fields (potential grids, streamlines,
                       Roche/L1), particles (test-particle swarms, banded
                       splatter), agents (Physarum/DLA/streamer), fluid
-                      (stable fluids), wave (leapfrog grid), kinematics,
-                      events, spd, contours, raster, audio, vector_export
-src/viz/modes/        one file per implemented mode (36)
+                      (stable fluids), wave (leapfrog grid), tube_render
+                      (capsule sphere tracer, SDF mesher, camera rigs),
+                      kinematics, events, spd, contours, raster, audio,
+                      vector_export (SVG/RDP + STL/PLY)
+src/viz/modes/        one file per implemented mode (44)
 ```
 
 Integration points in the core pipeline: `src/main.rs` (flags, SPD-phase
@@ -209,6 +235,12 @@ call inside the video branch, trajectory phase at the end),
   draft smoke also hits draft-only artifacts by design: frost's 50%
   fill-limit truncates growth on tiny grids, and dust barely drifts in a
   30k-step run — judge both at final only.
+- **Wave 6 constants likewise draft-tuned:** worldtube/chandelier fog
+  sigmas and emission gains, aurora striation/skirt weights, neon brick
+  albedo and flicker depths, V02 sigma calibration target. Final-quality
+  costs must be read off the per-mode "projected" log lines on the first
+  golden-seed run before batching (V45 hero 16 spp and V28's sweep are
+  the two to watch).
 - The user curates favorites from batch outputs; deep-polish passes on
   chosen modes follow the wave completions (V37/V39 full-res stills are
   queued behind that shortlist, per the Wave 4 addendum).

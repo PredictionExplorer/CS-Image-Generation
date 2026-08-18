@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 36);
+        assert_eq!(selection.entries().len(), 44);
         assert!(selection.entries().iter().all(|entry| entry.implemented));
     }
 
