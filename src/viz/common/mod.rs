@@ -13,6 +13,7 @@ pub mod fluid;
 pub mod kinematics;
 pub mod particles;
 pub mod raster;
+pub mod resim;
 pub mod spd;
 pub mod tube_render;
 pub mod vector_export;

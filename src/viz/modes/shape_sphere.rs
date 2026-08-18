@@ -317,6 +317,7 @@ impl VizMode for ShapeSphere {
             orientation: orientation_at(0.6),
             rim_color: rim_rgb,
             rim_strength: 0.9,
+            sun: None,
         });
         let mut rng = ctx.fork_rng("shape-sphere");
         let jitter_seed = rng.next_u64();

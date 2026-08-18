@@ -2,6 +2,7 @@
 
 pub mod alien_vision;
 pub mod aurora;
+pub mod basin_map;
 pub mod braid;
 pub mod bullet_time;
 pub mod chandelier;
@@ -11,6 +12,8 @@ pub mod corotating;
 pub mod depth_pack;
 pub mod dust_nebula;
 pub mod dwell_nebula;
+pub mod editorial_retime;
+pub mod epilogue;
 pub mod field_lines;
 pub mod frost;
 pub mod galaxy_collision;
@@ -21,6 +24,7 @@ pub mod light_echoes;
 pub mod lightning;
 pub mod marbling;
 pub mod medial_recursion;
+pub mod multiverse;
 pub mod neon;
 pub mod oscilloscope;
 pub mod physarum;
@@ -37,6 +41,7 @@ pub mod spectral_centroid;
 pub mod spectrum_card;
 pub mod strobe;
 pub mod syzygy_wheel;
+pub mod terra;
 pub mod thin_film;
 pub mod three_shadows;
 pub mod topo_contours;
@@ -97,6 +102,11 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "chandelier" => Some(Box::new(chandelier::Chandelier)),
         "sculpture-export" => Some(Box::new(sculpture_export::SculptureExport)),
         "bullet-time" => Some(Box::new(bullet_time::BulletTime)),
+        "epilogue" => Some(Box::new(epilogue::Epilogue)),
+        "multiverse" => Some(Box::new(multiverse::Multiverse)),
+        "editorial-retime" => Some(Box::new(editorial_retime::EditorialRetime)),
+        "basin-map" => Some(Box::new(basin_map::BasinMap)),
+        "terra" => Some(Box::new(terra::Terra)),
         _ => None,
     }
 }

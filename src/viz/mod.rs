@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 44);
+        assert_eq!(selection.entries().len(), 49);
         assert!(selection.entries().iter().all(|entry| entry.implemented));
     }
 
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn resolve_rejects_unknown_and_unimplemented() {
         assert!(VizSelection::resolve(&["no-such-mode".to_string()]).is_err());
-        assert!(VizSelection::resolve(&["basin-map".to_string()]).is_err());
+        assert!(VizSelection::resolve(&["hologram".to_string()]).is_err());
     }
 
     #[test]

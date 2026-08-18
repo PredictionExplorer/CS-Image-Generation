@@ -58,9 +58,9 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V19", "slit-scan", "The Whole Film in One Image", "time", 'A', true),
     entry("V20", "strobe", "Phantom Triangles", "time", 'B', true),
     entry("V21", "comet", "Forever Redrawing", "time", 'C', true),
-    entry("V22", "editorial-retime", "Drama-Adaptive Time", "time", 'C', false),
-    entry("V23", "epilogue", "How This Artwork Dies", "time", 'C', false),
-    entry("V24", "multiverse", "The Garden of Forking Orbits", "time", 'C', false),
+    entry("V22", "editorial-retime", "Drama-Adaptive Time", "time", 'C', true),
+    entry("V23", "epilogue", "How This Artwork Dies", "time", 'C', true),
+    entry("V24", "multiverse", "The Garden of Forking Orbits", "time", 'C', true),
     entry("V25", "three-shadows", "The Cave Wall Triptych", "frames", 'B', true),
     entry("V26", "corotating", "The Same Dance from the Dance Floor", "frames", 'C', true),
     entry("V27", "ride-along", "What Body Three Sees", "frames", 'C', true),
@@ -78,7 +78,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V39", "reconnection", "Field Lines That Snap", "matter", 'C', true),
     entry("V40", "aurora", "Curtains Over the Void", "matter", 'C', true),
     entry("V41", "winding-glass", "Topological Stained Glass", "topology", 'B', true),
-    entry("V42", "basin-map", "Where Your Artwork Lives in Chaos", "topology", 'D', false),
+    entry("V42", "basin-map", "Where Your Artwork Lives in Chaos", "topology", 'D', true),
     entry("V43", "worldtube", "The Spacetime Sculpture", "topology", 'C', true),
     entry("V44", "neon", "Signage from the End of the Universe", "scene3d", 'C', true),
     entry("V45", "chandelier", "The Room Lit by the Orbit", "scene3d", 'D', true),
@@ -98,7 +98,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V59", "blueprint", "Two Archival Restylings", "posters", 'B', false),
     entry("V60", "dwell-nebula", "The Ergodic Ghost", "posters", 'B', true),
     entry("V61", "topo-contours", "The Terrain of Light", "posters", 'B', true),
-    entry("V62", "terra", "Terra Trium Corporum", "posters", 'C', false),
+    entry("V62", "terra", "Terra Trium Corporum", "posters", 'C', true),
     entry("V63", "celestial-atlas", "The Collection as a Sky", "posters", 'C', false),
     entry("V64", "powers-of-fate", "The Dive", "combos", 'D', false),
     entry("V65", "witness", "First Person, Honest Optics", "combos", 'D', false),
@@ -247,10 +247,16 @@ mod tests {
             "chandelier",
             "sculpture-export",
             "bullet-time",
+            // Wave 7 (ensembles & cartography)
+            "epilogue",
+            "multiverse",
+            "editorial-retime",
+            "basin-map",
+            "terra",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 44);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 49);
     }
 }

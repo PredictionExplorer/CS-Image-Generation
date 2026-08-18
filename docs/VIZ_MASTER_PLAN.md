@@ -56,9 +56,9 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V19 | `slit-scan` | Time | 2 stills | A | frame tap | `[x]` |
 | V20 | `strobe` | Time | still + video | B | accumulation | `[x]` |
 | V21 | `comet` | Time | video | C | accumulation | `[x]` |
-| V22 | `editorial-retime` | Time | video | C | events, accumulation | `[ ]` |
-| V23 | `epilogue` | Time | video | C | resim | `[ ]` |
-| V24 | `multiverse` | Time | poster + video | C | resim | `[ ]` |
+| V22 | `editorial-retime` | Time | video | C | events, accumulation | `[x]` |
+| V23 | `epilogue` | Time | video | C | resim | `[x]` |
+| V24 | `multiverse` | Time | poster + video | C | resim | `[x]` |
 | V25 | `three-shadows` | Frames | triptych | B | accumulation | `[x]` |
 | V26 | `corotating` | Frames | diptych + video | C | kinematics, accumulation | `[x]` |
 | V27 | `ride-along` | Frames | video | C | kinematics, accumulation | `[x]` |
@@ -76,7 +76,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V39 | `reconnection` | Matter | video | C | fields, events | `[x]` |
 | V40 | `aurora` | Matter | video | C | tube_render | `[x]` |
 | V41 | `winding-glass` | Topology | still | B | kinematics | `[x]` |
-| V42 | `basin-map` | Topology | poster + data | D | resim | `[ ]` |
+| V42 | `basin-map` | Topology | poster + data | D | resim | `[x]` |
 | V43 | `worldtube` | Topology | still + video | C | tube_render | `[x]` |
 | V44 | `neon` | 3D scene | still | C | tube_render | `[x]` |
 | V45 | `chandelier` | 3D scene | still + video | D | tube_render, energy field | `[x]` |
@@ -96,7 +96,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V59 | `blueprint` | Posters | 2 stills | B | accumulation restyle | `[ ]` |
 | V60 | `dwell-nebula` | Posters | still | B | density splat | `[x]` |
 | V61 | `topo-contours` | Posters | still | B | energy field | `[x]` |
-| V62 | `terra` | Posters | poster + video | C | V08, V42-lite, text | `[ ]` |
+| V62 | `terra` | Posters | poster + video | C | V08, V42-lite, text | `[x]` |
 | V63 | `celestial-atlas` | Posters | poster | C | multi-seed input, text | `[ ]` |
 | V64 | `powers-of-fate` | Combos | video | D | V42, compositor | `[ ]` |
 | V65 | `witness` | Combos | video | D | V26, V27, V29, V30, V16, audio | `[ ]` |
@@ -347,6 +347,61 @@ implemented -- 44 of 69 modes. New shared infrastructure and deviations:
   recorded in `print_notes.txt`. STL (binary) and PLY (ASCII) writers
   landed in `common/vector_export.rs` per II.12; the n-gon sweep
   triangulator is superseded by the voxel remesh.
+
+## Wave 7 addendum (2026-08-18)
+
+Wave 7 (ensembles & cartography: V23, V24, V22, V42, V62) is implemented
+-- 49 of 69 modes. New shared infrastructure and deviations:
+
+- **`common/resim.rs`** (II.3): `rerun` reproduces `sim::get_positions`
+  bit-identically (warm-up semantics included, unit-tested); `extended`
+  records `steps x factor` with ejection detection every 10k steps and a
+  50k-step hysteresis, returning the escaper and final body states;
+  `perturb_grid` runs storage-free capped outcome sims (rayon);
+  `perturb_ensemble` draws isotropic sibling perturbations;
+  `sim::symplectic_step` became `pub(crate)`. The production
+  `DEFAULT_ESCAPE_THRESHOLD (-0.3)` is mirrored as a resim constant.
+- **Orientation recovery instead of transform replay.** The dressed
+  trajectories in `VizContext` carry a seeded view rotation and drift
+  applied mid-pipeline with RNG state that cannot be replayed post-hoc.
+  `resim::recover_orientation` fits the rotation with a per-step-centered
+  Kabsch SVD (centering cancels drift and COM wander; unit-tested under a
+  synthetic drift). Re-simulated modes (V23/V24) render with the
+  recovered rotation; the drift translation is intentionally dropped.
+- **`events::drama()`** (II.2): 0.5/0.3/0.2 blend of p99-normalized
+  inverse minimum separation, |dKE/dt|, and syzygy proximity, smoothed by
+  three O(n) box passes approximating the sigma = 1,200 Gaussian.
+- **V22:** 30 s at 30 fps (900 frames, the wave's video convention); the
+  step clamp is relative to the mean advance (mean/6 .. mean x 8 -- the
+  spec's absolute [90, 4500] assumed a fixed step count); the optional
+  12% exposure swell and the production substep interpolator are
+  deferred (the interpolator is not exposed to the viz layer).
+- **V23:** recap and epilogue render the re-simulated trajectory dressed
+  with the recovered rotation, so the recap approximates (not replays)
+  the master's exact framing; tail palette holds each body's final color;
+  the V09 score mux is deferred to the sound wave; segment crossfades
+  blend energy-linear RGBA between the outgoing and incoming framings.
+- **V24:** all nine cells (center included) are re-rendered from
+  re-simulated trajectories under the center's framing and per-cell
+  histogram levels -- the center is not a master.png downsample (framing
+  and drift consistency across the grid); divergence is measured on raw
+  trajectories (1% of scene scale) rather than cell image energy; the
+  grid video runs quarter-res cells (nine concurrent SPDs); labels ship
+  in `divergence.json` until text.rs.
+- **V42:** default lattice 768^2 with the draft ladder via
+  `--viz-quality` (192^2) instead of the unimplemented `--viz-budget`;
+  cap = 25% of the full 2 x steps integration from t = 0 (no warm-up);
+  cartography is hairline-only (crosshair, margin ticks, 8x inset) until
+  text.rs; outcome rows ship as compact strings in `basin.json`; the
+  center-cell fate is checked against the unperturbed capped fate and
+  the comparison is recorded.
+- **V62:** the terrain probe starts each shape-sphere configuration from
+  rest at the seed's mean hyper-radius (inverse Hopf map, unit-tested as
+  an exact roundtrip); the plate fills terrain by forward-projecting
+  equirect quads (no numerical Winkel tripel inverse); route stippling,
+  dragon/star sigils, graticule, and border ticks are inked, the
+  cartouche waits for text.rs; the globe gains soft terminator lighting
+  via an optional sun on `tube_render::TexturedSphere`.
 
 # Part I — Subsystem Architecture
 
@@ -1733,7 +1788,7 @@ phase. Segment library: the schedule builder is exported for V47/V49.
 - [ ] Total duration exactly 30.00 s; schedule sums verified.
 - [ ] Blind viewers prefer it over linear main video (curation check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 7; swell/substep deferred, see addendum)
 
 ---
 
@@ -1786,7 +1841,7 @@ phase, budget-capped.
 - [ ] Zoom continuous (no bound-jump pops between segments).
 - [ ] The final ember framing lands emotionally (curation check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 7; score muxing deferred, see addendum)
 
 ---
 
@@ -1831,7 +1886,7 @@ nine synchronized reveals), `divergence.json` (pairwise divergence times).
 - [ ] Divergence flashes ordered plausibly (Lyapunov sanity).
 - [ ] Grid poster print-clean at A1.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 7; center cell re-rendered, see addendum)
 
 ---
 
@@ -2677,7 +2732,7 @@ N. Trajectory phase (independent of SPD).
 - [ ] Center cell fate equals the actual run's fate (consistency test).
 - [ ] Poster annotation complete and exact.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 7; hairline-only cartography until text.rs)
 
 ---
 
@@ -3607,7 +3662,7 @@ mathematics; the globe and plate agree exactly.
 - [ ] Coastline fractality visible at plate zoom.
 - [ ] Cartouche/border typography passes the antique gut check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 7; cartouche deferred until text.rs)
 
 ---
 

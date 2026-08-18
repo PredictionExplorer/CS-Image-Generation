@@ -147,7 +147,7 @@ impl Body {
 }
 
 /// 4th-Order Yoshida Symplectic Integrator (conserves energy infinitely)
-fn symplectic_step(bodies: &mut [Body], dt: f64) {
+pub(crate) fn symplectic_step(bodies: &mut [Body], dt: f64) {
     debug_assert_eq!(bodies.len(), 3, "Optimized for 3-body problem");
     let mut mass = [0.0; 3];
     for (i, b) in bodies.iter().enumerate().take(3) {

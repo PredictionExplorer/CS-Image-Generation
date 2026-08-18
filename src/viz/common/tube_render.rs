@@ -55,6 +55,8 @@ pub struct TexturedSphere {
     pub rim_color: Rgb64,
     /// Rim glow strength.
     pub rim_strength: f64,
+    /// Optional soft terminator: `(sun direction, ambient floor)`.
+    pub sun: Option<(Vec3, f64)>,
 }
 
 /// Procedural finish applied to a plane's shading normal.
@@ -960,12 +962,17 @@ fn shade_sphere(sphere: &TexturedSphere, ray: &Ray, t: f64) -> Rgb64 {
     let bottom = blend(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), dx);
     let texel = blend(top, bottom, dy);
 
+    let mut lit = texel;
+    if let Some((sun_direction, ambient)) = sphere.sun {
+        let daylight = ambient + (1.0 - ambient) * normal.dot(&sun_direction).max(0.0);
+        lit = (lit.0 * daylight, lit.1 * daylight, lit.2 * daylight);
+    }
     let grazing = (1.0 - normal.dot(&(-ray.dir)).abs()).clamp(0.0, 1.0);
     let rim = grazing.powi(3) * sphere.rim_strength;
     (
-        texel.0 + sphere.rim_color.0 * rim,
-        texel.1 + sphere.rim_color.1 * rim,
-        texel.2 + sphere.rim_color.2 * rim,
+        lit.0 + sphere.rim_color.0 * rim,
+        lit.1 + sphere.rim_color.1 * rim,
+        lit.2 + sphere.rim_color.2 * rim,
     )
 }
 

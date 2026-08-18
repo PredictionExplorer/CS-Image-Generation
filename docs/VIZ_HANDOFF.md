@@ -5,7 +5,7 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~05:15 EST (~10:15 UTC), at the Wave 6 commit.
+Last updated: 2026-08-18 ~06:15 EST (~11:15 UTC), at the Wave 7 commit.
 
 > **Smoke-found bug, fixed pre-commit:** the Wave 6 draft smoke caught a
 > NaN-poisoned camera tangent — one-sided dolly look-aheads collapse to a
@@ -56,9 +56,10 @@ Last updated: 2026-08-18 ~05:15 EST (~10:15 UTC), at the Wave 6 commit.
 ## Where we are
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). Wave 5 landed as
-  `27eee5e`, Wave 6 as the latest `feat:` commit; every wave is one
-  `feat:` commit plus this handoff kept in sync. All gates green.
-- **Progress:** 44 of 69 modes implemented (`--viz-list` prints the live
+  `27eee5e`, Wave 6 as `47cf1e8`, Wave 7 as the latest `feat:` commit;
+  every wave is one `feat:` commit plus this handoff kept in sync. All
+  gates green.
+- **Progress:** 49 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
     kinematics/events/energy-field), `ArtifactSink` + `viz/manifest.json`,
@@ -96,9 +97,20 @@ Last updated: 2026-08-18 ~05:15 EST (~10:15 UTC), at the Wave 6 commit.
     mesher) and STL/PLY writers in `common/vector_export.rs`. Every 3D
     video logs measured s/frame + a projected total after frame 0 (the
     V46 lesson institutionalized). Deviations in the Wave 6 addendum.
-- **Next up:** **Wave 7 — Ensembles & cartography** per the build order in
-  the master plan Part IV.2: `resim` first, then V23 `epilogue`, V24
-  `multiverse`, V22 `editorial-retime`, V42 `basin-map`, V62 `terra`.
+  - **Wave 7** (5, ensembles & cartography): epilogue, multiverse,
+    editorial-retime, basin-map, terra — plus `common/resim.rs`
+    (bit-exact replays, extended runs with ejection hysteresis, capped
+    perturbation grids/ensembles, Kabsch view-rotation recovery),
+    `events::drama()`, and `sim::symplectic_step` exposed `pub(crate)`.
+    Re-simulated modes render with the recovered master rotation (drift
+    dropped). Deviations in the Wave 7 addendum.
+- **Next up:** **Wave 8 — Sound & cinema** per the build order in the
+  master plan Part IV.2: V10 `sonification`, V16 `chord-progression`,
+  V17 `epicycles`, `compositor`, V48 `mission-control`, V47 `trailer`,
+  V53 `webgl-viewer`, V56 `tilt`, V55 `hologram`, V58 `ephemeris-poster`,
+  V59 `blueprint`, V63 `celestial-atlas` — this wave also unblocks
+  `common/text.rs` (typography), `audio` muxing, and the deferred
+  captions/cartouches/labels across earlier waves.
 - **Deviations from specs** are recorded in the "Wave N addendum" sections
   at the top of the master plan (single viz manifest instead of an
   assets.json section; typography/text.rs deferred to the posters wave;
@@ -175,7 +187,8 @@ cargo test --release                          # ~500 tests
 
 Smoke outputs (`output/…`) are gitignored. Local smoke dirs so far:
 `viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3),
-`viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5), `viz-smoke6` (Wave 6).
+`viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5), `viz-smoke6` (Wave 6),
+`viz-smoke7` (Wave 7).
 CAUTION: never launch the smoke twice concurrently — two runs share
 `output/<name>` and their encoders fight over the same mp4 paths (this
 deadlocked a Wave 6 smoke until the duplicate was killed).
@@ -241,6 +254,11 @@ call inside the video branch, trajectory phase at the end),
   costs must be read off the per-mode "projected" log lines on the first
   golden-seed run before batching (V45 hero 16 spp and V28's sweep are
   the two to watch).
+- **Wave 7 constants likewise draft-tuned:** basin/terra fate palettes
+  and probe caps, epilogue zoom margins and crossfade length, multiverse
+  divergence threshold. V42's 768^2 final lattice and V23's x8 extended
+  sim are the budget items to watch on the first final-quality run
+  (projected log lines exist for every video).
 - The user curates favorites from batch outputs; deep-polish passes on
   chosen modes follow the wave completions (V37/V39 full-res stills are
   queued behind that shortlist, per the Wave 4 addendum).

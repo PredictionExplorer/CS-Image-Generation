@@ -139,6 +139,119 @@ impl Events {
 
         Self { syzygies, periapses, closest_triple }
     }
+
+    /// Normalized drama curve driving adaptive pacing (master plan II.2):
+    /// `0.5 * (1/r_min, p99-normalized) + 0.3 * |dKE/dt| (p99-normalized) +
+    /// 0.2 * syzygy proximity`, Gaussian-smoothed with sigma = 1,200 steps.
+    #[must_use]
+    pub fn drama(&self, kinematics: &Kinematics) -> Vec<f64> {
+        let steps = kinematics.pairwise.first().map_or(0, Vec::len);
+        if steps == 0 {
+            return Vec::new();
+        }
+
+        let p99 = |series: &[f64]| -> f64 {
+            let mut sample: Vec<f64> =
+                series.iter().step_by(37).copied().filter(|value| value.is_finite()).collect();
+            if sample.is_empty() {
+                return 1.0;
+            }
+            sample.sort_by(f64::total_cmp);
+            sample[((sample.len() - 1) as f64 * 0.99) as usize].max(1e-12)
+        };
+
+        // Inverse minimum separation.
+        let r_min_inv: Vec<f64> = (0..steps)
+            .map(|step| {
+                let r_min = kinematics
+                    .pairwise
+                    .iter()
+                    .map(|series| series[step])
+                    .fold(f64::INFINITY, f64::min);
+                1.0 / r_min.max(1e-9)
+            })
+            .collect();
+        let r_ref = p99(&r_min_inv);
+
+        // Kinetic-energy rate of change.
+        let kinetic: Vec<f64> = (0..steps)
+            .map(|step| {
+                (0..3)
+                    .map(|body| {
+                        0.5 * kinematics.masses[body]
+                            * kinematics.speeds[body][step]
+                            * kinematics.speeds[body][step]
+                    })
+                    .sum::<f64>()
+            })
+            .collect();
+        let ke_rate: Vec<f64> = (0..steps)
+            .map(|step| {
+                let next = (step + 1).min(steps - 1);
+                let prev = step.saturating_sub(1);
+                let span = (next - prev).max(1) as f64;
+                ((kinetic[next] - kinetic[prev]) / span).abs()
+            })
+            .collect();
+        let ke_ref = p99(&ke_rate);
+
+        // Syzygy proximity: Gaussian bumps around each alignment.
+        const SIGMA: f64 = 1_200.0;
+        let mut proximity = vec![0.0f64; steps];
+        for syzygy in &self.syzygies {
+            let radius = (SIGMA * 4.0) as usize;
+            let start = syzygy.step.saturating_sub(radius);
+            let end = (syzygy.step + radius).min(steps - 1);
+            for (offset, slot) in proximity[start..=end].iter_mut().enumerate() {
+                let distance = (start + offset) as f64 - syzygy.step as f64;
+                let bump = (-0.5 * (distance / SIGMA).powi(2)).exp();
+                if bump > *slot {
+                    *slot = bump;
+                }
+            }
+        }
+
+        let mut drama: Vec<f64> = (0..steps)
+            .map(|step| {
+                0.5 * (r_min_inv[step] / r_ref).min(2.0)
+                    + 0.3 * (ke_rate[step] / ke_ref).min(2.0)
+                    + 0.2 * proximity[step]
+            })
+            .collect();
+
+        // Gaussian smoothing approximated by three box passes (O(n)).
+        let width = ((SIGMA * 2.0) as usize) | 1;
+        for _ in 0..3 {
+            drama = box_blur(&drama, width);
+        }
+        let peak = drama.iter().copied().fold(0.0f64, f64::max).max(1e-12);
+        for value in &mut drama {
+            *value /= peak;
+        }
+        drama
+    }
+}
+
+/// Sliding-window mean with clamped edges (odd `width`).
+fn box_blur(series: &[f64], width: usize) -> Vec<f64> {
+    let steps = series.len();
+    if steps == 0 || width <= 1 {
+        return series.to_vec();
+    }
+    let half = width / 2;
+    // Prefix sums for O(1) window queries.
+    let mut prefix = Vec::with_capacity(steps + 1);
+    prefix.push(0.0f64);
+    for &value in series {
+        prefix.push(prefix.last().expect("nonempty") + value);
+    }
+    (0..steps)
+        .map(|step| {
+            let lo = step.saturating_sub(half);
+            let hi = (step + half).min(steps - 1);
+            (prefix[hi + 1] - prefix[lo]) / (hi + 1 - lo) as f64
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -169,5 +282,47 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
         ];
         assert_eq!(middle_body(points), 1);
+    }
+
+    #[test]
+    fn drama_peaks_near_the_close_approach() {
+        use crate::sim::Body;
+        let steps = 20_000usize;
+        // Two bodies swing close at the middle of the run; the third idles
+        // far away.
+        let positions: Vec<Vec<Vector3<f64>>> = (0..3)
+            .map(|body| {
+                (0..steps)
+                    .map(|step| {
+                        let t = (step as f64 / steps as f64 - 0.5) * 8.0;
+                        match body {
+                            0 => Vector3::new(-(0.05 + t * t), 0.0, 0.0),
+                            1 => Vector3::new(0.05 + t * t, 0.0, 0.0),
+                            _ => Vector3::new(0.0, 40.0, 0.0),
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let bodies = vec![
+            Body::new(1.0, Vector3::zeros(), Vector3::zeros()),
+            Body::new(1.0, Vector3::zeros(), Vector3::zeros()),
+            Body::new(1.0, Vector3::zeros(), Vector3::zeros()),
+        ];
+        let kinematics = Kinematics::compute(&positions, &bodies);
+        let events = Events::detect(&positions, &kinematics);
+        let drama = events.drama(&kinematics);
+        assert_eq!(drama.len(), steps);
+        assert!(drama.iter().all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
+        let mid = drama[steps / 2];
+        let early = drama[steps / 10];
+        assert!(mid > early * 1.5, "close approach must dominate: mid {mid} early {early}");
+    }
+
+    #[test]
+    fn box_blur_preserves_constant_series() {
+        let series = vec![0.7f64; 512];
+        let blurred = box_blur(&series, 101);
+        assert!(blurred.iter().all(|value| (value - 0.7).abs() < 1e-12));
     }
 }
