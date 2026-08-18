@@ -5,17 +5,15 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~16:30 EST (~21:30 UTC), at the Wave 8 commit.
+Last updated: 2026-08-18 ~17:00 EST (~22:00 UTC), after the Wave 8 commit
+(`95d7f9f`).
 
-> **Smoke-found bug, fixed pre-commit:** the Wave 6 draft smoke caught a
-> NaN-poisoned camera tangent — one-sided dolly look-aheads collapse to a
-> zero vector at clamped path ends, `normalize()` yields NaN, and the
-> ray/box clip fails open (`f64::max(0.0, NaN) = 0`,
-> `min(inf, NaN) = inf`), which spun V02's uncapped marcher forever on
-> its final frames. Fixed with symmetric-difference tangents, finite
-> interval guards, and a 640-step cap (V02 + V40). A full-smoke
-> verification pass on `viz-smoke6` accompanies the commit; treat any
-> non-green smoke as a stop-the-line issue for server batches.
+> **Standing lesson:** treat any non-green draft smoke as stop-the-line
+> for server batches. The smokes have caught real bugs every wave (Wave
+> 6: a NaN camera tangent spinning V02's marcher forever; Wave 8: xfade
+> timebase mismatches and empty trailer cold-opens) — always run
+> `viz-smokeN` and read the per-mode "projected" cost lines before
+> letting a wave near the server.
 
 ---
 
@@ -23,42 +21,44 @@ Last updated: 2026-08-18 ~16:30 EST (~21:30 UTC), at the Wave 8 commit.
 
 1. **Two batches are in flight** (topology + rationale in "The server"):
    - **Primary** (`--status` with defaults): seeds `0x1357` + `0xFACE`
-     finishing their max-quality Wave-1 turntables (measured ~3.7 and
-     ~4.6 min/frame of 720; ETA ~Aug 19 21:30 UTC and ~Aug 20 08:30 UTC,
-     then `plotter-svg`/`oscilloscope` in seconds). Expected `WARN ...
-     failed` lines for the other three seeds in `viz_batch.log` — those
-     were killed deliberately (see below). When it shows `COMPLETE`:
-     fetch, then relaunch these two seeds with every implemented mode
-     **except `turntable`** (they will already have it; there is no
-     exclusion syntax — build the comma list from `--viz-list` and pass
-     it via `--viz-flags`). Deploying from post-Wave-6 HEAD gives them
-     all 43 remaining modes in one run.
+     finishing their max-quality Wave-1 turntables. Progress at 2026-08-18
+     ~20:30 UTC: 333/720 and 232/720 frames (~3.4 and ~5.1 min/frame);
+     ETA ~Aug 19 19:00 UTC and ~Aug 20 14:00 UTC, then
+     `plotter-svg`/`oscilloscope` in seconds. Expected `WARN ... failed`
+     lines for the other three seeds in `viz_batch.log` — those were
+     killed deliberately (see below). When it shows `COMPLETE`: fetch,
+     then relaunch these two seeds with every implemented mode **except
+     `turntable`** (they will already have it; there is no exclusion
+     syntax — build the comma list from `--viz-list` and pass it via
+     `--viz-flags`). Deploying from post-Wave-8 HEAD (`95d7f9f`+) gives
+     them all 60 remaining modes in one run (budget: core re-render
+     ~4-5 h + roughly 2-4 h of modes per seed; read the projected lines).
    - **viz-batch2** (`--remote-dir viz-batch2/CS-Image-Generation`):
      seeds `0xBEEF 0xC0DE 0xCAFE` relaunched 2026-08-18 ~07:30 UTC from
      `77b5c2d` with all **36** modes of Waves 1-5, including max-quality
      turntables (decision: keep full quality; measured cost ≈ 2–11
      days/seed, turntable-dominated — see the corrected V46 Performance
-     note in the master plan). ETA roughly Aug 24–29. Fetch needs the
-     same `--remote-dir`. NOTE: this batch predates Wave 6 — those three
-     seeds will need a Wave-6-only top-up run afterwards (`--viz-flags`
-     with the 8 Wave-6 flags; budget the core re-render ~4-5 h/seed on
-     top).
+     note in the master plan). Progress at ~21:00 UTC Aug 18: ~13 of 36
+     modes done per seed. ETA roughly Aug 24–29. Fetch needs the same
+     `--remote-dir`. NOTE: this batch predates Waves 6-8 — those three
+     seeds will need a top-up run afterwards with the 25 Wave 6-8 flags
+     via `--viz-flags` (budget the core re-render ~4-5 h/seed on top).
 2. **Wave-1 partials already fetched** (2026-08-18 ~07:15 UTC) to
    `../CS-viz-results-20260818/` — all 5 seeds' core packages + the 5
-   cheap Wave-1 modes each, ready for curation now. NOTE: fetch
-   destinations must live **outside the repo** (or be gitignored) —
-   an in-repo `viz-results/` blocked a deploy (deploy requires a clean
-   tree). Add `viz-results/` to `.gitignore` in the next code commit.
-3. **Wave 6 is implemented** (this session; 44/69). **Start Wave 7**
-   (ensembles & cartography) per the plan below — independent of the
-   batches; local work never touches the server checkouts.
+   cheap Wave-1 modes each, ready for curation now. Fetch destinations
+   outside the repo remain safest; `viz-results/` is now gitignored
+   (since `47cf1e8`), so the default fetch no longer blocks deploys.
+3. **Waves 6, 7, and 8 all landed this session** (44 → 61 of 69).
+   **Start Wave 9 — Grand combos**, the final wave (see "Next up"
+   below) — independent of the batches; local work never touches the
+   server checkouts. The deferred caption/cartouche backfill is also now
+   unblocked (see Open items).
 
 ## Where we are
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). Wave 6 landed as
-  `47cf1e8`, Wave 7 as `68c422f`, Wave 8 as the latest `feat:` commit;
-  every wave is one `feat:` commit plus this handoff kept in sync. All
-  gates green.
+  `47cf1e8`, Wave 7 as `68c422f`, Wave 8 as `95d7f9f`; every wave is one
+  `feat:` commit plus this handoff kept in sync. All gates green.
 - **Progress:** 61 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
@@ -153,9 +153,9 @@ Last updated: 2026-08-18 ~16:30 EST (~21:30 UTC), at the Wave 8 commit.
     23:54 UTC from `e0066a9`, Wave 1 only, max quality): originally 5
     seeds; `0xBEEF 0xC0DE 0xCAFE` were **killed at ~07:15 UTC** mid-
     turntable (measured 13–23 min/frame → 6–11 days each) and their
-    partial outputs removed. `0x1357` (92/720 frames @ ~3.7 min) and
-    `0xFACE` (70/720 @ ~4.6 min) were left to finish their max-quality
-    turntables: ETA ~Aug 19 21:30 UTC / ~Aug 20 08:30 UTC.
+    partial outputs removed. `0x1357` and `0xFACE` were left to finish
+    their max-quality turntables (333/720 and 232/720 frames as of
+    ~20:30 UTC): ETA ~Aug 19 19:00 UTC / ~Aug 20 14:00 UTC.
   - **viz-batch2** (`viz-batch2/CS-Image-Generation`, launched 2026-08-18
     ~07:30 UTC from `77b5c2d`): the 3 killed seeds regenerating with all
     36 modes at max quality (deterministic, so Wave-1 artifacts reproduce
@@ -181,10 +181,10 @@ Last updated: 2026-08-18 ~16:30 EST (~21:30 UTC), at the Wave 8 commit.
 # Quality gates (all must be green before committing):
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings     # pedantic is enabled
-cargo test --release                          # ~500 tests
+cargo test --release                          # ~580 tests
 .venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/mypy
 
-# Fast full-pipeline smoke of every implemented mode (~2-3 min):
+# Fast full-pipeline smoke of every implemented mode (~6-7 min at 61):
 ./target/release/three_body_problem --seed 0xC0DE --sims 200 --steps 30000 \
   --resolution 640x414 --viz all --viz-quality draft --fast-encode \
   --output viz-smokeN
@@ -215,9 +215,15 @@ src/viz/common/       accum (production re-accumulation), display (graders,
                       splatter), agents (Physarum/DLA/streamer), fluid
                       (stable fluids), wave (leapfrog grid), tube_render
                       (capsule sphere tracer, SDF mesher, camera rigs),
-                      kinematics, events, spd, contours, raster, audio,
+                      resim (bit-exact replays, perturbation grids,
+                      Kabsch), text (IBM Plex rasterizer), style (poster
+                      tokens), compositor (cut/xfade film assembly),
+                      kinematics, events (incl. drama()), spd, contours,
+                      raster, audio (synthesis + LUFS + mux),
                       vector_export (SVG/RDP + STL/PLY)
-src/viz/modes/        one file per implemented mode (44)
+src/viz/modes/        one file per implemented mode (61)
+assets/fonts/         bundled IBM Plex cuts + OFL license (include_bytes!)
+assets/viewer/        the frozen V53 WebGL2 single-file template
 ```
 
 Integration points in the core pipeline: `src/main.rs` (flags, SPD-phase
@@ -241,15 +247,18 @@ call inside the video branch, trajectory phase at the end),
 - `--viz-quality draft` exists for development only; server batches run
   `final` (the default).
 
-## Open items beyond Wave 5
+## Open items
 
-- `common/text.rs` (ab_glyph + bundled OFL font) — unblocks poster
-  typography (Wave 8 per the build order; deferred captions noted in
-  addendums).
+- **Caption/cartouche backfill** (now unblocked by `common/text.rs`):
+  V03's annotated scale bar, V43's ring-gauge labels, V42's cartographic
+  axis labels, V62's atlas cartouche, V24's cell labels — all deferred
+  with JSON sidecars carrying the data. Schedule with the curation pass.
 - `render_still_image` does not return the SPD, so `--image-only` skips
   SPD-phase modes (warning logged); V33/V34 fall back to a trajectory
   splat-density food map in that case.
 - assets.json `viz` section (currently a separate `viz/manifest.json`).
+- V49 `broadcast` (Wave 9) needs the compositor's `amix`/`adelay` audio
+  graphs (deferred in Wave 8 — modes currently bake one WAV).
 - **Wave 5 aesthetic constants were tuned on the draft smoke only** and
   should be re-reviewed on golden seeds at final quality during curation:
   physarum trail normalization (16x steady state), marbling dye knee /
