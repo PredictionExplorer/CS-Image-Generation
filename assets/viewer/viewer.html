@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root { --ink: #d8d8de; --dim: #6a6a72; --accent: __ACCENT__; }
+  html, body { margin: 0; height: 100%; background: #030307; overflow: hidden;
+    font: 12px/1.5 "IBM Plex Mono", ui-monospace, monospace; color: var(--ink); }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hud { position: fixed; left: 14px; bottom: 12px; user-select: none; }
+  #hud .row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+  #hud label { color: var(--dim); letter-spacing: 0.08em; }
+  #hud input[type=range] { width: 160px; accent-color: var(--accent); }
+  #hud button { background: none; border: 1px solid var(--dim); color: var(--ink);
+    font: inherit; padding: 2px 8px; cursor: pointer; }
+  #hud button.off { color: var(--dim); border-color: #333; }
+  #title { position: fixed; left: 14px; top: 12px; letter-spacing: 0.12em;
+    color: var(--dim); }
+  #title b { color: var(--ink); font-weight: 500; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="title"><b>__TITLE__</b> &middot; three-body light sculpture</div>
+<div id="hud">
+  <div class="row">
+    <label>TIME</label><input id="time" type="range" min="0" max="1" step="0.0005" value="1">
+    <button id="orbit">AUTO-ORBIT</button>
+  </div>
+  <div class="row">
+    <label>EXPOSURE</label><input id="exposure" type="range" min="0.2" max="4" step="0.01" value="1">
+    <button id="b0">BODY 1</button><button id="b1">BODY 2</button><button id="b2">BODY 3</button>
+  </div>
+</div>
+<script>
+"use strict";
+// ---- embedded data -------------------------------------------------------
+// Packed little-endian records per point:
+//   u16 x, y, z, t, speed  (bbox/65535 normalized)  + u8 r, g, b, pad
+const META = __META__;
+const B64 = "__DATA_B64__";
+function decode(b64) {
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+const bytes = decode(B64);
+const REC = 14;
+const total = bytes.length / REC;
+const view = new DataView(bytes.buffer);
+
+// ---- geometry: expand each polyline segment into a screen-space quad -----
+const positions = [], sides = [], colors = [], times = [], next = [], indices = [];
+let vertexCount = 0;
+const bodyRanges = META.bodies.map(() => [0, 0]);
+let cursor = 0;
+for (let b = 0; b < META.bodies.length; b++) {
+  const count = META.bodies[b];
+  const start = indices.length;
+  for (let i = 0; i < count - 1; i++) {
+    const at = (cursor + i) * REC, an = (cursor + i + 1) * REC;
+    const px = [view.getUint16(at, true), view.getUint16(at + 2, true), view.getUint16(at + 4, true)];
+    const nx = [view.getUint16(an, true), view.getUint16(an + 2, true), view.getUint16(an + 4, true)];
+    const t0 = view.getUint16(at + 6, true) / 65535, t1 = view.getUint16(an + 6, true) / 65535;
+    const s0 = view.getUint16(at + 8, true) / 65535;
+    const c = [bytes[at + 10] / 255, bytes[at + 11] / 255, bytes[at + 12] / 255];
+    const w = 0.5 + 1.6 * (1 - s0); // slow = thick, matching the collection
+    for (const [p, q, tt, side] of [[px, nx, t0, +w], [px, nx, t0, -w], [nx, px, t1, +w], [nx, px, t1, -w]]) {
+      positions.push(p[0], p[1], p[2]); next.push(q[0], q[1], q[2]);
+      sides.push(side); colors.push(c[0], c[1], c[2]); times.push(tt);
+    }
+    const v = vertexCount;
+    indices.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
+    vertexCount += 4;
+  }
+  bodyRanges[b] = [start, indices.length - start];
+  cursor += count;
+}
+
+// ---- WebGL2 --------------------------------------------------------------
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl2", { antialias: false });
+if (!gl) document.body.textContent = "WebGL2 required.";
+const VS = `#version 300 es
+precision highp float;
+in vec3 aPos; in vec3 aNext; in float aSide; in vec3 aColor; in float aTime;
+uniform mat4 uProj, uView; uniform vec2 uViewport; uniform float uScale;
+out vec3 vColor; out float vTime; out float vEdge;
+void main() {
+  vec4 p0 = uProj * uView * vec4(aPos * uScale, 1.0);
+  vec4 p1 = uProj * uView * vec4(aNext * uScale, 1.0);
+  vec2 s0 = p0.xy / p0.w, s1 = p1.xy / p1.w;
+  vec2 dir = normalize((s1 - s0) * uViewport + vec2(1e-6));
+  vec2 nrm = vec2(-dir.y, dir.x) / uViewport * 2.0;
+  gl_Position = vec4(p0.xy + nrm * aSide * p0.w, p0.z, p0.w);
+  vColor = aColor; vTime = aTime; vEdge = sign(aSide);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec3 vColor; in float vTime; in float vEdge;
+uniform float uTMax, uExposure;
+out vec4 frag;
+void main() {
+  if (vTime > uTMax) discard;
+  float glow = exp(-2.4 * abs(vEdge));
+  frag = vec4(vColor * uExposure * (0.35 + 0.65 * glow), 1.0);
+}`;
+function shader(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw gl.getProgramInfoLog(prog);
+gl.useProgram(prog);
+
+function buffer(data, attrib, size) {
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, attrib);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+buffer(positions, "aPos", 3); buffer(next, "aNext", 3);
+buffer(sides, "aSide", 1); buffer(colors, "aColor", 3); buffer(times, "aTime", 1);
+const ibo = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.STATIC_DRAW);
+gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.disable(gl.DEPTH_TEST);
+
+// ---- camera + interaction -------------------------------------------------
+let yaw = 0.7, pitch = 0.32, dist = 2.6, autoOrbit = true;
+const enabled = [true, true, true];
+canvas.addEventListener("pointerdown", e => {
+  autoOrbit = false; setButton("orbit", false);
+  const move = ev => { yaw += ev.movementX * 0.005; pitch = Math.max(-1.5, Math.min(1.5, pitch + ev.movementY * 0.005)); };
+  const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+});
+canvas.addEventListener("wheel", e => { dist = Math.max(0.6, Math.min(9, dist * Math.exp(e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
+function setButton(id, on) { document.getElementById(id).classList.toggle("off", !on); }
+document.getElementById("orbit").onclick = () => { autoOrbit = !autoOrbit; setButton("orbit", autoOrbit); };
+[0, 1, 2].forEach(b => { document.getElementById("b" + b).onclick = () => { enabled[b] = !enabled[b]; setButton("b" + b, enabled[b]); }; });
+
+function perspective(fov, aspect, near, far) {
+  const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
+  return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
+}
+function lookAt(eye) {
+  const z = norm(eye), x = norm(cross([0, 1, 0], z)), y = cross(z, x);
+  return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1];
+  function norm(v) { const l = Math.hypot(...v); return v.map(c => c / l); }
+  function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+}
+
+// ---- render loop -----------------------------------------------------------
+const uProj = gl.getUniformLocation(prog, "uProj");
+const uView = gl.getUniformLocation(prog, "uView");
+const uViewport = gl.getUniformLocation(prog, "uViewport");
+const uScale = gl.getUniformLocation(prog, "uScale");
+const uTMax = gl.getUniformLocation(prog, "uTMax");
+const uExposure = gl.getUniformLocation(prog, "uExposure");
+function frame(ms) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth * dpr | 0, h = canvas.clientHeight * dpr | 0;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0.012, 0.012, 0.027, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  if (autoOrbit) yaw += 0.0022;
+  const eye = [dist * Math.cos(pitch) * Math.sin(yaw), dist * Math.sin(pitch), dist * Math.cos(pitch) * Math.cos(yaw)];
+  gl.uniformMatrix4fv(uProj, false, perspective(0.9, w / h, 0.05, 40));
+  gl.uniformMatrix4fv(uView, false, lookAt(eye));
+  gl.uniform2f(uViewport, w, h);
+  gl.uniform1f(uScale, 2.0 / 65535.0);
+  gl.uniform1f(uTMax, parseFloat(document.getElementById("time").value));
+  gl.uniform1f(uExposure, parseFloat(document.getElementById("exposure").value));
+  gl.bindVertexArray(vao);
+  for (let b = 0; b < bodyRanges.length; b++) {
+    if (!enabled[b]) continue;
+    gl.drawElements(gl.TRIANGLES, bodyRanges[b][1], gl.UNSIGNED_INT, bodyRanges[b][0] * 4);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

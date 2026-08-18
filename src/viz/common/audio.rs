@@ -1,9 +1,12 @@
-//! Minimal deterministic audio helpers: a hand-rolled 24-bit stereo WAV
-//! writer plus resampling and conditioning utilities shared by the audio
-//! modes (`gw-chirp`, `oscilloscope`, and future sonifications).
+//! Deterministic audio helpers (master plan II.11): a hand-rolled 24-bit
+//! stereo WAV writer, resampling and conditioning utilities, synthesis
+//! primitives (polyBLEP saw, ADSR, resonant low-pass, FM bell, equal-power
+//! pan, tanh limiter), a BS.1770-approximate loudness normalizer, and the
+//! `FFmpeg` mux that marries a WAV onto an existing video.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
+use std::process::Command;
 
 /// Standard output sample rate for all viz audio artifacts.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -117,6 +120,256 @@ pub fn fade_ends(samples: &mut [f64], fade_len: usize) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Synthesis primitives (II.11)
+// ---------------------------------------------------------------------------
+
+/// `PolyBLEP` correction for a discontinuity at phase `t` with step `dt`.
+#[inline]
+fn poly_blep(t: f64, dt: f64) -> f64 {
+    if t < dt {
+        let x = t / dt;
+        x + x - x * x - 1.0
+    } else if t > 1.0 - dt {
+        let x = (t - 1.0) / dt;
+        x * x + x + x + 1.0
+    } else {
+        0.0
+    }
+}
+
+/// Band-limited sawtooth sample at `phase` in `[0, 1)` advancing by
+/// `dphase` per sample (polyBLEP edge smoothing).
+#[inline]
+#[must_use]
+pub fn saw_bandlimited(phase: f64, dphase: f64) -> f64 {
+    let naive = 2.0 * phase - 1.0;
+    naive - poly_blep(phase, dphase.max(1e-9))
+}
+
+/// Linear attack / exponential-ish release envelope.
+#[derive(Clone, Copy, Debug)]
+pub struct Adsr {
+    /// Attack length in seconds.
+    pub attack: f64,
+    /// Decay length in seconds.
+    pub decay: f64,
+    /// Sustain level in `[0, 1]`.
+    pub sustain: f64,
+    /// Release length in seconds.
+    pub release: f64,
+}
+
+impl Adsr {
+    /// Envelope amplitude at `t` seconds after note-on, with the note held
+    /// for `held` seconds.
+    #[must_use]
+    pub fn amplitude(&self, t: f64, held: f64) -> f64 {
+        if t < 0.0 {
+            return 0.0;
+        }
+        let sustained = if t < self.attack {
+            t / self.attack.max(1e-9)
+        } else if t < self.attack + self.decay {
+            1.0 - (1.0 - self.sustain) * (t - self.attack) / self.decay.max(1e-9)
+        } else {
+            self.sustain
+        };
+        if t <= held {
+            sustained
+        } else {
+            let release_t = t - held;
+            if release_t >= self.release {
+                0.0
+            } else {
+                sustained * (1.0 - release_t / self.release.max(1e-9))
+            }
+        }
+    }
+}
+
+/// Two-pole resonant low-pass (RBJ biquad), processed per sample.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Biquad {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    x1: f64,
+    x2: f64,
+    y1: f64,
+    y2: f64,
+}
+
+impl Biquad {
+    /// Configure as a low-pass at `cutoff_hz` with quality `q`.
+    pub fn set_lowpass(&mut self, cutoff_hz: f64, q: f64, sample_rate: f64) {
+        let omega = std::f64::consts::TAU * cutoff_hz.clamp(10.0, sample_rate * 0.45) / sample_rate;
+        let alpha = omega.sin() / (2.0 * q.max(0.05));
+        let cos_omega = omega.cos();
+        let a0 = 1.0 + alpha;
+        self.b0 = (1.0 - cos_omega) / 2.0 / a0;
+        self.b1 = (1.0 - cos_omega) / a0;
+        self.b2 = self.b0;
+        self.a1 = -2.0 * cos_omega / a0;
+        self.a2 = (1.0 - alpha) / a0;
+    }
+
+    /// Configure as a high-shelf (BS.1770 pre-filter shape).
+    pub fn set_highshelf(&mut self, cutoff_hz: f64, gain_db: f64, sample_rate: f64) {
+        let amp = 10.0_f64.powf(gain_db / 40.0);
+        let omega = std::f64::consts::TAU * cutoff_hz / sample_rate;
+        let (sin_o, cos_o) = omega.sin_cos();
+        let alpha = sin_o / 2.0 * std::f64::consts::SQRT_2;
+        let a0 = (amp + 1.0) - (amp - 1.0) * cos_o + 2.0 * amp.sqrt() * alpha;
+        self.b0 = (amp * ((amp + 1.0) + (amp - 1.0) * cos_o + 2.0 * amp.sqrt() * alpha)) / a0;
+        self.b1 = (-2.0 * amp * ((amp - 1.0) + (amp + 1.0) * cos_o)) / a0;
+        self.b2 = (amp * ((amp + 1.0) + (amp - 1.0) * cos_o - 2.0 * amp.sqrt() * alpha)) / a0;
+        self.a1 = (2.0 * ((amp - 1.0) - (amp + 1.0) * cos_o)) / a0;
+        self.a2 = ((amp + 1.0) - (amp - 1.0) * cos_o - 2.0 * amp.sqrt() * alpha) / a0;
+    }
+
+    /// Configure as a high-pass at `cutoff_hz` (Butterworth-ish q).
+    pub fn set_highpass(&mut self, cutoff_hz: f64, sample_rate: f64) {
+        let omega = std::f64::consts::TAU * cutoff_hz / sample_rate;
+        let (sin_o, cos_o) = omega.sin_cos();
+        let alpha = sin_o / std::f64::consts::SQRT_2;
+        let a0 = 1.0 + alpha;
+        self.b0 = f64::midpoint(1.0, cos_o) / a0;
+        self.b1 = -(1.0 + cos_o) / a0;
+        self.b2 = self.b0;
+        self.a1 = -2.0 * cos_o / a0;
+        self.a2 = (1.0 - alpha) / a0;
+    }
+
+    /// Process one sample.
+    #[inline]
+    pub fn process(&mut self, x: f64) -> f64 {
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+/// FM bell sample: carrier plus a 3.5-ratio modulator, both decaying.
+#[must_use]
+pub fn fm_bell(t: f64, frequency: f64, brightness: f64) -> f64 {
+    if t < 0.0 {
+        return 0.0;
+    }
+    let modulator =
+        (std::f64::consts::TAU * frequency * 3.5 * t).sin() * brightness * (-t * 5.0).exp();
+    (std::f64::consts::TAU * frequency * t + modulator).sin() * (-t * 1.8).exp()
+}
+
+/// Equal-power stereo pan: `pan` in `[-1, 1]`.
+#[inline]
+#[must_use]
+pub fn equal_power_pan(sample: f64, pan: f64) -> (f64, f64) {
+    let angle = (pan.clamp(-1.0, 1.0) + 1.0) * std::f64::consts::FRAC_PI_4;
+    (sample * angle.cos(), sample * angle.sin())
+}
+
+/// Soft-clip a pair of channels in place (tanh limiter at `drive`).
+pub fn soft_limit(left: &mut [f64], right: &mut [f64], drive: f64) {
+    for sample in left.iter_mut().chain(right.iter_mut()) {
+        *sample = (*sample * drive).tanh() / drive.max(1e-9).tanh().max(1e-9);
+    }
+}
+
+/// BS.1770-approximate integrated loudness of a stereo pair, in LUFS.
+///
+/// K-weighting (high-shelf + high-pass) then 400 ms blocks with the
+/// absolute -70 LUFS gate and the relative -10 LU gate.
+#[must_use]
+pub fn integrated_lufs(left: &[f64], right: &[f64], sample_rate: f64) -> f64 {
+    let block = (sample_rate * 0.4) as usize;
+    if left.len() < block || block == 0 {
+        return -70.0;
+    }
+    let weight = |samples: &[f64]| -> Vec<f64> {
+        let mut shelf = Biquad::default();
+        shelf.set_highshelf(1_681.0, 4.0, sample_rate);
+        let mut highpass = Biquad::default();
+        highpass.set_highpass(38.0, sample_rate);
+        samples.iter().map(|&x| highpass.process(shelf.process(x))).collect()
+    };
+    let wl = weight(left);
+    let wr = weight(right);
+    // 75% overlapped 400 ms blocks.
+    let hop = block / 4;
+    let mut blocks: Vec<f64> = Vec::new();
+    let mut start = 0usize;
+    while start + block <= wl.len() {
+        let mean_sq: f64 =
+            (start..start + block).map(|i| wl[i] * wl[i] + wr[i] * wr[i]).sum::<f64>()
+                / block as f64;
+        blocks.push(-0.691 + 10.0 * (mean_sq.max(1e-12)).log10());
+        start += hop.max(1);
+    }
+    let gated: Vec<f64> = blocks.iter().copied().filter(|&l| l > -70.0).collect();
+    if gated.is_empty() {
+        return -70.0;
+    }
+    let mean_energy =
+        gated.iter().map(|&l| 10.0_f64.powf((l + 0.691) / 10.0)).sum::<f64>() / gated.len() as f64;
+    let relative_gate = -0.691 + 10.0 * mean_energy.log10() - 10.0;
+    let final_blocks: Vec<f64> = gated.iter().copied().filter(|&l| l > relative_gate).collect();
+    if final_blocks.is_empty() {
+        return -70.0;
+    }
+    let energy = final_blocks.iter().map(|&l| 10.0_f64.powf((l + 0.691) / 10.0)).sum::<f64>()
+        / final_blocks.len() as f64;
+    -0.691 + 10.0 * energy.log10()
+}
+
+/// Gain a stereo pair to an integrated loudness target (LUFS).
+pub fn normalize_to_lufs(left: &mut [f64], right: &mut [f64], target: f64, sample_rate: f64) {
+    let current = integrated_lufs(left, right, sample_rate);
+    let gain = 10.0_f64.powf((target - current) / 20.0);
+    for sample in left.iter_mut().chain(right.iter_mut()) {
+        *sample *= gain;
+    }
+}
+
+/// Mux a WAV onto an existing video (`-c:v copy -c:a aac -b:a 192k`).
+pub fn mux(video_in: &str, wav: &str, video_out: &str) -> io::Result<()> {
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            video_in,
+            "-i",
+            wav,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            video_out,
+        ])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("ffmpeg mux failed with {status}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +390,75 @@ mod tests {
         normalize_stereo_peak(&mut left, &mut right, 0.7);
         let max = left.iter().chain(right.iter()).fold(0.0_f64, |acc, &value| acc.max(value.abs()));
         assert!((max - 0.7).abs() < 1e-12);
+    }
+
+    #[test]
+    fn saw_stays_bounded_and_crosses_zero() {
+        let dphase = 220.0 / f64::from(SAMPLE_RATE);
+        let mut phase = 0.0;
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for _ in 0..48_000 {
+            let sample = saw_bandlimited(phase, dphase);
+            min = min.min(sample);
+            max = max.max(sample);
+            phase = (phase + dphase) % 1.0;
+        }
+        assert!(min < -0.8 && max > 0.8, "saw span [{min}, {max}]");
+        assert!(min >= -1.6 && max <= 1.6, "polyBLEP overshoot bounded");
+    }
+
+    #[test]
+    fn adsr_envelope_shape() {
+        let envelope = Adsr { attack: 0.1, decay: 0.1, sustain: 0.6, release: 0.2 };
+        assert!(envelope.amplitude(0.05, 1.0) < envelope.amplitude(0.1, 1.0));
+        assert!((envelope.amplitude(0.5, 1.0) - 0.6).abs() < 1e-9);
+        assert!(envelope.amplitude(1.1, 1.0) < 0.6);
+        assert!(envelope.amplitude(1.3, 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lowpass_attenuates_high_frequencies() {
+        let rate = f64::from(SAMPLE_RATE);
+        let respond = |freq: f64| -> f64 {
+            let mut filter = Biquad::default();
+            filter.set_lowpass(800.0, 0.9, rate);
+            let mut peak = 0.0f64;
+            for n in 0..24_000 {
+                let t = f64::from(n) / rate;
+                let y = filter.process((std::f64::consts::TAU * freq * t).sin());
+                if n > 12_000 {
+                    peak = peak.max(y.abs());
+                }
+            }
+            peak
+        };
+        assert!(respond(100.0) > 0.9);
+        assert!(respond(8_000.0) < 0.05);
+    }
+
+    #[test]
+    fn full_scale_sine_measures_near_reference_lufs() {
+        let rate = f64::from(SAMPLE_RATE);
+        let samples: Vec<f64> = (0..96_000)
+            .map(|n| (std::f64::consts::TAU * 997.0 * f64::from(n) / rate).sin())
+            .collect();
+        let lufs = integrated_lufs(&samples, &samples, rate);
+        // BS.1770 reference: a full-scale 997 Hz stereo sine reads ~ -0.7.
+        assert!((lufs + 0.7).abs() < 1.0, "measured {lufs}");
+        let mut left = samples.clone();
+        let mut right = samples;
+        normalize_to_lufs(&mut left, &mut right, -14.0, rate);
+        let normalized = integrated_lufs(&left, &right, rate);
+        assert!((normalized + 14.0).abs() < 0.5, "normalized {normalized}");
+    }
+
+    #[test]
+    fn pan_is_equal_power() {
+        let (l, r) = equal_power_pan(1.0, 0.0);
+        assert!((l * l + r * r - 1.0).abs() < 1e-9);
+        let (hard_l, hard_r) = equal_power_pan(1.0, -1.0);
+        assert!(hard_l > 0.999 && hard_r.abs() < 1e-9);
     }
 
     #[test]

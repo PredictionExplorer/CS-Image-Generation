@@ -44,14 +44,14 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V07 | `braid` | Physics | tall still + video | A | kinematics | `[x]` |
 | V08 | `shape-sphere` | Physics | still + video | B | kinematics | `[x]` |
 | V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[x]` |
-| V10 | `sonification` | Physics | WAV + remuxed videos | B | kinematics, audio | `[ ]` |
-| V11 | `recurrence` | Physics | still | B | kinematics | `[ ]` |
+| V10 | `sonification` | Physics | WAV + remuxed videos | B | kinematics, audio | `[x]` |
+| V11 | `recurrence` | Physics | still | B | kinematics | `[x]` |
 | V12 | `field-lines` | Physics | still + video | B | fields | `[x]` |
 | V13 | `syzygy-wheel` | Physics | still | A | events, text | `[x]` |
 | V14 | `triangle-centers` | Physics | still + video | B | kinematics | `[x]` |
 | V15 | `medial-recursion` | Physics | still + video | B | — | `[x]` |
-| V16 | `chord-progression` | Physics | poster + video + WAV | B | kinematics, audio, text | `[ ]` |
-| V17 | `epicycles` | Physics | video | B | rustfft | `[ ]` |
+| V16 | `chord-progression` | Physics | poster + video + WAV | B | kinematics, audio, text | `[x]` |
+| V17 | `epicycles` | Physics | video | B | rustfft | `[x]` |
 | V18 | `chrono-grid` | Time | poster | B | frame tap | `[x]` |
 | V19 | `slit-scan` | Time | 2 stills | A | frame tap | `[x]` |
 | V20 | `strobe` | Time | still + video | B | accumulation | `[x]` |
@@ -81,23 +81,23 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V44 | `neon` | 3D scene | still | C | tube_render | `[x]` |
 | V45 | `chandelier` | 3D scene | still + video | D | tube_render, energy field | `[x]` |
 | V46 | `turntable` | 3D scene | video | A | existing orbit.rs | `[x]` |
-| V47 | `trailer` | Cinema | video | C | compositor, events | `[ ]` |
-| V48 | `mission-control` | Cinema | video | C | text, kinematics, events | `[ ]` |
+| V47 | `trailer` | Cinema | video | C | compositor, events | `[x]` |
+| V48 | `mission-control` | Cinema | video | C | text, kinematics, events | `[x]` |
 | V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[ ]` |
 | V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[x]` |
 | V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[x]` |
 | V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[x]` |
-| V53 | `webgl-viewer` | Exports | JSON + HTML | B | vector_export | `[ ]` |
+| V53 | `webgl-viewer` | Exports | JSON + HTML | B | vector_export | `[x]` |
 | V54 | `oscilloscope` | Exports | WAV + video | B | audio | `[x]` |
-| V55 | `hologram` | Exports | huge still | D | rustfft | `[ ]` |
-| V56 | `tilt` | Exports | print PNGs | B | frame tap, V52 | `[ ]` |
+| V55 | `hologram` | Exports | huge still | D | rustfft | `[x]` |
+| V56 | `tilt` | Exports | print PNGs | B | frame tap, V52 | `[x]` |
 | V57 | `instrument` | Exports | HTML + JSON + WAV | C | V53, V54, V16 | `[ ]` |
-| V58 | `ephemeris-poster` | Posters | poster | B | text, metadata | `[ ]` |
-| V59 | `blueprint` | Posters | 2 stills | B | accumulation restyle | `[ ]` |
+| V58 | `ephemeris-poster` | Posters | poster | B | text, metadata | `[x]` |
+| V59 | `blueprint` | Posters | 2 stills | B | accumulation restyle | `[x]` |
 | V60 | `dwell-nebula` | Posters | still | B | density splat | `[x]` |
 | V61 | `topo-contours` | Posters | still | B | energy field | `[x]` |
 | V62 | `terra` | Posters | poster + video | C | V08, V42-lite, text | `[x]` |
-| V63 | `celestial-atlas` | Posters | poster | C | multi-seed input, text | `[ ]` |
+| V63 | `celestial-atlas` | Posters | poster | C | multi-seed input, text | `[x]` |
 | V64 | `powers-of-fate` | Combos | video | D | V42, compositor | `[ ]` |
 | V65 | `witness` | Combos | video | D | V26, V27, V29, V30, V16, audio | `[ ]` |
 | V66 | `rose-window` | Combos | video + still | D | V41, fields | `[ ]` |
@@ -402,6 +402,73 @@ Wave 7 (ensembles & cartography: V23, V24, V22, V42, V62) is implemented
   dragon/star sigils, graticule, and border ticks are inked, the
   cartouche waits for text.rs; the globe gains soft terminator lighting
   via an optional sun on `tube_render::TexturedSphere`.
+
+## Wave 8 addendum (2026-08-18)
+
+Wave 8 (sound & cinema: V10, V16, V17, V48, V47, V53, V56, V55, V58, V59,
+V63, plus V11) is implemented -- 61 of 69 modes. V11 `recurrence` appeared
+in no wave of the IV.2 build order (an oversight); it is folded into this
+wave so the ledger sums to 69. New infrastructure and deviations:
+
+- **`common/text.rs`** (II.10): `ab_glyph` over three bundled IBM Plex
+  cuts (Sans, Sans Italic, Mono; OFL license shipped in `assets/fonts/`).
+  Anti-aliasing is ab_glyph's native coverage rasterization rather than a
+  manual 4x supersample; small caps are faked as 0.78-scaled uppercase
+  (Plex has no small-cap cut); tabular numerals center each digit in the
+  widest digit advance (guaranteed alignment regardless of font tables).
+  A unit test pins glyph coverage of the poster charset in all faces.
+- **`common/style.rs`** (II.14): margins, the 1.333 modular type scale,
+  the three paper stocks, palette accents, and the standard typeset
+  footer used by every Wave 8 poster.
+- **`common/audio.rs`** (II.11): polyBLEP saw, ADSR, RBJ biquads, an FM
+  bell voice, equal-power pan, tanh limiting, a BS.1770-approximate
+  integrated-LUFS meter/normalizer (unit-tested against the full-scale
+  997 Hz sine reference), and `mux()` shelling to `ffmpeg -c:v copy`.
+- **`common/compositor.rs`** (II.13): cut/xfade timelines over trimmed
+  videos and held card stills through one `filter_complex` graph; the
+  argument vector is a pure function of inputs (golden-tested).
+  `amix`/`adelay` audio graphs are deferred to V49 -- modes bake their
+  mix into a single WAV. Assembled outputs re-encode through the
+  standard web/HQ profiles from a yuv420p-normalized graph.
+- **Frame archive:** quarter-res rgb8 copies of the frames around the
+  three deepest approaches (stride-2 over +/-36) plus 24 drama-weighted
+  samples, captured by a second observer on the existing render tap only
+  when V47/V56 are selected (`VizMode::needs_frame_archive`).
+- **V10:** bells humanized +/-20 ms from the mode RNG; scored copies mux
+  the web encodes only (HQ videos stay pristine).
+- **V17:** 45 s at 30 fps; the freeze still ships at video resolution
+  (the Wave 4 precedent); K escalates by doubling to 768 when the RMS
+  audit fails, recorded in `coefficients.json`.
+- **V47:** V10 stems are not persisted, so the trailer re-synthesizes
+  its bed to the EDL with the same voice primitives (drone + bells at
+  cuts, ducked under cards); cut times quantize to `score.json` bell
+  onsets when present. Push-ins render from the quarter-res archive
+  (soft by design, VHS-macro).
+- **V48:** ticker shows the last two lines; the CRT pass is an inverse
+  barrel resample + scanline mask + slow drift + scheduled sync jitter.
+  The spring-pen physics are unit-tested (overshoot + settling).
+- **V53:** the frozen template lives in `assets/viewer/viewer.html`
+  (vanilla WebGL2, ~450 lines); bloom is approximated by the additive
+  quad glow falloff instead of a separate blur pass (kept simple until a
+  curation pass asks for more).
+- **V55:** the reference angle is capped at 85% of the fringe-Nyquist
+  angle for the chosen grid (8 degrees needs the 16384 ladder rung; the
+  8192 default runs ~6.1 degrees, recorded in `hologram_spec.txt`);
+  bodies are banded to distinct depth thirds so the reconstruction
+  separates three strands; grids are `Complex<f32>` (1.07 GB at 8192).
+- **V56:** masters are strip-exact (1 px per frame column) at
+  `LPI x frames` DPI on a 200 x 133 mm sheet -- the spec's A3 at 300 DPI
+  cannot hold 24 frames under a 40 LPI lens (0.31 px strips); the spec
+  sheet states the real print DPI. Depth flip slices V52's quilt.
+- **V58/V59:** every printed number derives from `generation.json`,
+  kinematics, or events (energy/momentum formulas unit-tested against a
+  virial two-body case); the glass plate's artifacts are seeded and
+  subtle per the spec's restraint clause.
+- **V63:** features come from `generation.json` (weighted Borda score,
+  palette-fingerprint hue, HDR scale, drift eccentricity, equil weight);
+  embedding is a deterministic power-iteration PCA + 200 repulsion
+  passes; without `--viz-seeds-dir` the chart degenerates to one crowned
+  star. Constellation names come from a small curated epithet table.
 
 # Part I — Subsystem Architecture
 
@@ -1266,7 +1333,7 @@ phase.
 - [ ] No clipping; LUFS within ±1 of target.
 - [ ] Solo listen holds attention for 30 s (curation gut check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8)
 
 ---
 
@@ -1310,7 +1377,7 @@ rayon-parallel: ~1–2 min. Trajectory phase.
 - [ ] Diagonal symmetry exact (unit test on tolerance).
 - [ ] Time-difference hue mapping legible in the zoom print.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; folded in from the build-order gap)
 
 ---
 
@@ -1523,7 +1590,7 @@ Trajectory phase. Voice library shared with V57/V65.
 - [ ] Note quantization stable (no flicker chatter; hysteresis verified).
 - [ ] Poster legible as music to a musician (external gut check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8)
 
 ---
 
@@ -1568,7 +1635,7 @@ trail: ~5 min for 45 s. Trajectory phase.
 - [ ] Armatures never overpower trail (energy audit).
 - [ ] Convergence moment reads clearly at 1× speed.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; 30 fps, still at video res)
 
 ---
 
@@ -2964,7 +3031,7 @@ phase.
 - [ ] Macro push-ins land on genuinely dramatic frames (event audit).
 - [ ] EDL reproducible (hash test).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; score bed re-synthesized to the EDL)
 
 ---
 
@@ -3011,7 +3078,7 @@ Panel renderer exported for V49's Act I.
 - [ ] Teletype cadence and pen physics sell the period (gut check).
 - [ ] CRT pass stays under 10% luminance cost (legibility).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8)
 
 ---
 
@@ -3243,7 +3310,7 @@ average laptop with 100k points, and the *feel* matches the collection
 - [ ] 60 fps at default view on integrated graphics.
 - [ ] Visual language matches collection (curation check).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; template in assets/viewer)
 
 ---
 
@@ -3340,7 +3407,7 @@ will show), `hologram_spec.txt`.
 - [ ] Orders separated (no twin-image overlap at 8°).
 - [ ] Pattern print-viable per spec (fringe Nyquist audit).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; Nyquist-capped reference angle)
 
 ---
 
@@ -3383,7 +3450,7 @@ depth variant requested).
 - [ ] Ghosting ≤ 1 adjacent frame at nominal pitch (sim audit).
 - [ ] Spec sheet names lens vendor/part.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; 200x133 mm sheet at strip-exact DPI)
 
 ---
 
@@ -3472,7 +3539,7 @@ and every number traceable to `generation.json` or `Kinematics`.
 - [ ] Typographic review (baseline grid, rag, tab alignment).
 - [ ] Poster survives grayscale reproduction (values, not hue, carry it).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8)
 
 ---
 
@@ -3519,7 +3586,7 @@ response (dense blacks, creamy highs).
 - [ ] Plate curve matches reference scan characteristics (visual match).
 - [ ] Both pass the "found in an archive" gut check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8)
 
 ---
 
@@ -3719,7 +3786,7 @@ pipeline).
       the grammar table).
 - [ ] 500-star chart legible at print size.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 8; --viz-seeds-dir, degenerates to one star)
 
 ---
 

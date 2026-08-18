@@ -148,6 +148,102 @@ impl FrameTapCollector {
     }
 }
 
+/// Reduced-resolution frames captured from the main render at selected
+/// frame indices (V47 macro push-ins, V56 lenticular time flips).
+pub struct FrameArchiveData {
+    /// Archive frame width (quarter of the render width).
+    pub width: u32,
+    /// Archive frame height.
+    pub height: u32,
+    /// Total main-video frames observed.
+    pub source_frames: usize,
+    /// Captured `(frame index, rgb8)` pairs in frame order.
+    pub frames: Vec<(usize, Vec<u8>)>,
+}
+
+impl FrameArchiveData {
+    /// The captured frame nearest to `index`, if any were captured.
+    #[must_use]
+    pub fn nearest(&self, index: usize) -> Option<&(usize, Vec<u8>)> {
+        self.frames.iter().min_by_key(|(frame, _)| frame.abs_diff(index))
+    }
+}
+
+/// Collector capturing quarter-resolution copies of selected frames.
+pub struct FrameArchiveCollector {
+    targets: Vec<usize>,
+    data: FrameArchiveData,
+    full_width: usize,
+    full_height: usize,
+    counter: usize,
+}
+
+impl FrameArchiveCollector {
+    /// Create a collector for the given sorted, deduplicated target frames.
+    #[must_use]
+    pub fn new(full_width: u32, full_height: u32, mut targets: Vec<usize>) -> Self {
+        targets.sort_unstable();
+        targets.dedup();
+        let width = (full_width / 4).max(16);
+        let height = (full_height / 4).max(16);
+        Self {
+            targets,
+            data: FrameArchiveData { width, height, source_frames: 0, frames: Vec::new() },
+            full_width: full_width as usize,
+            full_height: full_height as usize,
+            counter: 0,
+        }
+    }
+
+    /// Observe one `rgb48` (native-endian) frame from the encoder stream.
+    pub fn observe(&mut self, frame_bytes: &[u8]) {
+        let index = self.counter;
+        self.counter += 1;
+        self.data.source_frames = self.counter;
+        if self.targets.binary_search(&index).is_err() {
+            return;
+        }
+        // 4x4 box downsample from rgb48 to rgb8.
+        let out_w = self.data.width as usize;
+        let out_h = self.data.height as usize;
+        let mut rgb8 = vec![0u8; out_w * out_h * 3];
+        for oy in 0..out_h {
+            for ox in 0..out_w {
+                let mut sums = [0u32; 3];
+                let mut count = 0u32;
+                for sy in 0..4 {
+                    let y = oy * 4 + sy;
+                    if y >= self.full_height {
+                        continue;
+                    }
+                    for sx in 0..4 {
+                        let x = ox * 4 + sx;
+                        if x >= self.full_width {
+                            continue;
+                        }
+                        let pixel = (y * self.full_width + x) * 3;
+                        for (channel, sum) in sums.iter_mut().enumerate() {
+                            *sum += u32::from(frame_u16(frame_bytes, pixel + channel)) >> 8;
+                        }
+                        count += 1;
+                    }
+                }
+                let base = (oy * out_w + ox) * 3;
+                for channel in 0..3 {
+                    rgb8[base + channel] = (sums[channel] / count.max(1)) as u8;
+                }
+            }
+        }
+        self.data.frames.push((index, rgb8));
+    }
+
+    /// Finish collection, returning the archive for the viz stage.
+    #[must_use]
+    pub fn finish(self) -> FrameArchiveData {
+        self.data
+    }
+}
+
 /// Trajectory density centroid in pixel space (strided, deterministic).
 #[must_use]
 pub fn trajectory_centroid_px(
@@ -197,8 +293,14 @@ pub struct VizContext<'a> {
     pub quality: VizQuality,
     /// Whether fast video encoding was requested.
     pub fast_encode: bool,
+    /// Directory of prior seed packages for multi-seed modes (V63); the
+    /// current seed is charted alone when absent.
+    pub seeds_dir: Option<&'a str>,
     /// Frame tap data if a tap-consuming mode was requested (video runs only).
     pub frame_tap: Option<FrameTapData>,
+    /// Reduced-resolution frame archive (event windows + drama samples),
+    /// present only when an archive-consuming mode was requested.
+    pub frame_archive: Option<FrameArchiveData>,
     /// Accumulated per-pixel SPD buffer (present only during the SPD phase).
     pub accum_spd: Option<&'a [[f64; NUM_BINS]]>,
     /// Energy field retained from the main render for the trajectory phase
@@ -227,7 +329,9 @@ impl<'a> VizContext<'a> {
         seed_dir: &'a str,
         quality: VizQuality,
         fast_encode: bool,
+        seeds_dir: Option<&'a str>,
         frame_tap: Option<FrameTapData>,
+        frame_archive: Option<FrameArchiveData>,
         accum_spd: Option<&'a [[f64; NUM_BINS]]>,
         retained_energy: Option<Vec<f32>>,
         base_rng: &'a Sha3RandomByteStream,
@@ -245,7 +349,9 @@ impl<'a> VizContext<'a> {
             seed_dir,
             quality,
             fast_encode,
+            seeds_dir,
             frame_tap,
+            frame_archive,
             accum_spd,
             retained_energy,
             base_rng,

@@ -3,9 +3,12 @@
 pub mod alien_vision;
 pub mod aurora;
 pub mod basin_map;
+pub mod blueprint;
 pub mod braid;
 pub mod bullet_time;
+pub mod celestial_atlas;
 pub mod chandelier;
+pub mod chord_progression;
 pub mod chrono_grid;
 pub mod comet;
 pub mod corotating;
@@ -13,17 +16,21 @@ pub mod depth_pack;
 pub mod dust_nebula;
 pub mod dwell_nebula;
 pub mod editorial_retime;
+pub mod ephemeris_poster;
+pub mod epicycles;
 pub mod epilogue;
 pub mod field_lines;
 pub mod frost;
 pub mod galaxy_collision;
 pub mod gw_chirp;
+pub mod hologram;
 pub mod hyperspectral_flythrough;
 pub mod lensing;
 pub mod light_echoes;
 pub mod lightning;
 pub mod marbling;
 pub mod medial_recursion;
+pub mod mission_control;
 pub mod multiverse;
 pub mod neon;
 pub mod oscilloscope;
@@ -31,12 +38,14 @@ pub mod physarum;
 pub mod plotter_svg;
 pub mod prism_portrait;
 pub mod reconnection;
+pub mod recurrence;
 pub mod retarded_time;
 pub mod ride_along;
 pub mod roche;
 pub mod sculpture_export;
 pub mod shape_sphere;
 pub mod slit_scan;
+pub mod sonification;
 pub mod spectral_centroid;
 pub mod spectrum_card;
 pub mod strobe;
@@ -44,9 +53,12 @@ pub mod syzygy_wheel;
 pub mod terra;
 pub mod thin_film;
 pub mod three_shadows;
+pub mod tilt;
 pub mod topo_contours;
+pub mod trailer;
 pub mod triangle_centers;
 pub mod turntable;
+pub mod webgl_viewer;
 pub mod winding_glass;
 pub mod worldtube;
 
@@ -107,6 +119,18 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "editorial-retime" => Some(Box::new(editorial_retime::EditorialRetime)),
         "basin-map" => Some(Box::new(basin_map::BasinMap)),
         "terra" => Some(Box::new(terra::Terra)),
+        "sonification" => Some(Box::new(sonification::Sonification)),
+        "chord-progression" => Some(Box::new(chord_progression::ChordProgression)),
+        "epicycles" => Some(Box::new(epicycles::Epicycles)),
+        "recurrence" => Some(Box::new(recurrence::Recurrence)),
+        "mission-control" => Some(Box::new(mission_control::MissionControl)),
+        "ephemeris-poster" => Some(Box::new(ephemeris_poster::EphemerisPoster)),
+        "blueprint" => Some(Box::new(blueprint::Blueprint)),
+        "webgl-viewer" => Some(Box::new(webgl_viewer::WebglViewer)),
+        "tilt" => Some(Box::new(tilt::Tilt)),
+        "hologram" => Some(Box::new(hologram::Hologram)),
+        "trailer" => Some(Box::new(trailer::Trailer)),
+        "celestial-atlas" => Some(Box::new(celestial_atlas::CelestialAtlas)),
         _ => None,
     }
 }

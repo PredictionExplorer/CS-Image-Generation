@@ -5,7 +5,7 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~06:15 EST (~11:15 UTC), at the Wave 7 commit.
+Last updated: 2026-08-18 ~16:30 EST (~21:30 UTC), at the Wave 8 commit.
 
 > **Smoke-found bug, fixed pre-commit:** the Wave 6 draft smoke caught a
 > NaN-poisoned camera tangent — one-sided dolly look-aheads collapse to a
@@ -55,11 +55,11 @@ Last updated: 2026-08-18 ~06:15 EST (~11:15 UTC), at the Wave 7 commit.
 
 ## Where we are
 
-- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 5 landed as
-  `27eee5e`, Wave 6 as `47cf1e8`, Wave 7 as the latest `feat:` commit;
+- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 6 landed as
+  `47cf1e8`, Wave 7 as `68c422f`, Wave 8 as the latest `feat:` commit;
   every wave is one `feat:` commit plus this handoff kept in sync. All
   gates green.
-- **Progress:** 49 of 69 modes implemented (`--viz-list` prints the live
+- **Progress:** 61 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
     kinematics/events/energy-field), `ArtifactSink` + `viz/manifest.json`,
@@ -104,13 +104,22 @@ Last updated: 2026-08-18 ~06:15 EST (~11:15 UTC), at the Wave 7 commit.
     `events::drama()`, and `sim::symplectic_step` exposed `pub(crate)`.
     Re-simulated modes render with the recovered master rotation (drift
     dropped). Deviations in the Wave 7 addendum.
-- **Next up:** **Wave 8 — Sound & cinema** per the build order in the
-  master plan Part IV.2: V10 `sonification`, V16 `chord-progression`,
-  V17 `epicycles`, `compositor`, V48 `mission-control`, V47 `trailer`,
-  V53 `webgl-viewer`, V56 `tilt`, V55 `hologram`, V58 `ephemeris-poster`,
-  V59 `blueprint`, V63 `celestial-atlas` — this wave also unblocks
-  `common/text.rs` (typography), `audio` muxing, and the deferred
-  captions/cartouches/labels across earlier waves.
+  - **Wave 8** (12, sound & cinema, incl. the orphaned V11): sonification,
+    recurrence, chord-progression, epicycles, mission-control, trailer,
+    webgl-viewer, tilt, hologram, ephemeris-poster, blueprint,
+    celestial-atlas — plus `common/text.rs` (IBM Plex typography, OFL
+    fonts in `assets/fonts/`), `common/style.rs` (poster tokens),
+    `common/compositor.rs` (cut/xfade assembly), audio synthesis + LUFS
+    mastering + ffmpeg muxing, the quarter-res frame archive
+    (`needs_frame_archive`), the V53 viewer template in `assets/viewer/`,
+    and the `--viz-seeds-dir` flag. Deviations in the Wave 8 addendum.
+- **Next up:** **Wave 9 — Grand combos**, the final wave, per the build
+  order in the master plan Part IV.2: V57 `instrument`, V49 `broadcast`,
+  V64 `powers-of-fate`, V65 `witness`, V66 `rose-window`, V68
+  `reliquary`, V69 `pond`, V67 `vanitas` (last — it consumes the most
+  upstream machinery). Also now unblocked: the deferred caption/cartouche
+  backfill across earlier waves (text.rs exists) — schedule it with the
+  curation pass.
 - **Deviations from specs** are recorded in the "Wave N addendum" sections
   at the top of the master plan (single viz manifest instead of an
   assets.json section; typography/text.rs deferred to the posters wave;
@@ -188,7 +197,7 @@ cargo test --release                          # ~500 tests
 Smoke outputs (`output/…`) are gitignored. Local smoke dirs so far:
 `viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3),
 `viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5), `viz-smoke6` (Wave 6),
-`viz-smoke7` (Wave 7).
+`viz-smoke7` (Wave 7), `viz-smoke8` (Wave 8).
 CAUTION: never launch the smoke twice concurrently — two runs share
 `output/<name>` and their encoders fight over the same mp4 paths (this
 deadlocked a Wave 6 smoke until the duplicate was killed).
@@ -259,6 +268,12 @@ call inside the video branch, trajectory phase at the end),
   divergence threshold. V42's 768^2 final lattice and V23's x8 extended
   sim are the budget items to watch on the first final-quality run
   (projected log lines exist for every video).
+- **Wave 8 constants likewise draft-tuned:** sonification voice levels
+  and filter ranges, poster type sizes and inks, CRT pass strengths,
+  trailer shot lengths, hologram emission binning. V55's 8192^2 grid
+  (~1.1 GB, minutes of FFTs) and V48's per-frame barrel resample are the
+  budget items to watch at final. ffmpeg-dependent artifacts (muxes,
+  trailer assembly) fail soft with warnings when ffmpeg is missing.
 - The user curates favorites from batch outputs; deep-polish passes on
   chosen modes follow the wave completions (V37/V39 full-res stills are
   queued behind that shortlist, per the Wave 4 addendum).

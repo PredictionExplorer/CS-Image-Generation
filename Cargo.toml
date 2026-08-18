@@ -40,6 +40,7 @@ needless_pass_by_value       = "allow"
 unused_self                  = "allow"
 
 [dependencies]
+ab_glyph = "0.2.32"
 bytemuck = "1.25.0"
 chrono   = "0.4.44"
 clap     = { version = "4.6.0", features = ["derive"] }

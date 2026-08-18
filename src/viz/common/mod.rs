@@ -5,6 +5,7 @@
 pub mod accum;
 pub mod agents;
 pub mod audio;
+pub mod compositor;
 pub mod contours;
 pub mod display;
 pub mod events;
@@ -15,6 +16,8 @@ pub mod particles;
 pub mod raster;
 pub mod resim;
 pub mod spd;
+pub mod style;
+pub mod text;
 pub mod tube_render;
 pub mod vector_export;
 pub mod wave;

@@ -159,6 +159,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = VizQualityArg::Final)]
     viz_quality: VizQualityArg,
 
+    /// Directory of prior seed packages for multi-seed modes such as
+    /// `celestial-atlas` (defaults to charting only the current seed).
+    #[arg(long)]
+    viz_seeds_dir: Option<String>,
+
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
 
@@ -525,6 +530,45 @@ fn main() -> Result<()> {
         None
     };
 
+    // Frame archive (V47/V56): quarter-res copies of the frames around the
+    // three deepest approaches plus 24 drama-weighted samples.
+    let mut viz_archive_collector = if viz_selection.needs_frame_archive() && !args.image_only {
+        let kinematics =
+            viz::common::kinematics::Kinematics::compute(&positions, &selection.bodies);
+        let events = viz::common::events::Events::detect(&positions, &kinematics);
+        let steps = positions.first().map_or(1, Vec::len).max(1);
+        let total_frames = render::constants::DEFAULT_TARGET_FRAMES as usize;
+        let frame_of = |step: usize| (step * total_frames / steps).min(total_frames - 1);
+        let mut targets: Vec<usize> = Vec::new();
+        let mut deepest = events.periapses.clone();
+        deepest.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        for approach in deepest.iter().take(3) {
+            let center = frame_of(approach.step);
+            for offset in (0..=72).step_by(2) {
+                targets.push((center + offset).saturating_sub(36).min(total_frames - 1));
+            }
+        }
+        // Drama-weighted samples for the lenticular time flip.
+        let drama = events.drama(&kinematics);
+        let weight_total: f64 = drama.iter().map(|d| d + 0.05).sum();
+        let mut cumulative = 0.0;
+        let mut next = weight_total / 24.0;
+        for (step, d) in drama.iter().enumerate() {
+            cumulative += d + 0.05;
+            if cumulative >= next {
+                targets.push(frame_of(step));
+                next += weight_total / 24.0;
+            }
+        }
+        Some(viz::context::FrameArchiveCollector::new(
+            args.resolution.width,
+            args.resolution.height,
+            targets,
+        ))
+    } else {
+        None
+    };
+
     let mut viz_state = viz::VizStageState::new();
     let mut retained_energy: Option<Vec<f32>> = None;
 
@@ -543,8 +587,12 @@ fn main() -> Result<()> {
             );
         }
     } else {
+        let observe_any = viz_selection.needs_frame_tap() || viz_selection.needs_frame_archive();
         let mut tap_observe = |frame: &[u8]| {
             if let Some(collector) = viz_tap_collector.as_mut() {
+                collector.observe(frame);
+            }
+            if let Some(collector) = viz_archive_collector.as_mut() {
                 collector.observe(frame);
             }
         };
@@ -555,7 +603,7 @@ fn main() -> Result<()> {
             main_video_outputs,
             image_outputs,
             args.fast_encode,
-            viz_selection.needs_frame_tap().then_some(&mut tap_observe),
+            observe_any.then_some(&mut tap_observe),
         )?;
 
         let spectral_dir = format!("{seed_dir}/spectral");
@@ -603,6 +651,8 @@ fn main() -> Result<()> {
                 &seed_dir,
                 args.viz_quality.to_viz(),
                 args.fast_encode,
+                args.viz_seeds_dir.as_deref(),
+                None,
                 None,
                 Some(&accum_spd),
                 None,
@@ -667,6 +717,7 @@ fn main() -> Result<()> {
     // reported via the exit code.
     if !viz_selection.is_empty() {
         let tap_data = viz_tap_collector.map(viz::context::FrameTapCollector::finish);
+        let archive_data = viz_archive_collector.map(viz::context::FrameArchiveCollector::finish);
         let viz_ctx = viz::context::VizContext::new(
             &positions,
             &colors,
@@ -680,7 +731,9 @@ fn main() -> Result<()> {
             &seed_dir,
             args.viz_quality.to_viz(),
             args.fast_encode,
+            args.viz_seeds_dir.as_deref(),
             tap_data,
+            archive_data,
             None,
             retained_energy,
             &rng,

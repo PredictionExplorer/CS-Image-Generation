@@ -46,6 +46,12 @@ pub trait VizMode {
         false
     }
 
+    /// Whether this mode consumes the reduced-resolution frame archive
+    /// (event windows + drama-weighted samples of the main render).
+    fn needs_frame_archive(&self) -> bool {
+        false
+    }
+
     /// Whether this mode needs the per-pixel energy field retained from the
     /// main render's SPD for the trajectory phase.
     fn needs_energy_field(&self) -> bool {
@@ -147,6 +153,15 @@ impl VizSelection {
             .iter()
             .filter_map(|entry| modes::build(entry.flag))
             .any(|mode| mode.needs_energy_field())
+    }
+
+    /// Whether any selected mode consumes the main-render frame archive.
+    #[must_use]
+    pub fn needs_frame_archive(&self) -> bool {
+        self.entries
+            .iter()
+            .filter_map(|entry| modes::build(entry.flag))
+            .any(|mode| mode.needs_frame_archive())
     }
 
     /// Whether any selected mode runs in the given phase.
@@ -255,7 +270,7 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 49);
+        assert_eq!(selection.entries().len(), 61);
         assert!(selection.entries().iter().all(|entry| entry.implemented));
     }
 
@@ -272,7 +287,7 @@ mod tests {
     #[test]
     fn resolve_rejects_unknown_and_unimplemented() {
         assert!(VizSelection::resolve(&["no-such-mode".to_string()]).is_err());
-        assert!(VizSelection::resolve(&["hologram".to_string()]).is_err());
+        assert!(VizSelection::resolve(&["witness".to_string()]).is_err());
     }
 
     #[test]
