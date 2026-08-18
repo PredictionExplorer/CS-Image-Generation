@@ -2781,7 +2781,17 @@ existing defaults). No renderer changes.
 
 **RNG.** None.
 
-**Performance.** As today (~5–8 min final). Trajectory phase.
+**Performance.** *Corrected 2026-08-18 from server measurements* — the
+original "~5–8 min final (as today)" was calibrated on preview-scale scenes
+and is wrong at production inputs. At max quality (default res/sims/steps)
+the final mapping (full res, stride 1, 24 s = 720 frames) re-renders the
+entire production frame pipeline per frame: measured 3.7–23 min/frame
+(scene-dependent) on the 128-core server at 25 threads/seed ≈ **2–11 days
+per seed**. Decision (2026-08-18): mapping intentionally kept at full
+quality — max-quality turntables are wanted. Server batches must either
+budget for this or pass an explicit `--viz` flag list excluding
+`turntable` (no exclusion syntax exists; build the list from
+`--viz-list`). Trajectory phase.
 
 **Quality checklist.**
 - [ ] Byte-identical frames vs `--orbit-video` at equal config (regression).

@@ -5,25 +5,38 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-18 ~01:30 EST (2026-08-18 ~06:30 UTC).
+Last updated: 2026-08-18 ~02:45 EST (~07:45 UTC).
 
 ---
 
 ## Immediate next actions (fresh session, start here)
 
-1. **Check the server batch** (`python3 run_viz_batch.py --status`). A
-   Wave-1-only batch over 5 seeds has been running since 2026-08-17
-   23:54 UTC; as of ~06:15 UTC all five seeds were inside `turntable`
-   (V46 — the full-res orbit re-render, by far the longest mode) with only
-   `plotter-svg` and `oscilloscope` left after it. When `viz_batch.log`
-   shows `COMPLETE`:
-   - `python3 run_viz_batch.py --fetch viz-results` (downloads
-     `output/viz-*` for curation; several GB), then
-   - `python3 run_viz_batch.py` to relaunch the same 5 seeds from HEAD —
-     they will regenerate with all **36** modes (fully seed-deterministic,
-     so Wave-1 artifacts reproduce identically).
-2. **Start Wave 6** (3D scene family) per the plan below — independent of
-   the batch; local work never touches the server checkout.
+1. **Two batches are in flight** (topology + rationale in "The server"):
+   - **Primary** (`--status` with defaults): seeds `0x1357` + `0xFACE`
+     finishing their max-quality Wave-1 turntables (measured ~3.7 and
+     ~4.6 min/frame of 720; ETA ~Aug 19 21:30 UTC and ~Aug 20 08:30 UTC,
+     then `plotter-svg`/`oscilloscope` in seconds). Expected `WARN ...
+     failed` lines for the other three seeds in `viz_batch.log` — those
+     were killed deliberately (see below). When it shows `COMPLETE`:
+     fetch, then relaunch these two seeds with every implemented mode
+     **except `turntable`** (they will already have it; there is no
+     exclusion syntax — build the comma list from `--viz-list` and pass
+     it via `--viz-flags`).
+   - **viz-batch2** (`--remote-dir viz-batch2/CS-Image-Generation`):
+     seeds `0xBEEF 0xC0DE 0xCAFE` relaunched 2026-08-18 ~07:30 UTC from
+     `77b5c2d` with all **36** modes, including max-quality turntables
+     (decision: keep full quality; measured cost ≈ 2–11 days/seed,
+     turntable-dominated — see the corrected V46 Performance note in the
+     master plan). ETA roughly Aug 24–29. Fetch needs the same
+     `--remote-dir`.
+2. **Wave-1 partials already fetched** (2026-08-18 ~07:15 UTC) to
+   `../CS-viz-results-20260818/` — all 5 seeds' core packages + the 5
+   cheap Wave-1 modes each, ready for curation now. NOTE: fetch
+   destinations must live **outside the repo** (or be gitignored) —
+   an in-repo `viz-results/` blocked a deploy (deploy requires a clean
+   tree). Add `viz-results/` to `.gitignore` in the next code commit.
+3. **Start Wave 6** (3D scene family) per the plan below — independent of
+   the batches; local work never touches the server checkouts.
 
 ## Where we are
 
@@ -92,19 +105,27 @@ Last updated: 2026-08-18 ~01:30 EST (2026-08-18 ~06:30 UTC).
   detached via `setsid nohup` (safe to disconnect). Per-seed logs:
   `viz-<seed>.log` in the remote dir; batch log: `viz_batch.log`.
 
-- **Batch in flight right now:** launched 2026-08-17 23:54 UTC from commit
-  `e0066a9` (Wave 1 only, 8 modes), seeds `0xCAFE 0xBEEF 0xC0DE 0xFACE
-  0x1357`, max quality (default resolution/sims/steps, HQ encodes,
-  `--viz all`). Progress timeline: main videos finished ~03-05 UTC (HEVC
-  `slower` encodes dominate the core package); as of ~06:15 UTC every seed
-  sat inside `turntable` (V46), which re-renders the sculpture from 360
-  angles at full res and dwarfs every other Wave-1 mode; `plotter-svg` and
-  `oscilloscope` (both cheap) remain after it. Follow-through when
-  `viz_batch.log` shows `COMPLETE` is step 1 of "Immediate next actions"
-  above. Budget note for the relaunch: Waves 2-5 add roughly 1.5-2.5 h per
-  seed at max quality (re-accumulation videos, the V31/V38 particle sims,
-  V33 physarum, and V32's wave grid are the big contributors), on top of
-  the Wave-1-only footprint this batch is finishing.
+- **Batches in flight right now** (restructured 2026-08-18 ~07:30 UTC
+  after measuring turntable's true cost):
+  - **Primary** (`viz-batch/CS-Image-Generation`, launched 2026-08-17
+    23:54 UTC from `e0066a9`, Wave 1 only, max quality): originally 5
+    seeds; `0xBEEF 0xC0DE 0xCAFE` were **killed at ~07:15 UTC** mid-
+    turntable (measured 13–23 min/frame → 6–11 days each) and their
+    partial outputs removed. `0x1357` (92/720 frames @ ~3.7 min) and
+    `0xFACE` (70/720 @ ~4.6 min) were left to finish their max-quality
+    turntables: ETA ~Aug 19 21:30 UTC / ~Aug 20 08:30 UTC.
+  - **viz-batch2** (`viz-batch2/CS-Image-Generation`, launched 2026-08-18
+    ~07:30 UTC from `77b5c2d`): the 3 killed seeds regenerating with all
+    36 modes at max quality (deterministic, so Wave-1 artifacts reproduce
+    identically), `RAYON_NUM_THREADS=42` each. Turntable-dominated: ETA
+    roughly Aug 24–29 (0xC0DE measured slowest at ~23 min/frame).
+  - **Turntable economics** (the lesson): V46 final = full res, stride 1,
+    24 s = 720 frames, each a full production re-render — measured 3.7–23
+    min/frame at max quality vs the spec's old "~5–8 min total" claim
+    (corrected in the V46 spec). Decision: keep max quality; budget for
+    it, or exclude `turntable` from a batch via an explicit
+    `--viz-flags` list. Waves 2-5 modes add only ~1.5-2.5 h per seed on
+    top of the core package (~4-5 h); turntable dwarfs everything.
 - **Useful deep probe** (per-seed mode completion, beyond `--status`):
 
   ```bash
