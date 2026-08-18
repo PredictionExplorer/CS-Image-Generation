@@ -71,8 +71,8 @@ for SEED in {seeds_shell}; do
   NAME="viz-${{SEED}}"
   echo "=== [$(date -u '+%H:%M:%S')] launching seed ${{SEED}} -> output/${{NAME}} \\
 (log: ${{NAME}}.log) ==="
-  RAYON_NUM_THREADS="$THREADS" "$BIN" --seed "${{SEED}}" --viz all --output "${{NAME}}" \\
-    > "${{NAME}}.log" 2>&1 &
+  RAYON_NUM_THREADS="$THREADS" "$BIN" --seed "${{SEED}}" --viz {viz_flags} \\
+    --output "${{NAME}}" > "${{NAME}}.log" 2>&1 &
   PIDS+=($!)
   NAMES+=("$NAME")
 done
@@ -138,13 +138,16 @@ def deploy(host: str, remote_dir: str, dry_run: bool) -> None:
         sys.exit(1)
 
 
-def upload_batch_script(host: str, remote_dir: str, seeds: list[str], dry_run: bool) -> None:
+def upload_batch_script(
+    host: str, remote_dir: str, seeds: list[str], viz_flags: str, dry_run: bool
+) -> None:
     """Generate and upload the self-contained batch script."""
     print("[3/4] upload batch script")
     script = BATCH_TEMPLATE.format(
         seeds_display=" ".join(seeds),
         seeds_shell=" ".join(seeds),
         seed_count=len(seeds),
+        viz_flags=viz_flags,
     )
     if dry_run:
         print(f"  (would write {len(script)} bytes to {remote_dir}/{SCRIPT_NAME})")
@@ -214,6 +217,7 @@ def main() -> None:
     parser.add_argument("--host", default=DEFAULT_HOST, help="ssh target (user@host)")
     parser.add_argument("--remote-dir", default=DEFAULT_REMOTE_DIR, help="remote checkout path")
     parser.add_argument("--seeds", default=DEFAULT_SEEDS, help="comma-separated hex seeds")
+    parser.add_argument("--viz-flags", default="all", help="value passed to --viz on the server")
     parser.add_argument("--status", action="store_true", help="show remote progress and exit")
     parser.add_argument("--fetch", metavar="DIR", help="download finished artifacts into DIR")
     parser.add_argument("--dry-run", action="store_true", help="print commands without running")
@@ -233,7 +237,7 @@ def main() -> None:
 
     preflight(args.host, args.dry_run)
     deploy(args.host, args.remote_dir, args.dry_run)
-    upload_batch_script(args.host, args.remote_dir, seeds, args.dry_run)
+    upload_batch_script(args.host, args.remote_dir, seeds, args.viz_flags, args.dry_run)
     launch(args.host, args.remote_dir, args.dry_run)
 
 

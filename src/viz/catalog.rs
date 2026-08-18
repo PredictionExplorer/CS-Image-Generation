@@ -37,12 +37,12 @@ const fn entry(
 
 /// Every mode from the master plan ledger, in ledger order.
 pub const CATALOG: &[ModeEntry] = &[
-    entry("V01", "alien-vision", "The Same Light, Other Eyes", "spectral", 'A', false),
+    entry("V01", "alien-vision", "The Same Light, Other Eyes", "spectral", 'A', true),
     entry("V02", "hyperspectral-flythrough", "Flying Through the Spectrum", "spectral", 'C', false),
-    entry("V03", "spectral-centroid", "What Color the Light Really Is", "spectral", 'A', false),
-    entry("V04", "prism-portrait", "The Artwork Through Glass", "spectral", 'A', false),
-    entry("V05", "spectrum-card", "Stellar Classification Card", "spectral", 'A', false),
-    entry("V06", "thin-film", "Oil-Slick Twin", "spectral", 'A', false),
+    entry("V03", "spectral-centroid", "What Color the Light Really Is", "spectral", 'A', true),
+    entry("V04", "prism-portrait", "The Artwork Through Glass", "spectral", 'A', true),
+    entry("V05", "spectrum-card", "Stellar Classification Card", "spectral", 'A', true),
+    entry("V06", "thin-film", "Oil-Slick Twin", "spectral", 'A', true),
     entry("V07", "braid", "The Orbit Is a Braid", "physics", 'A', true),
     entry("V08", "shape-sphere", "The Planet of Shapes", "physics", 'B', false),
     entry("V09", "gw-chirp", "The Sound of Spacetime", "physics", 'A', true),
@@ -96,8 +96,8 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V57", "instrument", "Play Your Orbit", "exports", 'C', false),
     entry("V58", "ephemeris-poster", "The Almanac Page", "posters", 'B', false),
     entry("V59", "blueprint", "Two Archival Restylings", "posters", 'B', false),
-    entry("V60", "dwell-nebula", "The Ergodic Ghost", "posters", 'B', false),
-    entry("V61", "topo-contours", "The Terrain of Light", "posters", 'B', false),
+    entry("V60", "dwell-nebula", "The Ergodic Ghost", "posters", 'B', true),
+    entry("V61", "topo-contours", "The Terrain of Light", "posters", 'B', true),
     entry("V62", "terra", "Terra Trium Corporum", "posters", 'C', false),
     entry("V63", "celestial-atlas", "The Collection as a Sky", "posters", 'C', false),
     entry("V64", "powers-of-fate", "The Dive", "combos", 'D', false),
@@ -195,8 +195,9 @@ mod tests {
     }
 
     #[test]
-    fn wave_one_modes_are_implemented() {
+    fn implemented_waves_are_marked() {
         for flag in [
+            // Wave 1
             "braid",
             "gw-chirp",
             "syzygy-wheel",
@@ -205,10 +206,18 @@ mod tests {
             "plotter-svg",
             "oscilloscope",
             "turntable",
+            // Wave 2 (SPD family)
+            "alien-vision",
+            "spectral-centroid",
+            "prism-portrait",
+            "spectrum-card",
+            "thin-film",
+            "dwell-nebula",
+            "topo-contours",
         ] {
-            let found = find(flag).expect("wave-1 flag must exist");
+            let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 8);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 15);
     }
 }

@@ -4,6 +4,7 @@
 
 use crate::render::{ChannelLevels, OklabColor, SpectralRenderSettings};
 use crate::sim::{Body, Sha3RandomByteStream};
+use crate::spectrum::NUM_BINS;
 use crate::viz::common::events::Events;
 use crate::viz::common::kinematics::Kinematics;
 use nalgebra::Vector3;
@@ -198,9 +199,12 @@ pub struct VizContext<'a> {
     pub fast_encode: bool,
     /// Frame tap data if a tap-consuming mode was requested (video runs only).
     pub frame_tap: Option<FrameTapData>,
+    /// Accumulated per-pixel SPD buffer (present only during the SPD phase).
+    pub accum_spd: Option<&'a [[f64; NUM_BINS]]>,
     base_rng: &'a Sha3RandomByteStream,
     kinematics: OnceLock<Kinematics>,
     events: OnceLock<Events>,
+    energy_field: OnceLock<Vec<f32>>,
 }
 
 impl<'a> VizContext<'a> {
@@ -221,6 +225,7 @@ impl<'a> VizContext<'a> {
         quality: VizQuality,
         fast_encode: bool,
         frame_tap: Option<FrameTapData>,
+        accum_spd: Option<&'a [[f64; NUM_BINS]]>,
         base_rng: &'a Sha3RandomByteStream,
     ) -> Self {
         Self {
@@ -237,9 +242,11 @@ impl<'a> VizContext<'a> {
             quality,
             fast_encode,
             frame_tap,
+            accum_spd,
             base_rng,
             kinematics: OnceLock::new(),
             events: OnceLock::new(),
+            energy_field: OnceLock::new(),
         }
     }
 
@@ -251,6 +258,14 @@ impl<'a> VizContext<'a> {
     /// Detected orbit events (computed once on first use).
     pub fn events(&self) -> &Events {
         self.events.get_or_init(|| Events::detect(self.positions, self.kinematics()))
+    }
+
+    /// Per-pixel total SPD energy (computed once; `None` without the SPD).
+    pub fn energy_field(&self) -> Option<&[f32]> {
+        let spd = self.accum_spd?;
+        Some(
+            self.energy_field.get_or_init(|| crate::viz::common::spd::energy_field(spd)).as_slice(),
+        )
     }
 
     /// Fork a deterministic RNG for a mode (`domain = viz/<flag>/v1`).

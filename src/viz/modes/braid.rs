@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::viz::VizMode;
 use crate::viz::catalog::{self, ModeEntry};
 use crate::viz::common::display::SpdCanvas;
+use crate::viz::common::kinematics::principal_axis_xy;
 use crate::viz::context::VizContext;
 use crate::viz::sink::ArtifactSink;
 use serde::Serialize;
@@ -42,42 +43,6 @@ struct Crossing {
 /// The braid visualization mode.
 pub struct Braid;
 
-/// Leading eigenvector of the 2x2 covariance of all projected xy positions.
-fn principal_axis(positions: &[Vec<nalgebra::Vector3<f64>>]) -> (f64, f64) {
-    let mut mean = (0.0_f64, 0.0_f64);
-    let mut count = 0.0_f64;
-    for body in positions {
-        for point in body.iter().step_by(97) {
-            mean.0 += point.x;
-            mean.1 += point.y;
-            count += 1.0;
-        }
-    }
-    if count == 0.0 {
-        return (1.0, 0.0);
-    }
-    mean.0 /= count;
-    mean.1 /= count;
-
-    let (mut cxx, mut cxy, mut cyy) = (0.0_f64, 0.0_f64, 0.0_f64);
-    for body in positions {
-        for point in body.iter().step_by(97) {
-            let dx = point.x - mean.0;
-            let dy = point.y - mean.1;
-            cxx += dx * dx;
-            cxy += dx * dy;
-            cyy += dy * dy;
-        }
-    }
-    // Closed-form leading eigenvector of [[cxx, cxy], [cxy, cyy]].
-    let trace_half = 0.5 * (cxx + cyy);
-    let det = cxx * cyy - cxy * cxy;
-    let lambda = trace_half + (trace_half * trace_half - det).max(0.0).sqrt();
-    let (vx, vy) = if cxy.abs() > 1e-15 { (lambda - cyy, cxy) } else { (1.0, 0.0) };
-    let norm = (vx * vx + vy * vy).sqrt().max(1e-15);
-    (vx / norm, vy / norm)
-}
-
 impl VizMode for Braid {
     fn entry(&self) -> &'static ModeEntry {
         catalog::find("braid").expect("braid is in the catalog")
@@ -90,7 +55,7 @@ impl VizMode for Braid {
         let samples = (height as usize * 2).min(steps.max(2));
 
         // Projected scalar series per body, sampled uniformly in time.
-        let axis = principal_axis(ctx.positions);
+        let axis = principal_axis_xy(ctx.positions);
         let step_of = |sample: usize| sample * (steps - 1) / (samples - 1).max(1);
         let projected: Vec<Vec<f64>> = (0..3)
             .map(|body| {

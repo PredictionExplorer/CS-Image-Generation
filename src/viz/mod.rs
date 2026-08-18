@@ -18,10 +18,28 @@ use context::VizContext;
 use sink::ArtifactSink;
 use tracing::{info, warn};
 
+/// Execution phase of a mode, per the planner in the master plan (I.6).
+///
+/// SPD-phase modes run inside the render block while the accumulated
+/// spectral buffer is still alive; trajectory-phase modes run at the end of
+/// the pipeline after the core package is complete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VizPhase {
+    /// Requires the accumulated per-pixel SPD buffer.
+    Spd,
+    /// Requires only trajectory data (and optionally the frame tap).
+    Trajectory,
+}
+
 /// A single visualization mode, executed after the main render.
 pub trait VizMode {
     /// Catalog entry for this mode (id, flag, metadata).
     fn entry(&self) -> &'static ModeEntry;
+
+    /// Which stage phase this mode must run in.
+    fn phase(&self) -> VizPhase {
+        VizPhase::Trajectory
+    }
 
     /// Whether this mode consumes frames tapped from the main video render.
     fn needs_frame_tap(&self) -> bool {
@@ -116,6 +134,25 @@ impl VizSelection {
             .any(|mode| mode.needs_frame_tap())
     }
 
+    /// Whether any selected mode runs in the given phase.
+    #[must_use]
+    pub fn has_phase(&self, phase: VizPhase) -> bool {
+        self.entries
+            .iter()
+            .filter_map(|entry| modes::build(entry.flag))
+            .any(|mode| mode.phase() == phase)
+    }
+
+    /// Flags of selected modes in the given phase (for skip warnings).
+    #[must_use]
+    pub fn phase_flags(&self, phase: VizPhase) -> Vec<&'static str> {
+        self.entries
+            .iter()
+            .filter(|entry| modes::build(entry.flag).is_some_and(|mode| mode.phase() == phase))
+            .map(|entry| entry.flag)
+            .collect()
+    }
+
     /// Selected catalog entries in execution order.
     #[must_use]
     pub fn entries(&self) -> &[&'static ModeEntry] {
@@ -123,53 +160,76 @@ impl VizSelection {
     }
 }
 
-/// Execute every selected mode, write the viz manifest, and report.
+/// Accumulates artifact records and failures across the stage's phases.
 ///
-/// Individual mode failures are logged and collected; the stage returns an
-/// error listing them only after all modes have been attempted, so one
-/// failure never blocks the rest.
-pub fn run_viz_stage(ctx: &VizContext<'_>, selection: &VizSelection) -> Result<()> {
-    let mut all_records = Vec::new();
-    let mut failures: Vec<String> = Vec::new();
+/// Individual mode failures are logged and collected; [`Self::finish`]
+/// returns an error listing them only after all phases have run, so one
+/// failure never blocks other modes and never endangers the core package
+/// (which is fully written before the trajectory phase runs).
+#[derive(Default)]
+pub struct VizStageState {
+    records: Vec<sink::ArtifactRecord>,
+    failures: Vec<String>,
+}
 
-    for entry in selection.entries() {
-        let Some(mode) = modes::build(entry.flag) else {
-            failures.push(format!("{} (no implementation registered)", entry.flag));
-            continue;
-        };
-        info!("VIZ {} `{}`: {}...", entry.id, entry.flag, entry.title);
-        let started = std::time::Instant::now();
-        match ArtifactSink::new(ctx.seed_dir, entry.flag) {
-            Ok(mut mode_sink) => match mode.run(ctx, &mut mode_sink) {
-                Ok(()) => {
-                    let records = mode_sink.into_records();
-                    info!(
-                        "   => viz `{}` done: {} artifact(s) in {:.1}s",
-                        entry.flag,
-                        records.len(),
-                        started.elapsed().as_secs_f64()
-                    );
-                    all_records.extend(records);
-                }
+impl VizStageState {
+    /// Create an empty stage state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Execute every selected mode belonging to `phase`.
+    pub fn run_phase(&mut self, ctx: &VizContext<'_>, selection: &VizSelection, phase: VizPhase) {
+        for entry in selection.entries() {
+            let Some(mode) = modes::build(entry.flag) else {
+                self.failures.push(format!("{} (no implementation registered)", entry.flag));
+                continue;
+            };
+            if mode.phase() != phase {
+                continue;
+            }
+            info!("VIZ {} `{}`: {}...", entry.id, entry.flag, entry.title);
+            let started = std::time::Instant::now();
+            match ArtifactSink::new(ctx.seed_dir, entry.flag) {
+                Ok(mut mode_sink) => match mode.run(ctx, &mut mode_sink) {
+                    Ok(()) => {
+                        let records = mode_sink.into_records();
+                        info!(
+                            "   => viz `{}` done: {} artifact(s) in {:.1}s",
+                            entry.flag,
+                            records.len(),
+                            started.elapsed().as_secs_f64()
+                        );
+                        self.records.extend(records);
+                    }
+                    Err(error) => {
+                        warn!("viz mode `{}` failed: {error}", entry.flag);
+                        self.failures.push(format!("{} ({error})", entry.flag));
+                    }
+                },
                 Err(error) => {
-                    warn!("viz mode `{}` failed: {error}", entry.flag);
-                    failures.push(format!("{} ({error})", entry.flag));
+                    warn!("viz mode `{}` could not create its sink: {error}", entry.flag);
+                    self.failures.push(format!("{} ({error})", entry.flag));
                 }
-            },
-            Err(error) => {
-                warn!("viz mode `{}` could not create its sink: {error}", entry.flag);
-                failures.push(format!("{} ({error})", entry.flag));
             }
         }
     }
 
-    sink::write_viz_manifest(ctx.seed_dir, &all_records)?;
-    info!("VIZ stage complete: {} artifact(s), {} failure(s)", all_records.len(), failures.len());
-
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!("viz modes failed: {}", failures.join(", "))).into())
+    /// Write the aggregated viz manifest and report the stage outcome.
+    pub fn finish(self, seed_dir: &str) -> Result<()> {
+        sink::write_viz_manifest(seed_dir, &self.records)?;
+        info!(
+            "VIZ stage complete: {} artifact(s), {} failure(s)",
+            self.records.len(),
+            self.failures.len()
+        );
+        if self.failures.is_empty() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!("viz modes failed: {}", self.failures.join(", ")))
+                .into())
+        }
     }
 }
 
@@ -180,8 +240,18 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 8);
+        assert_eq!(selection.entries().len(), 15);
         assert!(selection.entries().iter().all(|entry| entry.implemented));
+    }
+
+    #[test]
+    fn spd_phase_detection() {
+        let selection = VizSelection::resolve(&["thin-film,braid".to_string()]).expect("resolve");
+        assert!(selection.has_phase(VizPhase::Spd));
+        assert!(selection.has_phase(VizPhase::Trajectory));
+        assert_eq!(selection.phase_flags(VizPhase::Spd), vec!["thin-film"]);
+        let trajectory_only = VizSelection::resolve(&["braid".to_string()]).expect("resolve");
+        assert!(!trajectory_only.has_phase(VizPhase::Spd));
     }
 
     #[test]

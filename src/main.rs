@@ -525,6 +525,8 @@ fn main() -> Result<()> {
         None
     };
 
+    let mut viz_state = viz::VizStageState::new();
+
     if args.image_only {
         app::render_still_image(
             render::SpectralScene::new(&positions, &colors, &body_alphas),
@@ -532,6 +534,13 @@ fn main() -> Result<()> {
             spectral_settings,
             image_outputs,
         )?;
+        let skipped = viz_selection.phase_flags(viz::VizPhase::Spd);
+        if !skipped.is_empty() {
+            warn!(
+                "viz SPD-phase modes skipped under --image-only (no SPD buffer): {}",
+                skipped.join(", ")
+            );
+        }
     } else {
         let mut tap_observe = |frame: &[u8]| {
             if let Some(collector) = viz_tap_collector.as_mut() {
@@ -570,6 +579,29 @@ fn main() -> Result<()> {
             spectral_sweep_outputs,
             args.fast_encode,
         )?;
+
+        // SPD phase: modes that need the accumulated spectral buffer run
+        // here, while it is still alive. Failures are collected, not raised.
+        if viz_selection.has_phase(viz::VizPhase::Spd) {
+            let viz_ctx = viz::context::VizContext::new(
+                &positions,
+                &colors,
+                &body_alphas,
+                &selection.bodies,
+                &levels,
+                spectral_settings,
+                args.resolution.width,
+                args.resolution.height,
+                hex_seed,
+                &seed_dir,
+                args.viz_quality.to_viz(),
+                args.fast_encode,
+                None,
+                Some(&accum_spd),
+                &rng,
+            );
+            viz_state.run_phase(&viz_ctx, &viz_selection, viz::VizPhase::Spd);
+        }
     }
 
     if args.orbit_video {
@@ -622,8 +654,9 @@ fn main() -> Result<()> {
         warn!("Generation logging failed (non-fatal): {e}");
     }
 
-    // Viz stage runs last: the core package above is complete regardless of
-    // any visualization failure, which is still reported via the exit code.
+    // Trajectory-phase viz modes run last: the core package above is
+    // complete regardless of any visualization failure, which is still
+    // reported via the exit code.
     if !viz_selection.is_empty() {
         let tap_data = viz_tap_collector.map(viz::context::FrameTapCollector::finish);
         let viz_ctx = viz::context::VizContext::new(
@@ -640,9 +673,11 @@ fn main() -> Result<()> {
             args.viz_quality.to_viz(),
             args.fast_encode,
             tap_data,
+            None,
             &rng,
         );
-        viz::run_viz_stage(&viz_ctx, &viz_selection)?;
+        viz_state.run_phase(&viz_ctx, &viz_selection, viz::VizPhase::Trajectory);
+        viz_state.finish(&seed_dir)?;
     }
 
     Ok(())

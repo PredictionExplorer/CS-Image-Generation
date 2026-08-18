@@ -8,10 +8,10 @@
 use crate::error::Result;
 use crate::oklab::{oklab_to_linear_rec2020, oklab_to_oklch, oklch_to_oklab};
 use crate::render::{VideoEncodingOptions, VideoOutputSpec, create_videos_from_frames_singlepass};
-use crate::spectrum::linear_rec2020_to_display_p3;
 use crate::viz::VizMode;
 use crate::viz::catalog::{self, ModeEntry};
 use crate::viz::common::audio;
+use crate::viz::common::display::encode_linear_rec2020_to_u16;
 use crate::viz::context::VizContext;
 use crate::viz::sink::ArtifactSink;
 use rayon::prelude::*;
@@ -36,8 +36,6 @@ const SCOPE_SECONDS: usize = 30;
 const SCOPE_FPS: u32 = 60;
 /// Phosphor persistence time constant (seconds).
 const PHOSPHOR_TAU: f64 = 0.09;
-/// Display gamma for the direct-color encode.
-const DISPLAY_GAMMA: f64 = 2.2;
 
 /// The oscilloscope-music mode.
 pub struct Oscilloscope;
@@ -181,7 +179,7 @@ impl VizMode for Oscilloscope {
             SCOPE_FPS,
             |out| {
                 let mut frame_pixels = vec![(0.0, 0.0, 0.0); side_px * side_px];
-                let mut frame_u16 = vec![0u16; side_px * side_px * 3];
+                let mut frame_u16: Vec<u16> = Vec::new();
                 for _ in 0..frame_count {
                     // Decay phosphor, then integrate this frame's samples.
                     for value in &mut intensity {
@@ -221,15 +219,7 @@ impl VizMode for Oscilloscope {
                             *pixel = oklab_to_linear_rec2020(l, a, b);
                         },
                     );
-                    frame_u16.par_chunks_mut(3).zip(frame_pixels.par_iter()).for_each(
-                        |(chunk, &(r, g, b))| {
-                            let (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b);
-                            for (slot, value) in chunk.iter_mut().zip([p3_r, p3_g, p3_b]) {
-                                *slot = (value.clamp(0.0, 1.0).powf(1.0 / DISPLAY_GAMMA) * 65535.0)
-                                    .round() as u16;
-                            }
-                        },
-                    );
+                    encode_linear_rec2020_to_u16(&frame_pixels, &mut frame_u16);
                     out.write_all(bytemuck::cast_slice(&frame_u16))
                         .map_err(crate::render::error::RenderError::VideoEncoding)?;
                     frames_written += 1;

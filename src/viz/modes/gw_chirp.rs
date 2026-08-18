@@ -8,12 +8,11 @@
 use crate::error::Result;
 use crate::oklab::{oklab_to_linear_rec2020, oklab_to_oklch, oklch_to_oklab};
 use crate::render::constants::DEFAULT_DT;
-use crate::render::{ImageBuffer, Rgb};
-use crate::spectrum::linear_rec2020_to_display_p3;
 use crate::utils::fourier_transform;
 use crate::viz::VizMode;
 use crate::viz::catalog::{self, ModeEntry};
 use crate::viz::common::audio;
+use crate::viz::common::display::encode_linear_rec2020_png16;
 use crate::viz::context::VizContext;
 use crate::viz::sink::ArtifactSink;
 use rayon::prelude::*;
@@ -32,8 +31,6 @@ const STFT_HOP: usize = 1024;
 const POSTER_WIDTH: u32 = 3456;
 /// Poster height at final quality.
 const POSTER_HEIGHT: u32 = 2234;
-/// Display gamma for the direct-color encode.
-const DISPLAY_GAMMA: f64 = 2.2;
 
 /// The gravitational-wave chirp mode.
 pub struct GwChirp;
@@ -55,18 +52,6 @@ fn second_derivative(series: &[f64], h: f64) -> Vec<f64> {
                 / (12.0 * h * h)
         })
         .collect()
-}
-
-/// Gamma-encode a linear Rec.2020 buffer into Display P3 u16 samples.
-fn encode_display_p3(pixels: &[(f64, f64, f64)]) -> Vec<u16> {
-    let mut out = vec![0u16; pixels.len() * 3];
-    out.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b))| {
-        let (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b);
-        for (slot, value) in chunk.iter_mut().zip([p3_r, p3_g, p3_b]) {
-            *slot = (value.clamp(0.0, 1.0).powf(1.0 / DISPLAY_GAMMA) * 65535.0).round() as u16;
-        }
-    });
-    out
 }
 
 impl VizMode for GwChirp {
@@ -226,9 +211,7 @@ impl VizMode for GwChirp {
             }
         }
 
-        let image: ImageBuffer<Rgb<u16>, Vec<u16>> =
-            ImageBuffer::from_raw(width, height, encode_display_p3(&pixels))
-                .expect("poster buffer has width*height*3 samples");
+        let image = encode_linear_rec2020_png16(&pixels, width, height);
         sink.save_png16(&image, "chirp_poster.png")?;
 
         let meta = serde_json::json!({

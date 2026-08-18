@@ -9,13 +9,11 @@
 use crate::error::Result;
 use crate::oklab::{max_display_p3_chroma_for_lh, oklab_to_linear_rec2020, oklch_to_oklab};
 use crate::render::context::RenderContext;
-use crate::render::{ImageBuffer, Rgb};
-use crate::spectrum::linear_rec2020_to_display_p3;
 use crate::viz::VizMode;
 use crate::viz::catalog::{self, ModeEntry};
+use crate::viz::common::display::encode_linear_rec2020_png16;
 use crate::viz::context::VizContext;
 use crate::viz::sink::ArtifactSink;
-use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// Stride over simulation steps when building path segments.
@@ -24,8 +22,6 @@ const PATH_STRIDE: usize = 2;
 const LEAD_LIGHTNESS: f64 = 0.08;
 /// Paper (zero-winding) lightness.
 const PAPER_LIGHTNESS: f64 = 0.045;
-/// Display gamma for the direct-color encode.
-const DISPLAY_GAMMA: f64 = 2.2;
 
 /// The topological stained-glass mode.
 pub struct WindingGlass;
@@ -54,18 +50,6 @@ fn pane_color(triple: (i32, i32, i32), anchor_hue: f64) -> (f64, f64, f64) {
     let chroma = 0.6 * max_display_p3_chroma_for_lh(lightness, hue);
     let (l, a, b) = oklch_to_oklab(lightness, chroma, hue);
     oklab_to_linear_rec2020(l, a, b)
-}
-
-/// Encode a linear Rec.2020 buffer to gamma-encoded Display P3 u16 samples.
-fn encode_display_p3(pixels: &[(f64, f64, f64)]) -> Vec<u16> {
-    let mut out = vec![0u16; pixels.len() * 3];
-    out.par_chunks_mut(3).zip(pixels.par_iter()).for_each(|(chunk, &(r, g, b))| {
-        let (p3_r, p3_g, p3_b) = linear_rec2020_to_display_p3(r, g, b);
-        for (slot, value) in chunk.iter_mut().zip([p3_r, p3_g, p3_b]) {
-            *slot = (value.clamp(0.0, 1.0).powf(1.0 / DISPLAY_GAMMA) * 65535.0).round() as u16;
-        }
-    });
-    out
 }
 
 impl VizMode for WindingGlass {
@@ -203,10 +187,7 @@ impl VizMode for WindingGlass {
             }
         }
 
-        let quantized = encode_display_p3(&pixels);
-        let image: ImageBuffer<Rgb<u16>, Vec<u16>> =
-            ImageBuffer::from_raw(ctx.width, ctx.height, quantized)
-                .expect("winding buffer has width*height*3 samples");
+        let image = encode_linear_rec2020_png16(&pixels, ctx.width, ctx.height);
         sink.save_png16(&image, "winding.png")?;
 
         // Histogram of winding triples for the key / audits.

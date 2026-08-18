@@ -35,12 +35,12 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 
 | ID | Flag | Category | Primary artifacts | Cost | Depends on | Status |
 |----|------|----------|-------------------|------|------------|--------|
-| V01 | `alien-vision` | Spectral | 5 stills | A | SPD | `[ ]` |
+| V01 | `alien-vision` | Spectral | 5 stills | A | SPD | `[x]` |
 | V02 | `hyperspectral-flythrough` | Spectral | video | C | SPD, tube_render | `[ ]` |
-| V03 | `spectral-centroid` | Spectral | still | A | SPD | `[ ]` |
-| V04 | `prism-portrait` | Spectral | still | A | SPD | `[ ]` |
-| V05 | `spectrum-card` | Spectral | poster | A | SPD, text | `[ ]` |
-| V06 | `thin-film` | Spectral | still | A | SPD | `[ ]` |
+| V03 | `spectral-centroid` | Spectral | still | A | SPD | `[x]` |
+| V04 | `prism-portrait` | Spectral | still | A | SPD | `[x]` |
+| V05 | `spectrum-card` | Spectral | poster | A | SPD, text | `[x]` |
+| V06 | `thin-film` | Spectral | still | A | SPD | `[x]` |
 | V07 | `braid` | Physics | tall still + video | A | kinematics | `[x]` |
 | V08 | `shape-sphere` | Physics | still + video | B | kinematics | `[ ]` |
 | V09 | `gw-chirp` | Physics | WAV + poster | A | kinematics, audio, text | `[x]` |
@@ -94,8 +94,8 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V57 | `instrument` | Exports | HTML + JSON + WAV | C | V53, V54, V16 | `[ ]` |
 | V58 | `ephemeris-poster` | Posters | poster | B | text, metadata | `[ ]` |
 | V59 | `blueprint` | Posters | 2 stills | B | accumulation restyle | `[ ]` |
-| V60 | `dwell-nebula` | Posters | still | B | density splat | `[ ]` |
-| V61 | `topo-contours` | Posters | still | B | energy field | `[ ]` |
+| V60 | `dwell-nebula` | Posters | still | B | density splat | `[x]` |
+| V61 | `topo-contours` | Posters | still | B | energy field | `[x]` |
 | V62 | `terra` | Posters | poster + video | C | V08, V42-lite, text | `[ ]` |
 | V63 | `celestial-atlas` | Posters | poster | C | multi-seed input, text | `[ ]` |
 | V64 | `powers-of-fate` | Combos | video | D | V42, compositor | `[ ]` |
@@ -136,6 +136,25 @@ deviations from the original specs, to be resolved in later waves:
 - **Frame tap:** implemented as an optional observer parameter on
   `app::render_video`, not a general fan-out registry (sufficient until
   more tap consumers exist).
+
+## Wave 2 addendum (2026-08-17)
+
+Wave 2 (SPD family: V01, V03, V04, V05, V06, V60, V61) is implemented. New
+deviations:
+
+- **Two-phase runner:** `VizPhase::{Spd, Trajectory}` on the `VizMode` trait
+  with a `VizStageState` accumulating records/failures across phases; the
+  SPD phase runs inside the render block, the trajectory phase after the
+  core package, and `viz/manifest.json` is written once at the end.
+- **`--image-only`:** SPD-phase modes are skipped with a warning (the
+  still-path SPD return remains a later-wave item).
+- **V01 thermal ramp** uses a fixed inferno-like OKLCh path rather than a
+  palette-anchored ramp (palette anchoring revisit with text.rs captions).
+- **V06 sweep video** renders at half resolution (2x2 SPD downsample) to
+  keep the SPD phase under ~8 minutes at default resolution.
+- **Shared graders:** `grade_auto_levels` / `grade_with_levels` /
+  `encode_linear_rec2020_*` in `common/display.rs`; Wave 1 modes migrated
+  to them (duplicated encoders removed).
 
 # Part I — Subsystem Architecture
 
@@ -598,7 +617,7 @@ passes (SIMD path reusable); < 30 s total at default res. Runs in SPD phase.
       saturated cores).
 - [ ] Strip typography passes `style.rs` review.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2; strip captions deferred to text.rs)
 
 ---
 
@@ -684,7 +703,7 @@ print), `centroid_annotated.png` (thin margin scale bar 380–700 nm).
 - [ ] Scale-bar annotation typeset per `style.rs`.
 - [ ] No hue speckle in dim regions (floor + bilateral verified).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2; annotated scale-bar variant deferred to text.rs)
 
 ---
 
@@ -728,7 +747,7 @@ the website).
 - [ ] Fan direction harmonizes with composition (axis bias working).
 - [ ] No bilinear ghost doubling at high-contrast cores.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2)
 
 ---
 
@@ -770,7 +789,7 @@ phase.
 - [ ] Annotations match `generation.json` palette data exactly.
 - [ ] Passes `style.rs` layout review.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2; typeset labels deferred to text.rs, data in spectrum.json)
 
 ---
 
@@ -813,7 +832,7 @@ bound (each frame reuses the cached thickness field; ~3 min). SPD phase.
 - [ ] No hue banding across rings at 16-bit.
 - [ ] Blacks unchanged from master (floor respected).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2; sweep video rendered at half resolution)
 
 ---
 
@@ -3288,7 +3307,7 @@ underlay), both full res.
 - [ ] No banding in deep gradient regions at 16-bit.
 - [ ] Composite preserves master's blacks (≤ 1% lift audit).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2)
 
 ---
 
@@ -3331,7 +3350,7 @@ and the map stands alone as an elegant abstraction.
 - [ ] Summits match visual hotspots of the master.
 - [ ] Both stocks print-proofed (contrast audit).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 2; contour labels deferred to text.rs, values in topo.json)
 
 ---
 

@@ -87,6 +87,43 @@ impl Kinematics {
     }
 }
 
+/// Leading eigenvector of the 2x2 covariance of all projected xy positions
+/// (the trajectory's principal separation axis, unit length).
+#[must_use]
+pub fn principal_axis_xy(positions: &[Vec<Vector3<f64>>]) -> (f64, f64) {
+    let mut mean = (0.0_f64, 0.0_f64);
+    let mut count = 0.0_f64;
+    for body in positions {
+        for point in body.iter().step_by(97) {
+            mean.0 += point.x;
+            mean.1 += point.y;
+            count += 1.0;
+        }
+    }
+    if count == 0.0 {
+        return (1.0, 0.0);
+    }
+    mean.0 /= count;
+    mean.1 /= count;
+
+    let (mut cxx, mut cxy, mut cyy) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for body in positions {
+        for point in body.iter().step_by(97) {
+            let dx = point.x - mean.0;
+            let dy = point.y - mean.1;
+            cxx += dx * dx;
+            cxy += dx * dy;
+            cyy += dy * dy;
+        }
+    }
+    let trace_half = 0.5 * (cxx + cyy);
+    let det = cxx * cyy - cxy * cxy;
+    let lambda = trace_half + (trace_half * trace_half - det).max(0.0).sqrt();
+    let (vx, vy) = if cxy.abs() > 1e-15 { (lambda - cyy, cxy) } else { (1.0, 0.0) };
+    let norm = (vx * vx + vy * vy).sqrt().max(1e-15);
+    (vx / norm, vy / norm)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
