@@ -1,18 +1,27 @@
-//! Implemented visualization modes (Waves 1-2 of `docs/VIZ_MASTER_PLAN.md`).
+//! Implemented visualization modes (Waves 1-3 of `docs/VIZ_MASTER_PLAN.md`).
 
 pub mod alien_vision;
 pub mod braid;
+pub mod chrono_grid;
+pub mod comet;
+pub mod depth_pack;
 pub mod dwell_nebula;
 pub mod gw_chirp;
+pub mod medial_recursion;
 pub mod oscilloscope;
 pub mod plotter_svg;
 pub mod prism_portrait;
+pub mod retarded_time;
+pub mod ride_along;
 pub mod slit_scan;
 pub mod spectral_centroid;
 pub mod spectrum_card;
+pub mod strobe;
 pub mod syzygy_wheel;
 pub mod thin_film;
+pub mod three_shadows;
 pub mod topo_contours;
+pub mod triangle_centers;
 pub mod turntable;
 pub mod winding_glass;
 
@@ -30,13 +39,22 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "braid" => Some(Box::new(braid::Braid)),
         "gw-chirp" => Some(Box::new(gw_chirp::GwChirp)),
         "syzygy-wheel" => Some(Box::new(syzygy_wheel::SyzygyWheel)),
+        "triangle-centers" => Some(Box::new(triangle_centers::TriangleCenters)),
+        "medial-recursion" => Some(Box::new(medial_recursion::MedialRecursion)),
+        "chrono-grid" => Some(Box::new(chrono_grid::ChronoGrid)),
         "slit-scan" => Some(Box::new(slit_scan::SlitScan)),
+        "strobe" => Some(Box::new(strobe::Strobe)),
+        "comet" => Some(Box::new(comet::Comet)),
+        "three-shadows" => Some(Box::new(three_shadows::ThreeShadows)),
+        "ride-along" => Some(Box::new(ride_along::RideAlong)),
+        "retarded-time" => Some(Box::new(retarded_time::RetardedTime)),
         "winding-glass" => Some(Box::new(winding_glass::WindingGlass)),
         "plotter-svg" => Some(Box::new(plotter_svg::PlotterSvg)),
         "oscilloscope" => Some(Box::new(oscilloscope::Oscilloscope)),
         "turntable" => Some(Box::new(turntable::Turntable)),
         "dwell-nebula" => Some(Box::new(dwell_nebula::DwellNebula)),
         "topo-contours" => Some(Box::new(topo_contours::TopoContours)),
+        "depth-pack" => Some(Box::new(depth_pack::DepthPack)),
         _ => None,
     }
 }

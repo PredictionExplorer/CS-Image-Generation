@@ -97,6 +97,60 @@ pub fn draw_cross(
     );
 }
 
+/// Additively splat a line segment into weight and weighted-value fields
+/// (used for energy-weighted depth accumulation). `value` is interpolated
+/// along the segment; deposit falls off smoothly across `stroke_px`.
+#[allow(clippy::too_many_arguments)]
+pub fn splat_line_additive(
+    weight_field: &mut [f32],
+    value_field: &mut [f32],
+    width: usize,
+    height: usize,
+    from: (f32, f32),
+    to: (f32, f32),
+    value_from: f32,
+    value_to: f32,
+    stroke_px: f64,
+) {
+    let (x0, y0) = (f64::from(from.0), f64::from(from.1));
+    let (x1, y1) = (f64::from(to.0), f64::from(to.1));
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len_sq = dx * dx + dy * dy;
+    let half = stroke_px * 0.5;
+    let pad = (half + 1.5).ceil() as i64;
+
+    let min_x = ((x0.min(x1)) as i64 - pad).max(0);
+    let max_x = ((x0.max(x1)) as i64 + pad).min(width as i64 - 1);
+    let min_y = ((y0.min(y1)) as i64 - pad).max(0);
+    let max_y = ((y0.max(y1)) as i64 + pad).min(height as i64 - 1);
+    if min_x > max_x || min_y > max_y {
+        return;
+    }
+
+    for py in min_y..=max_y {
+        for px in min_x..=max_x {
+            let sx = px as f64 + 0.5;
+            let sy = py as f64 + 0.5;
+            let t = if len_sq > 1e-12 {
+                (((sx - x0) * dx + (sy - y0) * dy) / len_sq).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let cx = x0 + dx * t;
+            let cy = y0 + dy * t;
+            let dist = ((sx - cx).powi(2) + (sy - cy).powi(2)).sqrt();
+            let coverage = (half + 0.5 - dist).clamp(0.0, 1.0) as f32;
+            if coverage > 0.0 {
+                let index = py as usize * width + px as usize;
+                let value = value_from + (value_to - value_from) * t as f32;
+                weight_field[index] += coverage;
+                value_field[index] += coverage * value;
+            }
+        }
+    }
+}
+
 /// Separable Gaussian blur of a scalar field, in place (allocates one temp).
 pub fn blur_field(field: &mut [f32], width: usize, height: usize, sigma: f64) {
     if sigma <= 0.05 {

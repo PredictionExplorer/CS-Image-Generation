@@ -468,14 +468,14 @@ pub fn build_effect_config_from_resolved(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AccumulationBackend {
+pub(crate) enum AccumulationBackend {
     ParallelScanlines,
     #[cfg(test)]
     SerialReference,
 }
 
 #[inline]
-fn default_accumulation_backend() -> AccumulationBackend {
+pub(crate) fn default_accumulation_backend() -> AccumulationBackend {
     AccumulationBackend::ParallelScanlines
 }
 
@@ -501,14 +501,14 @@ fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     checkpoints
 }
 
-struct AccumulationParams<'a> {
-    scene: SpectralScene<'a>,
-    ctx: &'a RenderContext,
-    velocity_calc: &'a velocity_hdr::VelocityHdrCalculator<'a>,
-    step_start: usize,
-    step_end: usize,
-    hdr_scale: f64,
-    traits: SceneTraits,
+pub(crate) struct AccumulationParams<'a> {
+    pub(crate) scene: SpectralScene<'a>,
+    pub(crate) ctx: &'a RenderContext,
+    pub(crate) velocity_calc: &'a velocity_hdr::VelocityHdrCalculator<'a>,
+    pub(crate) step_start: usize,
+    pub(crate) step_end: usize,
+    pub(crate) hdr_scale: f64,
+    pub(crate) traits: SceneTraits,
 }
 
 /// Apply the rare diffraction-spike finish to a trajectory buffer in place.
@@ -1445,7 +1445,7 @@ fn accumulate_spectral_steps_into_rows(
     }
 }
 
-fn accumulate_spectral_steps(
+pub(crate) fn accumulate_spectral_steps(
     accum_spd: &mut [[f64; NUM_BINS]],
     params: &AccumulationParams<'_>,
     backend: AccumulationBackend,

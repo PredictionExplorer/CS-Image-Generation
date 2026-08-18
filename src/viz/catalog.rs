@@ -50,22 +50,22 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V11", "recurrence", "Fingerprint of Chaos", "physics", 'B', false),
     entry("V12", "field-lines", "The Gravitational Engraving", "physics", 'B', false),
     entry("V13", "syzygy-wheel", "The Rhythm Clock", "physics", 'A', true),
-    entry("V14", "triangle-centers", "The Constellation of Centers", "physics", 'B', false),
-    entry("V15", "medial-recursion", "Vortex of Triangles", "physics", 'B', false),
+    entry("V14", "triangle-centers", "The Constellation of Centers", "physics", 'B', true),
+    entry("V15", "medial-recursion", "Vortex of Triangles", "physics", 'B', true),
     entry("V16", "chord-progression", "The Harmony of Distances", "physics", 'B', false),
     entry("V17", "epicycles", "The Impossible Machine", "physics", 'B', false),
-    entry("V18", "chrono-grid", "Motion Study Sheet", "time", 'B', false),
+    entry("V18", "chrono-grid", "Motion Study Sheet", "time", 'B', true),
     entry("V19", "slit-scan", "The Whole Film in One Image", "time", 'A', true),
-    entry("V20", "strobe", "Phantom Triangles", "time", 'B', false),
-    entry("V21", "comet", "Forever Redrawing", "time", 'C', false),
+    entry("V20", "strobe", "Phantom Triangles", "time", 'B', true),
+    entry("V21", "comet", "Forever Redrawing", "time", 'C', true),
     entry("V22", "editorial-retime", "Drama-Adaptive Time", "time", 'C', false),
     entry("V23", "epilogue", "How This Artwork Dies", "time", 'C', false),
     entry("V24", "multiverse", "The Garden of Forking Orbits", "time", 'C', false),
-    entry("V25", "three-shadows", "The Cave Wall Triptych", "frames", 'B', false),
+    entry("V25", "three-shadows", "The Cave Wall Triptych", "frames", 'B', true),
     entry("V26", "corotating", "The Same Dance from the Dance Floor", "frames", 'C', false),
-    entry("V27", "ride-along", "What Body Three Sees", "frames", 'C', false),
+    entry("V27", "ride-along", "What Body Three Sees", "frames", 'C', true),
     entry("V28", "bullet-time", "The Held Breath", "frames", 'C', false),
-    entry("V29", "retarded-time", "Where Their Light Says They Are", "frames", 'B', false),
+    entry("V29", "retarded-time", "Where Their Light Says They Are", "frames", 'B', true),
     entry("V30", "lensing", "Gravity Bends the Gallery", "frames", 'B', false),
     entry("V31", "dust-nebula", "Gravity's Weather", "matter", 'C', false),
     entry("V32", "light-echoes", "Three Boats on a Dark Pond", "matter", 'C', false),
@@ -88,7 +88,7 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V49", "broadcast", "The Five-Act Short Film", "cinema", 'D', false),
     entry("V50", "sculpture-export", "The Printable Object", "exports", 'B', false),
     entry("V51", "plotter-svg", "Ink and Thread", "exports", 'A', true),
-    entry("V52", "depth-pack", "The Third Dimension, Packaged", "exports", 'B', false),
+    entry("V52", "depth-pack", "The Third Dimension, Packaged", "exports", 'B', true),
     entry("V53", "webgl-viewer", "Hold Your Orbit", "exports", 'B', false),
     entry("V54", "oscilloscope", "Sound That Draws", "exports", 'B', true),
     entry("V55", "hologram", "A Recording of the Wavefront", "exports", 'D', false),
@@ -214,10 +214,20 @@ mod tests {
             "thin-film",
             "dwell-nebula",
             "topo-contours",
+            // Wave 3 (re-accumulation family)
+            "triangle-centers",
+            "medial-recursion",
+            "chrono-grid",
+            "strobe",
+            "comet",
+            "three-shadows",
+            "ride-along",
+            "retarded-time",
+            "depth-pack",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 15);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 24);
     }
 }

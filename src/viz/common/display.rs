@@ -149,6 +149,30 @@ impl SpdCanvas {
         });
     }
 
+    /// Convert the canvas SPD into an existing linear RGBA buffer.
+    pub fn convert_into(&self, rgba: &mut PixelBuffer) {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        rgba.resize(width * height, (0.0, 0.0, 0.0, 0.0));
+        convert_spd_buffer_to_rgba(&self.spd, rgba, width, height);
+    }
+
+    /// Production levels from the canvas's current state (fixed-exposure
+    /// grading for incremental videos).
+    #[must_use]
+    pub fn levels(&self, clip_black: f64, clip_white: f64, exposure_key: f64) -> ChannelLevels {
+        let mut rgba = Vec::new();
+        self.convert_into(&mut rgba);
+        auto_levels(&rgba, clip_black, clip_white, exposure_key)
+    }
+
+    /// Zero the canvas SPD (incremental replay after a levels pass).
+    pub fn clear(&mut self) {
+        for bins in &mut self.spd {
+            *bins = [0.0; NUM_BINS];
+        }
+    }
+
     /// Convert, auto-level, tonemap, and quantize to a 16-bit Display P3
     /// image using the production pipeline.
     #[must_use]
@@ -158,10 +182,8 @@ impl SpdCanvas {
         clip_white: f64,
         exposure_key: f64,
     ) -> ImageBuffer<Rgb<u16>, Vec<u16>> {
-        let width = self.width as usize;
-        let height = self.height as usize;
-        let mut rgba = vec![(0.0, 0.0, 0.0, 0.0); width * height];
-        convert_spd_buffer_to_rgba(&self.spd, &mut rgba, width, height);
+        let mut rgba = Vec::new();
+        self.convert_into(&mut rgba);
         grade_auto_levels(&rgba, self.width, self.height, clip_black, clip_white, exposure_key)
     }
 }

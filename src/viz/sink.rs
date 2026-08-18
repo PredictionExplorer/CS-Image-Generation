@@ -36,9 +36,15 @@ impl ArtifactSink {
     }
 
     /// Absolute path for an artifact file inside the mode directory.
+    ///
+    /// Nested relative paths are allowed; parent directories are created.
     #[must_use]
     pub fn path(&self, file_name: &str) -> String {
-        format!("{}/viz/{}/{}", self.seed_dir, self.mode_flag, file_name)
+        let path = format!("{}/viz/{}/{}", self.seed_dir, self.mode_flag, file_name);
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        path
     }
 
     /// Record an artifact that was written at [`Self::path`]`(file_name)`.

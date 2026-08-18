@@ -48,22 +48,22 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V11 | `recurrence` | Physics | still | B | kinematics | `[ ]` |
 | V12 | `field-lines` | Physics | still + video | B | fields | `[ ]` |
 | V13 | `syzygy-wheel` | Physics | still | A | events, text | `[x]` |
-| V14 | `triangle-centers` | Physics | still + video | B | kinematics | `[ ]` |
-| V15 | `medial-recursion` | Physics | still + video | B | — | `[ ]` |
+| V14 | `triangle-centers` | Physics | still + video | B | kinematics | `[x]` |
+| V15 | `medial-recursion` | Physics | still + video | B | — | `[x]` |
 | V16 | `chord-progression` | Physics | poster + video + WAV | B | kinematics, audio, text | `[ ]` |
 | V17 | `epicycles` | Physics | video | B | rustfft | `[ ]` |
-| V18 | `chrono-grid` | Time | poster | B | frame tap | `[ ]` |
+| V18 | `chrono-grid` | Time | poster | B | frame tap | `[x]` |
 | V19 | `slit-scan` | Time | 2 stills | A | frame tap | `[x]` |
-| V20 | `strobe` | Time | still + video | B | accumulation | `[ ]` |
-| V21 | `comet` | Time | video | C | accumulation | `[ ]` |
+| V20 | `strobe` | Time | still + video | B | accumulation | `[x]` |
+| V21 | `comet` | Time | video | C | accumulation | `[x]` |
 | V22 | `editorial-retime` | Time | video | C | events, accumulation | `[ ]` |
 | V23 | `epilogue` | Time | video | C | resim | `[ ]` |
 | V24 | `multiverse` | Time | poster + video | C | resim | `[ ]` |
-| V25 | `three-shadows` | Frames | triptych | B | accumulation | `[ ]` |
+| V25 | `three-shadows` | Frames | triptych | B | accumulation | `[x]` |
 | V26 | `corotating` | Frames | diptych + video | C | kinematics, accumulation | `[ ]` |
-| V27 | `ride-along` | Frames | video | C | kinematics, accumulation | `[ ]` |
+| V27 | `ride-along` | Frames | video | C | kinematics, accumulation | `[x]` |
 | V28 | `bullet-time` | Frames | video | C | events, orbit camera | `[ ]` |
-| V29 | `retarded-time` | Frames | still + video | B | kinematics | `[ ]` |
+| V29 | `retarded-time` | Frames | still + video | B | kinematics | `[x]` |
 | V30 | `lensing` | Frames | still + video | B | fields | `[ ]` |
 | V31 | `dust-nebula` | Matter | video + still | C | fields, accumulation | `[ ]` |
 | V32 | `light-echoes` | Matter | video | C | wave grid | `[ ]` |
@@ -86,7 +86,7 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V49 | `broadcast` | Cinema | video | D | compositor, V22 V26 V28 V23 V48 | `[ ]` |
 | V50 | `sculpture-export` | Exports | STL + PLY + preview | B | vector_export, tube_render | `[ ]` |
 | V51 | `plotter-svg` | Exports | SVG set | A | vector_export | `[x]` |
-| V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[ ]` |
+| V52 | `depth-pack` | Exports | 4 artifacts | B | depth accumulation | `[x]` |
 | V53 | `webgl-viewer` | Exports | JSON + HTML | B | vector_export | `[ ]` |
 | V54 | `oscilloscope` | Exports | WAV + video | B | audio | `[x]` |
 | V55 | `hologram` | Exports | huge still | D | rustfft | `[ ]` |
@@ -155,6 +155,34 @@ deviations:
 - **Shared graders:** `grade_auto_levels` / `grade_with_levels` /
   `encode_linear_rec2020_*` in `common/display.rs`; Wave 1 modes migrated
   to them (duplicated encoders removed).
+
+## Wave 3 addendum (2026-08-17)
+
+Wave 3 (re-accumulation family: V14, V15, V18, V20, V21, V25, V27, V29,
+V52) is implemented -- 24 of 69 modes. New shared infrastructure and
+deviations:
+
+- **`common/accum.rs`:** `Accumulator` (owned transformed scenes over the
+  production splatter with `accumulate(range)` / `decay(factor)` /
+  `convert`), `scene_levels` (pass-1 levels for arbitrary scenes),
+  `resized_config`, and `stream_video` (fixed-levels incremental encoder
+  loop). `AccumulationParams`, `accumulate_spectral_steps`, and the backend
+  selector became `pub(crate)` in `render/mod.rs`.
+- **Videos at half resolution** across the wave (stills full-res), keeping
+  per-seed cost ~25-35 min; `SpdCanvas` gained `convert_into` / `levels` /
+  `clear` for fixed-exposure incremental replays.
+- **V20 strobe** derives its interval from the tightest pair's mean angular
+  rate rather than an FFT peak (more robust on short or irregular runs);
+  the JSON sidecar records the analysis.
+- **V21 comet** closes its loop by fading the last second toward a
+  snapshot of frame 0's steady state (static-target crossfade) after a
+  4-half-life pre-roll; the spec's fresh-restart crossfade is superseded.
+- **V27 ride-along** renders through the public pass-2 pipeline at half
+  resolution; the origin halo is deferred (the hero's collapsed trail
+  already marks the origin).
+- **V52 depth-pack** uses bilinear gather reprojection (no explicit
+  disocclusion dilation; thin-strand holes are negligible at the 1.2%
+  shift budget) and loads the finished master.png from the package.
 
 # Part I — Subsystem Architecture
 
@@ -1193,7 +1221,7 @@ clutter.
 - [ ] Each curve traceable alone in the legend crops.
 - [ ] Euler fan stays ≤ 8% of total image energy.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; video at half resolution)
 
 ---
 
@@ -1232,7 +1260,7 @@ accumulation cost at same res: ~4–8 min. Trajectory phase.
 - [ ] Level hues create depth (inner = rotated) without rainbow noise.
 - [ ] Energy discipline: total image energy within ×1.5 of master.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; video at half resolution)
 
 ---
 
@@ -1370,7 +1398,7 @@ SPD not needed). The naive "16 full-res SPDs" is explicitly rejected
 - [ ] Sheet narrative reads chronologically.
 - [ ] Captions match step ranges exactly.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; captions deferred to text.rs, data in chrono.json)
 
 ---
 
@@ -1456,7 +1484,7 @@ Trajectory phase.
 - [ ] Exposure comparable to master (boost audit).
 - [ ] JSON records ω, k, predicted phantom rate.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; interval from mean angular rate, not FFT peak)
 
 ---
 
@@ -1499,7 +1527,7 @@ video ≈ 10–15 min. Trajectory phase.
 - [ ] Tails brighten/stretch at periapsis (decay+velocity interplay).
 - [ ] No banding in faint tail ends at 10-bit encode.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; loop closes by fading to a frame-0 snapshot)
 
 ---
 
@@ -1681,7 +1709,7 @@ never shows.
 - [ ] Each panel independently composed (aesthetic floor check).
 - [ ] Triptych exposure uniform (joint levels working).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; joint levels, shared world scale)
 
 ---
 
@@ -1772,7 +1800,7 @@ Trajectory phase. Transform exported for V65.
 - [ ] No frame overflow (margin auto-widens if excursion > bounds, logged).
 - [ ] Halo subtle (blind viewers don't call it a cursor).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; rendered at half resolution via pass-2, halo deferred)
 
 ---
 
@@ -1866,7 +1894,7 @@ Retarded-time solver exported for V65 (its optics core).
 - [ ] Shear visibly grows with speed (periapsis check).
 - [ ] Overlay hierarchy (true > seen > struts) unambiguous.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3)
 
 ---
 
@@ -2942,7 +2970,7 @@ cheap reprojection. Trajectory phase.
 - [ ] Anaglyph comfortable (rivalry check on saturated cores).
 - [ ] Quilt verified in Looking Glass Studio (manual gate).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 3; gather reprojection, no explicit disocclusion fill)
 
 ---
 
