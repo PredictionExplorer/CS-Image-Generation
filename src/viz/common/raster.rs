@@ -205,6 +205,58 @@ pub fn splat_line_additive(
     }
 }
 
+/// Catmull-Rom weight for bicubic sampling.
+#[inline]
+fn catmull_rom(t: f64) -> f64 {
+    let t = t.abs();
+    if t < 1.0 {
+        1.5 * t * t * t - 2.5 * t * t + 1.0
+    } else if t < 2.0 {
+        -0.5 * t * t * t + 2.5 * t * t - 4.0 * t + 2.0
+    } else {
+        0.0
+    }
+}
+
+/// Bicubic (Catmull-Rom) upsample of a scalar field to new dimensions.
+#[must_use]
+pub fn upsample_bicubic(
+    source: &[f32],
+    source_w: usize,
+    source_h: usize,
+    dest_w: usize,
+    dest_h: usize,
+) -> Vec<f32> {
+    use rayon::prelude::*;
+    let mut dest = vec![0.0f32; dest_w * dest_h];
+    let scale_x = source_w as f64 / dest_w as f64;
+    let scale_y = source_h as f64 / dest_h as f64;
+    dest.par_chunks_mut(dest_w).enumerate().for_each(|(row, out)| {
+        let sy = (row as f64 + 0.5) * scale_y - 0.5;
+        let base_y = sy.floor() as i64;
+        let fy = sy - base_y as f64;
+        for (col, slot) in out.iter_mut().enumerate() {
+            let sx = (col as f64 + 0.5) * scale_x - 0.5;
+            let base_x = sx.floor() as i64;
+            let fx = sx - base_x as f64;
+            let mut sum = 0.0f64;
+            let mut weight_sum = 0.0f64;
+            for ky in -1i64..=2 {
+                let sample_y = (base_y + ky).clamp(0, source_h as i64 - 1) as usize;
+                let wy = catmull_rom(ky as f64 - fy);
+                for kx in -1i64..=2 {
+                    let sample_x = (base_x + kx).clamp(0, source_w as i64 - 1) as usize;
+                    let weight = wy * catmull_rom(kx as f64 - fx);
+                    sum += f64::from(source[sample_y * source_w + sample_x]) * weight;
+                    weight_sum += weight;
+                }
+            }
+            *slot = (sum / weight_sum.max(1e-12)).max(0.0) as f32;
+        }
+    });
+    dest
+}
+
 /// Separable Gaussian blur of a scalar field, in place (allocates one temp).
 pub fn blur_field(field: &mut [f32], width: usize, height: usize, sigma: f64) {
     if sigma <= 0.05 {

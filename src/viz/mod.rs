@@ -46,6 +46,12 @@ pub trait VizMode {
         false
     }
 
+    /// Whether this mode needs the per-pixel energy field retained from the
+    /// main render's SPD for the trajectory phase.
+    fn needs_energy_field(&self) -> bool {
+        false
+    }
+
     /// Render all artifacts into the sink. Must be seed-deterministic.
     fn run(&self, ctx: &VizContext<'_>, sink: &mut ArtifactSink) -> Result<()>;
 }
@@ -132,6 +138,15 @@ impl VizSelection {
             .iter()
             .filter_map(|entry| modes::build(entry.flag))
             .any(|mode| mode.needs_frame_tap())
+    }
+
+    /// Whether any selected mode needs the retained energy field.
+    #[must_use]
+    pub fn needs_energy_field(&self) -> bool {
+        self.entries
+            .iter()
+            .filter_map(|entry| modes::build(entry.flag))
+            .any(|mode| mode.needs_energy_field())
     }
 
     /// Whether any selected mode runs in the given phase.
@@ -240,7 +255,7 @@ mod tests {
     #[test]
     fn resolve_all_selects_only_implemented() {
         let selection = VizSelection::resolve(&["all".to_string()]).expect("'all' must resolve");
-        assert_eq!(selection.entries().len(), 29);
+        assert_eq!(selection.entries().len(), 36);
         assert!(selection.entries().iter().all(|entry| entry.implemented));
     }
 

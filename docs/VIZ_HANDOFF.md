@@ -5,14 +5,14 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-17 ~22:15 EST (2026-08-18 ~02:15 UTC).
+Last updated: 2026-08-18 ~01:00 EST (2026-08-18 ~06:00 UTC).
 
 ---
 
 ## Where we are
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). All work happens here.
-- **Progress:** 29 of 69 modes implemented (`--viz-list` prints the live
+- **Progress:** 36 of 69 modes implemented (`--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test).
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
     kinematics/events/energy-field), `ArtifactSink` + `viz/manifest.json`,
@@ -34,12 +34,19 @@ Last updated: 2026-08-17 ~22:15 EST (2026-08-18 ~02:15 UTC).
     is memory-prohibitive at default res); ghosts/sources come from
     half-res re-accumulation and master.png. Details in the Wave 4
     addendum.
-- **Next up:** **Wave 5 — particles, agents, media** per the build order in
-  the master plan Part IV.2: V31 `dust-nebula`, V38 `galaxy-collision`
-  (shared particle core), V33 `physarum`, V34 `frost`, V35 `lightning`,
-  V36 `marbling`, V32 `light-echoes`. Requires `common/agents.rs` (II.5),
-  `common/fluid.rs` (II.6), `common/wave.rs` (II.7), and a shared
-  test-particle integrator for V31/V38.
+  - **Wave 5** (7, particles/agents/media): dust-nebula, galaxy-collision,
+    physarum, frost, lightning, marbling, light-echoes — plus
+    `common/particles.rs` (test-particle swarms + the banded parallel
+    splatter), `common/agents.rs` (Physarum / batch-synchronous DLA /
+    streamer growth), `common/fluid.rs` (stable fluids + MacCormack dye),
+    `common/wave.rs` (leapfrog + sponge), and energy-field retention into
+    the trajectory phase (`VizMode::needs_energy_field`). Deviations in
+    the Wave 5 addendum. README gained a "Visualization Modes" section.
+- **Next up:** **Wave 6 — 3D scene family** per the build order in the
+  master plan Part IV.2: `common/tube_render.rs` (CPU sphere-traced capsule
+  chains, II.8) first, then V43 `worldtube`, V02
+  `hyperspectral-flythrough`, V08 `shape-sphere`, V40 `aurora`, V44 `neon`,
+  V45 `chandelier`, V50 `sculpture-export`, V28 `bullet-time`.
 - **Deviations from specs** are recorded in the "Wave N addendum" sections
   at the top of the master plan (single viz manifest instead of an
   assets.json section; typography/text.rs deferred to the posters wave;
@@ -100,7 +107,7 @@ cargo test --release                          # ~500 tests
 
 Smoke outputs (`output/…`) are gitignored. Local smoke dirs so far:
 `viz-smoke` (Wave 1), `viz-smoke2` (Wave 2), `viz-smoke3` (Wave 3),
-`viz-smoke4` (Wave 4).
+`viz-smoke4` (Wave 4), `viz-smoke5` (Wave 5).
 
 ## Code map (viz subsystem)
 
@@ -111,9 +118,11 @@ src/viz/context.rs    VizContext, FrameTapCollector, VizQuality
 src/viz/sink.rs       ArtifactSink, viz/manifest.json writer
 src/viz/common/       accum (production re-accumulation), display (graders,
                       SpdCanvas), fields (potential grids, streamlines,
-                      Roche/L1), kinematics, events, spd, contours, raster,
-                      audio (WAV), vector_export (SVG/RDP)
-src/viz/modes/        one file per implemented mode (29)
+                      Roche/L1), particles (test-particle swarms, banded
+                      splatter), agents (Physarum/DLA/streamer), fluid
+                      (stable fluids), wave (leapfrog grid), kinematics,
+                      events, spd, contours, raster, audio, vector_export
+src/viz/modes/        one file per implemented mode (36)
 ```
 
 Integration points in the core pipeline: `src/main.rs` (flags, SPD-phase

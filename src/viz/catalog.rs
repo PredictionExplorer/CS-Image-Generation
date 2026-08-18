@@ -67,14 +67,14 @@ pub const CATALOG: &[ModeEntry] = &[
     entry("V28", "bullet-time", "The Held Breath", "frames", 'C', false),
     entry("V29", "retarded-time", "Where Their Light Says They Are", "frames", 'B', true),
     entry("V30", "lensing", "Gravity Bends the Gallery", "frames", 'B', true),
-    entry("V31", "dust-nebula", "Gravity's Weather", "matter", 'C', false),
-    entry("V32", "light-echoes", "Three Boats on a Dark Pond", "matter", 'C', false),
-    entry("V33", "physarum", "The Organism Rediscovers the Orbit", "matter", 'C', false),
-    entry("V34", "frost", "Winter Claims the Window", "matter", 'C', false),
-    entry("V35", "lightning", "The Storm Record", "matter", 'C', false),
-    entry("V36", "marbling", "Suminagashi Stirred by Gravity", "matter", 'C', false),
+    entry("V31", "dust-nebula", "Gravity's Weather", "matter", 'C', true),
+    entry("V32", "light-echoes", "Three Boats on a Dark Pond", "matter", 'C', true),
+    entry("V33", "physarum", "The Organism Rediscovers the Orbit", "matter", 'C', true),
+    entry("V34", "frost", "Winter Claims the Window", "matter", 'C', true),
+    entry("V35", "lightning", "The Storm Record", "matter", 'C', true),
+    entry("V36", "marbling", "Suminagashi Stirred by Gravity", "matter", 'C', true),
     entry("V37", "roche", "Lobes That Touch", "matter", 'C', true),
-    entry("V38", "galaxy-collision", "The Antennae, Choreographed", "matter", 'C', false),
+    entry("V38", "galaxy-collision", "The Antennae, Choreographed", "matter", 'C', true),
     entry("V39", "reconnection", "Field Lines That Snap", "matter", 'C', true),
     entry("V40", "aurora", "Curtains Over the Void", "matter", 'C', false),
     entry("V41", "winding-glass", "Topological Stained Glass", "topology", 'B', true),
@@ -230,10 +230,18 @@ mod tests {
             "lensing",
             "roche",
             "reconnection",
+            // Wave 5 (particles, agents, media)
+            "dust-nebula",
+            "galaxy-collision",
+            "physarum",
+            "frost",
+            "lightning",
+            "marbling",
+            "light-echoes",
         ] {
             let found = find(flag).expect("implemented flag must exist");
             assert!(found.implemented, "{flag} must be marked implemented");
         }
-        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 29);
+        assert_eq!(CATALOG.iter().filter(|candidate| candidate.implemented).count(), 36);
     }
 }

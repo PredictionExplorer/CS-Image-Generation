@@ -6,12 +6,19 @@ pub mod chrono_grid;
 pub mod comet;
 pub mod corotating;
 pub mod depth_pack;
+pub mod dust_nebula;
 pub mod dwell_nebula;
 pub mod field_lines;
+pub mod frost;
+pub mod galaxy_collision;
 pub mod gw_chirp;
 pub mod lensing;
+pub mod light_echoes;
+pub mod lightning;
+pub mod marbling;
 pub mod medial_recursion;
 pub mod oscilloscope;
+pub mod physarum;
 pub mod plotter_svg;
 pub mod prism_portrait;
 pub mod reconnection;
@@ -65,6 +72,13 @@ pub fn build(flag: &str) -> Option<Box<dyn VizMode>> {
         "lensing" => Some(Box::new(lensing::Lensing)),
         "roche" => Some(Box::new(roche::Roche)),
         "reconnection" => Some(Box::new(reconnection::Reconnection)),
+        "dust-nebula" => Some(Box::new(dust_nebula::DustNebula)),
+        "galaxy-collision" => Some(Box::new(galaxy_collision::GalaxyCollision)),
+        "physarum" => Some(Box::new(physarum::Physarum)),
+        "frost" => Some(Box::new(frost::Frost)),
+        "lightning" => Some(Box::new(lightning::Lightning)),
+        "marbling" => Some(Box::new(marbling::Marbling)),
+        "light-echoes" => Some(Box::new(light_echoes::LightEchoes)),
         _ => None,
     }
 }

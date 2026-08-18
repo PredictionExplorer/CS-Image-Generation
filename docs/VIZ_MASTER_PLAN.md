@@ -65,14 +65,14 @@ Cost classes — **A**: < 1 min, reuses in-memory buffers · **B**: 1–5 min ·
 | V28 | `bullet-time` | Frames | video | C | events, orbit camera | `[ ]` |
 | V29 | `retarded-time` | Frames | still + video | B | kinematics | `[x]` |
 | V30 | `lensing` | Frames | still + video | B | fields | `[x]` |
-| V31 | `dust-nebula` | Matter | video + still | C | fields, accumulation | `[ ]` |
-| V32 | `light-echoes` | Matter | video | C | wave grid | `[ ]` |
-| V33 | `physarum` | Matter | video + still | C | agents, energy field | `[ ]` |
-| V34 | `frost` | Matter | video + still | C | agents, energy field | `[ ]` |
-| V35 | `lightning` | Matter | still + video | C | events, agents | `[ ]` |
-| V36 | `marbling` | Matter | video + still | C | fluid | `[ ]` |
+| V31 | `dust-nebula` | Matter | video + still | C | fields, accumulation | `[x]` |
+| V32 | `light-echoes` | Matter | video | C | wave grid | `[x]` |
+| V33 | `physarum` | Matter | video + still | C | agents, energy field | `[x]` |
+| V34 | `frost` | Matter | video + still | C | agents, energy field | `[x]` |
+| V35 | `lightning` | Matter | still + video | C | events, agents | `[x]` |
+| V36 | `marbling` | Matter | video + still | C | fluid | `[x]` |
 | V37 | `roche` | Matter | video | C | fields | `[x]` |
-| V38 | `galaxy-collision` | Matter | video + still | C | resim-lite, accumulation | `[ ]` |
+| V38 | `galaxy-collision` | Matter | video + still | C | resim-lite, accumulation | `[x]` |
 | V39 | `reconnection` | Matter | video | C | fields, events | `[x]` |
 | V40 | `aurora` | Matter | video | C | tube_render | `[ ]` |
 | V41 | `winding-glass` | Topology | still | B | kinematics | `[x]` |
@@ -235,6 +235,56 @@ Wave 4 (fields & frames: V12, V26, V30, V37, V39) is implemented -- 29 of
   video frames; the full-res re-render (a second full-resolution ghost
   accumulation each) is deferred to the curation pass if those modes make
   the shortlist.
+
+## Wave 5 addendum (2026-08-18)
+
+Wave 5 (particles, agents, media: V31, V38, V33, V34, V35, V36, V32) is
+implemented -- 36 of 69 modes. New shared infrastructure and deviations:
+
+- **Energy-field retention.** `VizMode::needs_energy_field()` plus a
+  `retained_energy` input on `VizContext`: the compact per-pixel energy
+  field is computed after the main render (while the SPD is alive) and
+  survives into the trajectory phase for V33/V34. Under `--image-only`
+  those modes fall back to a trajectory splat-density food map (logged).
+- **`common/particles.rs`:** kick-drift-kick massless test particles in the
+  time-varying three-body field (4x dt, Plummer-softened), seeded annuli
+  and tilted exponential disks, and `BandedSpd` -- a race-free banded
+  parallel splatter over the production stroke rasterizer (bit-identical
+  to serial splatting, unit-tested). The production accumulator itself is
+  hard-coded to 3 bodies, hence the dedicated path.
+- **Particle splat cadence:** strokes span 4 dust steps (polyline-
+  continuous trails) instead of a deposit every dust step -- the spec's
+  per-step cadence costs ~16x more than its own splat budget at 50k x 250k
+  steps. Fixed video levels come from a quarter-population probe pass
+  (energy scaled back up before analysis).
+- **`common/agents.rs`:** concrete SoA swarms instead of the generic
+  `Swarm<A: Agent>` trait. Determinism scheme: per-agent u64 seeds drawn
+  once from the SHA3 fork, per-step values from a stateless splitmix64
+  mix of (seed, step, salt) -- order-free like the spec's SHA3-per-step at
+  a fraction of the cost. DLA is batch-synchronous with stick proposals
+  applied in walker order (replaces the lock-free CAS design; same
+  determinism guarantee). Physarum deposits are applied serially after a
+  parallel sense/move pass.
+- **`common/fluid.rs`:** collocated grid (GPU-Gems stable fluids) instead
+  of the staggered MAC layout; 48 rayon-sliced Jacobi iterations,
+  vorticity confinement eps 2.0, MacCormack dye advection with a bilinear
+  min/max limiter. Projection is tested for divergence suppression (not
+  elimination -- 48 Jacobi iterations are a visual-quality budget).
+- **`common/wave.rs`:** leapfrog with automatic CFL substepping; the
+  sponge damps the (current, previous) pair together (damping a single
+  buffer acts as an impedance step and reflects). The wave speed derives
+  from the p98 of body pixel speeds (single-frame spikes may exceed Mach
+  0.7 briefly and are logged) instead of auto-raising c mid-run.
+- **V32 exposure still** accumulates the envelope at field resolution and
+  bicubic-upsamples at composite (per-frame full-res accumulation was the
+  only spec reading that fit neither budget nor benefit).
+- **V35 ghosts:** the storm still composites the master ghost in display
+  space over the tonemapped bolts; the video's "accumulating ghost" is the
+  bolt afterglow itself (6% deposits), with no master underlay.
+- **V33/V34 videos at 30 fps** (900 frames / 30 s and age-sweep reveal);
+  time-lapse cadence reads better than 60 fps for growth processes.
+- **README** gained a "Visualization Modes" usage section (flags,
+  categories, draft previews, artifact layout).
 
 # Part I — Subsystem Architecture
 
@@ -2041,7 +2091,7 @@ Half-res video SPD bounds memory. Trajectory phase.
 - [ ] Dust never overpowers master in composite (energy audit ≤ 40% share).
 - [ ] No particle-grid aliasing (splat jitter verified).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; strokes span 4 dust steps, levels from a quarter-population probe pass)
 
 ---
 
@@ -2088,7 +2138,7 @@ Trajectory phase. Field infra shared with V69.
 - [ ] No boundary reflections (sponge verified).
 - [ ] Exposure still holds detail in both crests and calm water.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; envelope accumulated at field res and bicubic-upsampled for the still)
 
 ---
 
@@ -2134,7 +2184,7 @@ retained, SPD dropped).
 - [ ] Growth video has clear act structure: scouts → highways → refinement.
 - [ ] Still passes the "living engraving" gut check.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; energy field retained from the main render, splat-density fallback under --image-only)
 
 ---
 
@@ -2182,7 +2232,7 @@ render passes cheap. Trajectory phase.
 - [ ] Age-sweep video shows continuous organic growth (no popping fronts).
 - [ ] Refraction shift subtle; master remains recognizable beneath.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; batch-synchronous DLA with walker-order tie-break)
 
 ---
 
@@ -2228,7 +2278,7 @@ Trajectory phase.
 - [ ] Bolts terminate on bodies exactly (anchor test).
 - [ ] Storm still balances: bolts foreground, ghost recedes.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; still ghost composited in display space, video ghost = bolt afterglow only)
 
 ---
 
@@ -2276,7 +2326,7 @@ with V69.
 - [ ] Dye interfaces crisp at final frame (no gray soup).
 - [ ] Three dyes remain distinguishable (palette separation held).
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; collocated GPU-Gems solver with MacCormack dye)
 
 ---
 
@@ -2370,7 +2420,7 @@ seeding strategies).
 - [ ] At least one grand tidal tail per golden seed.
 - [ ] Populations separable by color in the wreck still.
 
-**Status:** `[ ]`
+**Status:** `[x]` implemented (Wave 5; shared test-particle core with V31, quarter-population levels probe)
 
 ---
 

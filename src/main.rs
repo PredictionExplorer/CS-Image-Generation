@@ -526,6 +526,7 @@ fn main() -> Result<()> {
     };
 
     let mut viz_state = viz::VizStageState::new();
+    let mut retained_energy: Option<Vec<f32>> = None;
 
     if args.image_only {
         app::render_still_image(
@@ -580,6 +581,12 @@ fn main() -> Result<()> {
             args.fast_encode,
         )?;
 
+        // Retain the compact energy field for trajectory-phase modes that
+        // need it after the SPD buffer is dropped.
+        if viz_selection.needs_energy_field() {
+            retained_energy = Some(viz::common::spd::energy_field(&accum_spd));
+        }
+
         // SPD phase: modes that need the accumulated spectral buffer run
         // here, while it is still alive. Failures are collected, not raised.
         if viz_selection.has_phase(viz::VizPhase::Spd) {
@@ -598,6 +605,7 @@ fn main() -> Result<()> {
                 args.fast_encode,
                 None,
                 Some(&accum_spd),
+                None,
                 &rng,
             );
             viz_state.run_phase(&viz_ctx, &viz_selection, viz::VizPhase::Spd);
@@ -674,6 +682,7 @@ fn main() -> Result<()> {
             args.fast_encode,
             tap_data,
             None,
+            retained_energy,
             &rng,
         );
         viz_state.run_phase(&viz_ctx, &viz_selection, viz::VizPhase::Trajectory);

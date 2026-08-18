@@ -82,6 +82,9 @@ CLI reference:
 | `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
 | `--equil-weight` | random | Borda weight for equilateralness; omit to sample from a curated range |
 | `--fast-encode` | off | Use faster (lower quality) video encoding |
+| `--viz` | none | Visualization modes to render after the main outputs: flags, categories, or `all` (repeatable, comma lists) |
+| `--viz-list` | — | Print the visualization mode catalog and exit |
+| `--viz-quality` | `final` | Artifact quality for visualization modes (`draft` for fast previews) |
 | `--log-level` | `info` | Tracing log level (`error`, `warn`, `info`, `debug`, `trace`) |
 
 ## Outputs
@@ -100,6 +103,34 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 - `metadata/assets.json` — website asset manifest with paths, dimensions, codecs, and byte sizes
 
 `generation_log.json` is also appended in the **process working directory** (typically the repo root when you run the binary from there). It records the same reproducibility metadata across runs.
+
+## Visualization Modes
+
+Beyond the core package, the same run can emit additional artworks derived
+from the exact trajectory, palette, and spectral data — field-line
+engravings, gravitational lensing, Physarum colonies, paper marbling, wave
+interference, and more. The catalog (69 planned modes, with the implemented
+set growing wave by wave) lives in `docs/VIZ_MASTER_PLAN.md`:
+
+```bash
+# See every mode and its status:
+./target/release/three_body_problem --viz-list
+
+# Render specific modes, a whole category, or everything implemented:
+./target/release/three_body_problem --seed 0x1234 --viz braid,lensing
+./target/release/three_body_problem --seed 0x1234 --viz matter
+./target/release/three_body_problem --seed 0x1234 --viz all
+
+# Fast preview of every implemented mode (~minutes instead of hours):
+./target/release/three_body_problem --seed 0x1234 --sims 200 --steps 30000 \
+  --resolution 640x414 --viz all --viz-quality draft --fast-encode
+```
+
+Artifacts land in `output/<name>/viz/<flag>/` (16-bit Display P3 stills,
+web H.264 + HQ HEVC videos, and JSON sidecars with each mode's parameters);
+`output/<name>/viz/manifest.json` records every artifact with byte sizes.
+Every mode is seed-deterministic, and a mode failure never endangers the
+core package — it is reported at the end via the exit code.
 
 ## Automation
 

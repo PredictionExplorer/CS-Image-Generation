@@ -201,6 +201,9 @@ pub struct VizContext<'a> {
     pub frame_tap: Option<FrameTapData>,
     /// Accumulated per-pixel SPD buffer (present only during the SPD phase).
     pub accum_spd: Option<&'a [[f64; NUM_BINS]]>,
+    /// Energy field retained from the main render for the trajectory phase
+    /// (compact substitute for the dropped SPD buffer).
+    retained_energy: Option<Vec<f32>>,
     base_rng: &'a Sha3RandomByteStream,
     kinematics: OnceLock<Kinematics>,
     events: OnceLock<Events>,
@@ -226,6 +229,7 @@ impl<'a> VizContext<'a> {
         fast_encode: bool,
         frame_tap: Option<FrameTapData>,
         accum_spd: Option<&'a [[f64; NUM_BINS]]>,
+        retained_energy: Option<Vec<f32>>,
         base_rng: &'a Sha3RandomByteStream,
     ) -> Self {
         Self {
@@ -243,6 +247,7 @@ impl<'a> VizContext<'a> {
             fast_encode,
             frame_tap,
             accum_spd,
+            retained_energy,
             base_rng,
             kinematics: OnceLock::new(),
             events: OnceLock::new(),
@@ -260,8 +265,13 @@ impl<'a> VizContext<'a> {
         self.events.get_or_init(|| Events::detect(self.positions, self.kinematics()))
     }
 
-    /// Per-pixel total SPD energy (computed once; `None` without the SPD).
+    /// Per-pixel total SPD energy: the retained main-render field if present
+    /// (trajectory phase), else computed from the live SPD (SPD phase);
+    /// `None` when neither source exists (`--image-only`).
     pub fn energy_field(&self) -> Option<&[f32]> {
+        if let Some(retained) = &self.retained_energy {
+            return Some(retained.as_slice());
+        }
         let spd = self.accum_spd?;
         Some(
             self.energy_field.get_or_init(|| crate::viz::common::spd::energy_field(spd)).as_slice(),
