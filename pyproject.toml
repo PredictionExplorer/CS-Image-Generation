@@ -17,7 +17,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["_utils"]
+py-modules = ["_utils", "viz_farm"]
 
 # ---------------------------------------------------------------------------
 # Ruff — lint + format (line length matches rustfmt.toml)
@@ -46,7 +46,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["_utils"]
+known-first-party = ["_utils", "run_viz_batch", "viz_farm"]
 
 # ---------------------------------------------------------------------------
 # Mypy — strict typing for repository Python files
@@ -62,5 +62,6 @@ files = [
     "run.py",
     "run-test-images.py",
     "run_viz_batch.py",
+    "viz_farm.py",
     "ci/verify_reference.py",
 ]

@@ -1,159 +1,183 @@
 #!/usr/bin/env python3
-"""Deploy the current branch to a remote server and run a viz batch there.
+"""Deploy, operate, and fetch the continuous random visualization farm.
 
-The batch runs fully detached on the server (nohup), so no persistent SSH
-connection is needed: this script deploys the committed tree, uploads a
-self-contained batch shell script (bootstrap, release build, one maximum
-quality run per seed with ``--viz all``), launches it in the background,
-and returns. Use ``--status`` to check progress later and ``--fetch`` to
-download the finished artifacts.
+The remote checkout is deployed from committed ``HEAD``. Its launcher
+bootstraps dependencies, compiles the Rust binary once with the optimized
+release profile, verifies all 69 modes are present, then starts
+``viz_farm.py`` fully detached.
 
 Examples:
-    python3 run_viz_batch.py                       # deploy + launch batch
-    python3 run_viz_batch.py --status              # tail the remote log
-    python3 run_viz_batch.py --fetch viz-results   # download artifacts
+    python3 run_viz_batch.py
+    python3 run_viz_batch.py --status
+    python3 run_viz_batch.py --stop
+    python3 run_viz_batch.py --force-stop
+    python3 run_viz_batch.py --fetch ../CS-viz-random-results
 """
 
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
-import sys
-import time
 from pathlib import Path
 
 DEFAULT_HOST = "user@100.76.88.48"
-DEFAULT_REMOTE_DIR = "viz-batch/CS-Image-Generation"
-DEFAULT_SEEDS = "0xCAFE,0xBEEF,0xC0DE,0xFACE,0x1357"
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
-LOG_NAME = "viz_batch.log"
-SCRIPT_NAME = "viz_batch.sh"
+DEFAULT_REMOTE_DIR = "viz-farm/CS-Image-Generation"
+DEFAULT_CONCURRENCY = 4
+DEFAULT_THREADS_PER_JOB = 30
+DEFAULT_MIN_FREE_GB = 500.0
+DEFAULT_MAX_FAILURE_STREAK = 5
+DEFAULT_TIMEOUT_HOURS = 24.0 * 14.0
+EXPECTED_MODE_COUNT = 69
 
-BATCH_TEMPLATE = """#!/usr/bin/env bash
-set -u
-echo "=== viz batch started $(date -u '+%Y-%m-%d %H:%M:%S') on $(hostname) ==="
-echo "=== seeds (run concurrently): {seeds_display} ==="
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+LAUNCH_SCRIPT_NAME = "viz_farm_launch.sh"
+
+
+def run(
+    command: list[str],
+    *,
+    dry_run: bool,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command, echoing it first; honor ``--dry-run``."""
+    print(f"  $ {shlex.join(command)}")
+    if dry_run:
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    return subprocess.run(command, check=check, text=True, capture_output=False)
+
+
+def ssh_cmd(host: str, remote_command: str) -> list[str]:
+    """Build one noninteractive SSH invocation."""
+    return ["ssh", *SSH_OPTS, host, remote_command]
+
+
+def preflight(host: str, dry_run: bool) -> None:
+    """Verify passwordless SSH and report the remote environment."""
+    print("[1/4] preflight: SSH connectivity + remote environment")
+    probe = (
+        "echo ok && uname -sm && nproc && "
+        "(command -v cargo || echo no-cargo) && "
+        "(command -v ffmpeg || echo no-ffmpeg) && "
+        "(command -v python3 || echo no-python3)"
+    )
+    run(ssh_cmd(host, probe), dry_run=dry_run)
+
+
+def deploy(host: str, remote_dir: str, dry_run: bool) -> None:
+    """Ship committed HEAD to the remote tree without touching output."""
+    print("[2/4] deploy: git archive HEAD -> remote tree")
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    if dirty:
+        print("ERROR: working tree has uncommitted changes; commit before deploying.")
+        print(dirty)
+        raise SystemExit(1)
+
+    quoted_dir = shlex.quote(remote_dir)
+    if dry_run:
+        print(f"  $ git archive HEAD | ssh {host} 'mkdir -p {quoted_dir} && tar -x -C ...'")
+        return
+    archive = subprocess.Popen(
+        ["git", "archive", "--format=tar", "HEAD"],
+        stdout=subprocess.PIPE,
+    )
+    extract = subprocess.run(
+        ssh_cmd(host, f"mkdir -p {quoted_dir} && tar -x -C {quoted_dir}"),
+        stdin=archive.stdout,
+        check=True,
+    )
+    if archive.stdout is not None:
+        archive.stdout.close()
+    if archive.wait() != 0 or extract.returncode != 0:
+        print("ERROR: deploy failed")
+        raise SystemExit(1)
+
+
+def build_launch_script(args: argparse.Namespace) -> str:
+    """Return the deterministic remote bootstrap/launch script."""
+    max_jobs_arg = f" --max-jobs {args.max_jobs}" if args.max_jobs is not None else ""
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+
+echo "=== random viz farm bootstrap $(date -u '+%Y-%m-%d %H:%M:%S') on $(hostname) ==="
 
 if ! command -v cargo >/dev/null 2>&1; then
   if [ -f "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
   else
     echo "=== cargo missing; installing rustup (minimal profile) ==="
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \\
-      || {{ echo "FATAL: rustup install failed"; exit 1; }}
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \\
+      sh -s -- -y --profile minimal
     . "$HOME/.cargo/env"
   fi
 fi
 
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "=== ffmpeg missing; attempting passwordless apt install ==="
-  if sudo -n apt-get update -qq && sudo -n apt-get install -y -qq ffmpeg; then
-    echo "=== ffmpeg installed ==="
-  else
-    echo "FATAL: ffmpeg unavailable and passwordless install failed"
-    exit 1
-  fi
+  sudo -n apt-get update -qq
+  sudo -n apt-get install -y -qq ffmpeg
 fi
 
-echo "=== building release binary ($(nproc) cores) ==="
-cargo build --release || {{ echo "FATAL: build failed"; exit 1; }}
+echo "=== building maximum-performance release binary ($(nproc) cores) ==="
+cargo build --release --locked
 
-BIN=./target/release/three_body_problem
-CORES=$(nproc)
-SEED_COUNT={seed_count}
-THREADS=$(( CORES / SEED_COUNT ))
-if [ "$THREADS" -lt 8 ]; then THREADS=8; fi
-echo "=== launching ${{SEED_COUNT}} concurrent runs, RAYON_NUM_THREADS=${{THREADS}} each ==="
+MODE_COUNT=$(./target/release/three_body_problem --viz-list | \\
+  awk '$5 == "implemented" {{ count += 1 }} END {{ print count + 0 }}')
+if [ "$MODE_COUNT" -ne {EXPECTED_MODE_COUNT} ]; then
+  echo "FATAL: expected {EXPECTED_MODE_COUNT} implemented modes, got $MODE_COUNT"
+  exit 1
+fi
+echo "=== verified $MODE_COUNT implemented visualization modes ==="
 
-declare -a PIDS=()
-declare -a NAMES=()
-for SEED in {seeds_shell}; do
-  NAME="viz-${{SEED}}"
-  echo "=== [$(date -u '+%H:%M:%S')] launching seed ${{SEED}} -> output/${{NAME}} \\
-(log: ${{NAME}}.log) ==="
-  RAYON_NUM_THREADS="$THREADS" "$BIN" --seed "${{SEED}}" --viz {viz_flags} \\
-    --output "${{NAME}}" > "${{NAME}}.log" 2>&1 &
-  PIDS+=($!)
-  NAMES+=("$NAME")
-done
+mkdir -p orchestrator/jobs output
+rm -f orchestrator/STOP
+if pgrep -f '[p]ython3 .*viz_farm.py' >/dev/null 2>&1 || \\
+   pgrep -f '[t]hree_body_problem' >/dev/null 2>&1; then
+  echo "FATAL: farm supervisor or orphan Rust jobs are already running"
+  exit 1
+fi
 
-FAILURES=0
-for INDEX in "${{!PIDS[@]}}"; do
-  if wait "${{PIDS[$INDEX]}}"; then
-    echo "=== [$(date -u '+%H:%M:%S')] ${{NAMES[$INDEX]}} finished OK ==="
-  else
-    echo "WARN: ${{NAMES[$INDEX]}} failed (see ${{NAMES[$INDEX]}}.log)"
-    FAILURES=$((FAILURES + 1))
-  fi
-done
-
-echo "=== viz batch COMPLETE $(date -u '+%Y-%m-%d %H:%M:%S') failures=${{FAILURES}} ==="
+setsid nohup python3 viz_farm.py \\
+  --concurrency {args.concurrency} \\
+  --threads-per-job {args.threads_per_job} \\
+  --min-free-gb {args.min_free_gb:.3f} \\
+  --max-failure-streak {args.max_failure_streak} \\
+  --timeout-hours {args.timeout_hours:.3f}{max_jobs_arg} \\
+  > orchestrator/launcher.log 2>&1 < /dev/null &
+FARM_PID=$!
+echo "$FARM_PID" > orchestrator/launcher.pid
+sleep 3
+if ! kill -0 "$FARM_PID" 2>/dev/null; then
+  echo "FATAL: viz_farm.py failed to stay alive"
+  tail -n 80 orchestrator/launcher.log || true
+  exit 1
+fi
+echo "=== farm launched pid=$FARM_PID: {args.concurrency} jobs x \\
+{args.threads_per_job} Rayon threads, {args.min_free_gb:.0f} GB floor ==="
 """
 
 
-def run(cmd: list[str], *, dry_run: bool, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run a command, echoing it first; honor --dry-run."""
-    print(f"  $ {' '.join(cmd)}")
-    if dry_run:
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-    return subprocess.run(cmd, check=check, text=True, capture_output=False)
-
-
-def ssh_cmd(host: str, remote_command: str) -> list[str]:
-    """Build an ssh invocation for one remote command."""
-    return ["ssh", *SSH_OPTS, host, remote_command]
-
-
-def preflight(host: str, dry_run: bool) -> None:
-    """Verify passwordless SSH works and report the remote environment."""
-    print("[1/4] preflight: ssh connectivity + remote environment")
-    probe = (
-        "echo ok && uname -sm && nproc && "
-        "(command -v cargo || echo no-cargo) && (command -v ffmpeg || echo no-ffmpeg)"
-    )
-    run(ssh_cmd(host, probe), dry_run=dry_run)
-
-
-def deploy(host: str, remote_dir: str, dry_run: bool) -> None:
-    """Ship the committed tree (git archive of HEAD) to the server."""
-    print("[2/4] deploy: git archive HEAD -> remote tree")
-    dirty = subprocess.run(
-        ["git", "status", "--porcelain"], check=True, text=True, capture_output=True
-    ).stdout.strip()
-    if dirty:
-        print("ERROR: working tree has uncommitted changes; commit before deploying.")
-        print(dirty)
-        sys.exit(1)
-    if dry_run:
-        print(f"  $ git archive HEAD | ssh {host} 'mkdir -p {remote_dir} && tar -x -C ...'")
-        return
-    archive = subprocess.Popen(["git", "archive", "--format=tar", "HEAD"], stdout=subprocess.PIPE)
-    extract = subprocess.run(
-        ssh_cmd(host, f"mkdir -p {remote_dir} && tar -x -C {remote_dir}"),
-        stdin=archive.stdout,
-        check=True,
-    )
-    if archive.wait() != 0 or extract.returncode != 0:
-        print("ERROR: deploy failed")
-        sys.exit(1)
-
-
-def upload_batch_script(
-    host: str, remote_dir: str, seeds: list[str], viz_flags: str, dry_run: bool
+def upload_launch_script(
+    host: str,
+    remote_dir: str,
+    args: argparse.Namespace,
+    dry_run: bool,
 ) -> None:
-    """Generate and upload the self-contained batch script."""
-    print("[3/4] upload batch script")
-    script = BATCH_TEMPLATE.format(
-        seeds_display=" ".join(seeds),
-        seeds_shell=" ".join(seeds),
-        seed_count=len(seeds),
-        viz_flags=viz_flags,
-    )
+    """Upload the generated release-build and farm-launch script."""
+    print("[3/4] upload farm launcher")
+    script = build_launch_script(args)
+    remote_path = shlex.quote(f"{remote_dir}/{LAUNCH_SCRIPT_NAME}")
     if dry_run:
-        print(f"  (would write {len(script)} bytes to {remote_dir}/{SCRIPT_NAME})")
+        print(f"  (would write {len(script)} bytes to {remote_path})")
         return
     subprocess.run(
-        ssh_cmd(host, f"cat > {remote_dir}/{SCRIPT_NAME}"),
+        ssh_cmd(host, f"cat > {remote_path} && chmod +x {remote_path}"),
         input=script,
         text=True,
         check=True,
@@ -161,83 +185,175 @@ def upload_batch_script(
 
 
 def launch(host: str, remote_dir: str, dry_run: bool) -> None:
-    """Start the batch under nohup and confirm it is alive."""
-    print("[4/4] launch batch in background (nohup; safe to disconnect)")
-    command = (
-        f"cd {remote_dir} && rm -f {LOG_NAME} && "
-        f"(setsid nohup bash {SCRIPT_NAME} > {LOG_NAME} 2>&1 < /dev/null &) && "
-        "echo launched; exit 0"
+    """Build and start the farm, then display its initial state."""
+    print("[4/4] release build + detached farm launch")
+    quoted_dir = shlex.quote(remote_dir)
+    run(
+        ssh_cmd(host, f"cd {quoted_dir} && ./{LAUNCH_SCRIPT_NAME}"),
+        dry_run=dry_run,
     )
-    run(ssh_cmd(host, command), dry_run=dry_run)
     if dry_run:
         return
-    time.sleep(5)
-    print("--- first log lines ---")
-    run(ssh_cmd(host, f"tail -n 20 {remote_dir}/{LOG_NAME}"), dry_run=False, check=False)
+    print("\n--- initial farm status ---")
+    status(host, remote_dir)
     print(
-        "\nBatch is running detached. Check progress any time with:\n"
-        f"  python3 run_viz_batch.py --host {host} --remote-dir {remote_dir} --status"
+        "\nFarm is detached. Check it with:\n"
+        f"  python3 run_viz_batch.py --host {host} "
+        f"--remote-dir {remote_dir} --status"
     )
 
 
 def status(host: str, remote_dir: str) -> None:
-    """Show batch log, per-seed progress, load, and running processes."""
-    run(
-        ssh_cmd(
-            host,
-            f"cd {remote_dir} 2>/dev/null || exit 0; "
-            f"tail -n 12 {LOG_NAME} 2>/dev/null; "
-            "echo '--- per-seed (last line each) ---'; "
-            'for f in viz-0x*.log; do [ -f "$f" ] && '
-            'echo "$f: $(tail -n 1 "$f" | cut -c1-120)"; done; '
-            "echo '--- load ---'; uptime; "
-            "echo '--- processes ---'; "
-            "pgrep -af 'viz_batch.sh|three_body_problem' | head -8 || echo '(none running)'",
-        ),
-        dry_run=False,
-        check=False,
+    """Show atomic farm state, recent logs, load/RSS, processes, and disk."""
+    quoted_dir = shlex.quote(remote_dir)
+    command = (
+        f"cd {quoted_dir} 2>/dev/null || "
+        "{ echo 'farm checkout missing'; exit 0; }; "
+        "echo '--- state ---'; "
+        "if [ -f orchestrator/state.json ]; then "
+        "python3 -m json.tool orchestrator/state.json; "
+        "else echo '(state unavailable)'; fi; "
+        "echo '--- recent session log ---'; "
+        "tail -n 16 orchestrator/session.log 2>/dev/null || true; "
+        "echo '--- system ---'; uptime; "
+        "ps -C three_body_problem -o pid=,pcpu=,rss=,etime=,args= 2>/dev/null || true; "
+        "echo '--- aggregate RSS ---'; "
+        "ps -C three_body_problem -o rss= 2>/dev/null | "
+        "awk '{ total += $1 } END { printf \"%.1f GiB\\n\", total / 1048576 }'; "
+        "echo '--- disk ---'; df -h .; du -sh output 2>/dev/null || true; "
+        "echo '--- farm process ---'; "
+        "pgrep -af '[p]ython3 .*viz_farm.py' || echo '(farm not running)'"
     )
+    run(ssh_cmd(host, command), dry_run=False, check=False)
+
+
+def stop(host: str, remote_dir: str, *, force: bool) -> None:
+    """Request a graceful drain, or forcibly stop every farm child."""
+    quoted_dir = shlex.quote(remote_dir)
+    if force:
+        command = (
+            f"cd {quoted_dir} 2>/dev/null || exit 0; "
+            "touch orchestrator/STOP; "
+            "pkill -TERM -f '[p]ython3 .*viz_farm.py' 2>/dev/null || true; "
+            "pkill -TERM -f '[t]hree_body_problem' 2>/dev/null || true; "
+            "sleep 5; "
+            "pkill -KILL -f '[p]ython3 .*viz_farm.py' 2>/dev/null || true; "
+            "pkill -KILL -f '[t]hree_body_problem' 2>/dev/null || true; "
+            "echo 'forced stop complete'; "
+            "pgrep -af 'viz_farm.py|three_body_problem' || true"
+        )
+    else:
+        command = (
+            f"cd {quoted_dir} 2>/dev/null || exit 0; "
+            "mkdir -p orchestrator; touch orchestrator/STOP; "
+            "echo 'graceful drain requested (no new jobs will launch)'"
+        )
+    run(ssh_cmd(host, command), dry_run=False, check=False)
 
 
 def fetch(host: str, remote_dir: str, destination: str) -> None:
-    """Download all finished viz packages into a local directory."""
-    dest = Path(destination)
-    dest.mkdir(parents=True, exist_ok=True)
+    """Resumably merge every remote output package into a local directory."""
+    destination_path = Path(destination).expanduser().resolve()
+    destination_path.mkdir(parents=True, exist_ok=True)
+    ssh_transport = "ssh " + " ".join(shlex.quote(option) for option in SSH_OPTS)
+    source = f"{host}:{remote_dir}/output/"
     run(
-        ["scp", "-r", *SSH_OPTS, f"{host}:{remote_dir}/output/viz-*", str(dest)],
+        [
+            "rsync",
+            "-a",
+            "--partial",
+            "--stats",
+            "-e",
+            ssh_transport,
+            source,
+            f"{destination_path}/",
+        ],
         dry_run=False,
         check=False,
     )
-    print(f"Fetched into {dest}/")
+    print(f"Fetched into {destination_path}/")
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
 
 
 def main() -> None:
-    """CLI entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST, help="ssh target (user@host)")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="SSH target (user@host)")
     parser.add_argument("--remote-dir", default=DEFAULT_REMOTE_DIR, help="remote checkout path")
-    parser.add_argument("--seeds", default=DEFAULT_SEEDS, help="comma-separated hex seeds")
-    parser.add_argument("--viz-flags", default="all", help="value passed to --viz on the server")
-    parser.add_argument("--status", action="store_true", help="show remote progress and exit")
-    parser.add_argument("--fetch", metavar="DIR", help="download finished artifacts into DIR")
-    parser.add_argument("--dry-run", action="store_true", help="print commands without running")
+    parser.add_argument(
+        "--concurrency",
+        type=positive_int,
+        default=DEFAULT_CONCURRENCY,
+        help="simultaneous Rust jobs",
+    )
+    parser.add_argument(
+        "--threads-per-job",
+        type=positive_int,
+        default=DEFAULT_THREADS_PER_JOB,
+        help="RAYON_NUM_THREADS for each Rust job",
+    )
+    parser.add_argument(
+        "--min-free-gb",
+        type=positive_float,
+        default=DEFAULT_MIN_FREE_GB,
+        help="stop-launching disk floor",
+    )
+    parser.add_argument(
+        "--max-failure-streak",
+        type=positive_int,
+        default=DEFAULT_MAX_FAILURE_STREAK,
+    )
+    parser.add_argument(
+        "--timeout-hours",
+        type=positive_float,
+        default=DEFAULT_TIMEOUT_HOURS,
+    )
+    parser.add_argument("--max-jobs", type=positive_int, help="optional finite validation run")
+    parser.add_argument("--status", action="store_true", help="show remote farm status and exit")
+    parser.add_argument("--stop", action="store_true", help="request graceful drain and exit")
+    parser.add_argument("--force-stop", action="store_true", help="kill farm and Rust children")
+    parser.add_argument("--fetch", metavar="DIR", help="resumably download all output packages")
+    parser.add_argument("--dry-run", action="store_true", help="print deploy actions only")
     args = parser.parse_args()
 
+    action_count = sum(
+        [
+            args.status,
+            args.stop,
+            args.force_stop,
+            args.fetch is not None,
+        ]
+    )
+    if action_count > 1:
+        parser.error("choose only one of --status, --stop, --force-stop, or --fetch")
     if args.status:
         status(args.host, args.remote_dir)
+        return
+    if args.stop:
+        stop(args.host, args.remote_dir, force=False)
+        return
+    if args.force_stop:
+        stop(args.host, args.remote_dir, force=True)
         return
     if args.fetch:
         fetch(args.host, args.remote_dir, args.fetch)
         return
 
-    seeds = [seed.strip() for seed in args.seeds.split(",") if seed.strip()]
-    if not seeds:
-        print("ERROR: no seeds given")
-        sys.exit(1)
-
     preflight(args.host, args.dry_run)
     deploy(args.host, args.remote_dir, args.dry_run)
-    upload_batch_script(args.host, args.remote_dir, seeds, args.viz_flags, args.dry_run)
+    upload_launch_script(args.host, args.remote_dir, args, args.dry_run)
     launch(args.host, args.remote_dir, args.dry_run)
 
 
