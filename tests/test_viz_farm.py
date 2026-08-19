@@ -298,6 +298,15 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("setsid nohup python3 viz_farm.py", script)
         self.assertNotIn("--fast-encode", script)
 
+    def test_force_stop_patterns_do_not_kill_the_remote_shell(self) -> None:
+        command = run_viz_batch.build_stop_command(
+            "viz-farm/CS-Image-Generation",
+            force=True,
+        )
+        self.assertIn("pkill -TERM -f '[t]hree_body_problem'", command)
+        self.assertIn("pgrep -af '[v]iz_farm.py|[t]hree_body_problem'", command)
+        self.assertNotIn("pgrep -af 'viz_farm.py|three_body_problem'", command)
+
 
 if __name__ == "__main__":
     unittest.main()

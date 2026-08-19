@@ -240,11 +240,11 @@ def status(host: str, remote_dir: str) -> None:
     run(ssh_cmd(host, command), dry_run=False, check=False)
 
 
-def stop(host: str, remote_dir: str, *, force: bool) -> None:
-    """Request a graceful drain, or forcibly stop every farm child."""
+def build_stop_command(remote_dir: str, *, force: bool) -> str:
+    """Build a stop command whose process patterns cannot match its shell."""
     quoted_dir = shlex.quote(remote_dir)
     if force:
-        command = (
+        return (
             f"cd {quoted_dir} 2>/dev/null || exit 0; "
             "touch orchestrator/STOP; "
             "pkill -TERM -f '^python3 viz_farm.py( |$)' 2>/dev/null || true; "
@@ -253,14 +253,18 @@ def stop(host: str, remote_dir: str, *, force: bool) -> None:
             "pkill -KILL -f '^python3 viz_farm.py( |$)' 2>/dev/null || true; "
             "pkill -KILL -f '[t]hree_body_problem' 2>/dev/null || true; "
             "echo 'forced stop complete'; "
-            "pgrep -af 'viz_farm.py|three_body_problem' || true"
+            "pgrep -af '[v]iz_farm.py|[t]hree_body_problem' || true"
         )
-    else:
-        command = (
-            f"cd {quoted_dir} 2>/dev/null || exit 0; "
-            "mkdir -p orchestrator; touch orchestrator/STOP; "
-            "echo 'graceful drain requested (no new jobs will launch)'"
-        )
+    return (
+        f"cd {quoted_dir} 2>/dev/null || exit 0; "
+        "mkdir -p orchestrator; touch orchestrator/STOP; "
+        "echo 'graceful drain requested (no new jobs will launch)'"
+    )
+
+
+def stop(host: str, remote_dir: str, *, force: bool) -> None:
+    """Request a graceful drain, or forcibly stop every farm child."""
+    command = build_stop_command(remote_dir, force=force)
     run(ssh_cmd(host, command), dry_run=False, check=False)
 
 
