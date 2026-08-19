@@ -5,8 +5,8 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
-(`5338c08` deployed).
+Last updated: 2026-08-19 ~23:10 UTC, after scaling the random farm
+(`2ee9aca` deployed).
 
 > **Standing lesson:** treat any non-green draft smoke as stop-the-line
 > for server batches. The smokes have caught real bugs every wave (Wave
@@ -37,7 +37,8 @@ Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
 
 - **Branch:** `viz-master-plan` (pushed to `origin`). Wave 9 completed at
   `1524c98`; the farm landed at `256387d`, with pilot fixes `cd90e76` and
-  `5338c08`. All Rust and Python gates are green (including 12 farm tests).
+  `5338c08`, then scaled at `2ee9aca`. All Rust and Python gates are green
+  (including 13 farm tests).
 - **Progress: 69 of 69 modes implemented.** `--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test.
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
@@ -86,7 +87,7 @@ Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
 - **SSH:** `user@100.76.88.48` (passwordless key auth already set up).
   128 cores, 503 GB RAM, ~3.5 TB free disk, Linux x86_64, ffmpeg.
 - **Remote checkout:** `~/viz-farm/CS-Image-Generation`, deployed from
-  committed HEAD via `git archive`. Deployed code: `5338c08`.
+  committed HEAD via `git archive`. Deployed code: `2ee9aca`.
 - **Legacy state:** `~/viz-batch` and `~/viz-batch2` were stopped, fetched
   one final time, and deleted on 2026-08-19. Their five packages are
   preserved in `../CS-viz-results-20260818/`.
@@ -94,18 +95,25 @@ Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
   `Cargo.toml` uses opt-level 3, fat LTO, one codegen unit, aborting
   panics, and stripped symbols.
 - **Farm policy:**
-  - 4 rolling workers, `RAYON_NUM_THREADS=30` each (8 cores reserved).
+  - 8 rolling workers, `RAYON_NUM_THREADS=15` each (8 cores reserved).
   - Every one of the 69 targets is eligible, including `turntable`.
-    A turntable can occupy one slot for days; the other three continue.
+    A turntable can occupy one slot for days; the other seven continue.
   - Production defaults and `--viz-quality final`; no fast encode.
   - New jobs stop below 500 GB free; active jobs drain.
   - Five consecutive failures trip the circuit breaker.
   - Output names include UTC, sequence, target, and random seed; no two
     workers share an output directory.
-- **Current session:** `f00e620a1a1330aa`, started 2026-08-19 04:08 UTC.
-  First targets: `epicycles`, `roche`, `dust-nebula`, and `tilt`
-  (`depth-pack` prerequisite included). Initial load/RSS/disk were healthy
-  with no warnings or errors.
+- **Current session:** `1cb2cc707e3645a3`, started 2026-08-19 23:06 UTC.
+  Initial targets: `hologram`, `neon`, `tilt` (+ `depth-pack`),
+  `depth-pack`, `rose-window`, `slit-scan`, `trailer` (+ `sonification`),
+  and `ephemeris-poster`.
+- **Measured utilization after scaling:** 86.1% aggregate CPU (110 worker
+  cores average; zero I/O wait), 31/503 GiB RAM used with 471 GiB
+  available, no swap, 3.5 TB disk free. This is close to the practical
+  120/128-thread ceiling while retaining the intended 8-core reserve.
+- **Output audit:** the first drained session completed 6/6 jobs with
+  valid manifests, 403 PNGs and 46 MP4s; all MP4 containers passed
+  `ffprobe`, with no zero-byte artifacts.
 - **Orchestration:** [run_viz_batch.py](../run_viz_batch.py) and
   [viz_farm.py](../viz_farm.py) are stdlib-only and ruff/mypy-strict:
 
@@ -127,7 +135,7 @@ Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
 
 Every 20-minute check should inspect:
 
-- supervisor and exactly four live Rust jobs (unless draining);
+- supervisor and exactly eight live Rust jobs (unless draining);
 - `state.json` failure streak, free disk, target/seed, elapsed/log age;
 - system load, aggregate RSS, and output growth;
 - recent `WARN`, `ERROR`, `FATAL`, panic, OOM, or failed lines.
