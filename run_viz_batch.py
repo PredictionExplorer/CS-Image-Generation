@@ -52,6 +52,17 @@ def ssh_cmd(host: str, remote_command: str) -> list[str]:
     return ["ssh", *SSH_OPTS, host, remote_command]
 
 
+def local_git_head() -> str:
+    """Return the committed source revision being archived."""
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return result.stdout.strip()
+
+
 def preflight(host: str, dry_run: bool) -> None:
     """Verify passwordless SSH and report the remote environment."""
     print("[1/4] preflight: SSH connectivity + remote environment")
@@ -98,9 +109,10 @@ def deploy(host: str, remote_dir: str, dry_run: bool) -> None:
         raise SystemExit(1)
 
 
-def build_launch_script(args: argparse.Namespace) -> str:
+def build_launch_script(args: argparse.Namespace, git_head: str | None = None) -> str:
     """Return the deterministic remote bootstrap/launch script."""
     max_jobs_arg = f" --max-jobs {args.max_jobs}" if args.max_jobs is not None else ""
+    deployed_head = git_head or local_git_head()
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -137,13 +149,14 @@ echo "=== verified $MODE_COUNT implemented visualization modes ==="
 
 mkdir -p orchestrator/jobs output
 rm -f orchestrator/STOP
-if pgrep -f '[p]ython3 .*viz_farm.py' >/dev/null 2>&1 || \\
+if pgrep -f '^python3 viz_farm.py( |$)' >/dev/null 2>&1 || \\
    pgrep -f '[t]hree_body_problem' >/dev/null 2>&1; then
   echo "FATAL: farm supervisor or orphan Rust jobs are already running"
   exit 1
 fi
 
 setsid nohup python3 viz_farm.py \\
+  --git-head {shlex.quote(deployed_head)} \\
   --concurrency {args.concurrency} \\
   --threads-per-job {args.threads_per_job} \\
   --min-free-gb {args.min_free_gb:.3f} \\
@@ -171,7 +184,7 @@ def upload_launch_script(
 ) -> None:
     """Upload the generated release-build and farm-launch script."""
     print("[3/4] upload farm launcher")
-    script = build_launch_script(args)
+    script = build_launch_script(args, local_git_head())
     remote_path = shlex.quote(f"{remote_dir}/{LAUNCH_SCRIPT_NAME}")
     if dry_run:
         print(f"  (would write {len(script)} bytes to {remote_path})")
@@ -222,7 +235,7 @@ def status(host: str, remote_dir: str) -> None:
         "awk '{ total += $1 } END { printf \"%.1f GiB\\n\", total / 1048576 }'; "
         "echo '--- disk ---'; df -h .; du -sh output 2>/dev/null || true; "
         "echo '--- farm process ---'; "
-        "pgrep -af '[p]ython3 .*viz_farm.py' || echo '(farm not running)'"
+        "pgrep -af '^python3 viz_farm.py( |$)' || echo '(farm not running)'"
     )
     run(ssh_cmd(host, command), dry_run=False, check=False)
 
@@ -234,10 +247,10 @@ def stop(host: str, remote_dir: str, *, force: bool) -> None:
         command = (
             f"cd {quoted_dir} 2>/dev/null || exit 0; "
             "touch orchestrator/STOP; "
-            "pkill -TERM -f '[p]ython3 .*viz_farm.py' 2>/dev/null || true; "
+            "pkill -TERM -f '^python3 viz_farm.py( |$)' 2>/dev/null || true; "
             "pkill -TERM -f '[t]hree_body_problem' 2>/dev/null || true; "
             "sleep 5; "
-            "pkill -KILL -f '[p]ython3 .*viz_farm.py' 2>/dev/null || true; "
+            "pkill -KILL -f '^python3 viz_farm.py( |$)' 2>/dev/null || true; "
             "pkill -KILL -f '[t]hree_body_problem' 2>/dev/null || true; "
             "echo 'forced stop complete'; "
             "pgrep -af 'viz_farm.py|three_body_problem' || true"

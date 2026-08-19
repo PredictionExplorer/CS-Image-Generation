@@ -154,6 +154,7 @@ class GuardTests(unittest.TestCase):
         config = viz_farm.FarmConfig(
             work_dir=root,
             binary=root / "binary",
+            git_head="test-head",
             state_dir=state_dir,
             output_dir=output_dir,
             concurrency=4,
@@ -248,6 +249,8 @@ class FarmIntegrationTests(unittest.TestCase):
                     [
                         "--binary",
                         str(binary),
+                        "--git-head",
+                        "fake-head",
                         "--concurrency",
                         "2",
                         "--threads-per-job",
@@ -267,6 +270,7 @@ class FarmIntegrationTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             state = json.loads((root / "orchestrator" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["state"], "completed_limit")
+            self.assertEqual(state["git_head"], "fake-head")
             self.assertEqual(state["jobs_started"], 3)
             self.assertEqual(state["jobs_ok"], 3)
             self.assertEqual(state["jobs_failed"], 0)
@@ -284,9 +288,10 @@ class LauncherTests(unittest.TestCase):
             timeout_hours=336.0,
             max_jobs=None,
         )
-        script = run_viz_batch.build_launch_script(args)
+        script = run_viz_batch.build_launch_script(args, "abc123")
         self.assertIn("cargo build --release --locked", script)
         self.assertIn('if [ "$MODE_COUNT" -ne 69 ]', script)
+        self.assertIn("--git-head abc123", script)
         self.assertIn("--concurrency 4", script)
         self.assertIn("--threads-per-job 30", script)
         self.assertIn("--min-free-gb 500.000", script)

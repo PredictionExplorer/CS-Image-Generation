@@ -187,6 +187,7 @@ class FarmConfig:
 
     work_dir: Path
     binary: Path
+    git_head: str | None
     state_dir: Path
     output_dir: Path
     concurrency: int
@@ -261,6 +262,7 @@ def configure_logging(state_dir: Path) -> logging.Logger:
         "%(asctime)sZ [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
+    formatter.converter = time.gmtime
     file_handler = logging.FileHandler(state_dir / "session.log", encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -280,7 +282,7 @@ class VizFarm:
         self.catalog = catalog
         self.logger = logger
         self.session_id = secrets.token_hex(8)
-        self.git_head = current_git_head(config.work_dir)
+        self.git_head = config.git_head or current_git_head(config.work_dir)
         self.running: dict[int, RunningJob] = {}
         self.jobs_started = 0
         self.jobs_ok = 0
@@ -482,6 +484,7 @@ class VizFarm:
     def _fill_workers(self) -> None:
         if self.stop_reason is not None:
             return
+        started_before = self.jobs_started
         while len(self.running) < self.config.concurrency:
             free_gb = disk_free_gb(self.config.output_dir)
             if free_gb < self.config.min_free_gb:
@@ -496,6 +499,8 @@ class VizFarm:
                 self.stop_reason = "completed_limit"
                 return
             self._start_job()
+        if self.jobs_started != started_before:
+            self.write_state(force=True)
 
     def _force_stop_if_requested(self) -> None:
         if _signal_count < 2:
@@ -631,6 +636,7 @@ def positive_float(value: str) -> float:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="target/release/three_body_problem")
+    parser.add_argument("--git-head", help="deployed source commit (git archive has no .git)")
     parser.add_argument("--state-dir", default="orchestrator")
     parser.add_argument("--concurrency", type=positive_int, default=DEFAULT_CONCURRENCY)
     parser.add_argument(
@@ -677,6 +683,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = FarmConfig(
             work_dir=work_dir,
             binary=binary,
+            git_head=args.git_head,
             state_dir=state_dir,
             output_dir=output_dir,
             concurrency=args.concurrency,
