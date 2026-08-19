@@ -52,8 +52,8 @@ Last updated: 2026-08-19 ~00:10 UTC, after the Wave 9 commit (`1524c98`).
 
 ## Where we are
 
-- **Branch:** `viz-master-plan`. Wave 6 `47cf1e8`, Wave 7 `68c422f`,
-  Wave 8 `95d7f9f`, Wave 9 `1524c98` (not yet pushed); every wave is one
+- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 6 `47cf1e8`,
+  Wave 7 `68c422f`, Wave 8 `95d7f9f`, Wave 9 `1524c98`; every wave is one
   `feat:` commit plus this handoff kept in sync. All gates green
   (fmt, clippy pedantic, 616 tests, ruff/mypy).
 - **Progress: 69 of 69 modes implemented.** `--viz-list` prints the live
