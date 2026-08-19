@@ -279,10 +279,17 @@ class FarmIntegrationTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    def test_resource_defaults_use_eight_fifteen_split(self) -> None:
+        farm_args = viz_farm.parse_args([])
+        self.assertEqual(farm_args.concurrency, 8)
+        self.assertEqual(farm_args.threads_per_job, 15)
+        self.assertEqual(run_viz_batch.DEFAULT_CONCURRENCY, 8)
+        self.assertEqual(run_viz_batch.DEFAULT_THREADS_PER_JOB, 15)
+
     def test_launcher_builds_locked_release_and_starts_guarded_farm(self) -> None:
         args = argparse.Namespace(
-            concurrency=4,
-            threads_per_job=30,
+            concurrency=8,
+            threads_per_job=15,
             min_free_gb=500.0,
             max_failure_streak=5,
             timeout_hours=336.0,
@@ -292,8 +299,8 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("cargo build --release --locked", script)
         self.assertIn('if [ "$MODE_COUNT" -ne 69 ]', script)
         self.assertIn("--git-head abc123", script)
-        self.assertIn("--concurrency 4", script)
-        self.assertIn("--threads-per-job 30", script)
+        self.assertIn("--concurrency 8", script)
+        self.assertIn("--threads-per-job 15", script)
         self.assertIn("--min-free-gb 500.000", script)
         self.assertIn("setsid nohup python3 viz_farm.py", script)
         self.assertNotIn("--fast-encode", script)
