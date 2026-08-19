@@ -5,7 +5,8 @@ a fresh session. The authoritative implementation spec and progress ledger is
 [docs/VIZ_MASTER_PLAN.md](VIZ_MASTER_PLAN.md) — start there for *what* to
 build; start here for *where things stand*.
 
-Last updated: 2026-08-19 ~00:10 UTC, after the Wave 9 commit (`1524c98`).
+Last updated: 2026-08-19 ~04:10 UTC, after the random farm launch
+(`5338c08` deployed).
 
 > **Standing lesson:** treat any non-green draft smoke as stop-the-line
 > for server batches. The smokes have caught real bugs every wave (Wave
@@ -20,42 +21,23 @@ Last updated: 2026-08-19 ~00:10 UTC, after the Wave 9 commit (`1524c98`).
 
 ## Immediate next actions (fresh session, start here)
 
-1. **THE CATALOG IS COMPLETE: 69 of 69 modes.** Wave 9 (grand combos)
-   landed as `1524c98`. There are no more implementation waves; what
-   remains is curation, the caption/cartouche backfill, deep-polish
-   passes on chosen favorites, and batch logistics.
-2. **Two batches are in flight** (topology + rationale in "The server";
-   progress timestamps below are from the *previous* session — re-probe
-   with `--status` first):
-   - **Primary** (`--status` with defaults): seeds `0x1357` + `0xFACE`
-     finishing max-quality Wave-1 turntables (at 2026-08-18 ~20:30 UTC:
-     333/720 and 232/720 frames; ETA ~Aug 19 19:00 UTC and ~Aug 20 14:00
-     UTC). Expected `WARN ... failed` lines for three other seeds in
-     `viz_batch.log` — killed deliberately. When `COMPLETE`: fetch, then
-     relaunch these two seeds from post-Wave-9 HEAD (`1524c98`+) with
-     every implemented mode **except `turntable`** (no exclusion syntax —
-     build the 68-flag comma list from `--viz-list`, pass via
-     `--viz-flags`). Budget: core re-render ~4-5 h + modes per seed; read
-     the projected lines; V67/V65/V64/V68 are the new heavy items.
-   - **viz-batch2** (`--remote-dir viz-batch2/CS-Image-Generation`):
-     seeds `0xBEEF 0xC0DE 0xCAFE` running all 36 modes of Waves 1-5 from
-     `77b5c2d` (ETA roughly Aug 24-29; turntable-dominated). Fetch needs
-     the same `--remote-dir`. Afterwards they need a top-up run with the
-     **33 Wave 6-9 flags** via `--viz-flags` (budget the core re-render
-     ~4-5 h/seed on top).
-3. **Wave-1 partials already fetched** (2026-08-18 ~07:15 UTC) to
-   `../CS-viz-results-20260818/` — 5 seeds' core packages + 5 cheap
-   Wave-1 modes each, ready for curation now. `viz-results/` is
-   gitignored; default fetches no longer block deploys.
-4. **Caption/cartouche backfill** is unblocked (`common/text.rs` exists
-   since Wave 8) — schedule with the curation pass (list in Open items).
+1. **The catalog is complete: 69 of 69 modes.** There are no more
+   implementation waves.
+2. **A continuous random farm is running.** Check it with
+   `python3 run_viz_batch.py --status`. Four workers independently choose
+   one uniform random target from the live 69-mode Rust catalog and a
+   random 64-bit seed. Artifact prerequisites are expanded automatically.
+3. **Monitor every 20 minutes.** Treat repeated failures, panics, stale
+   idle workers, OOMs, or low disk as stop-the-line. A healthy long job
+   may have no completion for hours; require CPU/log/output progress.
+4. Curate fetched results and schedule the caption/cartouche backfill and
+   deep-polish pass listed under Open items.
 
 ## Where we are
 
-- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 6 `47cf1e8`,
-  Wave 7 `68c422f`, Wave 8 `95d7f9f`, Wave 9 `1524c98`; every wave is one
-  `feat:` commit plus this handoff kept in sync. All gates green
-  (fmt, clippy pedantic, 616 tests, ruff/mypy).
+- **Branch:** `viz-master-plan` (pushed to `origin`). Wave 9 completed at
+  `1524c98`; the farm landed at `256387d`, with pilot fixes `cd90e76` and
+  `5338c08`. All Rust and Python gates are green (including 12 farm tests).
 - **Progress: 69 of 69 modes implemented.** `--viz-list` prints the live
   catalog; the ledger in the master plan is kept in sync by a unit test.
   - **Wave 0** — framework: catalog, `--viz` CLI, `VizContext` (lazy
@@ -95,48 +77,69 @@ Last updated: 2026-08-19 ~00:10 UTC, after the Wave 9 commit (`1524c98`).
     (single-WAV broadcast score — the deferred `amix`/`adelay` graphs
     are closed as unnecessary; artifact-first L0 for the dive; in-mode
     projective finale for rose-window; single-stream vanitas acts).
-- **Next up:** no further waves. The order of work is now: (1) curate the
-  fetched Wave-1 partials + upcoming batch output, (2) caption/cartouche
-  backfill with `text.rs`, (3) deep-polish passes on the shortlist
-  (V37/V39 full-res stills queued, per the Wave 4 addendum), (4) batch
-  top-ups per "Immediate next actions".
+- **Next up:** no further waves. Curate farm output, backfill captions,
+  and deeply polish the shortlist (V37/V39 full-resolution stills remain
+  queued behind curation).
 
 ## The server
 
 - **SSH:** `user@100.76.88.48` (passwordless key auth already set up).
-  128 cores, 503 GB RAM, ~3.5 TB free disk, Linux x86_64, ffmpeg installed,
-  rustup installed by our bootstrap.
-- **Remote checkout:** `~/viz-batch/CS-Image-Generation` (deployed via
-  `git archive HEAD` over ssh — always commit before deploying).
-- **Batch orchestration:** [run_viz_batch.py](../run_viz_batch.py)
-  (stdlib-only, ruff/mypy-strict clean):
+  128 cores, 503 GB RAM, ~3.5 TB free disk, Linux x86_64, ffmpeg.
+- **Remote checkout:** `~/viz-farm/CS-Image-Generation`, deployed from
+  committed HEAD via `git archive`. Deployed code: `5338c08`.
+- **Legacy state:** `~/viz-batch` and `~/viz-batch2` were stopped, fetched
+  one final time, and deleted on 2026-08-19. Their five packages are
+  preserved in `../CS-viz-results-20260818/`.
+- **Release build:** launcher runs `cargo build --release --locked`.
+  `Cargo.toml` uses opt-level 3, fat LTO, one codegen unit, aborting
+  panics, and stripped symbols.
+- **Farm policy:**
+  - 4 rolling workers, `RAYON_NUM_THREADS=30` each (8 cores reserved).
+  - Every one of the 69 targets is eligible, including `turntable`.
+    A turntable can occupy one slot for days; the other three continue.
+  - Production defaults and `--viz-quality final`; no fast encode.
+  - New jobs stop below 500 GB free; active jobs drain.
+  - Five consecutive failures trip the circuit breaker.
+  - Output names include UTC, sequence, target, and random seed; no two
+    workers share an output directory.
+- **Current session:** `f00e620a1a1330aa`, started 2026-08-19 04:08 UTC.
+  First targets: `epicycles`, `roche`, `dust-nebula`, and `tilt`
+  (`depth-pack` prerequisite included). Initial load/RSS/disk were healthy
+  with no warnings or errors.
+- **Orchestration:** [run_viz_batch.py](../run_viz_batch.py) and
+  [viz_farm.py](../viz_farm.py) are stdlib-only and ruff/mypy-strict:
 
   ```bash
-  python3 run_viz_batch.py            # deploy HEAD + launch detached batch
-  python3 run_viz_batch.py --status   # tail logs, per-seed progress, load
-  python3 run_viz_batch.py --fetch viz-results   # download output/viz-*
-  # options: --seeds 0x...,0x...  --viz-flags all  --host  --remote-dir
+  python3 run_viz_batch.py                    # deploy/build/launch
+  python3 run_viz_batch.py --status           # state, jobs, load, RSS, disk
+  python3 run_viz_batch.py --stop             # graceful drain
+  python3 run_viz_batch.py --force-stop       # terminate supervisor + children
+  python3 run_viz_batch.py --fetch ../results # resumable rsync
   ```
 
-  The batch runs all seeds **concurrently**, each capped at
-  `RAYON_NUM_THREADS = cores / seed_count`, fully detached via
-  `setsid nohup` (safe to disconnect). Per-seed logs: `viz-<seed>.log`
-  in the remote dir; batch log: `viz_batch.log`.
+- **Remote layout:**
+  - `orchestrator/state.json`: atomic status snapshot.
+  - `orchestrator/session.log`: supervisor lifecycle.
+  - `orchestrator/jobs/<job-id>.json/.log`: provenance + full job log.
+  - `output/random-.../`: complete Rust package and `viz/manifest.json`.
 
-- **Batches in flight right now:** see "Immediate next actions" above
-  (primary: 2 seeds finishing turntables; viz-batch2: 3 seeds on Waves
-  1-5). **Turntable economics** (the standing lesson): V46 final = 720
-  full production re-renders, measured 3.7-23 min/frame at max quality.
-  Keep max quality; budget for it, or exclude `turntable` via an
-  explicit `--viz-flags` list. Waves 2-5 add ~1.5-2.5 h/seed on top of
-  the ~4-5 h core package; Waves 6-9 add the projected lines to read on
-  the first final-quality run (see Open items).
-- **Useful deep probe** (per-seed mode completion, beyond `--status`):
+### Monitoring and remediation
 
-  ```bash
-  ssh user@100.76.88.48 'cd viz-batch/CS-Image-Generation/output && \
-    for d in viz-0x*; do echo "== $d"; ls "$d/viz" | tr "\n" " "; echo; done'
-  ```
+Every 20-minute check should inspect:
+
+- supervisor and exactly four live Rust jobs (unless draining);
+- `state.json` failure streak, free disk, target/seed, elapsed/log age;
+- system load, aggregate RSS, and output growth;
+- recent `WARN`, `ERROR`, `FATAL`, panic, OOM, or failed lines.
+
+Response policy:
+
+- isolated random job failure: record it; the farm continues;
+- dead supervisor with healthy disk and no orphan children: restart;
+- clear repeatable code defect: drain, reproduce locally, add a regression
+  test, fix, run all gates, commit/push, redeploy/rebuild, and continue;
+- low disk, ambiguous hangs, SSH/auth failure, or any action requiring
+  output deletion: remain paused and report rather than destroy data.
 
 ## Local workflow cheat sheet
 
@@ -146,6 +149,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings     # pedantic is enabled
 cargo test --release                          # ~616 tests
 .venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/mypy
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 # Fast full-pipeline smoke of every mode (~8 min at 69):
 ./target/release/three_body_problem --seed 0xC0DE --sims 200 --steps 30000 \
@@ -186,6 +190,8 @@ assets/fonts/         bundled IBM Plex cuts + OFL license (include_bytes!)
 assets/viewer/        V53 viewer.html + V57 instrument.html templates
 src/render/drawing.rs shift_spectral_kernel (Doppler transport) + the
                       with-kernels rasterizer variant (V65)
+viz_farm.py           continuous random scheduler, atomic state, safeguards
+run_viz_batch.py      SSH deploy/build/lifecycle/fetch wrapper
 ```
 
 Integration points in the core pipeline: `src/main.rs` (flags, SPD-phase
