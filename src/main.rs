@@ -5,6 +5,7 @@ use rayon::ThreadPoolBuilder;
 use three_body_problem::{
     app,
     error::{self, Result},
+    nft_traits,
     render::{self, RenderConfig},
     sim::Sha3RandomByteStream,
     spectrum_simd,
@@ -100,6 +101,14 @@ struct Args {
     /// spectral gallery, and sweep video).
     #[arg(long, default_value_t = false)]
     image_only: bool,
+
+    /// Skip all rendering and media encoding; run the simulation, selection,
+    /// and trait analyses, then write only `metadata/generation.json` and
+    /// `metadata/nft_traits.json`. Takes precedence over `--image-only`.
+    /// Trait values are identical to a full render (everything is derived
+    /// from the seed before rendering begins).
+    #[arg(long, default_value_t = false)]
+    metadata_only: bool,
 
     #[arg(long, default_value = DEFAULT_LOG_LEVEL)]
     log_level: String,
@@ -381,83 +390,87 @@ fn main() -> Result<()> {
         scene_traits.stardust.count,
     );
 
-    let levels = app::build_histogram_and_levels(
-        &positions,
-        &colors,
-        &body_alphas,
-        &resolved_effect_config,
-        &render_config,
-        enhancements.aspect_correction,
-        &visual_profile.parameters,
-    )?;
-
-    let image_master_png = format!("{seed_dir}/images/source/master.png");
-    let image_full_webp = format!("{seed_dir}/images/web/full.webp");
-    let image_preview_webp = format!("{seed_dir}/images/web/preview.webp");
-    let image_outputs = app::ImageOutputPaths {
-        master_png: &image_master_png,
-        full_webp: &image_full_webp,
-        preview_webp: &image_preview_webp,
-    };
-    let main_web_video = format!("{seed_dir}/videos/web/main.mp4");
-    let main_hq_video = format!("{seed_dir}/videos/hq/main.mp4");
-    let main_video_outputs =
-        app::VideoOutputPaths { web: &main_web_video, high_quality: &main_hq_video };
-
-    let spectral_settings = render::SpectralRenderSettings::new(
-        &resolved_effect_config,
-        &render_config,
-        enhancements.aspect_correction,
-    )
-    .with_traits(scene_traits);
-
-    if args.image_only {
-        app::render_still_image(
-            render::SpectralScene::new(&positions, &colors, &body_alphas),
-            &levels,
-            spectral_settings,
-            image_outputs,
-        )?;
+    if args.metadata_only {
+        info!("METADATA-ONLY MODE: skipping histogram, rendering, and asset manifest");
     } else {
-        let accum_spd = app::render_video(
-            render::SpectralScene::new(&positions, &colors, &body_alphas),
-            &levels,
-            spectral_settings,
-            main_video_outputs,
-            image_outputs,
-            args.fast_encode,
+        let levels = app::build_histogram_and_levels(
+            &positions,
+            &colors,
+            &body_alphas,
+            &resolved_effect_config,
+            &render_config,
+            enhancements.aspect_correction,
+            &visual_profile.parameters,
         )?;
 
-        let spectral_dir = format!("{seed_dir}/spectral");
-        let spectral_sweep_web_path = format!("{seed_dir}/videos/web/spectral_sweep.mp4");
-        let spectral_sweep_hq_path = format!("{seed_dir}/videos/hq/spectral_sweep.mp4");
-        let spectral_sweep_outputs = app::VideoOutputPaths {
-            web: &spectral_sweep_web_path,
-            high_quality: &spectral_sweep_hq_path,
+        let image_master_png = format!("{seed_dir}/images/source/master.png");
+        let image_full_webp = format!("{seed_dir}/images/web/full.webp");
+        let image_preview_webp = format!("{seed_dir}/images/web/preview.webp");
+        let image_outputs = app::ImageOutputPaths {
+            master_png: &image_master_png,
+            full_webp: &image_full_webp,
+            preview_webp: &image_preview_webp,
         };
+        let main_web_video = format!("{seed_dir}/videos/web/main.mp4");
+        let main_hq_video = format!("{seed_dir}/videos/hq/main.mp4");
+        let main_video_outputs =
+            app::VideoOutputPaths { web: &main_web_video, high_quality: &main_hq_video };
 
-        app::generate_spectral_gallery(
-            &accum_spd,
+        let spectral_settings = render::SpectralRenderSettings::new(
+            &resolved_effect_config,
+            &render_config,
+            enhancements.aspect_correction,
+        )
+        .with_traits(scene_traits);
+
+        if args.image_only {
+            app::render_still_image(
+                render::SpectralScene::new(&positions, &colors, &body_alphas),
+                &levels,
+                spectral_settings,
+                image_outputs,
+            )?;
+        } else {
+            let accum_spd = app::render_video(
+                render::SpectralScene::new(&positions, &colors, &body_alphas),
+                &levels,
+                spectral_settings,
+                main_video_outputs,
+                image_outputs,
+                args.fast_encode,
+            )?;
+
+            let spectral_dir = format!("{seed_dir}/spectral");
+            let spectral_sweep_web_path = format!("{seed_dir}/videos/web/spectral_sweep.mp4");
+            let spectral_sweep_hq_path = format!("{seed_dir}/videos/hq/spectral_sweep.mp4");
+            let spectral_sweep_outputs = app::VideoOutputPaths {
+                web: &spectral_sweep_web_path,
+                high_quality: &spectral_sweep_hq_path,
+            };
+
+            app::generate_spectral_gallery(
+                &accum_spd,
+                args.resolution.width,
+                args.resolution.height,
+                &spectral_dir,
+            )?;
+
+            app::generate_spectral_sweep_video(
+                &accum_spd,
+                args.resolution.width,
+                args.resolution.height,
+                spectral_sweep_outputs,
+                args.fast_encode,
+            )?;
+        }
+
+        app::write_asset_manifest(
+            &seed_dir,
             args.resolution.width,
             args.resolution.height,
-            &spectral_dir,
-        )?;
-
-        app::generate_spectral_sweep_video(
-            &accum_spd,
-            args.resolution.width,
-            args.resolution.height,
-            spectral_sweep_outputs,
-            args.fast_encode,
+            args.image_only,
         )?;
     }
-
-    app::write_asset_manifest(
-        &seed_dir,
-        args.resolution.width,
-        args.resolution.height,
-        args.image_only,
-    )?;
 
     info!(
         "Done! Best orbit => Weighted Borda = {:.3}\nHave a nice day!",
@@ -478,6 +491,27 @@ fn main() -> Result<()> {
     ) {
         warn!("Generation logging failed (non-fatal): {e}");
     }
+
+    // The public trait file is a required package artifact: fail hard rather
+    // than upload a package without it.
+    nft_traits::compute_and_write(
+        &seed_dir,
+        &nft_traits::NftTraitsInputs {
+            seed_hex: hex_seed,
+            parameters: &visual_profile.parameters,
+            selection: &selection,
+            drift: drift_config.as_ref(),
+            drift_mode: args.drift.as_str(),
+            num_sims: args.sims,
+            num_steps: args.steps,
+            chaos_weight: borda_weights.chaos_weight,
+            equil_weight: borda_weights.equil_weight,
+            weights_randomized: borda_weights.was_randomized,
+            escape_threshold: DEFAULT_ESCAPE_THRESHOLD,
+            width: args.resolution.width,
+            height: args.resolution.height,
+        },
+    )?;
 
     Ok(())
 }

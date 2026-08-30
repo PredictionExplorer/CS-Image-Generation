@@ -97,7 +97,8 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 - `videos/web/spectral_sweep.mp4` — browser-compatible spectral sweep video
 - `videos/hq/spectral_sweep.mp4` — high-quality HEVC spectral sweep video
 - `metadata/generation.json` — per-package resolved generation parameters and randomization log
-- `metadata/assets.json` — website asset manifest with paths, dimensions, codecs, and byte sizes
+- `metadata/assets.json` — website asset manifest with paths, dimensions, codecs, byte sizes, and SHA-256 hashes
+- `metadata/nft_traits.json` — public NFT trait file: marketplace-ready attributes, physics analyses (syzygies, braid word, fate, chaos index), and the seed-resolved generation context (see [docs/augur-explorer-integration.md](docs/augur-explorer-integration.md))
 
 `generation_log.json` is also appended in the **process working directory** (typically the repo root when you run the binary from there). It records the same reproducibility metadata across runs.
 
@@ -137,6 +138,7 @@ Remote files mirror the Rust output package under `COSMICSIG_REMOTE_DIR/0x<seed>
   metadata/
     generation.json
     assets.json
+    nft_traits.json
 ```
 
 Only API-listed seeds are considered. If any required file in an API seed's remote package is missing, `run.py` treats that seed as incomplete and regenerates/uploads the full package.

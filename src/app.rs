@@ -210,10 +210,32 @@ struct AssetEntry {
     file_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 fn file_size(seed_dir: &str, relative_path: &str) -> Option<u64> {
     fs::metadata(format!("{seed_dir}/{relative_path}")).ok().map(|meta| meta.len())
+}
+
+/// Streaming SHA-256 of an output file, hex-encoded (lowercase). Returns
+/// `None` when the file does not exist (e.g. video entries in image-only
+/// runs), mirroring `file_size`.
+fn file_sha256(seed_dir: &str, relative_path: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    use std::io::Read as _;
+
+    let mut file = File::open(format!("{seed_dir}/{relative_path}")).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Some(hex::encode(hasher.finalize()))
 }
 
 fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
@@ -285,6 +307,7 @@ pub fn write_asset_manifest(
             pixel_format: Some("rgb48".to_string()),
             file_count: None,
             bytes: file_size(seed_dir, "images/source/master.png"),
+            sha256: file_sha256(seed_dir, "images/source/master.png"),
         },
         AssetEntry {
             path: "images/web/full.webp".to_string(),
@@ -299,6 +322,7 @@ pub fn write_asset_manifest(
             pixel_format: None,
             file_count: None,
             bytes: file_size(seed_dir, "images/web/full.webp"),
+            sha256: file_sha256(seed_dir, "images/web/full.webp"),
         },
         AssetEntry {
             path: "images/web/preview.webp".to_string(),
@@ -313,6 +337,7 @@ pub fn write_asset_manifest(
             pixel_format: None,
             file_count: None,
             bytes: file_size(seed_dir, "images/web/preview.webp"),
+            sha256: file_sha256(seed_dir, "images/web/preview.webp"),
         },
     ];
 
@@ -335,6 +360,7 @@ pub fn write_asset_manifest(
                 pixel_format: Some("yuv420p".to_string()),
                 file_count: None,
                 bytes: file_size(seed_dir, "videos/web/main.mp4"),
+                sha256: file_sha256(seed_dir, "videos/web/main.mp4"),
             },
             AssetEntry {
                 path: "videos/hq/main.mp4".to_string(),
@@ -349,6 +375,7 @@ pub fn write_asset_manifest(
                 pixel_format: Some("yuv422p10le".to_string()),
                 file_count: None,
                 bytes: file_size(seed_dir, "videos/hq/main.mp4"),
+                sha256: file_sha256(seed_dir, "videos/hq/main.mp4"),
             },
             AssetEntry {
                 path: "videos/web/spectral_sweep.mp4".to_string(),
@@ -363,6 +390,7 @@ pub fn write_asset_manifest(
                 pixel_format: Some("yuv420p".to_string()),
                 file_count: None,
                 bytes: file_size(seed_dir, "videos/web/spectral_sweep.mp4"),
+                sha256: file_sha256(seed_dir, "videos/web/spectral_sweep.mp4"),
             },
             AssetEntry {
                 path: "videos/hq/spectral_sweep.mp4".to_string(),
@@ -377,6 +405,7 @@ pub fn write_asset_manifest(
                 pixel_format: Some("yuv422p10le".to_string()),
                 file_count: None,
                 bytes: file_size(seed_dir, "videos/hq/spectral_sweep.mp4"),
+                sha256: file_sha256(seed_dir, "videos/hq/spectral_sweep.mp4"),
             },
             AssetEntry {
                 path: "spectral/".to_string(),
@@ -391,12 +420,13 @@ pub fn write_asset_manifest(
                 pixel_format: Some("rgb48".to_string()),
                 file_count: Some(crate::spectrum::NUM_BINS),
                 bytes: None,
+                sha256: None,
             },
         ]);
     }
 
     let manifest =
-        AssetManifest { schema_version: 1, generated_at: Local::now().to_rfc3339(), assets };
+        AssetManifest { schema_version: 2, generated_at: Local::now().to_rfc3339(), assets };
     let path = format!("{seed_dir}/metadata/assets.json");
     let file = File::create(&path)?;
     serde_json::to_writer_pretty(BufWriter::new(file), &manifest).map_err(std::io::Error::other)?;

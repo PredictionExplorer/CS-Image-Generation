@@ -11,6 +11,7 @@
 //! - [`drift_config`] -- drift parameter resolution and validation.
 //! - [`error`] -- error types and the crate-wide [`Result`] alias.
 //! - [`generation_log`] -- persistent JSON generation log.
+//! - [`nft_traits`] -- public NFT trait metadata (`metadata/nft_traits.json`).
 //! - [`post_effects`] -- active bloom, prism, and spectral-sweep post effects.
 //! - [`render`] -- rendering pipeline (histogram, tonemapping, effects, video).
 //! - [`sim`] -- N-body gravitational simulation with RNG.
@@ -35,6 +36,8 @@ pub mod drift_config;
 pub mod error;
 /// Persistent JSON generation log for tracking produced seeds.
 pub mod generation_log;
+/// Public NFT trait metadata emitted as `metadata/nft_traits.json`.
+pub mod nft_traits;
 pub(crate) mod oklab;
 /// Active post-processing effects and composable effect-chain traits.
 pub mod post_effects;
@@ -48,6 +51,7 @@ pub mod spectral_constants;
 pub mod spectrum;
 /// SIMD-accelerated spectral conversion with AVX2, NEON, and scalar fallback.
 pub mod spectrum_simd;
+pub(crate) mod traits_analysis;
 pub(crate) mod utils;
 
 /// Re-exported common types for convenience.

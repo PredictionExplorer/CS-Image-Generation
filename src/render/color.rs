@@ -121,6 +121,72 @@ pub fn current_palette_metadata() -> (String, String) {
     )
 }
 
+/// Human-facing summary of the most recent resolved palette, consumed by the
+/// NFT trait metadata pipeline.
+#[derive(Clone, Debug)]
+pub struct PaletteDetails {
+    /// Continuous genome fingerprint (same string as the generation log).
+    pub fingerprint: String,
+    /// Beauty-gate descriptor (`gateN` / `gateN_repaired`).
+    pub gate: String,
+    /// Bucketed human-readable family name, e.g. `"Ember Triad"`.
+    pub family: String,
+    /// Genome hue anchor in degrees.
+    pub anchor_deg: f64,
+    /// Genome hue dispersion (total span) in degrees.
+    pub dispersion_deg: f64,
+    /// Per-body base hues in `OKLCh` degrees.
+    pub body_base_hues_deg: [f64; 3],
+    /// Index of the most chromatic (dominant) body.
+    pub dominant_body: usize,
+}
+
+static LAST_PALETTE_DETAILS: LazyLock<Mutex<Option<PaletteDetails>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Return the detailed summary of the most recent palette generation, or
+/// `None` when no palette has been resolved in this process yet.
+#[must_use]
+pub fn current_palette_details() -> Option<PaletteDetails> {
+    LAST_PALETTE_DETAILS.lock().map_or(None, |details| details.clone())
+}
+
+/// Hue-sector names for the palette family, tuned to `OKLCh` hue landmarks.
+const HUE_FAMILY_NAMES: [(f64, &str); 12] = [
+    (20.0, "Rose"),
+    (45.0, "Ember"),
+    (75.0, "Amber"),
+    (105.0, "Solar"),
+    (140.0, "Aurora"),
+    (170.0, "Jade"),
+    (200.0, "Glacial"),
+    (235.0, "Cerulean"),
+    (270.0, "Sapphire"),
+    (300.0, "Violet"),
+    (330.0, "Nebular"),
+    (360.0, "Orchid"),
+];
+
+/// Bucketed human name for a continuous palette genome: a hue-sector word
+/// from the anchor plus a dispersion qualifier. The thresholds are frozen;
+/// changing them would change published trait values.
+#[must_use]
+pub fn palette_family(anchor_deg: f64, dispersion_deg: f64) -> String {
+    let hue = anchor_deg.rem_euclid(HUE_FULL_CIRCLE);
+    let hue_name =
+        HUE_FAMILY_NAMES.iter().find(|(upper, _)| hue < *upper).map_or("Orchid", |(_, name)| name);
+    let spread = if dispersion_deg < 30.0 {
+        "Mono"
+    } else if dispersion_deg < 90.0 {
+        "Analogous"
+    } else if dispersion_deg < 200.0 {
+        "Split"
+    } else {
+        "Triad"
+    };
+    format!("{hue_name} {spread}")
+}
+
 #[inline]
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
@@ -565,6 +631,22 @@ pub fn generate_body_color_sequences(
     let gate = gate_descriptor(&palette.genome);
     if let Ok(mut metadata) = LAST_PALETTE_METADATA.lock() {
         *metadata = (fingerprint.clone(), gate.clone());
+    }
+    if let Ok(mut details) = LAST_PALETTE_DETAILS.lock() {
+        let dominant_body = palette.bodies.iter().position(|plan| plan.is_dominant).unwrap_or(0);
+        *details = Some(PaletteDetails {
+            fingerprint: fingerprint.clone(),
+            gate: gate.clone(),
+            family: palette_family(palette.genome.anchor, palette.genome.dispersion),
+            anchor_deg: palette.genome.anchor,
+            dispersion_deg: palette.genome.dispersion,
+            body_base_hues_deg: [
+                palette.bodies[0].base_hue,
+                palette.bodies[1].base_hue,
+                palette.bodies[2].base_hue,
+            ],
+            dominant_body,
+        });
     }
     info!("   => Palette genome {fingerprint} ({gate}) phase={:.3}", palette.palette_phase);
 

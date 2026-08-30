@@ -52,7 +52,7 @@ pub struct VideoEncodingOptions {
 pub struct VideoOutputSpec {
     /// Path to the MP4 file to create.
     pub output_file: String,
-    /// FFmpeg options used for this output.
+    /// `FFmpeg` options used for this output.
     pub options: VideoEncodingOptions,
 }
 
@@ -64,7 +64,7 @@ impl Default for VideoEncodingOptions {
 }
 
 impl VideoEncodingOptions {
-    /// Website-compatible H.264 MP4 for QuickTime and broad browser playback.
+    /// Website-compatible H.264 MP4 for `QuickTime` and broad browser playback.
     #[must_use]
     pub fn web_compatible() -> Self {
         Self {

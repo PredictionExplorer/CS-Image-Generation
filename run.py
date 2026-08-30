@@ -80,6 +80,7 @@ REQUIRED_PACKAGE_FILES = (
     "videos/hq/spectral_sweep.mp4",
     "metadata/generation.json",
     "metadata/assets.json",
+    "metadata/nft_traits.json",
 )
 
 # Environment variable names for required config
