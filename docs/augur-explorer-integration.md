@@ -9,6 +9,11 @@ generator owns everything in it that is derivable from the seed; the Go
 metadata server owns everything that comes from chain events; the HTTP handler
 only merges.
 
+> **Implementing this now?** Most of the Go side is already built. See
+> [`augur-explorer-required-changes.md`](augur-explorer-required-changes.md)
+> for the audited, concrete work list — it is a short URL-contract fix, not a
+> from-scratch implementation.
+
 > **The one rule:** if a fact can be recomputed from the seed, it is computed
 > in Rust and shipped in `nft_traits.json` — the Go side copies it verbatim.
 > If a fact comes from an event log (round, mint time, prize track, token
@@ -41,27 +46,48 @@ is a pure function of the seed. Re-running the generator for the same seed
 reproduces identical values, so anyone can verify served traits against the
 CC0 pipeline.
 
-### 1.1 Expose the metadata files over HTTP
+### 1.1 Serving the metadata files over HTTP
 
-The images are already served publicly (e.g.
-`https://nfts.cosmicsignature.com/images/new/cosmicsignature/0x<seed>.png`).
-Expose the two JSON files the same way with an nginx alias on the asset host:
+**No asset-host configuration is required — the files are already public.**
+`nfts.cosmicsignature.com` reverse-proxies to a static file service that
+exposes the whole package tree, so every file the generator uploads becomes
+fetchable the moment the upload completes.
 
-```nginx
-# Trait contract files, one per seed.
-location ~ ^/traits/(0x[0-9a-f]+)\.json$ {
-    alias /home/frontend/nft-assets/new/cosmicsignature/$1/metadata/nft_traits.json;
-    types { } default_type application/json;
-    add_header Cache-Control "public, max-age=300";
-    etag on;
-}
-location ~ ^/asset-manifests/(0x[0-9a-f]+)\.json$ {
-    alias /home/frontend/nft-assets/new/cosmicsignature/$1/metadata/assets.json;
-    types { } default_type application/json;
-    add_header Cache-Control "public, max-age=300";
-    etag on;
-}
+Throughout this document:
+
+```text
+ASSETS_BASE = https://nfts.cosmicsignature.com/images/new/cosmicsignature
 ```
+
+| File | URL |
+|---|---|
+| Trait contract | `{ASSETS_BASE}/0x<seed>/metadata/nft_traits.json` |
+| Asset manifest | `{ASSETS_BASE}/0x<seed>/metadata/assets.json` |
+
+Verified live response headers for a backfilled seed:
+
+```text
+HTTP/2 200
+content-type: application/json
+access-control-allow-origin: *
+cache-control: public, max-age=3600, must-revalidate
+last-modified: Sun, 30 Aug 2026 13:56:18 GMT
+```
+
+Two consequences the Go side must account for:
+
+- **No `ETag` is served.** For conditional requests (Section 4) use
+  `If-Modified-Since` against the stored `Last-Modified`. An `If-None-Match`
+  implementation is not *wrong* — it simply never yields a `304`, so every
+  recheck re-downloads a few kilobytes. Efficiency, not correctness.
+- `Cache-Control` is `max-age=3600`, not the 300 an earlier draft assumed. A
+  package is only rewritten when the generator regenerates that seed, so a
+  one-hour window is harmless.
+
+An earlier revision of this document proposed nginx `alias` rules publishing
+shorter `/traits/0x<seed>.json` and `/asset-manifests/0x<seed>.json` URLs.
+Those were **not** implemented and those paths return `404`: they need root on
+the asset host and add nothing functionally. The table above is canonical.
 
 Publishing these URLs is deliberate: collectors and third parties can fetch
 the raw trait contract and verify it against the pipeline.
@@ -134,7 +160,7 @@ CREATE TABLE cs_token_traits (
     simulation       JSONB       NOT NULL,      -- verbatim block
     generation       JSONB       NOT NULL,      -- verbatim block
     assets           JSONB,                     -- assets.json v2 (dimensions/bytes/sha256)
-    source_etag      TEXT,
+    source_last_modified TEXT,                  -- Last-Modified header; the asset host serves no ETag
     fetched_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
@@ -153,15 +179,17 @@ cache):
 1. Select token seeds present in the token table but missing from
    `cs_token_traits` (or with a stale `pipeline_version` after a announced
    regeneration).
-2. For each seed, `GET {ASSETS_BASE}/traits/0x<seed>.json` with
-   `If-None-Match: <source_etag>`.
-   - `404` → package not rendered yet (new mints lag the generator by
-     minutes to hours). Not an error; retry on the next tick.
+2. For each seed, `GET {ASSETS_BASE}/0x<seed>/metadata/nft_traits.json` with
+   `If-Modified-Since: <source_last_modified>` (the asset host sends no
+   `ETag`; see Section 1.1).
+   - `404` → package not rendered yet. Expected in two cases: new mints lag
+     the generator by minutes to hours, and any token the backfill has not
+     reached yet. Not an error; retry on the next tick.
    - `304` → up to date; skip.
    - `200` → parse, then **gate**: `semver_major(schema_version) == 1` and
      `seed` matches. On mismatch: log at error level, increment a metric,
      do not upsert.
-3. Fetch `{ASSETS_BASE}/asset-manifests/0x<seed>.json` the same way (optional
+3. Fetch `{ASSETS_BASE}/0x<seed>/metadata/assets.json` the same way (optional
    but recommended; required for `image_details`).
 4. Upsert the row in one transaction.
 
@@ -169,8 +197,8 @@ Sketch:
 
 ```go
 func (ing *TraitsIngester) ingestSeed(ctx context.Context, seed string) error {
-    url := ing.assetsBase + "/traits/" + seed + ".json"
-    body, etag, status, err := ing.fetch(ctx, url, ing.knownEtag(seed))
+    url := ing.assetsBase + "/" + seed + "/metadata/nft_traits.json"
+    body, lastModified, status, err := ing.fetch(ctx, url, ing.knownLastModified(seed))
     if err != nil || status == http.StatusNotFound || status == http.StatusNotModified {
         return err // 404/304 are not failures; the caller just moves on
     }
@@ -185,7 +213,7 @@ func (ing *TraitsIngester) ingestSeed(ctx context.Context, seed string) error {
     if !strings.EqualFold(tf.Seed, seed) {
         return fmt.Errorf("traits %s: seed mismatch %s", seed, tf.Seed)
     }
-    return ing.store.UpsertTokenTraits(ctx, seed, tf, etag)
+    return ing.store.UpsertTokenTraits(ctx, seed, tf, lastModified)
 }
 ```
 
@@ -248,19 +276,21 @@ Merge order and rules:
      "simulation": { … },           // verbatim from the trait file
      "generation": { … },           // verbatim from the trait file
      "media": {                     // every hosted asset, discoverable at last
-       "hq_video":        "{base}/…/videos/hq/main.mp4",
-       "spectral_sweep":  "{base}/…/videos/web/spectral_sweep.mp4",
-       "spectral_sweep_hq":"{base}/…/videos/hq/spectral_sweep.mp4",
-       "spectral_bins":   "{base}/…/spectral/",   // 64 x 16-bit PNG
-       "asset_manifest":  "{base}/asset-manifests/0x<seed>.json",
-       "trait_source":    "{base}/traits/0x<seed>.json"
+       "hq_video":        "{ASSETS_BASE}/0x<seed>/videos/hq/main.mp4",
+       "spectral_sweep":  "{ASSETS_BASE}/0x<seed>/videos/web/spectral_sweep.mp4",
+       "spectral_sweep_hq":"{ASSETS_BASE}/0x<seed>/videos/hq/spectral_sweep.mp4",
+       "spectral_bins":   "{ASSETS_BASE}/0x<seed>/spectral/",   // 64 x 16-bit PNG
+       "asset_manifest":  "{ASSETS_BASE}/0x<seed>/metadata/assets.json",
+       "trait_source":    "{ASSETS_BASE}/0x<seed>/metadata/nft_traits.json"
      }
    }
    ```
 
-   (Adjust the media URLs to however nginx exposes the package tree; the
-   point is that the HQ video, sweep videos, and spectral bins stop being
-   invisible.)
+   These are literal, verified paths (Section 1.1) — the whole package tree is
+   served, so the HQ video, sweep videos, and spectral bins stop being
+   invisible. Note `spectral_bins` is a directory prefix, not a file: the
+   static server does not emit an index, so clients construct bin filenames
+   as `<NN>_<wavelength>nm.png` (64 bins, e.g. `00_382nm.png`).
 7. **`metadata_version`** — add a top-level field, start at `"2.0.0"`, bump
    on layout changes of the *served* JSON (independent of the trait-file
    schema version).
@@ -320,16 +350,23 @@ depends on it.
 
 ## 9. Rollout order (zero downtime)
 
-1. **Go**: ship the migration, the ingester, and the handler changes. With no
-   trait files on the asset host yet, every token serves the fallback path —
-   behavior is today's, minus `owner`.
-2. **Rust** (this repo, already done): generator emits `nft_traits.json` +
-   hashed `assets.json`; `run.py` requires the new file.
-3. **Backfill**: the `cosmicsig-sync` timer sees every existing package as
-   incomplete and regenerates + re-uploads all of them. Art is
-   pixel-identical (deterministic pipeline; CI reference hashes prove it).
-   Video *bytes* may differ (ffmpeg container metadata) — the manifest hashes
-   describe the uploaded files, so consistency holds.
+1. **Go**: ship the migration, the ingester, and the handler changes. Tokens
+   whose trait file has not landed yet serve the fallback path — behavior is
+   today's, minus `owner`.
+2. **Rust** (this repo, **done and deployed**): the generator emits
+   `nft_traits.json` + hashed `assets.json`, and `run.py` requires the new
+   file. Deployed to the generation host on 2026-08-30 (commit `9f293a6`).
+3. **Backfill** (**in progress**): the `cosmicsig-sync` timer sees every
+   existing package as incomplete and regenerates + re-uploads all 48. Until
+   it finishes, un-backfilled seeds return `404` on their trait URL — that is
+   expected, not an incident, and the fallback path covers it.
+
+   Art is pixel-identical, and this was verified empirically rather than
+   assumed: re-rendering an existing seed with the new binary reproduced
+   byte-identical `master.png`, `full.webp`, `preview.webp`, and **both**
+   `main.mp4` files versus the copies already on the asset host. The video
+   bytes matched too, so the earlier caveat about ffmpeg container metadata
+   did not materialise on this toolchain.
 4. **Ingest**: the cron ingests each package as it lands; tokens flip from
    fallback to enriched automatically.
 5. **Marketplace refresh**: emit ERC-4906 `BatchMetadataUpdate(0, maxId)` if
