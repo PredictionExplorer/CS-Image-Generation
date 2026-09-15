@@ -1,0 +1,23 @@
+{
+  "subdivisions": 32,
+  "attachment_mode": "centroid",
+  "frames": 144,
+  "fps": 24,
+  "substeps": 8,
+  "iterations": 32,
+  "slack": 1.15,
+  "world_size": 3.5,
+  "stretch_compliance": 1e-8,
+  "shear_compliance": 2e-8,
+  "bend_compliance": 1.0,
+  "damping": 0.24,
+  "air_drag": 0.4,
+  "gravity": 0.12,
+  "thickness": 0.008,
+  "self_collision": true,
+  "settle_seconds": 1.5,
+  "preroll_seconds": 1.0,
+  "orbit_start": 0.15,
+  "initial_drape": 0.06,
+  "orbit_end": 0.30
+}

@@ -43,6 +43,8 @@ pub(crate) mod oklab;
 pub mod post_effects;
 /// Rendering pipeline: histogram passes, tonemapping, effects, and video output.
 pub mod render;
+/// CPU cloth simulation and physically lit Tidal Silk artwork.
+pub mod silk;
 /// N-body gravitational simulation with deterministic RNG.
 pub mod sim;
 /// Wavelength-to-bin and bin-to-wavelength conversion constants.

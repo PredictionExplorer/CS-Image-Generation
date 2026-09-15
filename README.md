@@ -18,6 +18,15 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
   traits: seed-gated halation, prism, diffraction spikes, and stardust
 - Writes outputs to `output/<name>/`
 
+## Tidal Silk
+
+The optional **`tidal_silk`** executable turns the original three-dimensional
+orbit into a continuous, moving fabric. Its cloth solver and fabric ray tracer
+run entirely on CPUs, with independent orbit, cloth, and rendering caches.
+It produces 16-bit stills and H.264/HEVC films using the existing FFmpeg dependency.
+See [the Tidal Silk guide](docs/tidal-silk.md) for staged generation, recipes,
+resume behavior, and reproducibility checks.
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
