@@ -582,3 +582,46 @@ This supports the tested crop; full-film motion review remains outstanding.
   whether to schedule separate follow-up checks or resume manually. No answer
   and no new automation had been created at this checkpoint. Do not invent
   approval or mark the goal complete while films remain unfinished.
+
+### Aurora delivered; unattended production handoff
+
+- Aurora is complete locally in `03-aurora`. Both films independently decode
+  all1802frames at3840×2160/60,30.033333seconds. HEVC Main10 master SHA256:
+  `30c8c04a6af7ac4506b1ba09d82dea158e879117c0a1e79c0159054c6ca4697f`.
+  Recipe, executable/orbit hashes, poster900, source endpoints and assembly
+  coverage match the frozen v11 production. The gallery now contains3/6 films.
+- Root verified Aurora full playback to30.033333 with no media error, full-screen
+  mode, seeking, and quarter-speed playback through the encounter/end. Inspected
+  decoded compositions near0.5,7.37,15.0,22.7,27.84 and30.03seconds show the
+  intended open, layered curtains without observed clipping or obvious pops.
+  Fine interference at reduced display sizes is not a blanket no-shimmer claim.
+  Gallery IAB tab1 is marked deliverable with Aurora selected, normal speed,
+  paused at the beginning. Private Engraving QA tab2 is temporary.
+- Both selected Opal crop comparisons are complete. Bright-rim crop at900,
+  (1880,740),256×256, versus256samples and doubled spatial resolution:
+  maxRGB4.72414e-7, RMS2.33461e-8, active-pixel RMS7.28232e-8. Native/reference
+  were visually inspected at1:1. Faint-strand crop remains separately labelled.
+  Reports: `06-eclipse/qa-opal-rim/comparison.json` and
+  `06-eclipse/qa-opal-shoulder/comparison.json`; helper7tests/lint/build passed.
+- A finite CPU rebalancer now runs on the server as PID183527. Files:
+  `tools/atelier/rebalance_collection.py` and its13semantic tests. It validates
+  immutable inputs and process identities, uses pidfds and a private restart
+  journal, preserves all frames, and never interrupts finishing/encoding jobs.
+  After Aurora, allocations are Light32/Engraving32/Eclipse64. After Engraving,
+  Light64/Eclipse64; a sole survivor receives128. It exits when rendering ends,
+  with a persisted720-hour limit. This is render orchestration, not a model
+  scheduler or a new recurring user task.
+- Initial intended Engraving48→32 restart succeeded; current driver PID182826
+  replaces164853. Light remains126535; Eclipse remains172585. The first idle
+  rebalancer182808 was stopped before a newly found crash-recovery corner was
+  patched. The deployed corrected version passed13tests and a fresh live dry-run
+  with no further restarts. Its SHA256 is
+  `1fe54aeeacb428140e54d6f5bf82674aa093887bd307e65b7185374172b791fe`.
+  Record `rebalance-job.json`, log `logs/rebalance-collection.log`, owner-only
+  journal `.rebalance-collection/`. Do not log journal environments or change
+  pinned render helper files/binaries while this controller is active.
+- Local collector PID46446 and gallery server21254 remain active. All remaining
+  complete packages will be verified, copied and added automatically. No new
+  app automation has been created; optional scheduled model-review follow-ups
+  still await the user's earlier choice. The main goal is NOT complete while
+  Light, Engraving and Eclipse full films are still rendering.
