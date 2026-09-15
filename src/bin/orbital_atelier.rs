@@ -72,6 +72,9 @@ enum Action {
         aa: Option<u32>,
         #[arg(long)]
         overwrite: bool,
+        /// Save a separately labelled progressive preview while expensive exposures finish.
+        #[arg(long)]
+        progress: bool,
     },
     /// Encode a completed, verified frame sequence with the existing `FFmpeg`.
     Encode {
@@ -193,6 +196,35 @@ fn sidecar(path: &Path) -> PathBuf {
 
 fn frame_path(directory: &Path, frame: usize) -> PathBuf {
     directory.join(format!("frame_{frame:06}.png"))
+}
+
+fn write_progress_preview(
+    directory: &Path,
+    frame: usize,
+    completed: usize,
+    config: &StudyConfig,
+    hash: &str,
+    accumulated: &[V3],
+) -> SilkResult<()> {
+    let path = directory.join(format!(".progress-{frame:06}.png"));
+    let temporary = path.with_extension("png.partial");
+    let scale = config.temporal_samples as f64 / completed as f64;
+    let linear = accumulated.par_iter().map(|pixel| *pixel * scale).collect();
+    render::finish_linear(linear, &config.render)?
+        .save_with_format(&temporary, image::ImageFormat::Png)?;
+    fs::rename(temporary, &path)?;
+    json(
+        &sidecar(&path),
+        &serde_json::json!({
+            "development_preview":true,"final_frame":false,"frame":frame,
+            "completed_exposure_samples":completed,"total_exposure_samples":config.temporal_samples,
+            "nominal_source_fraction":frame as f64/(config.frames-1) as f64,
+            "latest_source_fraction":expected_sample_time(config,frame,completed-1),
+            "recipe_sha256":hash,"png_sha256":cache::file_hash(&path)?,
+            "note":"Progressive exposure preview. Canonical frame and receipt are published separately after all samples finish."
+        }),
+    )?;
+    Ok(())
 }
 
 fn recipe_hash(manifest: &Manifest) -> SilkResult<String> {
@@ -477,6 +509,7 @@ fn main() -> SilkResult<()> {
             height,
             aa,
             overwrite,
+            progress,
         } => {
             let mut config: StudyConfig = if let Some(path) = config {
                 serde_json::from_slice(&fs::read(path)?)?
@@ -652,6 +685,13 @@ fn main() -> SilkResult<()> {
                             .par_iter_mut()
                             .zip(linear.par_iter())
                             .for_each(|(a, b)| *a += *b * weight);
+                    }
+                    if progress
+                        && (sample == 0
+                            || (sample + 1).is_multiple_of(16)
+                            || sample + 1 == c.temporal_samples)
+                    {
+                        write_progress_preview(&output, frame, sample + 1, c, &hash, &accumulated)?;
                     }
                     if matches!(c.kind.as_str(), "light" | "engraving" | "eclipse") {
                         eprintln!(
