@@ -4,6 +4,7 @@
 //! filtering, including when narrower than a pixel. Every coverage sample has a
 //! depth-sorted optical stack; farther surfaces remain visible through nearer
 //! ones. Analytic studio lighting avoids stochastic light-sampling noise.
+mod profile;
 mod shading;
 
 use image::{ImageBuffer, Rgb};
@@ -259,6 +260,9 @@ fn validate(scene: &Scene, camera: &Camera, config: &RenderConfig) -> SilkResult
         {
             return Err("invalid thin-surface material".into());
         }
+        if let Some(profile) = &material.emission_profile {
+            self::profile::validate_profile(profile)?;
+        }
     }
     if scene.vertices.iter().any(|v| {
         !v.position.is_finite()
@@ -420,7 +424,6 @@ fn raster_triangle(
     index: usize,
     triangle: &SurfaceTriangle,
     geometry: &Projected,
-    scene: &Scene,
     studio: &Studio,
     offsets: &[[f64; 2]],
     buffer: &mut TileBuffer,
@@ -460,8 +463,8 @@ fn raster_triangle(
                     v[0].uv[0] * w[0] + v[1].uv[0] * w[1] + v[2].uv[0] * w[2],
                     v[0].uv[1] * w[0] + v[1].uv[1] * w[1] + v[2].uv[1] * w[2],
                 ];
-                let optical = studio.shade(
-                    &scene.materials[triangle.material],
+                let optical = studio.shade_index(
+                    triangle.material,
                     v[0].world * w[0] + v[1].world * w[1] + v[2].world * w[2],
                     normal,
                     tangent,
@@ -501,7 +504,6 @@ fn erf(value: f64) -> f64 {
 fn raster_fiber(
     index: usize,
     fiber: &FiberSegment,
-    scene: &Scene,
     studio: &Studio,
     camera: &CameraFrame,
     offsets: &[[f64; 2]],
@@ -561,8 +563,8 @@ fn raster_fiber(
                 let side = tangent.cross(view).normalized();
                 let normal = (face * (1.0 - q * q).sqrt() + side * q).normalized();
                 let arc = fiber.arc_start + fiber.arc_length * t;
-                let optical = studio.shade(
-                    &scene.materials[fiber.material],
+                let optical = studio.shade_index(
+                    fiber.material,
                     fiber.world_first * (1.0 - t) + fiber.world_last * t,
                     normal,
                     tangent,
@@ -656,7 +658,7 @@ pub fn render_linear(scene: &Scene, camera: &Camera, config: &RenderConfig) -> S
         height: f64::from(config.height),
     };
     let geometry = project(scene, &frame, config)?;
-    let studio = Studio::new(&frame, config);
+    let studio = Studio::new(&frame, config).with_materials(&scene.materials)?;
     let aa = config.aa as usize;
     let offsets: Vec<_> = (0..aa)
         .flat_map(|y| {
@@ -690,7 +692,6 @@ pub fn render_linear(scene: &Scene, camera: &Camera, config: &RenderConfig) -> S
                         index,
                         &geometry.triangles[index],
                         &geometry,
-                        scene,
                         &studio,
                         &offsets,
                         &mut buffer,
@@ -699,7 +700,6 @@ pub fn render_linear(scene: &Scene, camera: &Camera, config: &RenderConfig) -> S
                     raster_fiber(
                         index,
                         &geometry.fibers[index - geometry.triangles.len()],
-                        scene,
                         &studio,
                         &frame,
                         &offsets,
@@ -1017,6 +1017,56 @@ mod tests {
                 .install(|| render(&scene, &camera(), &c).unwrap())
         };
         assert_eq!(run(1), run(4));
+    }
+
+    #[test]
+    fn multihue_emission_renders_continuously_and_matches_across_workers() {
+        use crate::atelier::{EmissionProfile, EmissionStop, UvFeather};
+        let mut scene = Scene {
+            materials: vec![Material {
+                optical_depth: V3::new(0.1, 0.1, 0.1),
+                emission_profile: Some(EmissionProfile {
+                    origin: V3::new(0.0, -1.0, 0.0),
+                    extent: 2.0,
+                    stops: vec![
+                        EmissionStop {
+                            position: 0.0,
+                            emission: V3::new(0.0, 0.8, 0.15),
+                            density: 1.0,
+                        },
+                        EmissionStop {
+                            position: 1.0,
+                            emission: V3::new(0.4, 0.0, 0.8),
+                            density: 1.0,
+                        },
+                    ],
+                    uv_feather: Some(UvFeather { u: [0.15, 0.15], v: [0.1, 0.1] }),
+                    ..EmissionProfile::default()
+                }),
+                ..Material::default()
+            }],
+            ..Scene::default()
+        };
+        quad(&mut scene, 0.0, 0, 1.0);
+        let settings = RenderConfig { width: 48, height: 48, aa: 3, ..config() };
+        let run = |threads| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| render(&scene, &camera(), &settings).unwrap())
+        };
+        assert_eq!(run(1), run(4));
+        let linear = render_linear(&scene, &camera(), &settings).unwrap();
+        let top = linear[10 * 48 + 24];
+        let bottom = linear[38 * 48 + 24];
+        assert!(top.z > top.y);
+        assert!(bottom.y > bottom.z);
+        let dark_edge = linear[24 * 48];
+        assert!(dark_edge.length() < linear[24 * 48 + 24].length() * 0.05);
+        for y in 9..38 {
+            assert!((linear[y * 48 + 24] - linear[(y + 1) * 48 + 24]).length() < 0.05);
+        }
     }
     #[test]
     fn invalid_camera_or_material_is_rejected() {

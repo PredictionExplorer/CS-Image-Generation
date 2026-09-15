@@ -56,7 +56,7 @@ Local delivery: `CS-Image-Generation/output/six-art-studies-b7`.
 |---|---|
 | Tidal Calligraphy | Complete: both 4K/60 films verified and copied to the local collection |
 | Gravity Loom | Selected v08 spindle; full 4K/60 film rendering, motion review pending |
-| Aurora Veils | Design prepared; next implementation |
+| Aurora Veils | Refined full-detail v11; final texture proofs rendering before full film |
 | Light Cast by Gravity | Pending |
 | Orbital Engraving | Pending |
 | Eclipse Garden | Pending |
@@ -241,7 +241,84 @@ fixture guards compatibility with Calligraphy artifacts.
   `02-loom/final-job.json`; progress log `logs/loom-final-v08.log`. The driver
   will finish both movies and verify every encoded frame. Source RGB16 images
   remain archived. Original v08 midpoint is the selected poster frame.
+- After observing concurrent throughput, preserved ranges resumed with four
+  active ranges of 28 workers; the 16 range boundaries and image settings are
+  unchanged. Driver PID 98271 replaced 97267. Quarter-interval ranges run first
+  so motion can be reviewed in several parts of the orbit before the full film
+  finishes. Already verified frames are reused.
 - Implementation proceeds to Aurora after Loom's selected design is frozen;
   Loom rendering and subsequent motion review continue independently through
   its immutable executable. The collection is not finished until every film
   has completed rendering, visual review, encoding and full verification.
+
+### Aurora first implementation (v09)
+
+- `src/atelier/aurora.rs` builds three open luminous sheets, each with
+  1024×192 surface intervals and 3072 fine vertical rays of 160 intervals.
+  Fixed principal source axes drive large lateral and lower-edge movement;
+  positive heights, monotone chronology and separated depth lanes prevent
+  crumpled or intersecting sheets. Camera remains fixed.
+- A continuous optional emission profile supplies jade/cyan/violet height
+  colors and smooth material density. Both glow and absorption disappear at
+  feathered boundaries; ray ends taper geometrically. Curve coefficients are
+  prepared once per material, with bounded smooth interpolation.
+- Fine ray radius/length patterns are stable in material indices. The first
+  source-arc fine pattern would have reached about 153 Hz near the fastest
+  visible passage and was removed before rendering. Broad source-driven folds
+  and light gatherings remain below about 1.35 Hz in the visible recording.
+- The combined v09 binary passes 49 atelier tests, eight CLI tests and native
+  all-target Clippy. Both archived Calligraphy and Loom recipe hashes remain
+  unchanged. A nonblank Calligraphy fixture also has exactly identical RGB16
+  pixels and PNG bytes between immutable v08 and v09. Regression evidence:
+  `logs/qa-profile-none-v08-v09.json` on the server.
+- Four first full-detail 4K proofs at frame 900: `03-aurora/v09-jade`,
+  `v09-luminous`, `v09-mist`, and `v09-moon`, with matching recipes in `configs/`.
+  Immutable renderer: `bin/atelier-v09`. No Aurora full film has started.
+- Inspect the actual proofs next. Watch for overly flat filled shapes, uniform
+  neon brightness, hard boundaries, or subtle ray/sheet depth-order flicker;
+  a small forward ray offset is a possible refinement only if needed.
+
+### Aurora refinement and current selection
+
+- First v09 images were rejected as too much like a graphic equalizer: ruler-
+  straight rays, broad bright green plateaus, and sharp lower hems. v10 adds a
+  globally invertible world-height shear, curving the rays while retaining
+  regular surfaces and separated layers. Chronology is monotone in the
+  unsheared coordinate. The selected lean amplitude is 1.1 world units.
+- Preferred v10 recipe: `configs/aurora-v10-dense.json`. It has 6144 fine rays
+  per body (18432 total), radius 0.00014, quieter sheet emission 0.012,
+  sheet/ray optical depths 0.012/0.13, lower/top feather 0.14/0.67, and a
+  restrained opal/cyan/violet palette. Studio lighting is zero; emitted light
+  supplies the image. 3×3 spatial and four temporal samples remain unchanged.
+- Native 4K checkpoints at frames 0, 180, 450, 900, 1350, 1670 and 1801 show
+  large source-driven shifts and changing open spaces with no observed crop.
+  Local copies: `output/atelier/aurora-v10/`. The densest treatment was preferred
+  independently over the more visibly striped and greener alternatives.
+- v11 replaces the remaining periodic fine modulation with smooth seeded
+  aperiodic value noise in fixed material indices. The existing
+  `ray_detail_period` setting controls its characteristic scale; selected 13
+  gives approximately 6.5, 13 and 24.7-ray scales. Temporal identity, bounded
+  radii/lengths, source positions, camera, palette and broad motion are unchanged.
+- v11 passes 52 atelier tests, eight CLI tests, native all-target Clippy and
+  formatting. Immutable executable: `bin/atelier-v11`. Final texture proofs at
+  900, 0 and 1670 are rendering under `03-aurora/v11-proof-*` using
+  `configs/aurora-v11-selected.json`; no full Aurora film has started yet.
+
+### Current motion review
+
+- A verified Loom development excerpt contains 108 actual final-quality frames:
+  0–53 followed by 901–954, native 3840×2160/60, duration 1.8 seconds. It has
+  explicit excerpt labels and source-frame/hash provenance. Local copy:
+  `output/atelier/loom-v08/motion-check.mp4`.
+- The in-app browser's direct native-video speed menu crashed that temporary
+  tab. A fresh tab using a simple local review page played to the end at quarter
+  speed and reported native 3840×2160 media dimensions. Private page:
+  `http://127.0.0.1:8768/loom-motion-check.html`. This verifies sample playback;
+  longer full-source motion and shimmer review remain required when available.
+- Full Loom rendering continues through driver PID 98271 and immutable v08.
+  The completed collection still contains only Calligraphy. Later studies are
+  not marked complete while rendering or look development is unfinished.
+- Fourth-study design is prepared in `docs/light-cast-design.md`; implementation
+  has not started. Use 12 wavelength groups from the existing spectral/CIE data
+  for its initial high-detail optical render, rather than the proposal's original
+  three-band starting point. Preserve energy and deterministic accumulation.

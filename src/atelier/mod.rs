@@ -3,6 +3,7 @@
 //! Physical trajectories remain frozen. Designed geometry, optics and graphic
 //! fields turn their motion into distinct artworks using deterministic CPU work.
 
+pub mod aurora;
 pub mod calligraphy;
 pub mod loom;
 pub mod render;
@@ -71,6 +72,10 @@ pub struct Material {
     /// Omitted at zero so existing serialized Calligraphy recipes retain their hash.
     #[serde(skip_serializing_if = "metallic_is_zero")]
     pub metallic: f64,
+    /// Optional continuous luminous-gas color and density profile.
+    /// Its density and edge envelope fade both emission and extinction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emission_profile: Option<EmissionProfile>,
 }
 
 fn metallic_is_zero(value: &f64) -> bool {
@@ -90,6 +95,69 @@ impl Default for Material {
             fiber_frequency: 420.0,
             fiber_strength: 0.12,
             metallic: 0.0,
+            emission_profile: None,
+        }
+    }
+}
+
+/// One control point of a continuous linear-light emission and density curve.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmissionStop {
+    /// Normalized position along the profile's world-space axis.
+    pub position: f64,
+    /// Additional linear HDR emission before density and edge fading.
+    pub emission: V3,
+    /// Amount of emitting and absorbing material, from zero to one.
+    pub density: f64,
+}
+
+/// Smooth fades measured inward from the edges of a unit material-UV square.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UvFeather {
+    /// Fade widths at u=0 and u=1; zero disables the corresponding edge fade.
+    pub u: [f64; 2],
+    /// Fade widths at v=0 and v=1; zero disables the corresponding edge fade.
+    pub v: [f64; 2],
+}
+
+/// A smooth world-space emission profile shared by sheet and strand geometry.
+///
+/// Coordinates are `dot(point-origin, normalized(axis))/extent`. Ordered stops
+/// use bounded cubic interpolation and clamp to the end stops outside their
+/// range. Density scales optical depth before Beer--Lambert attenuation and
+/// scales the sum of base material emission and profile emission. Give the end
+/// stops zero density to make the surrounding space entirely clear and dark.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EmissionProfile {
+    /// World-space position of profile coordinate zero.
+    pub origin: V3,
+    /// Fixed world-space axis; normalized before evaluation.
+    pub axis: V3,
+    /// Positive world-space distance corresponding to one profile unit.
+    pub extent: f64,
+    /// At least two strictly ordered stops, with positions in zero to one.
+    pub stops: Vec<EmissionStop>,
+    /// Optional material-UV edge fades for sheets; leave absent for strands.
+    pub uv_feather: Option<UvFeather>,
+}
+
+impl Default for EmissionProfile {
+    fn default() -> Self {
+        Self {
+            origin: V3::ZERO,
+            axis: V3::new(0.0, 1.0, 0.0),
+            extent: 1.0,
+            stops: [(0.0, 0.0), (0.2, 1.0), (0.8, 1.0), (1.0, 0.0)]
+                .map(|(position, density)| EmissionStop {
+                    position,
+                    emission: V3::new(1.0, 1.0, 1.0),
+                    density,
+                })
+                .into(),
+            uv_feather: None,
         }
     }
 }

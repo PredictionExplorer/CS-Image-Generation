@@ -1,5 +1,6 @@
 //! Quiet analytic studio lighting and thin colored optical layers.
-use super::{CameraFrame, Material, RenderConfig, V3};
+use super::profile::CompiledProfile;
+use super::{CameraFrame, Material, RenderConfig, SilkResult, V3};
 use std::f64::consts::{PI, TAU};
 
 #[derive(Clone, Copy)]
@@ -14,10 +15,25 @@ struct Strip {
     reference_squared: f64,
 }
 
-pub(super) struct Studio {
+struct PreparedMaterial<'a> {
+    material: &'a Material,
+    profile: Option<CompiledProfile>,
+}
+
+impl<'a> PreparedMaterial<'a> {
+    fn new(material: &'a Material) -> SilkResult<Self> {
+        Ok(Self {
+            material,
+            profile: material.emission_profile.as_ref().map(CompiledProfile::new).transpose()?,
+        })
+    }
+}
+
+pub(super) struct Studio<'a> {
     view: V3,
     strips: [Strip; 2],
     fill: V3,
+    materials: Vec<PreparedMaterial<'a>>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,13 +62,19 @@ fn unit_color(color: V3) -> V3 {
 }
 
 impl ConductorMix {
-    fn new(material: &Material, base_transmission: V3, scattered: V3, dye: V3) -> Self {
-        let dielectric = 1.0 - material.metallic;
+    fn new(
+        material: &Material,
+        base_transmission: V3,
+        scattered: V3,
+        dye: V3,
+        metallic: f64,
+    ) -> Self {
+        let dielectric = 1.0 - metallic;
         let transmission = base_transmission * dielectric;
         Self {
             // Metallic-workflow approximation: dye is the conductor's normal-
             // incidence reflectance, not a diffuse paint under white highlights.
-            f0: V3::new(0.045, 0.045, 0.045).lerp(unit_color(dye), material.metallic),
+            f0: V3::new(0.045, 0.045, 0.045).lerp(unit_color(dye), metallic),
             transmission,
             removed: V3::new(1.0, 1.0, 1.0) - transmission,
             diffuse_source: scattered * dielectric,
@@ -72,7 +94,7 @@ impl ConductorMix {
     }
 }
 
-impl Studio {
+impl<'a> Studio<'a> {
     pub fn new(camera: &CameraFrame, config: &RenderConfig) -> Self {
         let angle = config.light_rotation_degrees.to_radians();
         let horizontal = camera.right * angle.cos() + camera.up * angle.sin();
@@ -107,13 +129,29 @@ impl Studio {
                 ),
             ],
             fill: V3::new(0.50, 0.56, 0.68) * config.fill_strength,
+            materials: Vec::new(),
         }
     }
 
-    /// Finite-position strips provide deterministic direction and distance falloff.
-    /// Their angular covariance broadens the highlight analytically; this is a
-    /// smooth emitter approximation, not Monte Carlo transport or a cast shadow.
-    pub fn shade(
+    pub fn with_materials(mut self, materials: &'a [Material]) -> SilkResult<Self> {
+        self.materials = materials.iter().map(PreparedMaterial::new).collect::<SilkResult<_>>()?;
+        Ok(self)
+    }
+
+    pub fn shade_index(
+        &self,
+        index: usize,
+        point: V3,
+        normal: V3,
+        tangent: V3,
+        uv: [f64; 2],
+        transverse_variance: f64,
+    ) -> Optical {
+        self.shade_prepared(&self.materials[index], point, normal, tangent, uv, transverse_variance)
+    }
+
+    #[cfg(test)]
+    pub(super) fn shade(
         &self,
         material: &Material,
         point: V3,
@@ -122,6 +160,43 @@ impl Studio {
         uv: [f64; 2],
         transverse_variance: f64,
     ) -> Optical {
+        self.shade_prepared(
+            &PreparedMaterial::new(material).unwrap(),
+            point,
+            normal,
+            tangent,
+            uv,
+            transverse_variance,
+        )
+    }
+
+    /// Finite-position strips provide deterministic direction and distance falloff.
+    /// Their angular covariance broadens the highlight analytically; this is a
+    /// smooth emitter approximation, not Monte Carlo transport or a cast shadow.
+    fn shade_prepared(
+        &self,
+        prepared: &PreparedMaterial<'_>,
+        point: V3,
+        normal: V3,
+        tangent: V3,
+        uv: [f64; 2],
+        transverse_variance: f64,
+    ) -> Optical {
+        let material = prepared.material;
+        let (optical_depth, emission, metallic) = if let Some(profile) = &prepared.profile {
+            let sample = profile.sample(point, uv);
+            if sample.density == 0.0 {
+                return Optical { light: V3::ZERO, transmission: V3::new(1.0, 1.0, 1.0) };
+            }
+            (
+                material.optical_depth * sample.density,
+                (material.emission + sample.emission) * sample.density,
+                material.metallic * sample.density,
+            )
+        } else {
+            // No profile means exactly the original material and arithmetic.
+            (material.optical_depth, material.emission, material.metallic)
+        };
         let front = normal.dot(self.view) >= 0.0;
         let base_normal = if front { normal } else { -normal };
         let optical_cosine = base_normal.dot(self.view).max(0.0);
@@ -147,32 +222,31 @@ impl Studio {
         let roughness = (material.roughness * (1.0 + fiber * 0.08)).clamp(0.025, 1.0);
         let slant = 1.0 / optical_cosine.max(0.055);
         let transmission = V3::new(
-            (-material.optical_depth.x * slant).exp(),
-            (-material.optical_depth.y * slant).exp(),
-            (-material.optical_depth.z * slant).exp(),
+            (-optical_depth.x * slant).exp(),
+            (-optical_depth.y * slant).exp(),
+            (-optical_depth.z * slant).exp(),
         );
         let intercepted = V3::new(1.0, 1.0, 1.0) - transmission;
         // Absorbed red/green/blue energy is not the reflected dye. Multiplying
         // it directly by front_color can neutralize the intended hue. Allocate
         // the common extinction share to bounded scattering; residual channel
         // differences remain colored absorption in the camera transmission.
-        let common =
-            material.optical_depth.x.min(material.optical_depth.y).min(material.optical_depth.z);
+        let common = optical_depth.x.min(optical_depth.y).min(optical_depth.z);
         let scattered_channel = |depth: f64, removed: f64| {
             if depth > 0.0 { (common / depth) * removed } else { 0.0 }
         };
         let scattered = V3::new(
-            scattered_channel(material.optical_depth.x, intercepted.x),
-            scattered_channel(material.optical_depth.y, intercepted.y),
-            scattered_channel(material.optical_depth.z, intercepted.z),
+            scattered_channel(optical_depth.x, intercepted.x),
+            scattered_channel(optical_depth.y, intercepted.y),
+            scattered_channel(optical_depth.z, intercepted.z),
         );
         let opacity = (intercepted.x + intercepted.y + intercepted.z) / 3.0;
         // Preserve the complete legacy dielectric arithmetic at exactly zero.
         // Only the opt-in metal path reserves Fresnel energy explicitly and
         // makes the conductor fraction opaque. Its three reflection weights
         // sum to at most one minus the remaining camera transmission.
-        let metal = (material.metallic > 0.0)
-            .then(|| ConductorMix::new(material, transmission, scattered, base));
+        let metal = (metallic > 0.0)
+            .then(|| ConductorMix::new(material, transmission, scattered, base, metallic));
         let base = if metal.is_some() { unit_color(base) } else { base };
         let mut light = if let Some(metal) = &metal {
             let weights = metal.weights(optical_cosine);
@@ -182,6 +256,9 @@ impl Studio {
             base.hadamard(self.fill).hadamard(scattered)
         };
         for strip in &self.strips {
+            if strip.color == V3::ZERO {
+                continue;
+            }
             let offset = strip.center - point;
             let distance_squared = offset.length_squared();
             if distance_squared <= 1e-12 {
@@ -270,7 +347,7 @@ impl Studio {
             }
         }
         Optical {
-            light: light + material.emission,
+            light: light + emission,
             transmission: metal.as_ref().map_or(transmission, |metal| metal.transmission),
         }
     }
@@ -285,7 +362,7 @@ pub(super) fn perpendicular(normal: V3) -> V3 {
 mod tests {
     use super::*;
 
-    fn studio() -> Studio {
+    fn studio() -> Studio<'static> {
         Studio::new(
             &CameraFrame {
                 forward: V3::new(0.0, 0.0, -1.0),
@@ -411,8 +488,13 @@ mod tests {
         let scattered = V3::new(0.2, 0.3, 0.4);
         for metallic in [0.01, 0.25, 0.75, 1.0] {
             let material = Material { metallic, sheen: 2.0, ..Material::default() };
-            let mix =
-                ConductorMix::new(&material, transmission, scattered, V3::new(0.9, 0.55, 0.15));
+            let mix = ConductorMix::new(
+                &material,
+                transmission,
+                scattered,
+                V3::new(0.9, 0.55, 0.15),
+                metallic,
+            );
             for cosine in [0.0, 0.1, 0.5, 1.0] {
                 let weights = mix.weights(cosine);
                 let total = weights.diffuse + weights.specular + weights.sheen + mix.transmission;
@@ -463,5 +545,63 @@ mod tests {
         material.front_color = V3::new(0.7, 0.7, 0.7);
         let silver = shade(&material);
         assert!(gold.light.x / gold.light.z > 3.0 * silver.light.x / silver.light.z);
+    }
+
+    #[test]
+    fn emission_and_extinction_share_the_same_smooth_sheet_envelope() {
+        use crate::atelier::{EmissionProfile, EmissionStop, UvFeather};
+        let source = EmissionProfile {
+            stops: [0.0, 1.0]
+                .map(|position| EmissionStop {
+                    position,
+                    emission: V3::new(0.1, 0.6, 0.3),
+                    density: 1.0,
+                })
+                .into(),
+            uv_feather: Some(UvFeather { u: [0.2, 0.2], v: [0.1, 0.2] }),
+            ..EmissionProfile::default()
+        };
+        let mut material = Material {
+            optical_depth: V3::new(0.3, 0.6, 0.9),
+            emission: V3::new(0.1, 0.2, 0.3),
+            emission_profile: Some(source),
+            fiber_strength: 0.0,
+            ..Material::default()
+        };
+        let mut studio = studio();
+        for strip in &mut studio.strips {
+            strip.color = V3::ZERO;
+        }
+        studio.fill = V3::ZERO;
+        let shade = |material: &Material, u| {
+            studio.shade(
+                material,
+                V3::new(0.0, 0.5, 0.0),
+                V3::new(0.0, 0.0, 1.0),
+                V3::new(1.0, 0.0, 0.0),
+                [u, 0.5],
+                0.0,
+            )
+        };
+        let middle = shade(&material, 0.5);
+        let half = shade(&material, 0.1);
+        let edge = shade(&material, 0.0);
+        assert_eq!(middle.light, V3::new(0.2, 0.8, 0.6));
+        assert_eq!(half.light, middle.light * 0.5);
+        for channel in 0..3 {
+            assert!(
+                (half.transmission.axis(channel)
+                    - (-material.optical_depth.axis(channel) * 0.5).exp())
+                .abs()
+                    < 1e-12
+            );
+        }
+        assert_eq!(edge.light, V3::ZERO);
+        assert_eq!(edge.transmission, V3::new(1.0, 1.0, 1.0));
+        // Optional mixed conductors also disappear continuously at the envelope.
+        material.metallic = 1.0;
+        let near = shade(&material, 1e-5);
+        assert!(near.light.length() < 1e-10);
+        assert!((near.transmission - V3::new(1.0, 1.0, 1.0)).length() < 1e-10);
     }
 }

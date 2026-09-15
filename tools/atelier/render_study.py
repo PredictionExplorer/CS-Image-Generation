@@ -15,8 +15,9 @@ def render(args: argparse.Namespace) -> None:
     frames = recipe.get("frames", 1802)
     if not isinstance(frames, int) or frames < 2:
         raise ValueError("The recipe must specify at least two frames")
-    if args.chunks > frames or args.workers < args.chunks:
-        raise ValueError("Each chunk needs at least one frame and one worker")
+    parallel = min(args.parallel_ranges, args.chunks)
+    if args.chunks > frames or args.workers < parallel:
+        raise ValueError("Each chunk needs a frame and each active range needs a worker")
     if args.poster_frame >= frames:
         raise ValueError("Poster frame falls outside the full film")
     output = args.output.resolve()
@@ -33,7 +34,7 @@ def render(args: argparse.Namespace) -> None:
     executable = str(args.executable.resolve(strict=True))
     orbit = str(args.orbit.resolve(strict=True))
     config = str(request)
-    worker_count = args.workers // args.chunks
+    worker_count = args.workers // parallel
     chunks = [output / f"final-chunk-{i}" for i in range(args.chunks)]
 
     def run(index: int) -> None:
@@ -61,8 +62,10 @@ def render(args: argparse.Namespace) -> None:
         print(f"Range {index} complete", flush=True)
 
     failures = []
-    with concurrent.futures.ThreadPoolExecutor(args.chunks) as pool:
-        pending = {pool.submit(run, i): i for i in range(args.chunks)}
+    stride = (args.chunks + parallel - 1) // parallel
+    order = sorted(range(args.chunks), key=lambda index: (index % stride, index // stride))
+    with concurrent.futures.ThreadPoolExecutor(parallel) as pool:
+        pending = {pool.submit(run, i): i for i in order}
         for future in concurrent.futures.as_completed(pending):
             try:
                 future.result()
@@ -94,10 +97,14 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--chunks", type=int, default=8)
+    parser.add_argument("--parallel-ranges", type=int, default=4)
     parser.add_argument("--workers", type=int, default=112)
     parser.add_argument("--encoder-threads", type=int, default=16)
     parser.add_argument("--poster-frame", type=int, default=900)
     args = parser.parse_args()
-    if min(args.chunks, args.workers, args.encoder_threads) < 1 or args.poster_frame < 0:
+    if (
+        min(args.chunks, args.parallel_ranges, args.workers, args.encoder_threads) < 1
+        or args.poster_frame < 0
+    ):
         parser.error("Counts must be positive and the poster index nonnegative")
     render(args)

@@ -1,0 +1,277 @@
+{
+  "kind": "aurora",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 4,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.36,
+  "camera": {
+    "position": {
+      "x": 2.0,
+      "y": 1.4,
+      "z": 12.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 1.3,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 7.0
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 3,
+    "exposure": 1.05,
+    "background": {
+      "x": 0.0008,
+      "y": 0.0014,
+      "z": 0.003
+    },
+    "key_strength": 0.0,
+    "rim_strength": 0.0,
+    "fill_strength": 0.0,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.085
+  },
+  "aurora": {
+    "history_fraction": 0.26,
+    "source_axes": [
+      {
+        "x": 0.9775173637530767,
+        "y": 0.07416319035834007,
+        "z": -0.19738192611560845
+      },
+      {
+        "x": -0.13152225722147193,
+        "y": 0.946134321388188,
+        "z": -0.29585763763452494
+      },
+      {
+        "x": 0.16480806842082663,
+        "y": 0.31516609444416055,
+        "z": 0.9346168377983626
+      }
+    ],
+    "source_scales": [
+      1.5,
+      1.5,
+      1.5
+    ],
+    "source_motion": [
+      1.8,
+      1.8
+    ],
+    "widths": [
+      5.2,
+      4.8,
+      5.6
+    ],
+    "curtains": [
+      true,
+      true,
+      true
+    ],
+    "depth_lanes": [
+      -1.2,
+      0.0,
+      1.2
+    ],
+    "source_depth": 0.18,
+    "fold_amplitude": 0.28,
+    "fold_pitch": 2.8,
+    "height_floor": 0.25,
+    "height_bulge": 1.7,
+    "height_proximity": 0.6,
+    "height_speed": 0.2,
+    "sheet_segments": 1024,
+    "height_segments": 192,
+    "ray_count": 6144,
+    "ray_segments": 160,
+    "ray_radius": 0.00014,
+    "ray_radius_variation": 0.2,
+    "ray_length_variation": 0.38,
+    "ray_gather_pitch": 3.8,
+    "ray_detail_period": 13.0,
+    "ray_dark_floor": 0.045,
+    "side_feather": [
+      0.18,
+      0.14
+    ],
+    "height_feather": [
+      0.14,
+      0.67
+    ],
+    "sheet_optical_depth": 0.012,
+    "ray_optical_depth": 0.13,
+    "sheet_emission": 0.012,
+    "ray_emission": 1.9,
+    "body_emission": [
+      1.0,
+      0.72,
+      0.88
+    ],
+    "emission_profile": {
+      "origin": {
+        "x": 0.0,
+        "y": -2.0,
+        "z": 0.0
+      },
+      "axis": {
+        "x": 0.0,
+        "y": 1.0,
+        "z": 0.0
+      },
+      "extent": 6.6,
+      "stops": [
+        {
+          "position": 0.0,
+          "emission": {
+            "x": 0.12,
+            "y": 0.26,
+            "z": 0.32
+          },
+          "density": 0.0
+        },
+        {
+          "position": 0.15,
+          "emission": {
+            "x": 0.65,
+            "y": 1.05,
+            "z": 0.86
+          },
+          "density": 0.78
+        },
+        {
+          "position": 0.38,
+          "emission": {
+            "x": 0.32,
+            "y": 1.1,
+            "z": 1.32
+          },
+          "density": 0.6
+        },
+        {
+          "position": 0.6,
+          "emission": {
+            "x": 0.29,
+            "y": 0.56,
+            "z": 1.3
+          },
+          "density": 0.4
+        },
+        {
+          "position": 0.82,
+          "emission": {
+            "x": 0.65,
+            "y": 0.2,
+            "z": 1.1
+          },
+          "density": 0.25
+        },
+        {
+          "position": 1.0,
+          "emission": {
+            "x": 0.24,
+            "y": 0.045,
+            "z": 0.35
+          },
+          "density": 0.0
+        }
+      ],
+      "uv_feather": null
+    },
+    "detail_seed": 4731029,
+    "materials": [
+      {
+        "front_color": {
+          "x": 0.045,
+          "y": 0.13,
+          "z": 0.12
+        },
+        "back_color": {
+          "x": 0.025,
+          "y": 0.08,
+          "z": 0.11
+        },
+        "optical_depth": {
+          "x": 0.055,
+          "y": 0.055,
+          "z": 0.055
+        },
+        "roughness": 0.55,
+        "anisotropy": 0.55,
+        "sheen": 0.04,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0
+      },
+      {
+        "front_color": {
+          "x": 0.045,
+          "y": 0.13,
+          "z": 0.12
+        },
+        "back_color": {
+          "x": 0.025,
+          "y": 0.08,
+          "z": 0.11
+        },
+        "optical_depth": {
+          "x": 0.055,
+          "y": 0.055,
+          "z": 0.055
+        },
+        "roughness": 0.55,
+        "anisotropy": 0.55,
+        "sheen": 0.04,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0
+      },
+      {
+        "front_color": {
+          "x": 0.045,
+          "y": 0.13,
+          "z": 0.12
+        },
+        "back_color": {
+          "x": 0.025,
+          "y": 0.08,
+          "z": 0.11
+        },
+        "optical_depth": {
+          "x": 0.055,
+          "y": 0.055,
+          "z": 0.055
+        },
+        "roughness": 0.55,
+        "anisotropy": 0.55,
+        "sheen": 0.04,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0
+      }
+    ],
+    "lean_amplitude": 1.1,
+    "lean_height_center": 0.8,
+    "lean_height_scale": 1.3
+  }
+}

@@ -12,7 +12,9 @@ use std::{
     time::Instant,
 };
 use three_body_problem::{
-    atelier::{Camera, OrbitSeries, RenderConfig, Scene, SilkResult, calligraphy, loom, render},
+    atelier::{
+        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, aurora, calligraphy, loom, render,
+    },
     silk::cache,
 };
 
@@ -101,6 +103,8 @@ struct StudyConfig {
     calligraphy: Option<calligraphy::CalligraphyConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     loom: Option<loom::LoomConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    aurora: Option<aurora::AuroraConfig>,
 }
 
 impl Default for StudyConfig {
@@ -116,6 +120,7 @@ impl Default for StudyConfig {
             render: RenderConfig::default(),
             calligraphy: Some(calligraphy::CalligraphyConfig::default()),
             loom: None,
+            aurora: None,
         }
     }
 }
@@ -179,6 +184,9 @@ fn art_scene(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResul
             config.calligraphy.as_ref().ok_or("Missing Calligraphy parameters")?,
         ),
         "loom" => loom::scene(source, time, config.loom.as_ref().ok_or("Missing Loom parameters")?),
+        "aurora" => {
+            aurora::scene(source, time, config.aurora.as_ref().ok_or("Missing Aurora parameters")?)
+        }
         _ => Err(format!("Unsupported study: {}", config.kind).into()),
     }
 }
@@ -195,6 +203,27 @@ fn main() -> SilkResult<()> {
     match args.command {
         Action::Config { output, preset } => {
             let config = match preset.as_str() {
+                "aurora" => StudyConfig {
+                    kind: "aurora".into(),
+                    calligraphy: None,
+                    aurora: Some(aurora::AuroraConfig::default()),
+                    camera: Camera {
+                        position: three_body_problem::atelier::V3::new(2.0, 1.4, 12.0),
+                        target: three_body_problem::atelier::V3::new(0.0, 1.3, 0.0),
+                        orthographic_height: 7.0,
+                        ..Camera::default()
+                    },
+                    render: RenderConfig {
+                        exposure: 0.7,
+                        background: three_body_problem::atelier::V3::new(0.0008, 0.0014, 0.003),
+                        key_strength: 0.035,
+                        rim_strength: 0.025,
+                        fill_strength: 0.015,
+                        bloom_strength: 0.09,
+                        ..RenderConfig::default()
+                    },
+                    ..StudyConfig::default()
+                },
                 "loom" | "loom-panel" | "loom-spindle" => {
                     let parameters = loom::LoomConfig {
                         panels: if preset == "loom-panel" {
@@ -264,10 +293,17 @@ fn main() -> SilkResult<()> {
                 "calligraphy" => {
                     config.calligraphy.get_or_insert_with(calligraphy::CalligraphyConfig::default);
                     config.loom = None;
+                    config.aurora = None;
                 }
                 "loom" => {
                     config.loom.get_or_insert_with(loom::LoomConfig::default);
                     config.calligraphy = None;
+                    config.aurora = None;
+                }
+                "aurora" => {
+                    config.aurora.get_or_insert_with(aurora::AuroraConfig::default);
+                    config.calligraphy = None;
+                    config.loom = None;
                 }
                 _ => return Err(format!("Unsupported study: {}", config.kind).into()),
             }
@@ -915,9 +951,25 @@ mod assembly_tests {
                 .unwrap();
         assert!(manifest.config.calligraphy.is_some());
         assert!(manifest.config.loom.is_none());
+        assert!(manifest.config.aurora.is_none());
         assert_eq!(
             recipe_hash(&manifest).unwrap(),
             "f40ec9d064ca6c7711f1955998c26ac183c9f3b6cc7bd477cb41e8578b1b9748"
+        );
+    }
+
+    #[test]
+    fn archived_v08_loom_keeps_its_original_recipe_hash() {
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../tests/fixtures/atelier-v08-loom-manifest.json"
+        ))
+        .unwrap();
+        assert!(manifest.config.calligraphy.is_none());
+        assert!(manifest.config.loom.is_some());
+        assert!(manifest.config.aurora.is_none());
+        assert_eq!(
+            recipe_hash(&manifest).unwrap(),
+            "dac3b725dd71d3accbb0042d61ebde3174c8956c95720c2c4702eb669ba2a0b7"
         );
     }
 
