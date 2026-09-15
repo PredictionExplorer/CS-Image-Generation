@@ -7,7 +7,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use three_body_problem::silk::{SilkResult, cache, comparison, orbit, render, simulation};
+use three_body_problem::silk::{
+    SilkResult, cache, comparison, guides, normal, orbit, render, simulation,
+};
 
 #[derive(Parser)]
 #[command(
@@ -24,6 +26,43 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Replay the normal accumulated-light movie from a recorded selected orbit.
+    Normal {
+        #[arg(long)]
+        orbit: PathBuf,
+        #[arg(long)]
+        generation_record: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        width: Option<u32>,
+        #[arg(long)]
+        height: Option<u32>,
+        #[arg(long)]
+        fast_encode: bool,
+    },
+    /// Export the three physical attachment positions through the silk camera.
+    Guides {
+        #[arg(long)]
+        orbit: PathBuf,
+        #[arg(long)]
+        bake: PathBuf,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Add body-position markers to a separate copy of a PNG sequence.
+    Overlay {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        markers: PathBuf,
+    },
     /// Generate or reconstruct original physical motion once.
     Orbit {
         #[arg(long)]
@@ -168,6 +207,35 @@ fn main() -> SilkResult<()> {
         .init();
     let started = Instant::now();
     match args.command {
+        Action::Normal { orbit, generation_record, output, config, width, height, fast_encode } => {
+            let orbit = cache::read_orbit(&orbit)?;
+            let record = serde_json::from_slice(&fs::read(generation_record)?)?;
+            let mut config: normal::NormalConfig = read_config(config.as_deref())?;
+            if let Some(width) = width {
+                config.width = width;
+            }
+            if let Some(height) = height {
+                config.height = height;
+            }
+            if fast_encode {
+                config.fast_encode = true;
+            }
+            let report = normal::render_from_record(&orbit, &record, &config, &output)?;
+            eprintln!(
+                "Normal movie: {} frames at {} fps, {} seconds",
+                report["frame_count"], report["fps"], report["duration_seconds"]
+            );
+        }
+        Action::Guides { orbit, bake, config, output } => {
+            let orbit = cache::read_orbit(&orbit)?;
+            let bake = cache::read_bake(&bake)?;
+            let config: render::RenderConfig = read_config(config.as_deref())?;
+            write_json(&output, &guides::generate_silk_markers(&orbit, &bake, &config)?)?;
+        }
+        Action::Overlay { input, output, markers } => {
+            let markers = serde_json::from_slice(&fs::read(markers)?)?;
+            guides::overlay_frames(&input, &output, &markers)?;
+        }
         Action::Orbit { output, config, seed, sims, steps, generation_record } => {
             let mut config: orbit::OrbitConfig = read_config(config.as_deref())?;
             if let Some(seed) = seed {

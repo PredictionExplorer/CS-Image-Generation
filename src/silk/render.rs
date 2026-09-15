@@ -231,12 +231,40 @@ fn validate(bake: &ClothBake, frame: usize, c: &RenderConfig) -> SilkResult<()> 
     Ok(())
 }
 
-fn render_linear(
+/// Project cloth-world points through the exact camera used to render a frame.
+///
+/// The result uses normalized image coordinates: `(0, 0)` is the top-left
+/// corner and `(1, 1)` the bottom-right. Coordinates are intentionally not
+/// clamped, so callers can identify supports outside the image. Raw orbital
+/// points must first receive the bake recipe's `world_center`/`world_scale`.
+pub fn project_points(
     bake: &ClothBake,
     frame_index: usize,
     config: &RenderConfig,
-) -> SilkResult<Vec<V3>> {
+    points: &[V3],
+) -> SilkResult<Vec<[f64; 2]>> {
     validate(bake, frame_index, config)?;
+    if !points.iter().all(|point| point.is_finite()) {
+        return Err("projection points must be finite".into());
+    }
+    let (camera, center, radius) = camera_fit(bake, frame_index, config);
+    points
+        .iter()
+        .map(|&point| {
+            let relative = (point - center) / radius - camera.origin;
+            let depth = relative.dot(camera.forward);
+            if depth <= 1e-12 {
+                return Err("projection point is behind the camera".into());
+            }
+            Ok([
+                0.5 + 0.5 * relative.dot(camera.right) / (depth * camera.tangent * camera.aspect),
+                0.5 - 0.5 * relative.dot(camera.up) / (depth * camera.tangent),
+            ])
+        })
+        .collect()
+}
+
+fn camera_fit(bake: &ClothBake, frame_index: usize, config: &RenderConfig) -> (Camera, V3, f64) {
     let selected = &bake.frames[frame_index];
     let fitting: &[Vec<V3>] =
         if config.fit_all_frames { &bake.frames } else { std::slice::from_ref(selected) };
@@ -249,7 +277,6 @@ fn render_linear(
     let center = (minimum + maximum) * 0.5;
     let radius =
         fitting.iter().flatten().map(|&p| (p - center).length()).fold(0.0, f64::max).max(1e-9);
-    let positions: Vec<V3> = selected.iter().map(|&p| (p - center) / radius).collect();
     let azimuth = config.azimuth_degrees.to_radians();
     let elevation = config.elevation_degrees.to_radians();
     let eye =
@@ -271,6 +298,21 @@ fn render_linear(
         .fold(0.5, f64::max)
         * config.distance_scale;
     let camera = Camera { origin: eye * distance, forward: -eye, right, up, tangent, aspect };
+    (camera, center, radius)
+}
+
+fn render_linear(
+    bake: &ClothBake,
+    frame_index: usize,
+    config: &RenderConfig,
+) -> SilkResult<Vec<V3>> {
+    validate(bake, frame_index, config)?;
+    let (camera, center, radius) = camera_fit(bake, frame_index, config);
+    let positions: Vec<V3> =
+        bake.frames[frame_index].iter().map(|&p| (p - center) / radius).collect();
+    let eye = -camera.forward;
+    let right = camera.right;
+    let up = camera.up;
     let light_angle = config.light_rotation_degrees.to_radians();
     let light_right = right * light_angle.cos() + up * light_angle.sin();
     let light_up = up * light_angle.cos() - right * light_angle.sin();
@@ -643,6 +685,45 @@ impl Random {
 mod tests {
     use super::super::Mesh;
     use super::*;
+    #[test]
+    fn projection_uses_render_camera_axes_aspect_and_fit() {
+        let positions = vec![
+            V3::new(-1.0, -1.0, 0.0),
+            V3::new(1.0, -1.0, 0.0),
+            V3::new(1.0, 1.0, 0.0),
+            V3::new(-1.0, 1.0, 0.0),
+        ];
+        let bake = ClothBake {
+            mesh: Mesh {
+                positions: positions.clone(),
+                triangles: vec![[0, 1, 2], [0, 2, 3]],
+                uv: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            },
+            frames: vec![positions],
+            fps: 24,
+            stats: vec![],
+            recipe: serde_json::json!({}),
+        };
+        let config = RenderConfig {
+            width: 400,
+            height: 200,
+            azimuth_degrees: 0.0,
+            elevation_degrees: 0.0,
+            roll_degrees: 0.0,
+            distance_scale: 1.2,
+            ..RenderConfig::default()
+        };
+        let points = project_points(
+            &bake,
+            0,
+            &config,
+            &[V3::ZERO, V3::new(1.0, 0.0, 0.0), V3::new(0.0, 1.0, 0.0)],
+        )
+        .unwrap();
+        assert_eq!(points[0], [0.5, 0.5]);
+        assert!((points[1][0] - (0.5 + 0.25 / 1.2)).abs() < 1e-12);
+        assert!((points[2][1] - (0.5 - 0.5 / 1.2)).abs() < 1e-12);
+    }
     fn bake() -> ClothBake {
         let positions =
             vec![V3::new(-1.0, -0.7, 0.0), V3::new(1.0, -0.7, 0.0), V3::new(0.0, 1.0, 0.15)];

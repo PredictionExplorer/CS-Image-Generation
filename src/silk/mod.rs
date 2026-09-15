@@ -5,7 +5,11 @@
 
 pub mod cache;
 pub mod comparison;
+/// Body-position guides for synchronized visualization comparisons.
+pub mod guides;
 mod math;
+/// Replay the original accumulated-light rendering from a recorded source orbit.
+pub mod normal;
 pub mod orbit;
 pub mod render;
 pub mod simulation;

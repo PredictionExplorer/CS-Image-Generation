@@ -23,6 +23,17 @@ pub enum AttachmentMode {
     Centroid,
 }
 
+/// Whether hidden pre-roll advances the source trajectory before visible playback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrerollMode {
+    /// Preserve the original timing: hidden pre-roll consumes the source prefix.
+    #[default]
+    AdvanceSource,
+    /// Hold the first source positions until the first visible frame.
+    HoldFirst,
+}
+
 /// Physical and sampling settings for a reusable cloth bake.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -69,8 +80,10 @@ pub struct SimulationConfig {
     pub self_collision: bool,
     /// Hidden time to gather the flat rest pattern onto the initial supports.
     pub settle_seconds: f64,
-    /// Hidden trajectory playback before the first visible frame.
+    /// Hidden cloth preparation time after gathering onto the initial supports.
     pub preroll_seconds: f64,
+    /// Advance the source during pre-roll, or preserve the complete visible interval.
+    pub preroll_mode: PrerollMode,
     /// Small, static initial drape as a fraction of world size; breaks flat symmetry.
     pub initial_drape: f64,
     /// Beginning of the source interval, as a fraction of its sample range.
@@ -106,6 +119,7 @@ impl Default for SimulationConfig {
             self_collision: true,
             settle_seconds: 1.5,
             preroll_seconds: 1.0,
+            preroll_mode: PrerollMode::AdvanceSource,
             initial_drape: 0.04,
             orbit_start: 0.0,
             orbit_end: 1.0,
@@ -163,6 +177,20 @@ struct Driver<'a> {
 
 impl Driver<'_> {
     fn source_fraction(&self, motion_time: f64) -> f64 {
+        if self.config.preroll_mode == PrerollMode::HoldFirst {
+            let visible_time = motion_time - self.config.preroll_seconds;
+            if motion_time <= self.config.preroll_seconds {
+                return self.config.orbit_start;
+            }
+            // Use the same endpoint expression as the frame loop, avoiding a
+            // subtraction-rounding loss of the final source sample.
+            if motion_time >= self.config.preroll_seconds + self.duration {
+                return self.config.orbit_end;
+            }
+            return self.config.orbit_start
+                + (self.config.orbit_end - self.config.orbit_start)
+                    * (visible_time / self.duration).clamp(0.0, 1.0);
+        }
         self.config.orbit_start
             + (self.config.orbit_end - self.config.orbit_start)
                 * (motion_time / self.duration).clamp(0.0, 1.0)
@@ -190,8 +218,9 @@ struct State {
 /// Simulate a continuous cloth and save its visible geometry for later rendering.
 ///
 /// All supports share one constant space/time transform. The hidden settling
-/// phase changes the supports, never the rest pattern. Subsequent pre-roll and
-/// visible motion sample the actual source trajectory.
+/// phase changes the supports, never the rest pattern. In `hold_first` mode,
+/// pre-roll keeps the first support positions fixed and the visible frames span
+/// the complete requested source interval, including both endpoint samples.
 pub fn bake(orbit: &OrbitData, config: &SimulationConfig) -> SilkResult<ClothBake> {
     validate(orbit, config)?;
     let center = orbit.samples[0]
@@ -213,7 +242,11 @@ pub fn bake(orbit: &OrbitData, config: &SimulationConfig) -> SilkResult<ClothBak
     let scale = config.world_size / maximum_pair_distance;
     let initial = sample_orbit(orbit, config.orbit_start).map(|p| (p - center) * scale);
     let pattern = make_pattern(initial, config)?;
-    let duration = config.preroll_seconds + f64::from(config.frames - 1) / f64::from(config.fps);
+    let visible_duration = f64::from(config.frames - 1) / f64::from(config.fps);
+    let duration = match config.preroll_mode {
+        PrerollMode::AdvanceSource => config.preroll_seconds + visible_duration,
+        PrerollMode::HoldFirst => visible_duration,
+    };
     let driver =
         Driver { orbit, config, center, scale, duration, rest_supports: pattern.rest_supports };
     let mut state = State {
@@ -306,6 +339,10 @@ pub fn bake(orbit: &OrbitData, config: &SimulationConfig) -> SilkResult<ClothBak
         "source_start_fraction": config.orbit_start,
         "first_visible_source_fraction": driver.source_fraction(config.preroll_seconds),
         "source_end_fraction": config.orbit_end,
+        "last_visible_source_fraction":driver.source_fraction(config.preroll_seconds+visible_duration),
+        "preroll_mode":config.preroll_mode,
+        "visible_motion_duration_seconds":visible_duration,
+        "encoded_duration_seconds":f64::from(config.frames)/f64::from(config.fps),
         "source_time_per_playback_second": (config.orbit_end-config.orbit_start)
             * (orbit.samples.len()-1) as f64 * orbit.dt / duration,
         "settling": "quintic support gathering; fixed material metric; hidden",
@@ -1075,5 +1112,91 @@ mod tests {
             );
             assert!(pattern.inverse_mass[pin.vertex] > 0.0);
         }
+    }
+
+    #[test]
+    fn hold_first_covers_visible_endpoints_at_multiple_frame_rates() {
+        let orbit = fixture();
+        for fps in [24, 30, 60] {
+            for frames in [2, fps * 30] {
+                let config = SimulationConfig {
+                    frames,
+                    fps,
+                    preroll_seconds: 1.25,
+                    preroll_mode: PrerollMode::HoldFirst,
+                    orbit_start: 0.2,
+                    orbit_end: 0.8,
+                    ..SimulationConfig::default()
+                };
+                let duration = f64::from(frames - 1) / f64::from(fps);
+                let driver = Driver {
+                    orbit: &orbit,
+                    config: &config,
+                    center: V3::ZERO,
+                    scale: 1.0,
+                    duration,
+                    rest_supports: sample_orbit(&orbit, config.orbit_start),
+                };
+                for time in [0.0, config.preroll_seconds * 0.5, config.preroll_seconds] {
+                    assert_eq!(driver.source_fraction(time), config.orbit_start);
+                    assert_eq!(driver.supports(time), sample_orbit(&orbit, config.orbit_start));
+                }
+                let middle = config.preroll_seconds + duration * 0.5;
+                assert!((driver.source_fraction(middle) - 0.5).abs() < 1e-12);
+                let end = config.preroll_seconds + duration;
+                assert_eq!(driver.source_fraction(end), config.orbit_end);
+                assert_eq!(driver.supports(end), sample_orbit(&orbit, config.orbit_end));
+                assert_eq!(driver.source_fraction(end + 1.0), config.orbit_end);
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_preroll_mode_keeps_legacy_source_timing() {
+        let config: SimulationConfig =
+            serde_json::from_str(r#"{"frames":900,"fps":30,"preroll_seconds":1.0}"#).unwrap();
+        assert_eq!(config.preroll_mode, PrerollMode::AdvanceSource);
+        let orbit = fixture();
+        let duration =
+            config.preroll_seconds + f64::from(config.frames - 1) / f64::from(config.fps);
+        let driver = Driver {
+            orbit: &orbit,
+            config: &config,
+            center: V3::ZERO,
+            scale: 1.0,
+            duration,
+            rest_supports: orbit.samples[0],
+        };
+        assert_eq!(driver.source_fraction(config.preroll_seconds), 1.0 / duration);
+        assert!(driver.source_fraction(config.preroll_seconds) > 0.0);
+        assert_eq!(driver.source_fraction(duration), 1.0);
+    }
+
+    #[test]
+    fn full_visible_bake_reaches_actual_first_and_last_source_positions() {
+        let orbit = fixture();
+        let config = SimulationConfig {
+            subdivisions: 8,
+            frames: 3,
+            fps: 24,
+            substeps: 3,
+            iterations: 8,
+            settle_seconds: 0.3,
+            preroll_seconds: 0.2,
+            preroll_mode: PrerollMode::HoldFirst,
+            self_collision: false,
+            ..SimulationConfig::default()
+        };
+        let result = bake(&orbit, &config).unwrap();
+        let center: V3 = serde_json::from_value(result.recipe["world_center"].clone()).unwrap();
+        let scale = result.recipe["world_scale"].as_f64().unwrap();
+        let first = orbit.samples[0].map(|point| (point - center) * scale);
+        let last = orbit.samples.last().unwrap().map(|point| (point - center) * scale);
+        let pattern = make_pattern(first, &config).unwrap();
+        assert!(measure(&result.frames[0], &pattern, first, 0).pin_error < 1e-12);
+        assert!(measure(result.frames.last().unwrap(), &pattern, last, 0).pin_error < 1e-12);
+        assert_eq!(result.recipe["first_visible_source_fraction"], 0.0);
+        assert_eq!(result.recipe["last_visible_source_fraction"], 1.0);
+        assert_eq!(result.recipe["preroll_mode"], "hold_first");
     }
 }

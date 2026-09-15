@@ -15,7 +15,10 @@ small portability checks; full-size artwork generation ran on the server.
 ## Automated checks
 
 - Formatting and all-target Clippy pass with the repository's CI flags.
-- 498 tests pass, including 33 Tidal Silk unit tests and 3 CLI integration tests.
+- Initial pipeline validation: 498 tests passed, including 33 Tidal Silk unit
+  tests and 3 CLI integration tests.
+- The subsequent full-length comparison changes pass all 46 Tidal Silk unit
+  tests and all 3 CLI integration tests, plus formatting and all-target Clippy.
 - One existing test remains ignored.
 - One existing scalar spectral NaN property test is excluded from the final
   successful full-suite run. Its failure was independently reproduced on
@@ -72,6 +75,30 @@ Memory was selected for its taller, open, layered silhouette. Calm offers a
 quieter unfolding. Their exact physical and rendering controls are supplied in
 `tools/tidal_silk/`. The source-state profile allows reproduction without a fresh
 candidate search or access to the earlier output archive.
+
+## Full-length seed comparison
+
+The full comparison reuses all one million cached physical samples of
+`0xb7f327f9f722`. The normal replay verifies the archived candidate, profile,
+palette and drift before running the existing accumulation renderer. Its movie
+contains 1,802 frames at 60 fps. The new full Memory recipe has 901 frames at
+30 fps, spanning source fractions 0 through 1; both films last 30.033 seconds.
+
+The full Memory motion study uses 817 physical vertices and self-contact. Its
+95th-percentile edge stretch is 0.321%, with a worst case of 10.062%; approximately
+0.000047% of edge/frame observations exceed 10% and none exceed 20%. Attachment
+center error remains below `5e-16` scene units. This longer, coarser physical mesh
+is a separate study from the short mesh64 Memory cache. Its exact settings are
+`tools/tidal_silk/full-memory.json` and `comparison-indigo.json`.
+
+The guided comparison preserves the body index mapping A=0, B=1, C=2 and chooses
+the nearest actual normal checkpoint for each silk frame. The worst timing
+offset is the first frame's 555 source steps (about 0.017 seconds of playback);
+the last source sample matches exactly. Each chosen normal image keeps its own
+actual source time and projected markers. The raw closest approach is A–C at
+source index 927,461, approximately 27.8 seconds into playback. Normal uses a
+phase portrait plus view rotation and drift; silk uses original 3D positions,
+so physical proximity need not look like screen-space proximity in both views.
 
 ## Practical limits
 
