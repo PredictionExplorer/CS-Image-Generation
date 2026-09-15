@@ -756,6 +756,7 @@ fn main() -> SilkResult<()> {
     emit(
         &serde_json::json!({
             "status":"complete", "plan":plan,
+            "executable_sha256":cache::file_hash(&std::env::current_exe()?)?,
             "config_sha256":cache::file_hash(&args.config)?, "orbit_sha256":cache::file_hash(&args.orbit)?,
             "orbit_seed":orbit.seed, "native":native_summary, "reference":reference_summary,
             "metrics":metrics, "previews":previews,

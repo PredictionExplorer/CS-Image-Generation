@@ -519,11 +519,78 @@ fn bin_range(bounds: [Point; 2], plane: Plane, tile: usize) -> Option<[usize; 4]
     Some([x0, y0, x1, y1])
 }
 
+fn covering_ball(plane: Plane, x: usize, y: usize, width: usize, height: usize) -> (Point, f64) {
+    let center = plane.world(x as f64 + width as f64 * 0.5, y as f64 + height as f64 * 0.5);
+    let mut radius: f64 = 0.0;
+    for cy in [y, y + height] {
+        for cx in [x, x + width] {
+            let corner = plane.world(cx as f64, cy as f64);
+            radius = radius.max((corner[0] - center[0]).hypot(corner[1] - center[1]));
+        }
+    }
+    // Include absolute coordinate error as well as the cell's radius. This
+    // remains conservative for off-center crops and every boundary probe.
+    let frame_extent = plane.step.abs() * (plane.width as f64 + plane.height as f64);
+    let padding = 64.0 * f64::EPSILON * (1.0 + center[0].abs() + center[1].abs() + frame_extent);
+    (center, (radius + padding).next_up())
+}
+
+#[derive(Clone, Copy)]
+enum ConstantRegion {
+    Dark,
+    Background,
+}
+
+fn constant_region(
+    center: Point,
+    radius: f64,
+    petals: &[field::Petal; 3],
+    has_corona: bool,
+    config: &EclipseConfig,
+) -> Option<ConstantRegion> {
+    if !radius.is_finite() {
+        return None;
+    }
+    match field::constant_transmission(center, radius, petals, config) {
+        Some(0.0) => Some(ConstantRegion::Dark),
+        Some(1.0)
+            if !has_corona
+                && petals.iter().all(|petal| field::crescent_is_zero(center, radius, petal)) =>
+        {
+            Some(ConstantRegion::Background)
+        }
+        _ => None,
+    }
+}
+
+fn constant_pixel(color: V3, aa: u32) -> V3 {
+    // Keep the original AA addition order: nine additions of color/9 need
+    // not have the same last bit as directly assigning color.
+    let weight = 1.0 / f64::from(aa * aa);
+    let mut value = V3::ZERO;
+    for _ in 0..aa {
+        for _ in 0..aa {
+            value += color * weight;
+        }
+    }
+    value
+}
+
 /// Render one exposure with joint opaque-mask, crescent and corona integration.
 ///
 /// Spatial refinement measures the complete composite, so independently averaged
 /// light cannot leak through a separately averaged moving opaque edge.
 pub fn render_linear(
+    source: &OrbitSeries,
+    time: f64,
+    config: &EclipseConfig,
+    camera: &Camera,
+    render: &RenderConfig,
+) -> SilkResult<EclipseFrame> {
+    render_linear_impl::<true>(source, time, config, camera, render)
+}
+
+fn render_linear_impl<const CACHE_CONSTANT_REGIONS: bool>(
     source: &OrbitSeries,
     time: f64,
     config: &EclipseConfig,
@@ -580,6 +647,15 @@ pub fn render_linear(
             }
         }
     }
+    let dark_pixel = constant_pixel(config.dark_color, render.aa);
+    // Reproduce the uncached transparent sample arithmetic, including signed
+    // zero behavior. Inactive tiles retain their existing literal background.
+    let mut clear_sample = render.background;
+    for _ in &petals {
+        clear_sample += V3::ZERO;
+    }
+    clear_sample = clear_sample * 1.0 + config.dark_color * 0.0;
+    let background_pixel = constant_pixel(clear_sample, render.aa);
     let tile_results: Vec<SilkResult<(Vec<V3>, Stats)>> = (0..nx * ny)
         .into_par_iter()
         .map(|index| {
@@ -590,6 +666,18 @@ pub fn render_linear(
             let mut pixels = vec![render.background; width * height];
             let mut stats = Stats::default();
             if active[index] {
+                if CACHE_CONSTANT_REGIONS {
+                    let (center, radius) = covering_ball(plane, x0, y0, width, height);
+                    if let Some(region) =
+                        constant_region(center, radius, &petals, !bins[index].is_empty(), config)
+                    {
+                        pixels.fill(match region {
+                            ConstantRegion::Dark => dark_pixel,
+                            ConstantRegion::Background => background_pixel,
+                        });
+                        return Ok((pixels, stats));
+                    }
+                }
                 let integrator = Integrator {
                     petals: &petals,
                     corona: &corona,
@@ -602,6 +690,22 @@ pub fn render_linear(
                 let weight = 1.0 / f64::from(count * count);
                 for y in 0..height {
                     for x in 0..width {
+                        if CACHE_CONSTANT_REGIONS {
+                            let (center, radius) = covering_ball(plane, x0 + x, y0 + y, 1, 1);
+                            if let Some(region) = constant_region(
+                                center,
+                                radius,
+                                &petals,
+                                !bins[index].is_empty(),
+                                config,
+                            ) {
+                                pixels[y * width + x] = match region {
+                                    ConstantRegion::Dark => dark_pixel,
+                                    ConstantRegion::Background => background_pixel,
+                                };
+                                continue;
+                            }
+                        }
                         let mut value = V3::ZERO;
                         for sy in 0..count {
                             for sx in 0..count {
@@ -904,6 +1008,87 @@ mod tests {
         // World x=0 is exactly the boundary between pixels15 and16.
         let bins = bin_range([[0.0, -0.25], [0.25, 0.25]], plane, 4).unwrap();
         assert_eq!([bins[0], bins[2]], [3, 4]);
+    }
+
+    #[test]
+    fn covering_balls_include_boundary_probes_with_large_absolute_camera_offsets() {
+        for target in [[0.37, -0.81], [1e12, -2e12]] {
+            let plane = Plane { target, step: 7.4 / 2160.0, width: 3840, height: 2160 };
+            for (x, y, width, height) in [(1371, 653, 4, 4), (3839, 2159, 1, 1), (0, 0, 3, 2)] {
+                let (center, radius) = covering_ball(plane, x, y, width, height);
+                assert!(radius.is_finite());
+                for sy in 0..=16 {
+                    for sx in 0..=16 {
+                        let point = plane.world(
+                            x as f64 + width as f64 * f64::from(sx) / 16.0,
+                            y as f64 + height as f64 * f64::from(sy) / 16.0,
+                        );
+                        assert!((point[0] - center[0]).hypot(point[1] - center[1]) <= radius);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn constant_regions_ignore_buried_corona_but_require_empty_clear_bins() {
+        let c = config();
+        let petals = c.petals.map(|shape| field::Petal::new(shape, [0.0; 2], 1.0));
+        assert!(matches!(
+            constant_region([0.0; 2], 0.01, &petals, true, &c),
+            Some(ConstantRegion::Dark)
+        ));
+        assert!(matches!(
+            constant_region([10.0, 10.0], 0.01, &petals, false, &c),
+            Some(ConstantRegion::Background)
+        ));
+        assert!(constant_region([10.0, 10.0], 0.01, &petals, true, &c).is_none());
+    }
+
+    #[test]
+    fn constant_region_cache_preserves_visible_pixel_bits_for_shifted_cameras() {
+        let source = source(true);
+        let mut c = config();
+        // Resolve the thumbnail's silhouette without changing the strict local
+        // error tolerance or the production recipe's edge/refinement settings.
+        c.edge_width = 0.03;
+        c.max_spatial_depth = 8;
+        let mut r = RenderConfig { width: 32, height: 24, aa: 3, ..render() };
+        let workers = rayon::ThreadPoolBuilder::new().num_threads(3).build().unwrap();
+        for (target, time) in [([0.0, 0.0], 0.17), ([-0.43, 0.29], 0.63)] {
+            let camera = Camera {
+                position: V3::new(target[0], target[1], 12.0),
+                target: V3::new(target[0], target[1], 0.0),
+                ..camera()
+            };
+            let uncached = render_linear_impl::<false>(&source, time, &c, &camera, &r).unwrap();
+            let cached = workers
+                .install(|| render_linear_impl::<true>(&source, time, &c, &camera, &r))
+                .unwrap();
+            assert!(uncached.pixels.iter().any(|value| maximum_channel(*value) > 0.005));
+            assert!(cached.diagnostics.accepted_cells < uncached.diagnostics.accepted_cells);
+            assert_eq!(cached.diagnostics.refinements, uncached.diagnostics.refinements);
+            for (index, (&a, &b)) in cached.pixels.iter().zip(&uncached.pixels).enumerate() {
+                for axis in 0..3 {
+                    assert_eq!(
+                        a.axis(axis).to_bits(),
+                        b.axis(axis).to_bits(),
+                        "pixel {index}, channel {axis}"
+                    );
+                }
+            }
+            assert_eq!(
+                cached.diagnostics.minimum_linear_channel.to_bits(),
+                uncached.diagnostics.minimum_linear_channel.to_bits()
+            );
+            assert_eq!(
+                cached.diagnostics.maximum_linear_channel.to_bits(),
+                uncached.diagnostics.maximum_linear_channel.to_bits()
+            );
+            // Also exercise signed-zero arithmetic and untouched inactive tiles.
+            r.background.x = -0.0;
+            c.dark_color.z = -0.0;
+        }
     }
 
     #[test]

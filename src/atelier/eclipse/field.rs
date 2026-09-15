@@ -360,6 +360,76 @@ impl Petal {
     }
 }
 
+/// Prove that transmission is constant throughout a closed world-space ball.
+///
+/// Signed distance is 1-Lipschitz. Subtracting the ball radius from a proven
+/// center clearance therefore bounds every point without evaluating or
+/// approximating its light. `None` retains ordinary per-point integration.
+pub(super) fn constant_transmission(
+    center: Point,
+    radius: f64,
+    petals: &[Petal; 3],
+    config: &EclipseConfig,
+) -> Option<f64> {
+    if !valid_ball(center, radius) {
+        return None;
+    }
+    let count = petals.iter().filter(|petal| petal.shape.enabled).count();
+    if count == 0 {
+        return Some(1.0);
+    }
+    let dark_clearance = config.edge_width.next_up();
+    let clear_clearance = (config.edge_width + config.smooth_join * (count as f64).ln()).next_up();
+    let mut all_clear = true;
+    for petal in petals.iter().filter(|petal| petal.shape.enabled) {
+        let (inside, clearance) = ball_clearance(center, radius, petal);
+        if inside && clearance.is_finite() && clearance >= dark_clearance {
+            return Some(0.0);
+        }
+        if inside || clearance < clear_clearance || !clearance.is_finite() {
+            all_clear = false;
+        }
+    }
+    all_clear.then_some(1.0)
+}
+
+/// Prove that this petal emits no broad crescent light anywhere in a world ball.
+/// The unsigned distance to the shifted contour is also 1-Lipschitz, on both
+/// sides of the contour. This does not classify or discard any corona segment.
+pub(super) fn crescent_is_zero(center: Point, radius: f64, petal: &Petal) -> bool {
+    if !petal.shape.enabled || petal.shape.light_gain == 0.0 {
+        return true;
+    }
+    if !valid_ball(center, radius) {
+        return false;
+    }
+    let shifted = subtract(center, petal.shape.light_offset);
+    if !shifted.iter().all(|v| v.is_finite()) {
+        return false;
+    }
+    let (_, clearance) = ball_clearance(shifted, radius, petal);
+    clearance.is_finite() && clearance >= (4.0 * petal.shape.light_sigma).next_up()
+}
+
+fn valid_ball(center: Point, radius: f64) -> bool {
+    radius.is_finite() && radius >= 0.0 && center.iter().all(|v| v.is_finite())
+}
+
+fn ball_clearance(center: Point, radius: f64, petal: &Petal) -> (bool, f64) {
+    let (inside, lower) = petal.distance_lower_bound(center);
+    // Round only toward uncertainty: a tile touching a transition keeps the
+    // original shader. This covers coordinate subtraction and the arithmetic
+    // of the existing Lipschitz lower bounds for validated finite geometry.
+    let magnitude = 1.0
+        + center[0].abs().max(center[1].abs())
+        + petal.center[0].abs().max(petal.center[1].abs())
+        + petal.semi_axes[0].max(petal.semi_axes[1])
+        + lower.abs()
+        + radius;
+    let padding = 128.0 * f64::EPSILON * magnitude;
+    (inside, (lower - radius - padding).next_down())
+}
+
 /// Transmission of the symmetric common opaque union, in zero to one.
 pub(super) fn transmission(point: Point, petals: &[Petal; 3], config: &EclipseConfig) -> f64 {
     let count = petals.iter().filter(|petal| petal.shape.enabled).count();
@@ -471,6 +541,16 @@ fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn probe_ball(center: Point, radius: f64, mut check: impl FnMut(Point)) {
+        check(center);
+        for fraction in [0.5, 1.0] {
+            for index in 0..48 {
+                let (s, c) = (TAU * f64::from(index) / 48.0).sin_cos();
+                check([center[0] + radius * fraction * c, center[1] + radius * fraction * s]);
+            }
+        }
+    }
 
     fn assert_original_distance_bits(petal: &Petal, point: Point, requested: f64) {
         // Reproduce the old entry path, which always initialized its nearest
@@ -724,6 +804,162 @@ mod tests {
         assert!(!unproven.convex);
         for point in [[0.23, -0.37], [-0.9, 0.2], [0.1, 1.7], [1.6, -0.8]] {
             assert_original_distance_bits(&unproven, point, 1e-7);
+        }
+    }
+
+    #[test]
+    fn certified_transmission_balls_preserve_dense_original_shader_samples() {
+        let config = EclipseConfig::default();
+        let centers = [[-0.8, -0.3], [0.7, 0.2], [0.0, 1.0]];
+        let petals = std::array::from_fn(|i| Petal::new(config.petals[i], centers[i], 1.06));
+        let mut dark = 0;
+        let mut clear = 0;
+        for y in 0..=16 {
+            for x in 0..=20 {
+                let center = [-4.0 + 8.0 * f64::from(x) / 20.0, -3.5 + 7.0 * f64::from(y) / 16.0];
+                for radius in [0.0, 0.025, 0.09] {
+                    if let Some(value) = constant_transmission(center, radius, &petals, &config) {
+                        if value == 0.0 {
+                            dark += 1;
+                        } else {
+                            clear += 1;
+                        }
+                        probe_ball(center, radius, |point| {
+                            assert_eq!(
+                                transmission(point, &petals, &config),
+                                value,
+                                "center {center:?}, radius {radius}, point {point:?}"
+                            );
+                        });
+                    }
+                }
+            }
+        }
+        assert!(dark > 20 && clear > 200, "dark {dark}, clear {clear}");
+    }
+
+    #[test]
+    fn transition_touching_balls_stay_uncertain_and_enabled_count_sets_clear_reach() {
+        let config = EclipseConfig::default();
+        let circle = EclipsePetalConfig {
+            semi_axes: [1.0; 2],
+            shear: 0.0,
+            shoulder: 0.0,
+            angle_degrees: 0.0,
+            ..config.petals[0]
+        };
+        let radius = 0.1;
+        let single = [
+            Petal::new(circle, [0.0; 2], 1.0),
+            Petal::new(EclipsePetalConfig { enabled: false, ..circle }, [0.0; 2], 1.0),
+            Petal::new(EclipsePetalConfig { enabled: false, ..circle }, [0.0; 2], 1.0),
+        ];
+        let touch = [1.0 + config.edge_width + radius, 0.0];
+        assert_eq!(constant_transmission(touch, radius, &single, &config), None);
+        let clear = [touch[0] + 1e-6, 0.0];
+        assert_eq!(constant_transmission(clear, radius, &single, &config), Some(1.0));
+        probe_ball(clear, radius, |p| assert_eq!(transmission(p, &single, &config), 1.0));
+        let crossing = [touch[0] - 0.001, 0.0];
+        assert_eq!(constant_transmission(crossing, radius, &single, &config), None);
+        assert!(transmission([crossing[0] - radius, 0.0], &single, &config) < 1.0);
+
+        let lower = single[0].distance_lower_bound([0.0; 2]).1;
+        let proof_touch = lower - config.edge_width;
+        assert_eq!(constant_transmission([0.0; 2], proof_touch, &single, &config), None);
+        assert_eq!(
+            constant_transmission([0.0; 2], proof_touch - 1e-6, &single, &config),
+            Some(0.0)
+        );
+        let dark_crossing = [1.0 - config.edge_width - radius + 0.001, 0.0];
+        assert_eq!(constant_transmission(dark_crossing, radius, &single, &config), None);
+        assert!(transmission([dark_crossing[0] + radius, 0.0], &single, &config) > 0.0);
+
+        for count in 2..=3 {
+            let petals = std::array::from_fn(|i| {
+                Petal::new(EclipsePetalConfig { enabled: i < count, ..circle }, [0.0; 2], 1.0)
+            });
+            let join = config.smooth_join * (count as f64).ln();
+            let too_close = [1.0 + radius + config.edge_width + 0.5 * join, 0.0];
+            assert_eq!(constant_transmission(too_close, radius, &petals, &config), None);
+            assert!(transmission([too_close[0] - radius, 0.0], &petals, &config) < 1.0);
+            let clear = [1.0 + radius + config.edge_width + join + 1e-6, 0.0];
+            assert_eq!(constant_transmission(clear, radius, &petals, &config), Some(1.0));
+        }
+        let disabled = [single[1]; 3];
+        assert_eq!(constant_transmission([0.0; 2], 100.0, &disabled, &config), Some(1.0));
+        for invalid in [-1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(constant_transmission([0.0; 2], invalid, &single, &config), None);
+        }
+    }
+
+    #[test]
+    fn certified_zero_crescent_balls_preserve_both_sides_of_the_complete_light_band() {
+        let config = EclipseConfig::default();
+        let mut certified = 0;
+        for shape in config.petals {
+            let petal = Petal::new(shape, [0.23, -0.37], 0.94);
+            let bounds = petal.bounds(4.0 * shape.light_sigma + 0.20);
+            for y in 0..=12 {
+                for x in 0..=16 {
+                    let center = [
+                        bounds[0][0]
+                            + (bounds[1][0] - bounds[0][0]) * f64::from(x) / 16.0
+                            + shape.light_offset[0],
+                        bounds[0][1]
+                            + (bounds[1][1] - bounds[0][1]) * f64::from(y) / 12.0
+                            + shape.light_offset[1],
+                    ];
+                    for radius in [0.0, 0.025, 0.09] {
+                        if crescent_is_zero(center, radius, &petal) {
+                            certified += 1;
+                            probe_ball(center, radius, |point| {
+                                assert_eq!(crescent(point, &petal, &config), V3::ZERO);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        assert!(certified > 300, "only {certified} zero balls");
+    }
+
+    #[test]
+    fn shifted_crescent_cutoff_touching_balls_never_discard_visible_light() {
+        let config = EclipseConfig::default();
+        let shape = EclipsePetalConfig {
+            semi_axes: [1.0; 2],
+            shear: 0.0,
+            shoulder: 0.0,
+            angle_degrees: 0.0,
+            light_sigma: 0.1,
+            light_offset: [0.17, -0.11],
+            ..config.petals[0]
+        };
+        let petal = Petal::new(shape, [0.0; 2], 1.0);
+        let radius = 0.1;
+        let touch = add(shape.light_offset, [1.0 + 4.0 * shape.light_sigma + radius, 0.0]);
+        assert!(!crescent_is_zero(touch, radius, &petal));
+        let zero = [touch[0] + 1e-6, touch[1]];
+        assert!(crescent_is_zero(zero, radius, &petal));
+        probe_ball(zero, radius, |p| assert_eq!(crescent(p, &petal, &config), V3::ZERO));
+        let crossing = [touch[0] - 0.001, touch[1]];
+        assert!(!crescent_is_zero(crossing, radius, &petal));
+        assert!(
+            crescent([crossing[0] - radius, crossing[1]], &petal, &config).length_squared() > 0.0
+        );
+        assert!(crescent_is_zero(shape.light_offset, radius, &petal));
+        probe_ball(shape.light_offset, radius, |p| {
+            assert_eq!(crescent(p, &petal, &config), V3::ZERO);
+        });
+        for changed in [
+            EclipsePetalConfig { enabled: false, ..shape },
+            EclipsePetalConfig { light_gain: 0.0, ..shape },
+        ] {
+            let absent = Petal::new(changed, [0.0; 2], 1.0);
+            assert!(crescent_is_zero([0.0; 2], 10.0, &absent));
+        }
+        for invalid in [-1.0, f64::INFINITY, f64::NAN] {
+            assert!(!crescent_is_zero([0.0; 2], invalid, &petal));
         }
     }
 }
