@@ -404,3 +404,75 @@ This section supersedes the earlier progress snapshots above.
 - Eclipse Garden remains design-only in `docs/eclipse-garden-design.md` until
   Engraving's visual treatment is selected. All six films, motion review, and
   final collection delivery remain the task; it is not complete at two films.
+
+### Engraving selection and sixth-study implementation
+
+- Engraving v17 is frozen at source commit `5de6878`, with archived source,
+  executable SHA and build metadata. Its 104 atelier tests, 14 CLI tests and
+  native all-target Clippy passed. A nonzero-shutter legacy Engraving image has
+  identical PNG bytes between v16 and v17; the low-resolution compatibility
+  probe used depth eight to resolve its unusually coarse boundary pixels.
+- The selected visual treatment is the finer `90/100/76` engraving with the
+  curved mouths, exposure .70 stops and copper strength .65. Recipe:
+  `tools/atelier/recipes/05-engraving-b7.json` / `configs/05-engraving.json`.
+  Temporal refinement ceiling is six, retaining the original tolerances,
+  sixteen exposure cells and 2×2 analytic spatial cells. The higher ceiling
+  changes no result unless more integration is necessary.
+- Native 4K first/last and quarter/three-quarter stills exist under
+  `05-engraving/v17-luminous-*`; comparison proofs at 900 and 1670 use the same
+  finer geometry with the slightly darker .35-stop exposure. All keep open
+  centers and curved mouths; the full-source-independent crop bound remains
+  positive even with the larger lobes. Full-quality opening 0–47 and encounter
+  1646–1717 motion passages are rendering in four `v17-motion-*` ranges. The
+  full Engraving film has not started before those motion checks.
+- `examples/atelier_convergence.rs` compares actual linear renderer output in
+  aligned native crops, with doubled spatial/temporal reference samples and
+  optional doubled Light source grids. Its four semantic tests pass; native
+  source tests and all-target Clippy passed after adding continuous velocity
+  bounds. In Engraving's 192×192 fast-passage crop at (2120,800), the doubled
+  reference differs by 0.0169% foreground-weighted relative luminance RMS;
+  maximum absolute RGB difference is .000389. Both crops were inspected.
+  Evidence: `05-engraving/qa-convergence-fast.json` and its PNG directory.
+- Light's fast-cusp comparison doubles spatial resolution, shutter samples and
+  both source-grid axes in a 256×256 crop at (1704,660), frame 1670. It is still
+  running; do not treat that reference as a passed check yet.
+- Eclipse implementation now lives in `atelier/eclipse.rs`, `eclipse/field.rs`
+  and `eclipse/corona.rs`. It uses corrected closest-contour distances throughout
+  the luminous bands, persistent base-pose arc-length corona anchors, finite
+  Gaussian segments, symmetric opaque union, and joint light/mask integration.
+  The main film path preserves legacy hashes and records every Eclipse exposure.
+- The first combined Eclipse test run found a coarse synthetic-image refinement
+  limit; 121 tests passed and one failed. Independent numerical review also
+  found a center-vs-four-midpoint cancellation case for a Gaussian, so the
+  quadrature is being strengthened before any Eclipse proof or full film.
+  Neither Eclipse's implementation nor its artistic treatment is final yet.
+- Live in-app gallery QA confirmed that entering Compare selects Calligraphy
+  and Loom as distinct films. Loom's short description now matches its actual
+  woven spindle treatment. The gallery still presents two finished films.
+
+
+### Eclipse v18 compiled; first full-quality proof started
+
+The strengthened joint quadrature resolves the reported Gaussian cancellation
+cases. The complete current renderer passes 127 atelier tests, 15 CLI tests and
+native all-target Clippy. V18 includes exact outside-distance optimization,
+four-pixel curve bins with outward boundary inclusion, stable tanh-derivative
+bounds and strict receipt-to-recipe integration checks. It preserves every
+archived legacy recipe hash. Eclipse's first full 4K/128-exposure proof at frame
+900 is running with 32 workers; local controller log is
+`/tmp/eclipse-v18-pearl-900.log`. The source, shutter and all 1,536 hairs/body
+remain at the planned detail from this first proof.
+
+Whole-source Eclipse bounds: maximum 19.9971 pixels/frame, .078114 pixels between
+128 exposure centers, and at least 60.699 pixels of conservative crop margin.
+Worst interval1659 belongs to body C. The fixed recipe is
+`configs/eclipse-v18-pearl.json`, with audit in `06-eclipse/v18-motion-audit.json`.
+The first art proof is still pending; a compiled renderer is not a finished film.
+
+Light's 8×-work reference comparison completed. Foreground-weighted linear
+luminance RMS differs by2.457%, concentrated in the brightest HDR cusp; crop
+integrated luminance is .906% higher in the reference. After the common tone
+curve the PNG crops have SSIM .999904, and visual inspection showed the same
+curves/fringes without a clear artistic improvement. Evidence remains in
+`04-light/qa-convergence-fast.json` and its native/reference PNG directory.
+This supports the tested crop; full-film motion review remains outstanding.

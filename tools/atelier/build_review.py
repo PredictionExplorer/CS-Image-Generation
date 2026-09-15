@@ -15,7 +15,7 @@ STUDIES = [
     (
         "02-loom",
         "Gravity Loom",
-        "Pairwise relationships become open arches and fans of luminous thread.",
+        "Gold and bronze threads form an open weave that bends with the bodies' relationships.",
     ),
     (
         "03-aurora",

@@ -13,8 +13,8 @@ use std::{
 };
 use three_body_problem::{
     atelier::{
-        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, engraving,
-        light, loom, render,
+        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, eclipse,
+        engraving, light, loom, render,
     },
     silk::cache,
 };
@@ -31,6 +31,15 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Bound full-source Eclipse motion and the fixed camera crop.
+    AuditEclipse {
+        #[arg(long)]
+        orbit: PathBuf,
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Write the fully specified default art recipe.
     Config {
         #[arg(long)]
@@ -110,6 +119,8 @@ struct StudyConfig {
     light: Option<light::LightConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engraving: Option<engraving::EngravingConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    eclipse: Option<eclipse::EclipseConfig>,
 }
 
 impl Default for StudyConfig {
@@ -128,6 +139,7 @@ impl Default for StudyConfig {
             aurora: None,
             light: None,
             engraving: None,
+            eclipse: None,
         }
     }
 }
@@ -159,6 +171,8 @@ struct Receipt {
     light_samples: Option<Vec<light::LightDiagnostics>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engraving_samples: Option<Vec<engraving::EngravingDiagnostics>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    eclipse_samples: Option<Vec<eclipse::EclipseDiagnostics>>,
 }
 
 fn json(path: &Path, value: &impl Serialize) -> SilkResult<()> {
@@ -207,6 +221,7 @@ struct ArtFrame {
     geometry: [usize; 3],
     light: Option<light::LightDiagnostics>,
     engraving: Option<engraving::EngravingDiagnostics>,
+    eclipse: Option<eclipse::EclipseDiagnostics>,
 }
 
 fn art_frame(
@@ -215,7 +230,23 @@ fn art_frame(
     raw_cell_interval: [f64; 2],
     config: &StudyConfig,
 ) -> SilkResult<ArtFrame> {
-    if config.kind == "light" {
+    if config.kind == "eclipse" {
+        let frame = eclipse::render_linear(
+            source,
+            time,
+            config.eclipse.as_ref().ok_or("Missing Eclipse Garden parameters")?,
+            &config.camera,
+            &config.render,
+        )?;
+        frame.diagnostics.validate()?;
+        Ok(ArtFrame {
+            pixels: frame.pixels,
+            geometry: [0; 3],
+            light: None,
+            engraving: None,
+            eclipse: Some(frame.diagnostics),
+        })
+    } else if config.kind == "light" {
         let frame = light::render_linear(
             source,
             time,
@@ -229,6 +260,7 @@ fn art_frame(
             geometry: [0; 3],
             light: Some(frame.diagnostics),
             engraving: None,
+            eclipse: None,
         })
     } else if config.kind == "engraving" {
         let frame = engraving::render_linear(
@@ -245,6 +277,7 @@ fn art_frame(
             geometry: [0; 3],
             light: None,
             engraving: Some(frame.diagnostics),
+            eclipse: None,
         })
     } else {
         let scene = art_scene(source, time, config)?;
@@ -253,6 +286,7 @@ fn art_frame(
             geometry: [scene.vertices.len(), scene.triangles.len(), scene.strands.len()],
             light: None,
             engraving: None,
+            eclipse: None,
         })
     }
 }
@@ -267,8 +301,54 @@ fn main() -> SilkResult<()> {
     }
     let started = Instant::now();
     match args.command {
+        Action::AuditEclipse { orbit, config, output } => {
+            let c: StudyConfig = serde_json::from_slice(&fs::read(&config)?)?;
+            if c.kind != "eclipse" {
+                return Err("Motion audit requires an Eclipse recipe".into());
+            }
+            let data = cache::read_orbit(&orbit)?;
+            let source = OrbitSeries::new(&data)?;
+            let audit = eclipse::audit_motion(
+                &source,
+                c.eclipse.as_ref().ok_or("Missing Eclipse parameters")?,
+                &c.camera,
+                &c.render,
+                c.frames,
+                c.shutter_fraction,
+                c.temporal_samples,
+            )?;
+            json(
+                &output,
+                &serde_json::json!({"source_seed":data.seed,"orbit_sha256":cache::file_hash(&orbit)?,"config_sha256":cache::file_hash(&config)?,"audit":audit}),
+            )?;
+            eprintln!("Motion audit: {}", output.display());
+        }
         Action::Config { output, preset } => {
             let config = match preset.as_str() {
+                "eclipse" => StudyConfig {
+                    kind: "eclipse".into(),
+                    temporal_samples: 128,
+                    calligraphy: None,
+                    eclipse: Some(eclipse::EclipseConfig::default()),
+                    prelude_fraction: 0.0,
+                    camera: Camera {
+                        position: V3::new(0.0, 0.0, 12.0),
+                        target: V3::ZERO,
+                        orthographic_height: 7.4,
+                        ..Camera::default()
+                    },
+                    render: RenderConfig {
+                        aa: 3,
+                        exposure: 0.0,
+                        background: V3::new(0.0005, 0.00035, 0.00065),
+                        key_strength: 0.0,
+                        rim_strength: 0.0,
+                        fill_strength: 0.0,
+                        bloom_strength: 0.0,
+                        ..RenderConfig::default()
+                    },
+                    ..StudyConfig::default()
+                },
                 "engraving" => StudyConfig {
                     kind: "engraving".into(),
                     temporal_samples: 16,
@@ -413,6 +493,14 @@ fn main() -> SilkResult<()> {
                 config.render.aa = aa;
             }
             match config.kind.as_str() {
+                "eclipse" => {
+                    config.eclipse.get_or_insert_with(eclipse::EclipseConfig::default);
+                    config.calligraphy = None;
+                    config.loom = None;
+                    config.aurora = None;
+                    config.light = None;
+                    config.engraving = None;
+                }
                 "calligraphy" => {
                     config.calligraphy.get_or_insert_with(calligraphy::CalligraphyConfig::default);
                     config.loom = None;
@@ -445,6 +533,9 @@ fn main() -> SilkResult<()> {
                     config.light = None;
                 }
                 _ => return Err(format!("Unsupported study: {}", config.kind).into()),
+            }
+            if config.kind != "eclipse" {
+                config.eclipse = None;
             }
             if config.kind != "engraving" {
                 config.engraving = None;
@@ -511,6 +602,7 @@ fn main() -> SilkResult<()> {
                         && receipt.png_sha256 == cache::file_hash(&path)?
                         && verify_light_samples(&manifest.config, frame, &receipt).is_ok()
                         && verify_engraving_samples(&manifest.config, frame, &receipt).is_ok()
+                        && verify_eclipse_samples(&manifest.config, frame, &receipt).is_ok()
                     {
                         let dims = image::image_dimensions(&path)?;
                         if dims == (manifest.config.render.width, manifest.config.render.height) {
@@ -526,6 +618,7 @@ fn main() -> SilkResult<()> {
                 let mut geometry = [0; 3];
                 let mut light_samples = Vec::new();
                 let mut engraving_samples = Vec::new();
+                let mut eclipse_samples = Vec::new();
                 let mut shutter_start = fraction;
                 let mut shutter_end = fraction;
                 for sample in 0..c.temporal_samples {
@@ -543,6 +636,9 @@ fn main() -> SilkResult<()> {
                     if let Some(diagnostics) = product.engraving {
                         engraving_samples.push(diagnostics);
                     }
+                    if let Some(diagnostics) = product.eclipse {
+                        eclipse_samples.push(diagnostics);
+                    }
                     let linear = product.pixels;
                     let weight = 1.0 / c.temporal_samples as f64;
                     if accumulated.is_empty() {
@@ -557,7 +653,7 @@ fn main() -> SilkResult<()> {
                             .zip(linear.par_iter())
                             .for_each(|(a, b)| *a += *b * weight);
                     }
-                    if matches!(c.kind.as_str(), "light" | "engraving") {
+                    if matches!(c.kind.as_str(), "light" | "engraving" | "eclipse") {
                         eprintln!(
                             "{} frame {frame}: shutter sample {}/{}, {:.1}s elapsed",
                             c.kind,
@@ -586,6 +682,7 @@ fn main() -> SilkResult<()> {
                         light_samples: (!light_samples.is_empty()).then_some(light_samples),
                         engraving_samples: (!engraving_samples.is_empty())
                             .then_some(engraving_samples),
+                        eclipse_samples: (!eclipse_samples.is_empty()).then_some(eclipse_samples),
                     },
                 )?;
                 eprintln!(
@@ -743,6 +840,45 @@ fn expected_sample_interval(config: &StudyConfig, frame: usize, sample: usize) -
     })
 }
 
+fn verify_eclipse_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -> SilkResult<()> {
+    if config.kind != "eclipse" {
+        return if receipt.eclipse_samples.is_none() {
+            Ok(())
+        } else {
+            Err("Non-Eclipse frame has unexpected Eclipse diagnostics".into())
+        };
+    }
+    let samples = receipt.eclipse_samples.as_ref().ok_or("Missing Eclipse exposure diagnostics")?;
+    if samples.len() != config.temporal_samples {
+        return Err("Incomplete Eclipse exposure diagnostics".into());
+    }
+    let style = config.eclipse.as_ref().ok_or("Missing Eclipse parameters")?;
+    let expected_curves = if style.corona_fraction == 0.0 {
+        0
+    } else {
+        style.petals.iter().filter(|p| p.enabled && p.light_gain > 0.0).count() * style.corona_hairs
+    };
+    for (index, sample) in samples.iter().enumerate() {
+        sample.validate()?;
+        if sample.spatial_subcells != config.render.aa
+            || sample.integration_tolerance.to_bits() != style.integration_tolerance.to_bits()
+            || sample.max_spatial_depth > style.max_spatial_depth
+        {
+            return Err("Eclipse diagnostics do not match the recipe's integration settings".into());
+        }
+        if sample.curves != expected_curves
+            || sample.segments != expected_curves * style.corona_segments
+        {
+            return Err("Eclipse diagnostics have inconsistent corona geometry".into());
+        }
+        if sample.source_fraction.to_bits() != expected_sample_time(config, frame, index).to_bits()
+        {
+            return Err("Mistimed Eclipse exposure diagnostics".into());
+        }
+    }
+    Ok(())
+}
+
 fn verify_engraving_samples(
     config: &StudyConfig,
     frame: usize,
@@ -808,6 +944,7 @@ fn verify_assembly_frame(
     let receipt: Receipt = serde_json::from_slice(&receipt_bytes)?;
     verify_light_samples(&chunk.manifest.config, frame, &receipt)?;
     verify_engraving_samples(&chunk.manifest.config, frame, &receipt)?;
+    verify_eclipse_samples(&chunk.manifest.config, frame, &receipt)?;
     if receipt.recipe_sha256 != chunk.recipe_sha256 {
         return Err(format!("Frame {frame} receipt does not match its source chunk recipe").into());
     }
@@ -1072,6 +1209,7 @@ fn encode(
         let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(&path))?)?;
         verify_light_samples(c, frame, &receipt)?;
         verify_engraving_samples(c, frame, &receipt)?;
+        verify_eclipse_samples(c, frame, &receipt)?;
         if receipt.recipe_sha256 != hash || receipt.png_sha256 != cache::file_hash(&path)? {
             return Err(format!("Frame {frame} failed its integrity check").into());
         }
@@ -1183,6 +1321,65 @@ mod assembly_tests {
     use super::*;
 
     #[test]
+    fn eclipse_receipts_require_complete_correctly_timed_geometry_records() {
+        let config = StudyConfig {
+            kind: "eclipse".into(),
+            calligraphy: None,
+            eclipse: Some(eclipse::EclipseConfig::default()),
+            temporal_samples: 2,
+            ..StudyConfig::default()
+        };
+        let diagnostic = |time| eclipse::EclipseDiagnostics {
+            source_fraction: time,
+            centers: [[0.0; 2]; 3],
+            axis_factors: [1.0; 3],
+            curves: 4608,
+            segments: 294_912,
+            spatial_subcells: config.render.aa,
+            accepted_cells: 1,
+            refinements: 0,
+            max_spatial_depth: 0,
+            max_accepted_error_indicator: 0.0,
+            integration_tolerance: 1e-4,
+            max_chord_error_pixels: 0.002,
+            estimated_corona_luminance: 0.1,
+            minimum_linear_channel: 0.0,
+            maximum_linear_channel: 1.0,
+        };
+        let mut receipt = Receipt {
+            recipe_sha256: String::new(),
+            png_sha256: String::new(),
+            source_fraction: 0.0,
+            shutter_start_fraction: 0.0,
+            shutter_end_fraction: 0.0,
+            vertices: 0,
+            triangles: 0,
+            strands: 0,
+            seconds: 0.0,
+            light_samples: None,
+            engraving_samples: None,
+            eclipse_samples: None,
+        };
+        assert!(verify_eclipse_samples(&StudyConfig::default(), 0, &receipt).is_ok());
+        assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
+        receipt.eclipse_samples =
+            Some((0..2).map(|i| diagnostic(expected_sample_time(&config, 0, i))).collect());
+        verify_eclipse_samples(&config, 0, &receipt).unwrap();
+        receipt.eclipse_samples.as_mut().unwrap()[0].integration_tolerance = 0.002;
+        assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
+        receipt.eclipse_samples.as_mut().unwrap()[0].integration_tolerance = 1e-4;
+        assert!(verify_eclipse_samples(&StudyConfig::default(), 0, &receipt).is_err());
+        receipt.eclipse_samples.as_mut().unwrap()[1].source_fraction = 0.4;
+        assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
+        receipt.eclipse_samples.as_mut().unwrap()[1] =
+            diagnostic(expected_sample_time(&config, 0, 1));
+        receipt.eclipse_samples.as_mut().unwrap()[1].segments -= 1;
+        assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
+        receipt.eclipse_samples.as_mut().unwrap().pop();
+        assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
+    }
+
+    #[test]
     fn archived_v03_manifest_keeps_its_original_recipe_hash() {
         let manifest: Manifest =
             serde_json::from_str(include_str!("../../tests/fixtures/atelier-v03-manifest.json"))
@@ -1273,6 +1470,7 @@ mod assembly_tests {
             seconds: 0.0,
             light_samples: None,
             engraving_samples: None,
+            eclipse_samples: None,
         };
         assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_light_samples(&config, 0, &receipt).is_err());
@@ -1315,6 +1513,7 @@ mod assembly_tests {
             seconds: 0.0,
             light_samples: None,
             engraving_samples: None,
+            eclipse_samples: None,
         };
         assert!(verify_engraving_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_engraving_samples(&config, 0, &receipt).is_err());
@@ -1370,6 +1569,7 @@ mod assembly_tests {
                     seconds: 0.25,
                     light_samples: None,
                     engraving_samples: None,
+                    eclipse_samples: None,
                 },
             )
             .unwrap();

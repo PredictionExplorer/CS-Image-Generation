@@ -1,0 +1,156 @@
+{
+  "kind": "engraving",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 16,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.0,
+  "camera": {
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 12.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 6.8
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 2,
+    "exposure": 0.7,
+    "background": {
+      "x": 0.003,
+      "y": 0.0018,
+      "z": 0.0048
+    },
+    "key_strength": 0.0,
+    "rim_strength": 0.0,
+    "fill_strength": 0.0,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.0
+  },
+  "engraving": {
+    "source_axes": [
+      {
+        "x": 0.9775173637530767,
+        "y": 0.07416319035834007,
+        "z": -0.19738192611560845
+      },
+      {
+        "x": -0.13152225722147193,
+        "y": 0.946134321388188,
+        "z": -0.29585763763452494
+      },
+      {
+        "x": 0.16480806842082663,
+        "y": 0.31516609444416055,
+        "z": 0.9346168377983626
+      }
+    ],
+    "source_scales": [
+      1.5,
+      1.5,
+      1.5
+    ],
+    "source_motion": [
+      2.7,
+      1.35
+    ],
+    "rosettes": [
+      {
+        "enabled": true,
+        "semi_axes": [
+          2.12,
+          1.17
+        ],
+        "angle_degrees": -24.0,
+        "mouth_angle_degrees": -38.0,
+        "carrier_cycles": 90,
+        "beat_cycles": 2.7,
+        "saddle_cycles": 1.8,
+        "tint": {
+          "x": 0.72,
+          "y": 0.82,
+          "z": 0.9
+        },
+        "strength": 1.0,
+        "radial_twist": 0.8,
+        "lobe_amplitudes": [
+          0.1,
+          0.035
+        ]
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          1.83,
+          1.45
+        ],
+        "angle_degrees": 48.0,
+        "mouth_angle_degrees": 104.0,
+        "carrier_cycles": 100,
+        "beat_cycles": 3.1,
+        "saddle_cycles": -1.3,
+        "tint": {
+          "x": 0.35,
+          "y": 0.57,
+          "z": 0.69
+        },
+        "strength": 0.8,
+        "radial_twist": -0.65,
+        "lobe_amplitudes": [
+          0.1,
+          0.035
+        ]
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          1.6,
+          0.93
+        ],
+        "angle_degrees": 101.0,
+        "mouth_angle_degrees": 234.0,
+        "carrier_cycles": 76,
+        "beat_cycles": 2.3,
+        "saddle_cycles": 1.5,
+        "tint": {
+          "x": 0.72,
+          "y": 0.5,
+          "z": 0.39
+        },
+        "strength": 0.65,
+        "radial_twist": 1.0,
+        "lobe_amplitudes": [
+          0.1,
+          0.035
+        ]
+      }
+    ],
+    "radial_edges": [
+      0.28,
+      0.33,
+      0.96,
+      1.02
+    ],
+    "mouth_half_angle_degrees": 32.0,
+    "mouth_feather_degrees": 12.0,
+    "light_angle_degrees": 135.0,
+    "directional_floor": 0.35,
+    "gain": 0.85,
+    "phase_tolerance_radians": 0.03,
+    "envelope_tolerance": 0.01,
+    "max_spatial_depth": 5,
+    "max_temporal_depth": 6
+  }
+}

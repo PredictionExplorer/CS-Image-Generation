@@ -1,6 +1,7 @@
 # Eclipse Garden — first detailed design
 
-Design only. Implement after the fifth study is selected; use the same frozen
+Implemented in `src/atelier/eclipse.rs` and its field/corona modules. Visual
+proofs and film selection are in progress. Use the same frozen
 `0xb7f327f9f722` orbit, 1802 frames, 3840×2160 and 60 fps. All generation and
 rendering remain deterministic Rust CPU work with existing dependencies.
 
@@ -221,3 +222,49 @@ Archive the selected recipe, full-source bounds, spatial/temporal convergence
 crops, maximum per-sample displacement and union/filter diagnostics. Only after
 the visual proof passes should the complete film start; deliver both verified
 4K/60 movies, canonical frames and the same provenance as the other studies.
+
+
+## Implemented quality and first full-resolution proof
+
+The implementation follows the composition above, with these refinements:
+
+- Closest-contour distance replaces the uncorrected implicit-distance proxy
+  throughout the light bands. Analytic contour derivatives, safeguarded roots,
+  and conservative arc bounds handle near-boundary, inside and medial cases.
+  Certified convex outside queries bypass a redundant node scan. The optimized
+  and original distance paths agree bit for bit over 8,530 tested points.
+- Joint quadrature compares Gauss 2×2, Gauss 3×3 and boundary-touching tensor
+  Simpson estimates, returning Gauss 3×3. The independent estimates catch
+  concrete Gaussian/edge cancellations missed by simpler midpoint or two-rule
+  checks. These are numerical error indicators, supported by dense-reference
+  tests; they are not a general mathematical certificate for arbitrary fields.
+  Refinement exhaustion is an error, with no silent quality fallback.
+- Spatial strata remain 3×3, tolerance .0001 in linear RGB, maximum depth six.
+  Four-pixel tiles keep fine-hair candidate lists local. Projected bounds round
+  outward so boundary probes include both touching tiles. Body/hair/segment
+  accumulation order stays fixed across worker counts.
+- Fixed arc-length anchors use the undeformed recipe pose. Their theta and
+  long-hair identities never change. Every body has 1,536 hairs, including 36
+  longer hairs, each with 64 quadratic chords. Effective Gaussian width combines
+  the physical radius and .25 final-pixel reconstruction sigma. Six-sigma
+  support preserves tiny tails; finite longitudinal integration avoids segment
+  end beads. The .12 corona contribution is an explicitly estimated unoccluded
+  luminance ratio, not normalization from the visible image.
+- The full-source motion audit uses conservative Hermite velocity hulls,
+  stable outward bounds on tanh derivatives, and the exact anisotropic
+  normal/tangent rate. It includes the moving corona tips and source-driven
+  bend, not just the three centers. For the b7 pearl recipe, the worst bound is
+  19.9971 pixels/frame at interval 1659, body C. All 128 exposure samples remain:
+  the resulting step bound is .078114 pixels, below the .15-pixel criterion.
+- The fixed 7.4-height camera has at least 60.699 pixels of conservative crop
+  margin across the source, including the corona reconstruction support.
+  Evidence is `06-eclipse/v18-motion-audit.json` on the server.
+- The combined renderer passes 127 atelier tests, 15 CLI tests and native
+  all-target Clippy. A strict-lint-only loop adjustment followed the test run.
+  Receipts bind the exact exposure time, curve/segment count, AA, integration
+  tolerance and depth to the frozen recipe. Legacy manifest hash tests pass.
+
+Immutable v18 is rendering the first complete 4K, 128-exposure proof at frame
+900 in `06-eclipse/v18-pearl-900`, using `configs/eclipse-v18-pearl.json`.
+No Eclipse full film or artistic selection is claimed until actual proofs,
+convergence crops and motion have been reviewed.

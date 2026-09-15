@@ -319,6 +319,76 @@ impl OrbitSeries {
         ))
     }
 
+    /// Conservative componentwise velocity bounds per normalized source fraction.
+    ///
+    /// Velocity is the derivative of the fixed normalized world position with
+    /// respect to the visible fraction in `[0, 1]`, not per stored sample or
+    /// physical second. For a film of F frames, divide by F-1 to bound motion
+    /// over one frame interval; the original orbit's `dt` does not enter here.
+    /// Each touched Hermite interval contributes its complete quadratic Bezier
+    /// derivative hull, so partial queries can receive wider bounds than their
+    /// exact extrema. A point query uses the existing derivative evaluation.
+    /// At 0 and 1 this is the one-sided source derivative, not zero motion for
+    /// a shutter held outside the recording; the caller handles that hold.
+    ///
+    /// Outward padding includes the original position magnitudes because the
+    /// unchanged derivative evaluation can cancel large position terms even
+    /// when its velocity is tiny. Padding is scaled by the interval count and
+    /// covers derivative-control conversion, evaluation and unit conversion.
+    /// Returns `None` for invalid bodies, non-finite or reversed intervals, or
+    /// times outside `[0, 1]`, including available negative prehistory.
+    pub fn velocity_bounds(&self, body: usize, start: f64, end: f64) -> Option<(V3, V3)> {
+        if body >= 3 || !(0.0..=1.0).contains(&start) || !(start..=1.0).contains(&end) {
+            return None;
+        }
+        let segments = self.positions.len() - 1;
+        let fraction_scale = segments as f64;
+        let first = ((start * fraction_scale).floor() as usize).min(segments - 1);
+        let last = ((end * fraction_scale).floor() as usize).min(segments - 1);
+        let mut minimum = [f64::INFINITY; 3];
+        let mut maximum = [f64::NEG_INFINITY; 3];
+        let mut magnitude = [1.0_f64; 3];
+        for left in first..=last {
+            let p = self.positions[left][body];
+            let q = self.positions[left + 1][body];
+            let a = slope(&self.positions, body, left);
+            let b = slope(&self.positions, body, left + 1);
+            // Derivative controls of [p,p+a/3,q-b/3,q], expressed without
+            // subtracting nearby converted position controls. Bernstein's
+            // quadratic weights are nonnegative and sum to one on [0,1].
+            let controls = [a, (q - p) * 3.0 - a - b, b];
+            for axis in 0..3 {
+                for control in controls {
+                    minimum[axis] = minimum[axis].min(control.axis(axis));
+                    maximum[axis] = maximum[axis].max(control.axis(axis));
+                }
+                magnitude[axis] = magnitude[axis].max(
+                    p.axis(axis).abs()
+                        + q.axis(axis).abs()
+                        + a.axis(axis).abs()
+                        + b.axis(axis).abs(),
+                );
+            }
+        }
+        if start == end {
+            let velocity = evaluate(&self.positions, body, start).velocity;
+            minimum = std::array::from_fn(|axis| velocity.axis(axis));
+            maximum = minimum;
+        }
+        for axis in 0..3 {
+            // The local Hermite coordinate advances by `segments` per unit
+            // source fraction. Pad in those same final units, including the
+            // rounding of the multiplication, then round the bounds outward.
+            let padding = 256.0 * f64::EPSILON * magnitude[axis] * fraction_scale;
+            minimum[axis] = (minimum[axis] * fraction_scale - padding).next_down();
+            maximum[axis] = (maximum[axis] * fraction_scale + padding).next_up();
+        }
+        Some((
+            V3::new(minimum[0], minimum[1], minimum[2]),
+            V3::new(maximum[0], maximum[1], maximum[2]),
+        ))
+    }
+
     fn body_at(&self, body: usize, fraction: f64) -> BodySample {
         if fraction < 0.0 {
             return self.prelude_body_at(body, fraction);
@@ -979,6 +1049,145 @@ mod tests {
             let current = series.sample(time).unwrap();
             for body in 0..3 {
                 assert_same_bits(previous.bodies[body], current.bodies[body]);
+            }
+        }
+    }
+
+    #[test]
+    fn velocity_bounds_use_source_fraction_units_and_one_sided_cubic_endpoints() {
+        let samples =
+            [-1.0, 0.0, 1.0, 0.0].map(|x| [V3::new(x, 0.0, 0.0), V3::ZERO, V3::ZERO]).to_vec();
+        let original = orbit(samples);
+        let series = OrbitSeries::new(&original).unwrap();
+        assert_eq!(series.world_scale(), 2.0);
+        // The middle normalized cubic is x(u)=2u+2u^2-2u^3, with
+        // u=3*fraction-1. Its velocity peaks at fraction 4/9, not a knot.
+        for (fraction, expected) in
+            [(0.0, 6.0), (1.0 / 3.0, 6.0), (4.0 / 9.0, 8.0), (2.0 / 3.0, 0.0), (1.0, -6.0)]
+        {
+            let (minimum, maximum) = series.velocity_bounds(0, fraction, fraction).unwrap();
+            assert!(minimum.x <= expected && expected <= maximum.x);
+            assert!(minimum.y <= 0.0 && maximum.y >= 0.0);
+            assert!(minimum.z <= 0.0 && maximum.z >= 0.0);
+            assert!((maximum - minimum).length() < 1e-10);
+        }
+        let (minimum, maximum) = series.velocity_bounds(0, 0.35, 0.62).unwrap();
+        assert!(minimum.x <= 8.0 && maximum.x >= 8.0);
+        assert!(maximum.x > 6.0);
+        let mut another_cadence = original;
+        another_cadence.dt *= 1000.0;
+        let unchanged = OrbitSeries::new(&another_cadence).unwrap();
+        assert_eq!(series.velocity_bounds(0, 0.35, 0.62), unchanged.velocity_bounds(0, 0.35, 0.62));
+    }
+
+    #[test]
+    fn velocity_bounds_keep_linear_motion_units_when_sample_count_changes() {
+        for segments in [1, 4, 64] {
+            let samples = (0..=segments)
+                .map(|i| {
+                    let fraction = f64::from(i) / f64::from(segments);
+                    [V3::new(fraction, -0.5 * fraction, 0.25 * fraction); 3]
+                })
+                .collect();
+            let series = OrbitSeries::new(&orbit(samples)).unwrap();
+            for (start, end) in [(0.0, 1.0), (0.0, 0.0), (0.123, 0.789), (1.0, 1.0)] {
+                let (minimum, maximum) = series.velocity_bounds(0, start, end).unwrap();
+                for (axis, expected) in [4.0, -2.0, 1.0].into_iter().enumerate() {
+                    assert!(minimum.axis(axis) <= expected && expected <= maximum.axis(axis));
+                }
+                assert!((maximum - minimum).length() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn velocity_bounds_contain_dense_derivatives_and_cancellation_prone_point_queries() {
+        let samples = (0..=64)
+            .map(|i| {
+                std::array::from_fn(|body| {
+                    let t = f64::from(i) / 64.0 * TAU + body as f64;
+                    let x = if body == 0 { 1.0 + 1e-11 * t.sin() } else { t.sin() };
+                    V3::new(x, 0.7 * (3.7 * t).cos(), 0.4 * (5.3 * t).sin())
+                })
+            })
+            .collect();
+        let series = OrbitSeries::new(&orbit(samples)).unwrap();
+        let count = (series.positions.len() - 1) as f64;
+        let knot = 17.0_f64 / 64.0;
+        for (start, end) in [
+            (0.0, 1.0),
+            (0.007, 0.019),
+            (0.247, 0.251),
+            (0.873, 1.0),
+            (knot.next_down(), knot.next_up()),
+            (0.0, 0.0),
+            (0.422, 0.422),
+            (1.0, 1.0),
+        ] {
+            for body in 0..3 {
+                let (minimum, maximum) = series.velocity_bounds(body, start, end).unwrap();
+                assert!(minimum.is_finite() && maximum.is_finite());
+                for i in 0..=1000 {
+                    let time = start + (end - start) * f64::from(i) / 1000.0;
+                    let evaluated = evaluate(&series.positions, body, time);
+                    let actual = evaluated.velocity * count;
+                    for axis in 0..3 {
+                        assert!(
+                            (minimum.axis(axis)..=maximum.axis(axis)).contains(&actual.axis(axis)),
+                            "body {body}, interval {start}..{end}, time {time}, axis {axis}: {actual:?} outside {minimum:?}..{maximum:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // A stable difference-based derivative and the existing position-basis
+        // derivative can round differently near a large almost-static offset.
+        // Point bounds must enclose both, not just the evaluated center value.
+        for i in 0..=1000 {
+            let time = f64::from(i) / 1000.0;
+            let (minimum, maximum) = series.velocity_bounds(0, time, time).unwrap();
+            let value = evaluate(&series.positions, 0, time);
+            let p = series.positions[value.left][0];
+            let q = series.positions[value.left + 1][0];
+            let a = slope(&series.positions, 0, value.left);
+            let b = slope(&series.positions, 0, value.left + 1);
+            let middle = (q - p) * 3.0 - a - b;
+            let stable = (a * (1.0 - value.t).powi(2)
+                + middle * (2.0 * value.t * (1.0 - value.t))
+                + b * value.t.powi(2))
+                * count;
+            for axis in 0..3 {
+                assert!((minimum.axis(axis)..=maximum.axis(axis)).contains(&stable.axis(axis)));
+            }
+        }
+    }
+
+    #[test]
+    fn velocity_bounds_reject_invalid_intervals_and_leave_source_evaluation_unchanged() {
+        let (original, _) = replay_fixture(3);
+        let series = OrbitSeries::with_prelude(&original, 0.4).unwrap();
+        let times = [0.0, 0.17, 0.5, 0.91, 1.0];
+        let before = times.map(|time| series.sample(time).unwrap());
+        for (body, start, end) in [
+            (3, 0.0, 1.0),
+            (usize::MAX, 0.5, 0.5),
+            (0, -0.01, 0.1),
+            (0, 0.9, 1.01),
+            (0, 0.7, 0.3),
+            (0, f64::NAN, 0.5),
+            (0, 0.5, f64::NAN),
+            (0, f64::NEG_INFINITY, 0.5),
+            (0, 0.5, f64::INFINITY),
+        ] {
+            assert!(series.velocity_bounds(body, start, end).is_none());
+        }
+        for body in 0..3 {
+            assert!(series.velocity_bounds(body, 0.0, 1.0).is_some());
+        }
+        for (time, previous) in times.into_iter().zip(before) {
+            let current = series.sample(time).unwrap();
+            for (a, b) in previous.bodies.into_iter().zip(current.bodies) {
+                assert_same_bits(a, b);
             }
         }
     }

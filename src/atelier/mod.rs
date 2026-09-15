@@ -5,6 +5,7 @@
 
 pub mod aurora;
 pub mod calligraphy;
+pub mod eclipse;
 pub mod engraving;
 pub mod light;
 pub mod loom;
