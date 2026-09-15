@@ -356,7 +356,7 @@ fn validate(config: &EclipseConfig, render: &RenderConfig, time: f64) -> SilkRes
             || !petal.light_gain.is_finite()
             || petal.light_gain < 0.0
             || !petal.corona_bend.is_finite()
-            || petal.corona_bend.abs() > 0.5
+            || petal.corona_bend.abs() > 2.0
         {
             return Err("Invalid Eclipse petal geometry or light".into());
         }
