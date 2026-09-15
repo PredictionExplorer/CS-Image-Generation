@@ -1,377 +1,210 @@
-# Gravity Loom — construction notes
+# Gravity Loom — implemented construction
 
-Status: design only. Implement after the first Tidal Calligraphy film is finished.
+Gravity Loom is implemented in `src/atelier/loom.rs`. `LoomConfig` controls its
+geometry and dyes; `scene(&OrbitSeries, time, &config)` produces strands for the
+shared CPU renderer. This document describes v08; curated film recipes can
+override the defaults below.
 
-## The object
+## The object and its meaning
 
-One suspended woven conch: a slender old end opens into a generous belly and an
-asymmetric mouth. Its centerline makes a shallow, permanent S-curve across the
-frame. Three pairwise textile panels surround a dark central chamber, with large
-staggered openings through which the far-side weave is only partly visible.
-Fine threads form actual alternating warp/weft crossings; quiet braided rims
-finish the openings. The three families are AB, BC, and CA.
+Three woven relationship panels, AB, BC, and CA, form a rounded shell with a broad
+belly, narrow feathered ends, and staggered windows. A permanent S-curve and
+longitudinal twist establish the silhouette. Recorded motion deforms the rails
+and bows as it travels through a fixed history window.
 
-Chronology has a permanent left-to-right direction. The panels breathe and their
-threads catch traveling highlights as the source changes, while the overall
-object keeps its orientation and generous empty spaces.
+The shell’s X coordinate represents chronology. Its shape is an artistic mapping
+of original positions and actual three-dimensional pair distances. It does not
+depict literal body trajectories or simulate a freely moving cloth.
 
-This is a parametric artistic interpretation of recorded motion. The source
-positions and physical pair distances are unchanged inputs. The time axis,
-stationary conch profile, bounded rail neighborhoods, bowed panels, and weave
-are designed mappings; this is not a simulation of celestial bodies pulling a
-physical textile.
+## 1. Genuine history and a fixed source plane
 
-## 1. Permanent chronology and organic outer silhouette
+For current source fraction `t`, history length `H`, and material coordinate
+`u ∈ [0,1]`, sample `tau = t-H*(1-u)`. The oldest history is at `u=0`; the current
+source position is at `u=1`. The complete window must exist in `OrbitSeries`.
+Missing prehistory returns an error. A verified prelude at least `H` long supports
+the fully formed first frame; there is no wrapping or extrapolation.
 
-Let `T = (1,0,0)` be the time axis, and let `P` project onto the YZ plane. Let
-`u ∈ [0,1]` run from oldest to newest history, and `t` be the current source
-fraction. Sample genuine source history at
-
-```
-tau(u,t) = t - H * (1-u)
-```
-
-Use a verified prelude at least `H` long for a fully formed opening. Do not wrap
-time or fabricate pre-zero samples.
-
-The centerline bends in YZ while retaining an exact, monotone X coordinate:
+Let `p_i(tau)` be a body’s position after the source’s single fixed world
+normalization. Two fixed orthonormal `source_axes`, `a` and `b`, give
 
 ```
-C(u)  = L*(u-0.5)*T + A_y*sin(2*pi*u)*Y + A_z*sin(pi*u)^2*Z
-C'(u) = L*T + 2*pi*A_y*cos(2*pi*u)*Y + pi*A_z*sin(2*pi*u)*Z
+y = dot(p_i,a); z = dot(p_i,b)
+q_i = (0,y,z) / hypot(source_radius, hypot(y,z))
 ```
 
-Start with `L = 7.2`, `A_y = 0.42`, and `A_z = 0.32`. The maximum transverse slope
-is bounded by about 0.40, giving a gentle bend. `C` never changes with frame time.
-Keep cross-sections in the fixed YZ plane; do not rotate them to follow the
-centerline tangent. This preserves the simple chronology invariant below.
+This smooth mapping guarantees `|q_i| < 1`. The default axes select original X/Y:
+`a=(1,0,0)`, `b=(0,1,0)`. Validation requires unit lengths and orthogonality within
+`1e-6`. A seed-specific plane may be fitted once from the complete source and
+stored explicitly in the recipe; it never follows the moving window.
 
-Compare only two finished silhouette treatments in the first proof:
+Sampling 20,001 evenly spaced rows of seed `0xb7f327f9f722` found that YZ retained
+about 50% of temporal position variance, XY retained 87%, and a fixed principal-
+component plane retained 92%. This explains the change from the original YZ
+projection.
 
-**Preferred teardrop/conch.** A narrow tail, fuller belly, and open mouth:
-
-```
-S5(u)  = 6*u^5 - 15*u^4 + 10*u^3
-S5'(u) = 30*u^2*(1-u)^2
-K      = (3/5)^3*(2/5)^2 = 0.03456
-E(u)   = u^3*(1-u)^2 / K
-E'(u)  = u^2*(1-u)*(3-5*u) / K
-
-R(u)  = R_tail + (R_mouth-R_tail)*S5(u) + R_bulge*E(u)
-R'(u) = (R_mouth-R_tail)*S5'(u) + R_bulge*E'(u)
-```
-
-Use `R_tail = 0.32`, `R_mouth = 0.78`, and `R_bulge = 0.50`. The radius stays at
-least 0.32, has zero derivative at both ends, and grows to roughly 1.1–1.2 in the
-belly. Its upper bound is `R_mouth + R_bulge = 1.28`.
-
-**Spindle alternative.** A simpler open-ended, symmetrical envelope:
+Pair closeness always uses the unprojected positions:
 
 ```
-R(u)  = R_min + (R_max-R_min)*sin(pi*u)^2
-R'(u) = pi*(R_max-R_min)*sin(2*pi*u)
+d_ij = |p_i-p_j|
+c_ij = 1 / (1 + (d_ij/pair_distance_scale)^2)
 ```
 
-Use `R_min = 0.42` and `R_max = 1.18`. Both profiles have genuinely open ends;
-neither collapses to a point. Start without twisting the cross-sections. Only if
-the silhouette proof needs it, consider a small, fixed twist along `u`; never
-drive whole-object orientation from frame time.
+All three pairs share the same distance scale. The implementation uses `hypot`
+for numerical range. It does not substitute a nearest-companion measurement for
+a particular pair’s distance.
 
-## 2. Source-driven rails with local separation bounds
+## 2. Static silhouette and moving rails
 
-Place unit rail directions `r_i` in the YZ plane at 90°, 210°, and 330°. Define
-one shared, fixed source normalization:
+With fixed unit axes `X`, `Y`, and `Z`, the centerline and conch radius are
 
 ```
-q_i(tau) = P*p_i(tau)/M, with |q_i| <= 1
-Q_i(u,t) = C(u) + R(u)*(r_i + rho*q_i(tau))
+C(u) = L*(u-0.5)*X + A_y*sin(2*pi*u)*Y + A_z*sin(pi*u)^2*Z
+S5(u) = 6*u^5 - 15*u^4 + 10*u^3
+R(u) = radius_tail + (radius_mouth-radius_tail)*S5(u)
+     + radius_bulge*u^3*(1-u)^2/0.03456
 ```
 
-Choose `M` from the complete visible source and required prelude, with a bound
-on the actual position interpolant. Knot extrema alone can miss interpolation
-overshoot. A conservative maximum projected norm of the cubic Hermite curves'
-Bezier control points supplies a convex-hull bound. Use the same `M` for all
-bodies and all frames, with a positive fallback for a stationary source.
-
-Start with `rho = 0.22`; require `0 <= rho <= 0.40`. Scaling source displacement
-by the local radius keeps the narrow tail as well separated as the broad belly.
-No per-frame normalization, force clamping, or change to recorded positions is
-involved. The rail derivative is
+The alternative spindle uses
+`R(u)=radius_min+(radius_max-radius_min)*sin(pi*u)^2`. Both profiles remain
+strictly positive. Three rest rail angles are separated by 120°:
 
 ```
-Q_i,u = C' + R'*(r_i + rho*q_i) + R*rho*H*q_i,tau
+theta_i(u) = pi/2 + 2*pi*i/3 + rail_rotation + twist*(u-0.5)
+e_i(u) = (0,cos(theta_i),sin(theta_i))
+Q_i(u,t) = C(u) + R(u)*(e_i(u) + rho*q_i(tau))
 ```
 
-Use actual position derivatives, or consistent geometric finite differences.
-`BodySample.speed` is a normalized artistic measurement, not this derivative.
+`rho` is `source_influence`, restricted to `[0,0.40]`. Source displacement stays
+below `rho*R(u)`, including at the narrow ends. Twist is a fixed function of
+chronology, never a whole-object spin over time.
 
-For every pair,
+## 3. Rounded polar panels and their bounds
 
-```
-|Q_j-Q_i| >= R(u)*(sqrt(3)-2*rho)
-```
+The default `cross_section: "polar"` interpolates between adjacent rails around
+the shell. Let `r_i` and `phi_i` be a rail’s actual transverse radius and angle
+about `C`. Angles stay anchored to their rest directions and are unwrapped
+continuously. For each ordered pair A→B, B→C, C→A, take the positive angular span
+`Delta_phi`; the final pair wraps through one full turn.
 
-At the teardrop defaults this is at least about 0.413 world units. The radius is
-positive and the three displacement neighborhoods retain their cyclic order.
-Thus the rail frame remains defined even at a close physical encounter.
-
-The omitted spatial coordinate is not presented as literal position. Actual
-three-dimensional pair separation is retained in the panel-shaping signal below.
-
-## 3. Bowed panels and explicit derivative invariants
-
-Use the oriented pairs A→B, B→C, and C→A. At each history row, define
+For across-panel coordinate `v ∈ [0,1]`,
 
 ```
-D_ij = Q_j - Q_i
-N_ij = normalize(D_ij cross T)
+k = compression*c_ij
+F = v + k*sin(2*pi*v)/(2*pi)
+B = R(u)*(bow_base + bow_response*c_ij)
+r = r_i + (r_j-r_i)*S5(F) + B*sin(pi*F)^2
+phi = phi_i + Delta_phi*F
+S(u,v,t) = C(u) + r*(0,cos(phi),sin(phi))
 ```
 
-The fixed time axis and separated rail neighborhoods keep this frame defined.
-Orient it outward once using the rest triangle. No Frenet frame, arbitrary
-normal sign switches, or per-frame object rotation is needed.
+Radial interpolation and bow have zero across-panel radial slope at the rails.
+Adjacent panels therefore share smooth surface normals. The earlier chord-and-
+bow construction remains selectable as `cross_section: "bowed"` for explicit
+comparison recipes.
 
-Let `c_ij(tau)` be a gently smoothed closeness signal derived from the actual
-three-dimensional distance `|p_i-p_j|`, with one fixed normalization shared by
-the three pair families. It ranges from zero (far) to one (near).
-Compute these pair distances directly; `BodySample.proximity` describes the
-nearest companion and must not be mistaken for a specific AB/BC/CA measurement.
-
-For material coordinate `v ∈ [0,1]` across a panel, use
+The polar construction guarantees
 
 ```
-k = 0.40*c_ij
-F(u,v,t) = v + k*sin(2*pi*v)/(2*pi)
-b = R(u)*(0.11 + 0.23*c_ij)
+F_v >= 1-compression > 0
+r >= R(u)*(1-rho) > 0
+Delta_phi >= 2*pi/3 - 2*asin(rho) > 0
+S_u.x = L; S_v.x = 0; S_t.x = 0
 
-S_ij(u,v,t) = Q_i + F*D_ij + b*sin(pi*F)^2*N_ij
+|S_u cross S_v| >= L*R(u)*(1-rho)*(2*pi/3-2*asin(rho))*(1-compression)
 ```
 
-Scale the bow with the local radius too. Smooth `c_ij` over the complete source,
-not separately over each moving window, and keep its interpolation in `[0,1]`.
+The base shell thus retains an ordered radial cross-section and positive area.
+Surface derivatives are analytical around measured rail values; source-dependent
+derivatives use nearby genuine samples, with one-sided differences at source
+endpoints. The outward normal is `normalize(S_v cross S_u)`.
 
-For implementation and normal calculation, let `e = D/|D|`, `g = sin(pi*F)^2`,
-and `g_F = pi*sin(2*pi*F)`. Then
+## 4. Permanent windows and real weaving
 
-```
-e_u = (D_u - e*(e dot D_u))/|D|
-N_u = e_u cross T
-F_u = k_u*sin(2*pi*v)/(2*pi)
-F_v = 1 + k*cos(2*pi*v)
-b_u = R'*(0.11 + 0.23*c_ij) + R*0.23*c_ij,u
+Each panel removes a fixed rotated ellipse in material coordinates:
 
-S_u = Q_i,u + F_u*D + F*D_u + (b_u*g + b*g_F*F_u)*N + b*g*N_u
-S_v = F_v*(D + b*g_F*N)
-```
-
-`F_v >= 0.60`, `S_u.x = L`, `S_v.x = 0`, and `S_t.x = 0` exactly. Because
-`D` and `N` are perpendicular, the base panel has the lower Jacobian bound
-
-```
-|S_u cross S_v| >= L*0.60*R_min*(sqrt(3)-2*rho) > 0
-```
-
-Here `R_min` is the lower bound of the chosen radius profile. This is about
-1.79 at the teardrop defaults. It guarantees a regular panel and ordered
-chronology; a base panel cannot fold back along the time axis. It does not
-certify clearance between all woven fibers or adjacent panels, which still
-needs a geometry check and the visual proof.
-
-An approaching pair narrows the middle of its woven opening and deepens its
-bow. Separation lets the opening expand. The changing signal travels through
-the fixed history axis. Keep these changes broad and smooth enough to read as
-one gesture rather than high-frequency vibration.
-
-## 4. Staggered permanent apertures and connected edges
-
-Give each panel a different fixed, gently tilted material-space ellipse:
-
-```
-x = u-u_0; y = v-v_0
-xi  = x*cos(theta) + y*sin(theta)
-eta = -x*sin(theta) + y*cos(theta)
-hole: (xi/a)^2 + (eta/b)^2 < 1
-```
-
-| Panel | Center `(u_0,v_0)` | Half-axes `(a,b)` | Tilt |
+| Panel | Center `(u,v)` | Half-axes | Tilt |
 | --- | --- | --- | --- |
 | AB | `(0.43,0.48)` | `(0.39,0.37)` | −6° |
 | BC | `(0.59,0.53)` | `(0.35,0.40)` | +8° |
 | CA | `(0.50,0.48)` | `(0.42,0.36)` | −5° |
 
-These remove about 44–48% of each panel's parameter area. Their staggering
-creates unequal overlapping views through the chamber. The S-curve and radius
-envelope make their world-space outlines organic. Keep centers, axes, and tilts
-fixed for the whole film; no threshold animation or changing topology.
+The windows remove roughly 44–48% of parameter area. Their topology is fixed;
+source motion changes their world-space shape. Constant-U and constant-V thread
+curves are split at analytical quadratic intersections with each ellipse.
+Separate surviving pieces are never connected across a hole.
 
-Validate containment with the exact axis-aligned ellipse extents:
-
-```
-h_u = sqrt((a*cos(theta))^2 + (b*sin(theta))^2)
-h_v = sqrt((a*sin(theta))^2 + (b*cos(theta))^2)
-```
-
-Require `u_0 +/- h_u` and `v_0 +/- h_v` inside `[0.035,0.965]`. The proposed
-openings satisfy this margin.
-
-Split thread curves analytically where they meet each ellipse; a constant-U or
-constant-V fiber still has a quadratic intersection after ellipse rotation.
-Never join the two surviving pieces across the hole. End them at a fine
-continuous braided rim.
-Ease both crossing lift and thread radius to zero over the final boundary region
-so ends meet the rim cleanly. Apply the same treatment at the outer rails.
-
-Emit each of the three shared rail cables once, rather than duplicating bright
-edges for both adjoining panels.
-
-## 5. Real over/under weaving, with a breathing yarn scale
-
-Keep weave indices fixed in material coordinates, not tied to the current frame
-number or the changing first sample of a history window.
-
-For longitudinal warp group `m` at `v_m = (m+0.5)/N_w`, and crosswise weft row `n`
-at `u_n = (n+0.5)/N_f`, use opposite offsets along the actual panel normal. The
-half-cell offsets keep these groups distinct from the shared boundary cables.
-Choose the outward surface normal `nu = normalize(S_v cross S_u)`; it includes
-the centerline and panel slopes, whereas the earlier `N_ij` is only the
-cross-sectional bow direction.
+Warp group `m` lies near `v_m=(m+0.5)/N_w`; weft row `n` lies near
+`u_n=(n+0.5)/N_f`. Their offsets along the actual surface normal are
 
 ```
-h(u) = h_ref*R(u)/R_ref
-warp lift(u,m) =  h(u)*cos(pi*(N_f*u - 0.5 + m))
-weft lift(n,v) = -h(u_n)*cos(pi*(N_w*v - 0.5 + n))
+h(u) = crossing_lift*R(u)/1.1
+warp_lift(u,m) =  h(u)*cos(pi*(N_f*u - 0.5 + m))
+weft_lift(n,v) = -h(u_n)*cos(pi*(N_w*v - 0.5 + n))
 ```
 
-At a crossing `(u_n,v_m)`, one centerline is at `+h(u_n)*(-1)^(n+m)` and the other at
-the opposite height. This produces actual alternate over/under crossings in 3D.
-It is not a texture painted onto coincident curves.
+Group-center crossings have opposite heights, alternating by `(-1)^(n+m)`.
+Fine fibers have fixed offsets within each group; crossing height is validated
+against fiber radius, variation, and group width. These are separate 3D curves,
+with no supporting opaque surface.
 
-Scale fiber radius by the same `R(u)/R_ref`, and size group offsets from the
-local lattice pitch. This prevents the narrow tail from becoming a dense plug
-of constant-thickness wire. At cut boundaries, taper radius and lift together.
+Each window has a continuous braid; each shared rail cable is emitted once.
+Component-end tapers reduce yarn radii and crossing lift where threads meet a
+rim. Lattice indices, braid phases, and dye variations remain fixed through time.
+A runtime check rejects a lifted warp polyline that folds backward along
+chronology. This construction does not include a global fiber-contact solver.
 
-Each yarn group contains a few fine parallel fibers. Use group-scale lift
-phases, small offsets within the group, and restrained fixed radius/tint
-variation. Choose lift to clear the complete bundle thickness. Fixed crossing
-parity and fixed apertures keep the animation temporally coherent. The normal
-offset curves need their own clearance checks: require positive longitudinal
-derivatives on warp fibers and lift small relative to local pitch and bend
-radius. The regularity bound for the base panel alone does not prove this.
+## 5. Feathered terminal finish
 
-Warp in the AB panel uses A's dye and weft uses B's; similarly for BC and CA.
-Their overlap expresses the pair without labels on the artwork.
-
-## 6. Resolvable detail and smooth fiber highlights
-
-Start with three fibers per yarn group in both directions. Add five only if the
-intended 4K camera resolves their spacing in the broad sections. At the narrow
-tail, fine fibers may merge into an analytically filtered yarn; increasing the
-count there adds cost without a visible benefit. Keep counts fixed through time.
-
-Use the initial sampling counts below, then check projected chord error against
-0.2–0.25 pixel and check tangent change under raking light. Smooth geometric
-curves with segment-constant shading can still show zipper-like highlights.
-
-The current strand renderer shades with a constant tangent per segment. If the
-weave close-up exposes this, compute a tangent at every curve point and
-interpolate it along each rendered segment:
+The oldest and newest ends have independent smooth feather lengths. With `S5`
+clamped to `[0,1]`, their shared envelope is
 
 ```
-T(s) = normalize((1-s)*T_0 + s*T_1)
+T(u) = S5(u/terminal_feather_old)
+     * S5((1-u)/terminal_feather_new)
 ```
 
-Prefer analytical derivatives of the lifted curves, or arc-length-aware central
-differences. Compute tangents separately for each clipped component, never
-across an aperture gap. This can live in renderer preparation without changing
-the public `Strand` data structure. Preserve analytical coverage and the merge
-of neighboring segment footprints; change shading interpolation only. Resolve
-this in the first material proof if needed, before a full Loom film.
+A zero length replaces its factor with one. The envelope scales all yarn radii
+and crossing lift, plus boundary-fiber radii and braid offsets. Terminal rings
+therefore vanish when feathering is enabled; interior threads remain unchanged.
+No source sampling, aperture topology, or lattice indices change. Defaults
+feather the oldest 5% and newest 8% of the shell.
 
-## Initial high-detail recipe
+## Defaults and artistic controls
 
-| Parameter | Starting value |
+| Control | Default |
 | --- | --- |
-| History fraction H | 0.22 |
-| Verified prelude | at least 0.22 |
-| Time-axis length L | 7.2 world units |
-| Static centerline offsets A_y / A_z | 0.42 / 0.32 |
-| Preferred radius tail / mouth / bulge | 0.32 / 0.78 / 0.50 |
-| Reference radius R_ref for fiber sizing | 1.1 |
-| Maximum source displacement | 0.22 × local R(u) |
-| Panel bow | local R(u) × (0.11–0.34) |
-| Closeness compression gain | 0.40 |
-| Apertures | three fixed staggered ellipses from the table above |
-| Warp groups per panel | 56 |
-| Weft rows per panel | 144 |
-| Fibers per warp/weft group | 3 / 3; compare 5 only when visibly resolved |
-| Fiber radius at R_ref | about 0.00045–0.00055 |
-| Group width | about 24% of its lattice pitch |
-| Crossing lift h_ref | about 0.0035 |
-| Longitudinal warp intervals | 1536 |
-| Weft intervals across a complete row | 192 |
-| Surface film between fibers | off initially; optional very faint web later |
+| Construction / profile | polar / conch |
+| History / required first-frame prelude | 0.22 / at least 0.22 |
+| Axis length / centerline Y,Z amplitudes | 7.2 / 0.42, 0.32 |
+| Conch tail, mouth, extra belly radius | 0.06, 0.15, 1.25 |
+| Spindle minimum / maximum radius | 0.06 / 1.35 |
+| Fixed longitudinal twist | 180° |
+| Source plane / influence / soft radius | XY / 0.22 / 2.0 |
+| Pair distance scale | 1.4 |
+| Base bow / pair response / compression | 0.055 / 0.16 / 0.40 |
+| Warp groups / weft rows | 128 / 256 |
+| Fibers per warp / weft group | 2 / 2 |
+| Warp / weft / aperture sampling intervals | 3072 / 512 / 1536 |
+| Group width relative to cell pitch | 0.34 |
+| Fiber radius / crossing lift at radius 1.1 | 0.00035 / 0.0015 |
+| Terminal feather, old / new | 0.05 / 0.08 |
 
-These are high-detail starting values for actual 4K stills: roughly one million
-strand segments before aperture clipping with three fibers per group. Keep
-subpixel fibers analytically filtered, and verify that additional geometry is
-visible in the intended framing.
+Default dyes are champagne, bronze, and pearl, with metallic contributions
+0.68, 0.75, and 0.15, and roughness 0.32. Blue accents affect about 3.5% of yarn
+groups; selected other groups receive stronger gilding. Geometry supplies the
+fine weave, so material `fiber_strength` is zero. Film recipes can adjust dyes
+and lighting independently of the recorded motion.
 
-## Palette, light, and camera
+For more readable motion, first choose a fixed source plane that captures the
+orbit. Influence 0.4 and pair response 0.35–0.4 remain within the construction’s
+bounds. A soft radius around 1.0 is a useful starting point: reducing it increases
+displacement but eventually saturates radial changes, so smaller values do not
+uniformly increase motion. The stationary centerline and radius profile preserve
+the broad silhouette.
 
-- A: champagne; B: soft bronze; C: warm pearl. Example linear dye colors are
-  `(0.82,0.68,0.45)`, `(0.50,0.28,0.13)`, and `(0.78,0.73,0.65)`. Use a muted blue
-  accent in at most roughly 5% of fine yarn groups, keeping the overall object
-  warm. Their paired yarn colors remain distinct without becoming three colored
-  hero bands.
-- Start around roughness 0.32–0.38, anisotropy 0.80, and sheen 0.45, with no
-  emission. Aim for soft dyed silk highlights; hard brass glints could make the
-  object look like a metal strainer. Dim companion fibers provide depth.
-  Cylindrical fibers do not have an independently visible back face. Keep the
-  apertures truly dark and legible against a nearly black background.
-- One long raking strip light, a cool rear strip, and low fill. The modeled
-  crossings provide depth occlusion and changing local tangent highlights;
-  avoid promising cast shadows that the current raster compositor does not add.
-- Start with an oblique fixed camera around `(3.4,2.0,10)`, target zero, world-Y
-  up, orthographic height around 5.0–5.2. Fit the complete deformed geometry,
-  including the prelude, at all six source checkpoints. Retain both open ends
-  and the large windows so the conch silhouette remains readable. Keep this
-  camera fixed through the film.
-
-## Risks and decisions
-
-1. **Industrial tube:** a straight centerline, uniform radius, aligned windows,
-   and sharp metallic highlights can reinforce one another. The static S-curve,
-   broad radius envelope, staggered apertures, and warm soft sheen must establish
-   the object at full-frame scale before thread detail can succeed.
-2. **Opaque tube:** too much material or overlap. Keep the lens apertures large,
-   the central chamber open, and the base film absent or extremely light.
-3. **Conveyor-belt flicker:** resetting weave parity or clipping topology by
-   frame. Keep the lattice and holes fixed in UV while source history deforms it.
-4. **Neon cage:** too-bright outline cables. Shared rails and aperture rims should
-   finish the object quietly rather than dominate it.
-5. **A static diagram:** insufficient source influence. Increase panel bow and
-   proximity response first; retain the fixed chronology axis and safe rail
-   neighborhoods.
-6. **Unresolved glitter:** excessive fine geometry or segmented tangent shading.
-   Judge a raking-light 4K crop, interpolate tangents when needed, and keep
-   genuinely visible yarn hierarchy rather than adding invisible strands.
-
-## First proof after Calligraphy is complete
-
-Build the connected three-panel object at finished detail, with a close-up of
-one AB region showing unambiguous alternating crossings. The complete object is
-necessary to judge the silhouette and the views through staggered windows.
-
-Compare only the S-teardrop and S-spindle profiles, using the same camera,
-material, and yarn counts, at two source times with different pair separation.
-Choose the silhouette first, then verify fiber softness and real over/under
-depth in the close-up. Favor the teardrop if its open mouth and uneven belly
-read as a graceful woven conch; retain the spindle if it makes cleaner openings.
-
-Review fixed-camera frames at source fractions `0`, `0.25`, `0.50`, `0.75`,
-`0.927`, and `1`, including genuine prelude geometry at the opening. Check
-rail separation, panel regularity, lifted-fiber clearance, aperture continuity,
-and clean temporally stable highlights. Only after that visual proof should
-the second full film begin.
-
-This document records the design only. No Loom implementation or render has been started.
+`panels: [true,false,false]` isolates AB for a material proof. Full-film curation
+uses a fixed camera, checkpoints across the complete source, and motion review
+for readability and shimmer. Tests cover projection validity, pair-measurement
+independence, polar joins and derivatives, area bounds, analytical cuts,
+alternating crossings, repeatability, temporal continuity, missing prehistory,
+and terminal feathering.

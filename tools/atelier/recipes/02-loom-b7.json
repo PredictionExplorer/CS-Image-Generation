@@ -1,0 +1,258 @@
+{
+  "kind": "loom",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 4,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.36,
+  "camera": {
+    "position": {
+      "x": 1.8,
+      "y": 1.4,
+      "z": 10
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 4.9
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 3,
+    "exposure": 0.68,
+    "background": {
+      "x": 0.002,
+      "y": 0.0017,
+      "z": 0.0026
+    },
+    "key_strength": 2.2,
+    "rim_strength": 0.85,
+    "fill_strength": 0.25,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.03
+  },
+  "loom": {
+    "profile": "spindle",
+    "cross_section": "polar",
+    "history_fraction": 0.22,
+    "axis_length": 7.2,
+    "centerline_y": 0.42,
+    "centerline_z": 0.32,
+    "radius_tail": 0.06,
+    "radius_mouth": 0.15,
+    "radius_bulge": 1.25,
+    "radius_min": 0.055,
+    "radius_max": 1.3,
+    "rail_rotation_degrees": 0.0,
+    "twist_degrees": 180.0,
+    "source_influence": 0.4,
+    "source_radius": 1.0,
+    "pair_distance_scale": 1.4,
+    "bow_base": 0.055,
+    "bow_response": 0.35,
+    "compression": 0.4,
+    "panels": [
+      true,
+      true,
+      true
+    ],
+    "apertures": [
+      {
+        "enabled": true,
+        "center": [
+          0.43,
+          0.48
+        ],
+        "half_axes": [
+          0.39,
+          0.37
+        ],
+        "tilt_degrees": -6.0
+      },
+      {
+        "enabled": true,
+        "center": [
+          0.59,
+          0.53
+        ],
+        "half_axes": [
+          0.35,
+          0.4
+        ],
+        "tilt_degrees": 8.0
+      },
+      {
+        "enabled": true,
+        "center": [
+          0.5,
+          0.48
+        ],
+        "half_axes": [
+          0.42,
+          0.36
+        ],
+        "tilt_degrees": -5.0
+      }
+    ],
+    "warp_groups": 128,
+    "weft_groups": 256,
+    "warp_fibers": 2,
+    "weft_fibers": 2,
+    "warp_segments": 3072,
+    "weft_segments": 512,
+    "rim_segments": 1536,
+    "bundle_width": 0.34,
+    "fiber_radius": 0.00048,
+    "radius_variation": 0.16,
+    "crossing_lift": 0.0015,
+    "edge_taper_cells": 0.38,
+    "rim_fibers": 5,
+    "rim_braid_radius": 0.0012,
+    "rim_fiber_radius": 0.00046,
+    "rim_turns": 72.0,
+    "rim_brightness": 0.72,
+    "fiber_optical_depth": 0.86,
+    "fiber_brightness": 1.0,
+    "tint_variation": 0.12,
+    "accent_fraction": 0.02,
+    "gilded_fraction": 0.06,
+    "gilded_metallic": 0.82,
+    "detail_seed": 834927,
+    "materials": [
+      {
+        "front_color": {
+          "x": 0.82,
+          "y": 0.5,
+          "z": 0.19
+        },
+        "back_color": {
+          "x": 0.49199999999999994,
+          "y": 0.3,
+          "z": 0.11399999999999999
+        },
+        "optical_depth": {
+          "x": 0.72,
+          "y": 0.79,
+          "z": 0.9
+        },
+        "roughness": 0.29,
+        "anisotropy": 0.8,
+        "sheen": 0.2,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0,
+        "metallic": 0.78
+      },
+      {
+        "front_color": {
+          "x": 0.42,
+          "y": 0.2,
+          "z": 0.075
+        },
+        "back_color": {
+          "x": 0.252,
+          "y": 0.12,
+          "z": 0.045
+        },
+        "optical_depth": {
+          "x": 0.72,
+          "y": 0.79,
+          "z": 0.9
+        },
+        "roughness": 0.34,
+        "anisotropy": 0.8,
+        "sheen": 0.2,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0,
+        "metallic": 0.75
+      },
+      {
+        "front_color": {
+          "x": 0.55,
+          "y": 0.42,
+          "z": 0.27
+        },
+        "back_color": {
+          "x": 0.33,
+          "y": 0.252,
+          "z": 0.162
+        },
+        "optical_depth": {
+          "x": 0.72,
+          "y": 0.79,
+          "z": 0.9
+        },
+        "roughness": 0.38,
+        "anisotropy": 0.8,
+        "sheen": 0.2,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 420.0,
+        "fiber_strength": 0.0,
+        "metallic": 0.3
+      }
+    ],
+    "accent_material": {
+      "front_color": {
+        "x": 0.21,
+        "y": 0.37,
+        "z": 0.48
+      },
+      "back_color": {
+        "x": 0.12,
+        "y": 0.22,
+        "z": 0.3
+      },
+      "optical_depth": {
+        "x": 0.28,
+        "y": 0.31,
+        "z": 0.37
+      },
+      "roughness": 0.34,
+      "anisotropy": 0.8,
+      "sheen": 0.43,
+      "emission": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "fiber_frequency": 420.0,
+      "fiber_strength": 0.0,
+      "metallic": 0.08
+    },
+    "terminal_feather_old": 0.05,
+    "terminal_feather_new": 0.08,
+    "source_axes": [
+      {
+        "x": 0.9775173637530767,
+        "y": 0.07416319035834007,
+        "z": -0.19738192611560845
+      },
+      {
+        "x": -0.13152225722147193,
+        "y": 0.946134321388188,
+        "z": -0.29585763763452494
+      }
+    ]
+  }
+}

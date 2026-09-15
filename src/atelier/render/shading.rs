@@ -26,6 +26,52 @@ pub(super) struct Optical {
     pub transmission: V3,
 }
 
+#[derive(Clone, Copy)]
+struct EnergyWeights {
+    diffuse: V3,
+    specular: V3,
+    sheen: V3,
+}
+
+struct ConductorMix {
+    f0: V3,
+    transmission: V3,
+    removed: V3,
+    diffuse_source: V3,
+    sheen_share: f64,
+}
+
+fn unit_color(color: V3) -> V3 {
+    V3::new(color.x.clamp(0.0, 1.0), color.y.clamp(0.0, 1.0), color.z.clamp(0.0, 1.0))
+}
+
+impl ConductorMix {
+    fn new(material: &Material, base_transmission: V3, scattered: V3, dye: V3) -> Self {
+        let dielectric = 1.0 - material.metallic;
+        let transmission = base_transmission * dielectric;
+        Self {
+            // Metallic-workflow approximation: dye is the conductor's normal-
+            // incidence reflectance, not a diffuse paint under white highlights.
+            f0: V3::new(0.045, 0.045, 0.045).lerp(unit_color(dye), material.metallic),
+            transmission,
+            removed: V3::new(1.0, 1.0, 1.0) - transmission,
+            diffuse_source: scattered * dielectric,
+            sheen_share: material.sheen / (1.0 + material.sheen),
+        }
+    }
+
+    fn weights(&self, cosine: f64) -> EnergyWeights {
+        let white = V3::new(1.0, 1.0, 1.0);
+        let fresnel = self.f0 + (white - self.f0) * (1.0 - cosine.clamp(0.0, 1.0)).powi(5);
+        let remaining = self.diffuse_source.hadamard(white - fresnel);
+        EnergyWeights {
+            diffuse: remaining * (1.0 - self.sheen_share),
+            specular: self.removed.hadamard(fresnel),
+            sheen: remaining * self.sheen_share,
+        }
+    }
+}
+
 impl Studio {
     pub fn new(camera: &CameraFrame, config: &RenderConfig) -> Self {
         let angle = config.light_rotation_degrees.to_radians();
@@ -121,7 +167,20 @@ impl Studio {
             scattered_channel(material.optical_depth.z, intercepted.z),
         );
         let opacity = (intercepted.x + intercepted.y + intercepted.z) / 3.0;
-        let mut light = base.hadamard(self.fill).hadamard(scattered);
+        // Preserve the complete legacy dielectric arithmetic at exactly zero.
+        // Only the opt-in metal path reserves Fresnel energy explicitly and
+        // makes the conductor fraction opaque. Its three reflection weights
+        // sum to at most one minus the remaining camera transmission.
+        let metal = (material.metallic > 0.0)
+            .then(|| ConductorMix::new(material, transmission, scattered, base));
+        let base = if metal.is_some() { unit_color(base) } else { base };
+        let mut light = if let Some(metal) = &metal {
+            let weights = metal.weights(optical_cosine);
+            base.hadamard(self.fill).hadamard(weights.diffuse)
+                + self.fill.hadamard(weights.specular)
+        } else {
+            base.hadamard(self.fill).hadamard(scattered)
+        };
         for strip in &self.strips {
             let offset = strip.center - point;
             let distance_squared = offset.length_squared();
@@ -144,9 +203,18 @@ impl Studio {
             let signed_nl = normal.dot(direction);
             let nl = signed_nl.max(0.0);
             let backlight = (-signed_nl).max(0.0);
+            let metal_weights = metal
+                .as_ref()
+                .map(|metal| metal.weights(self.view.dot((self.view + direction).normalized())));
             // A thin textile scatters some back illumination while also allowing
             // the camera to see farther surfaces through its colored transmission.
-            light += base.hadamard(incoming).hadamard(scattered) * (0.70 * nl + 0.42 * backlight);
+            if let Some(weights) = metal_weights {
+                light += base.hadamard(incoming).hadamard(weights.diffuse)
+                    * (0.70 * nl + 0.42 * backlight);
+            } else {
+                light +=
+                    base.hadamard(incoming).hadamard(scattered) * (0.70 * nl + 0.42 * backlight);
+            }
             if nl > 0.0 && nv > 1e-6 {
                 let half_length = (self.view + direction).length().max(1e-6);
                 let half = (self.view + direction) / half_length;
@@ -178,16 +246,33 @@ impl Studio {
                         - 1.0)
                 };
                 let masking = 1.0 / (1.0 + lambda(self.view, nv) + lambda(direction, nl));
-                let fresnel = 0.045 + 0.955 * (1.0 - self.view.dot(half).max(0.0)).powi(5);
-                let specular = distribution * masking * fresnel / (4.0 * nv.max(0.035));
-                light += incoming * (specular * opacity * 0.78);
+                if let Some(weights) = metal_weights {
+                    let specular = distribution * masking / (4.0 * nv.max(0.035));
+                    light += incoming.hadamard(weights.specular) * (specular * 0.78);
+                } else {
+                    let fresnel = 0.045 + 0.955 * (1.0 - self.view.dot(half).max(0.0)).powi(5);
+                    let specular = distribution * masking * fresnel / (4.0 * nv.max(0.035));
+                    light += incoming * (specular * opacity * 0.78);
+                }
             }
             let edge = (1.0 - nv).powi(2);
-            let velvet = material.sheen * edge * (nl * 0.45 + backlight * 0.65);
-            light +=
-                base.lerp(V3::new(1.0, 1.0, 1.0), 0.70).hadamard(incoming) * (velvet * opacity);
+            if let Some(weights) = metal_weights {
+                let velvet = edge * (nl * 0.45 + backlight * 0.65);
+                light += base
+                    .lerp(V3::new(1.0, 1.0, 1.0), 0.70)
+                    .hadamard(incoming)
+                    .hadamard(weights.sheen)
+                    * velvet;
+            } else {
+                let velvet = material.sheen * edge * (nl * 0.45 + backlight * 0.65);
+                light +=
+                    base.lerp(V3::new(1.0, 1.0, 1.0), 0.70).hadamard(incoming) * (velvet * opacity);
+            }
         }
-        Optical { light: light + material.emission, transmission }
+        Optical {
+            light: light + material.emission,
+            transmission: metal.as_ref().map_or(transmission, |metal| metal.transmission),
+        }
     }
 }
 
@@ -293,5 +378,90 @@ mod tests {
         );
         assert!((result.transmission.x - (-0.40_f64).exp()).abs() < 1e-12);
         assert!((result.transmission.z - (-0.54_f64).exp()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zero_metal_preserves_legacy_serialization_and_dielectric_shading() {
+        let legacy = r#"{"front_color":{"x":0.72,"y":0.68,"z":0.57},"back_color":{"x":0.24,"y":0.22,"z":0.4},"optical_depth":{"x":0.28,"y":0.31,"z":0.37},"roughness":0.31,"anisotropy":0.72,"sheen":0.45,"emission":{"x":0.0,"y":0.0,"z":0.0},"fiber_frequency":420.0,"fiber_strength":0.12}"#;
+        let inherited: Material = serde_json::from_str(legacy).unwrap();
+        assert_eq!(serde_json::to_string(&Material::default()).unwrap(), legacy);
+        assert_eq!(serde_json::to_string(&inherited).unwrap(), legacy);
+        let explicit: Material =
+            serde_json::from_str(&format!("{},\"metallic\":0.0}}", &legacy[..legacy.len() - 1]))
+                .unwrap();
+        let shade = |material: &Material| {
+            studio().shade(
+                material,
+                V3::ZERO,
+                V3::new(0.0, 0.0, 1.0),
+                V3::new(1.0, 0.0, 0.0),
+                [0.0, 0.0],
+                0.0,
+            )
+        };
+        assert_eq!(shade(&inherited).light, shade(&explicit).light);
+        assert_eq!(shade(&inherited).transmission, shade(&explicit).transmission);
+        let metal = Material { metallic: 0.8, ..inherited };
+        assert!(serde_json::to_string(&metal).unwrap().ends_with(",\"metallic\":0.8}"));
+    }
+
+    #[test]
+    fn conductor_mixture_bounds_reflection_and_transmission_weights() {
+        let transmission = V3::new(0.7, 0.5, 0.2);
+        let scattered = V3::new(0.2, 0.3, 0.4);
+        for metallic in [0.01, 0.25, 0.75, 1.0] {
+            let material = Material { metallic, sheen: 2.0, ..Material::default() };
+            let mix =
+                ConductorMix::new(&material, transmission, scattered, V3::new(0.9, 0.55, 0.15));
+            for cosine in [0.0, 0.1, 0.5, 1.0] {
+                let weights = mix.weights(cosine);
+                let total = weights.diffuse + weights.specular + weights.sheen + mix.transmission;
+                for axis in 0..3 {
+                    assert!(total.axis(axis) <= 1.0 + 1e-12);
+                    assert!(weights.diffuse.axis(axis) >= 0.0);
+                    assert!(weights.specular.axis(axis) >= 0.0);
+                    assert!(weights.sheen.axis(axis) >= 0.0);
+                }
+                if metallic == 1.0 {
+                    assert_eq!(mix.transmission, V3::ZERO);
+                    assert_eq!(weights.diffuse, V3::ZERO);
+                    assert_eq!(weights.sheen, V3::ZERO);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gold_conductor_reflects_colored_light_and_has_no_fabric_transmission() {
+        let mut material = Material {
+            metallic: 1.0,
+            front_color: V3::new(0.9, 0.55, 0.15),
+            optical_depth: V3::ZERO,
+            fiber_strength: 0.0,
+            ..Material::default()
+        };
+        let shade = |material: &Material| {
+            studio().shade(
+                material,
+                V3::ZERO,
+                V3::new(0.0, 0.0, 1.0),
+                V3::new(1.0, 0.0, 0.0),
+                [0.0, 0.0],
+                0.0,
+            )
+        };
+        let gold = shade(&material);
+        assert_eq!(gold.transmission, V3::ZERO);
+        assert!(
+            gold.light.x > gold.light.y && gold.light.y > gold.light.z * 2.0,
+            "{:?}",
+            gold.light
+        );
+        material.sheen = 100.0;
+        material.optical_depth = V3::new(20.0, 20.0, 20.0);
+        assert_eq!(shade(&material).light, gold.light);
+        material.front_color = V3::new(0.7, 0.7, 0.7);
+        let silver = shade(&material);
+        assert!(gold.light.x / gold.light.z > 3.0 * silver.light.x / silver.light.z);
     }
 }

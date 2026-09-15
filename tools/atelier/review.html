@@ -103,7 +103,8 @@ function markSelection() {
   setLink('recipe-link', study.recipe);
 }
 function updateQuality() {
-  const available = activeStudies().every(study => study.master);
+  const available = current('left').master &&
+    (!comparing || current('right').master || current('right').reference);
   $('quality').querySelector('[value="master"]').disabled = !available;
   if (!available && $('quality').value === 'master') $('quality').value = 'video';
 }

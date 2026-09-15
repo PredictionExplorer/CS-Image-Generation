@@ -103,11 +103,51 @@ struct FiberSegment {
     radius_first: f64,
     radius_last: f64,
     tangent: V3,
+    tangent_first: V3,
+    tangent_last: V3,
     material: usize,
     group: usize,
     arc_start: f64,
     arc_length: f64,
     bounds: Bounds,
+}
+
+impl FiberSegment {
+    fn tangent_at(&self, fraction: f64) -> V3 {
+        let tangent = self.tangent_first * (1.0 - fraction) + self.tangent_last * fraction;
+        if tangent.length_squared() > 1e-12 { tangent.normalized() } else { self.tangent }
+    }
+}
+
+fn fiber_point_tangents(points: &[V3]) -> Vec<V3> {
+    let directions: Vec<_> = points.windows(2).map(|p| (p[1] - p[0]).normalized()).collect();
+    // Geometry may repeat the first point after a full turn with tiny trig
+    // roundoff. Give both copies the same cyclic tangent, avoiding a light seam.
+    let closed = points.len() > 3
+        && (points[0] - points[points.len() - 1]).length_squared()
+            <= 1e-20 * (1.0 + points[0].length_squared());
+    (0..points.len())
+        .map(|index| {
+            let incoming = if closed && index == 0 {
+                directions.last().copied().unwrap_or(V3::ZERO)
+            } else {
+                index.checked_sub(1).and_then(|i| directions.get(i)).copied().unwrap_or(V3::ZERO)
+            };
+            let outgoing = if closed && index + 1 == points.len() {
+                directions.first().copied().unwrap_or(V3::ZERO)
+            } else {
+                directions.get(index).copied().unwrap_or(V3::ZERO)
+            };
+            let tangent = incoming + outgoing;
+            if tangent.length_squared() > 1e-12 {
+                tangent.normalized()
+            } else if outgoing.length_squared() > 0.5 {
+                outgoing
+            } else {
+                incoming
+            }
+        })
+        .collect()
 }
 
 struct Projected {
@@ -214,6 +254,8 @@ fn validate(scene: &Scene, camera: &Camera, config: &RenderConfig) -> SilkResult
             || material.fiber_frequency < 0.0
             || !material.fiber_strength.is_finite()
             || !(0.0..=1.0).contains(&material.fiber_strength)
+            || !material.metallic.is_finite()
+            || !(0.0..=1.0).contains(&material.metallic)
         {
             return Err("invalid thin-surface material".into());
         }
@@ -310,6 +352,7 @@ fn project(scene: &Scene, camera: &CameraFrame, config: &RenderConfig) -> SilkRe
     }
     let mut fibers = Vec::new();
     for (group, strand) in scene.strands.iter().enumerate() {
+        let tangents = fiber_point_tangents(&strand.points);
         let mut arc = 0.0;
         for (index, pair) in strand.points.windows(2).enumerate() {
             let length = (pair[1] - pair[0]).length();
@@ -346,6 +389,8 @@ fn project(scene: &Scene, camera: &CameraFrame, config: &RenderConfig) -> SilkRe
                     radius_first,
                     radius_last,
                     tangent: (pair[1] - pair[0]) / length,
+                    tangent_first: tangents[index],
+                    tangent_last: tangents[index + 1],
                     material: strand.material,
                     group,
                     arc_start: arc,
@@ -467,11 +512,6 @@ fn raster_fiber(
     let length = (dx * dx + dy * dy).sqrt();
     let (tx, ty) = if length > 1e-10 { (dx / length, dy / length) } else { (1.0, 0.0) };
     let view = -camera.forward;
-    let mut face = (view - fiber.tangent * view.dot(fiber.tangent)).normalized();
-    if face.length_squared() < 0.5 {
-        face = view;
-    }
-    let side = fiber.tangent.cross(view).normalized();
     let bounds = fiber.bounds.intersection(buffer.bounds);
     let gaussian_scale = FIBER_SIGMA * std::f64::consts::SQRT_2;
     for y in bounds.y0..bounds.y1 {
@@ -513,13 +553,19 @@ fn raster_fiber(
                     continue;
                 }
                 let q = if radius >= 0.85 { (distance / radius).clamp(-0.98, 0.98) } else { 0.0 };
+                let tangent = fiber.tangent_at(t);
+                let mut face = (view - tangent * view.dot(tangent)).normalized();
+                if face.length_squared() < 0.5 {
+                    face = view;
+                }
+                let side = tangent.cross(view).normalized();
                 let normal = (face * (1.0 - q * q).sqrt() + side * q).normalized();
                 let arc = fiber.arc_start + fiber.arc_length * t;
                 let optical = studio.shade(
                     &scene.materials[fiber.material],
                     fiber.world_first * (1.0 - t) + fiber.world_last * t,
                     normal,
-                    fiber.tangent,
+                    tangent,
                     [arc, 0.0],
                     0.0,
                 );
@@ -980,6 +1026,65 @@ mod tests {
         assert!(render(&scene, &bad, &config()).is_err());
         scene.materials.push(material(V3::ZERO, -0.1));
         assert!(render(&scene, &camera(), &config()).is_err());
+        for metallic in [-0.1, 1.01, f64::NAN, f64::INFINITY] {
+            scene.materials[0] = Material { metallic, ..Material::default() };
+            assert!(render(&scene, &camera(), &config()).is_err());
+        }
+    }
+
+    #[test]
+    fn curved_fiber_tangents_and_highlights_are_continuous_at_joins() {
+        let points =
+            vec![V3::new(-0.8, -0.1, 0.0), V3::new(-0.1, 0.2, 0.15), V3::new(0.6, -0.2, 0.3)];
+        let scene = Scene {
+            strands: vec![Strand { radii: vec![0.01; 3], points, material: 0 }],
+            materials: vec![Material { metallic: 0.8, fiber_strength: 0.0, ..Material::default() }],
+            ..Scene::default()
+        };
+        let frame = CameraFrame {
+            forward: V3::new(0.0, 0.0, -1.0),
+            right: V3::new(1.0, 0.0, 0.0),
+            up: V3::new(0.0, 1.0, 0.0),
+            position: camera().position,
+            target: V3::ZERO,
+            scale: 8.0,
+            width: 16.0,
+            height: 16.0,
+        };
+        let projected = project(&scene, &frame, &config()).unwrap();
+        let a = &projected.fibers[0];
+        let b = &projected.fibers[1];
+        assert!((a.tangent - b.tangent).length() > 0.5);
+        assert_eq!(a.tangent_at(1.0), b.tangent_at(0.0));
+        assert!((a.tangent_at(1.0 - 1e-7) - b.tangent_at(1e-7)).length() < 1e-6);
+        let studio = Studio::new(&frame, &RenderConfig::default());
+        let shade = |tangent: V3| {
+            let view = -frame.forward;
+            let normal = (view - tangent * view.dot(tangent)).normalized();
+            studio.shade(&scene.materials[0], a.world_last, normal, tangent, [0.0, 0.0], 1.0)
+        };
+        assert_eq!(shade(a.tangent_at(1.0)).light, shade(b.tangent_at(0.0)).light);
+    }
+
+    #[test]
+    fn closed_fiber_has_cyclic_tangents_and_degenerate_points_stay_finite() {
+        let points: Vec<_> = (0..=32)
+            .map(|i| {
+                let angle = f64::from(i) * std::f64::consts::TAU / 32.0;
+                V3::new(angle.cos(), angle.sin(), 0.1 * (2.0 * angle).sin())
+            })
+            .collect();
+        let tangents = fiber_point_tangents(&points);
+        assert_eq!(tangents[0], tangents[32]);
+        assert!(tangents[0].x.abs() < 1e-12);
+        for points in [
+            vec![],
+            vec![V3::ZERO],
+            vec![V3::ZERO; 3],
+            vec![V3::ZERO, V3::new(1.0, 0.0, 0.0), V3::ZERO],
+        ] {
+            assert!(fiber_point_tangents(&points).iter().all(|tangent| tangent.is_finite()));
+        }
     }
 
     #[test]

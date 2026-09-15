@@ -4,6 +4,7 @@
 //! fields turn their motion into distinct artworks using deterministic CPU work.
 
 pub mod calligraphy;
+pub mod loom;
 pub mod render;
 pub mod source;
 
@@ -66,6 +67,14 @@ pub struct Material {
     pub fiber_frequency: f64,
     /// Restrained strength of material fiber modulation.
     pub fiber_strength: f64,
+    /// Conductor fraction: zero preserves dielectric fabric, one is opaque metal.
+    /// Omitted at zero so existing serialized Calligraphy recipes retain their hash.
+    #[serde(skip_serializing_if = "metallic_is_zero")]
+    pub metallic: f64,
+}
+
+fn metallic_is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 impl Default for Material {
@@ -80,6 +89,7 @@ impl Default for Material {
             emission: V3::ZERO,
             fiber_frequency: 420.0,
             fiber_strength: 0.12,
+            metallic: 0.0,
         }
     }
 }

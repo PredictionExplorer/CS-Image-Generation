@@ -116,8 +116,8 @@ def build(root: Path, *, include_development: bool = False) -> None:
                 "id": "reference-normal",
                 "number": "Reference",
                 "title": "Original accumulation reference",
-                "description": "The original accumulation follows the same recorded movement "
-                "through a different view combining position and velocity.",
+                "description": "The original 1280 x 828 reference follows the same recorded "
+                "movement through a different view combining position and velocity.",
                 "ready": True,
                 "complete": False,
                 "development": False,

@@ -54,9 +54,9 @@ Local delivery: `CS-Image-Generation/output/six-art-studies-b7`.
 
 | Study | State |
 |---|---|
-| Tidal Calligraphy | Final refined filament recipe selected; full 4K/60 film rendering in four verified ranges |
-| Gravity Loom | Pending completion of Calligraphy |
-| Aurora Veils | Pending |
+| Tidal Calligraphy | Complete: both 4K/60 films verified and copied to the local collection |
+| Gravity Loom | Selected v08 spindle; full 4K/60 film rendering, motion review pending |
+| Aurora Veils | Design prepared; next implementation |
 | Light Cast by Gravity | Pending |
 | Orbital Engraving | Pending |
 | Eclipse Garden | Pending |
@@ -163,3 +163,85 @@ completed films and the next outstanding study as work progresses.
 - Encounter seeking is corrected for 1802@60: source fraction
   `0.9274619274619275 × (1801/60) = 27.839315522648857` seconds, nearest frame 1670.
 - Actual 10-bit-master playback remains to be checked when encoding completes.
+
+### Calligraphy complete; Loom begins
+
+Calligraphy completed on 2026-09-15 at approximately 07:26 UTC. Its four ranges
+were assembled with v04; all 1802 frames in both 3840×2160 / 60 fps films decode
+without errors. Both durations are 30.033333 seconds. The HEVC master is 10-bit.
+
+Local result: `CS-Image-Generation/output/six-art-studies-b7/01-calligraphy/`.
+Server result: `/home/user/tidal-silk/six-studies-b7/01-calligraphy/`.
+Master SHA256: `68e9f2edea0568707a035427dc3c536de4bee1554ca78d2f7f85c1d2b52f43b3`.
+The first implementation checkpoint is commit `87eeec5`.
+
+Loom implementation starts only after that completed film. Its design is in
+`docs/gravity-loom-design.md`; it has a stable S-curved chronological axis, a
+positive teardrop radius, staggered apertures and actual over/under fiber lifts.
+The next renderer adds optional metallic reflection and interpolated strand
+tangents. Zero metallic remains omitted from serialized old materials, and
+inactive study parameter blocks are omitted; a real archived v03 manifest/hash
+fixture guards compatibility with Calligraphy artifacts.
+
+### Loom look development
+
+- v05 builds and passes 34 atelier tests, seven CLI tests and all-target Clippy.
+  The v03 manifest hash remains unchanged under the extended schema.
+- New optics add metallic reflection and continuous endpoint-interpolated fiber
+  tangents, including closed braided loops. Zero metallic retains the original
+  dielectric arithmetic and is omitted from serialized legacy materials.
+- First actual 4K panel/conch/spindle proofs are in server `02-loom/*-v05-proof`;
+  local copies are `output/atelier/loom-v05/`. They were rejected artistically:
+  flat panel interiors, straight-cut ends and coarse regular cells read as an
+  industrial wire-mesh tube. Numerical success was not treated as visual success.
+- v06 revises the geometry to polar, rounded panel interpolation with matched
+  seam normals, a fixed 180-degree twist along chronology, narrow ends and a
+  fuller asymmetric belly. The weave now has 128×256 groups, two fine fibers per
+  group and 3072/512 sampling intervals. Eight Loom tests cover the revised
+  surface and its derivatives/crossings.
+- v06 build/test is running; next step is new finished-light 4K proofs and further
+  material/camera curation. No full Loom film has been started.
+- The production review gallery is running locally on port 8767 (PID 9708,
+  exec session 39971), with one verified completed film and an optional original
+  reference. Actual 4K/60 HEVC master playback and mixed HEVC/H.264 synchronized
+  comparison were verified. QA windows were closed and notes left untouched.
+
+### Loom v08 selection
+
+- Rounded polar panels, narrow spindle ends, and smooth terminal feathering
+  replace the cut-tube appearance. The fixed 180-degree twist belongs to the
+  material's history coordinate; the object does not spin with animation time.
+- The original YZ source projection hid much of this seed's movement. A fixed
+  plane fitted from the full source captures approximately 92% of sampled
+  positional variance, versus 50% for YZ. Its two orthonormal axes are recorded
+  in the recipe. No moving fit or change to physical coordinates is performed.
+- Four actual v08 4K lighting proofs are in `02-loom/v08-*`. Current preferred
+  candidate: `configs/loom-v08-luminous.json`, with gold, darker bronze and
+  champagne; source influence 0.4, soft radius 1.0, pair bow response 0.35.
+  It retains 128×256 yarn groups, 3072/512 curve intervals, 3×3 spatial samples,
+  four temporal samples, and the original full-source timing.
+- Immutable renderer: `bin/atelier-v08`. All 38 atelier tests and seven CLI
+  tests pass. Native all-target Clippy passes after four syntax-only cleanups
+  in the existing x86 spectral implementation. Three spectral approximation
+  accuracy failures reproduce identically in baseline `e62cba5`. Independent
+  native probes confirm bitwise equality of old/new constants, loads, 100,000
+  exponential inputs and 1,000 spectra. Evidence: `qa-simd-e62cba5/results.log`
+  on the server. This renderer does not call that spectral conversion path.
+- v06 frame 900 is byte-identical with 8 and 112 workers and matches the original
+  proof. Times were 57.99 and 9.91 seconds respectively; the smaller worker
+  allocation used less total CPU per frame. Evidence is archived in server
+  `logs/benchmark-v06-summary.json`.
+- `tools/atelier/render_study.py` now runs one selected recipe in independent,
+  resumable full-quality ranges and then invokes assembly, both encoders and
+  complete-video verification. No spatial, temporal or material detail is
+  reduced for parallel rendering.
+- Selected recipe: `tools/atelier/recipes/02-loom-b7.json`, mirrored as server
+  `configs/02-loom.json`. Full render started around 08:23 UTC with 16 ranges
+  and seven workers each (112 total). Driver PID 97267; job record
+  `02-loom/final-job.json`; progress log `logs/loom-final-v08.log`. The driver
+  will finish both movies and verify every encoded frame. Source RGB16 images
+  remain archived. Original v08 midpoint is the selected poster frame.
+- Implementation proceeds to Aurora after Loom's selected design is frozen;
+  Loom rendering and subsequent motion review continue independently through
+  its immutable executable. The collection is not finished until every film
+  has completed rendering, visual review, encoding and full verification.

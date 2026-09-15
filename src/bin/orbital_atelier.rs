@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 use three_body_problem::{
-    atelier::{Camera, OrbitSeries, RenderConfig, SilkResult, calligraphy, render},
+    atelier::{Camera, OrbitSeries, RenderConfig, Scene, SilkResult, calligraphy, loom, render},
     silk::cache,
 };
 
@@ -97,7 +97,10 @@ struct StudyConfig {
     prelude_fraction: f64,
     camera: Camera,
     render: RenderConfig,
-    calligraphy: calligraphy::CalligraphyConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    calligraphy: Option<calligraphy::CalligraphyConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    loom: Option<loom::LoomConfig>,
 }
 
 impl Default for StudyConfig {
@@ -111,7 +114,8 @@ impl Default for StudyConfig {
             prelude_fraction: 0.36,
             camera: Camera::default(),
             render: RenderConfig::default(),
-            calligraphy: calligraphy::CalligraphyConfig::default(),
+            calligraphy: Some(calligraphy::CalligraphyConfig::default()),
+            loom: None,
         }
     }
 }
@@ -167,6 +171,18 @@ fn recipe_hash(manifest: &Manifest) -> SilkResult<String> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(&normalized)?)))
 }
 
+fn art_scene(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResult<Scene> {
+    match config.kind.as_str() {
+        "calligraphy" => calligraphy::scene(
+            source,
+            time,
+            config.calligraphy.as_ref().ok_or("Missing Calligraphy parameters")?,
+        ),
+        "loom" => loom::scene(source, time, config.loom.as_ref().ok_or("Missing Loom parameters")?),
+        _ => Err(format!("Unsupported study: {}", config.kind).into()),
+    }
+}
+
 fn main() -> SilkResult<()> {
     let args = Args::parse();
     if let Some(threads) = args.threads {
@@ -178,14 +194,42 @@ fn main() -> SilkResult<()> {
     let started = Instant::now();
     match args.command {
         Action::Config { output, preset } => {
-            let config = StudyConfig {
-                calligraphy: match preset.as_str() {
-                    "default" => calligraphy::CalligraphyConfig::default(),
-                    "gossamer" => calligraphy::CalligraphyConfig::gossamer(),
-                    "fans" => calligraphy::CalligraphyConfig::silk_fans(),
-                    _ => return Err("Unknown preset; choose default, gossamer or fans".into()),
+            let config = match preset.as_str() {
+                "loom" | "loom-panel" | "loom-spindle" => {
+                    let parameters = loom::LoomConfig {
+                        panels: if preset == "loom-panel" {
+                            [true, false, false]
+                        } else {
+                            [true; 3]
+                        },
+                        profile: if preset == "loom-spindle" {
+                            loom::LoomProfile::Spindle
+                        } else {
+                            loom::LoomProfile::Conch
+                        },
+                        ..loom::LoomConfig::default()
+                    };
+                    StudyConfig {
+                        kind: "loom".into(),
+                        calligraphy: None,
+                        loom: Some(parameters),
+                        camera: Camera {
+                            position: three_body_problem::atelier::V3::new(3.4, 2.0, 10.0),
+                            orthographic_height: 4.8,
+                            ..Camera::default()
+                        },
+                        ..StudyConfig::default()
+                    }
+                }
+                "default" | "gossamer" | "fans" => StudyConfig {
+                    calligraphy: Some(match preset.as_str() {
+                        "gossamer" => calligraphy::CalligraphyConfig::gossamer(),
+                        "fans" => calligraphy::CalligraphyConfig::silk_fans(),
+                        _ => calligraphy::CalligraphyConfig::default(),
+                    }),
+                    ..StudyConfig::default()
                 },
-                ..StudyConfig::default()
+                _ => return Err("Unknown art preset".into()),
             };
             json(&output, &config)?;
         }
@@ -216,8 +260,16 @@ fn main() -> SilkResult<()> {
             if let Some(aa) = aa {
                 config.render.aa = aa;
             }
-            if config.kind != "calligraphy" {
-                return Err(format!("Unsupported study: {}", config.kind).into());
+            match config.kind.as_str() {
+                "calligraphy" => {
+                    config.calligraphy.get_or_insert_with(calligraphy::CalligraphyConfig::default);
+                    config.loom = None;
+                }
+                "loom" => {
+                    config.loom.get_or_insert_with(loom::LoomConfig::default);
+                    config.calligraphy = None;
+                }
+                _ => return Err(format!("Unsupported study: {}", config.kind).into()),
             }
             if config.frames < 2 || config.fps == 0 || every == 0 || config.temporal_samples == 0 {
                 return Err("Require at least two frames, positive fps and positive stride".into());
@@ -303,7 +355,7 @@ fn main() -> SilkResult<()> {
                         shutter_start = time;
                     }
                     shutter_end = time;
-                    let scene = calligraphy::scene(&source, time, &c.calligraphy)?;
+                    let scene = art_scene(&source, time, c)?;
                     geometry = [scene.vertices.len(), scene.triangles.len(), scene.strands.len()];
                     let linear = render::render_linear(&scene, &c.camera, &c.render)?;
                     let weight = 1.0 / c.temporal_samples as f64;
@@ -855,6 +907,19 @@ fn encode(
 #[cfg(test)]
 mod assembly_tests {
     use super::*;
+
+    #[test]
+    fn archived_v03_manifest_keeps_its_original_recipe_hash() {
+        let manifest: Manifest =
+            serde_json::from_str(include_str!("../../tests/fixtures/atelier-v03-manifest.json"))
+                .unwrap();
+        assert!(manifest.config.calligraphy.is_some());
+        assert!(manifest.config.loom.is_none());
+        assert_eq!(
+            recipe_hash(&manifest).unwrap(),
+            "f40ec9d064ca6c7711f1955998c26ac183c9f3b6cc7bd477cb41e8578b1b9748"
+        );
+    }
 
     fn manifest(frames: &[usize]) -> Manifest {
         Manifest {

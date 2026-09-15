@@ -27,6 +27,15 @@ It produces 16-bit stills and H.264/HEVC films using the existing FFmpeg depende
 See [the Tidal Silk guide](docs/tidal-silk.md) for staged generation, recipes,
 resume behavior, and reproducibility checks.
 
+## Six art studies
+
+The experimental **`orbital_atelier`** executable develops six distinct artistic
+interpretations of one frozen orbit. It uses detailed CPU geometry, layered
+optics, sub-frame exposure sampling, and RGB16 source frames. Each completed
+study includes a full 4K/60 film, a 10-bit HEVC master, and verified provenance.
+See [the study log](docs/six-art-studies.md) for the current completion state and
+[the atelier workflow](docs/atelier-workflow.md) for rendering and review.
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
