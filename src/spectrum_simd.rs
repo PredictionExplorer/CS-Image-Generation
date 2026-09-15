@@ -156,7 +156,7 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let zero = _mm256_setzero_pd();
         let neg_x = _mm256_sub_pd(zero, x_safe);
 
-        let log2_e = _mm256_set1_pd(1.442_695_040_888_963_4);
+        let log2_e = _mm256_set1_pd(std::f64::consts::LOG2_E);
         let ln2_hi = _mm256_set1_pd(6.931_471_803_691_238e-1);
         let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
 
@@ -167,12 +167,12 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
         let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
 
-        let c7 = _mm256_set1_pd(1.984_126_984_126_984_1e-4);
+        let c7 = _mm256_set1_pd(1.984_126_984_126_984e-4);
         let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
         let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
         let c4 = _mm256_set1_pd(4.166_666_666_666_666_4e-2);
         let c3 = _mm256_set1_pd(1.666_666_666_666_666_6e-1);
-        let c2 = _mm256_set1_pd(5.000_000_000_000_000_0e-1);
+        let c2 = _mm256_set1_pd(0.5);
         let one = _mm256_set1_pd(1.0);
 
         let p = _mm256_fmadd_pd(c7, r, c6);
@@ -211,7 +211,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
         let threshold = _mm256_set1_pd(1e-10);
 
         for chunk_start in (0..NUM_BINS).step_by(4) {
-            let energy = _mm256_loadu_pd(&spd[chunk_start]);
+            let energy = _mm256_loadu_pd(&raw const spd[chunk_start]);
 
             let lut0 = BIN_XYZ_LUT[chunk_start];
             let lut1 = BIN_XYZ_LUT[chunk_start + 1];
