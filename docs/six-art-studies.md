@@ -546,3 +546,39 @@ This supports the tested crop; full-film motion review remains outstanding.
   Aurora-review agent currently has only Brave and correctly avoided it;
   root must perform Aurora playback if that remains the case. The agent is
   watching Aurora until21:34 UTC and will notify when rendering ends.
+
+### Full production launched for the sixth film
+
+- Eclipse now runs the full 1802-frame film through immutable v22, selected
+  `configs/06-eclipse.json` (identical to the archived Opal recipe). Detached
+  server driver PID172585;64workers/four active ranges/16total; poster900.
+  Record `06-eclipse/final-job.json`, log `logs/eclipse-final-v22.log`.
+- v22 source commit238c249, source archive/build record in server `bin/`.
+  Certificate candidate root solves stop only after a strict normalized residual
+  check. The original fixed-28 solver remains the fallback and numerical oracle.
+  Its32Eclipse tests and all-target native Clippy pass. No sample count, geometry,
+  palette, reconstruction width or quality tolerance was reduced.
+- One completed Opal4K still at900 contains all128exposures, v21,2837.55seconds.
+  Maximum accepted indicator .0001; maximum chord error .0102543pixels. It is
+  local at `output/atelier/eclipse-v21/opal-900/frame_000900.png`. Progressive
+  compositions at0,1659,1801 were inspected and selected. Their redundant v21
+  development jobs were replaced with the v22 full production; partial previews
+  remain explicitly labelled. Full-film motion review is still pending.
+- Independent art review judged Opal a clear improvement over the initial broad
+  cream/lash look.900 has the strongest separated composition; at1659 the
+  joined black forms make the luminous contact the focal point. Fine apex fans
+  remain visibly designed. Keep the selected recipe stable for this six-film
+  comparison; user review can guide a later artistic iteration.
+- Faint-strand/corner Opal crop at900,(1840,220),256×256 completed128-vs256
+  exposure and2×spatial comparison: maxRGB3.25667e-7, RMS5.76937e-9. It does
+  not cover the main bright rim. A second crop at(1880,740) covers the actual
+  rim and is still running. Artifacts live under `06-eclipse/qa-opal-shoulder`
+  and `06-eclipse/qa-opal-rim`, with matching local visualization directories.
+- The local finite collection helper was restarted with a720-hour deadline so
+  long CPU films do not outlive automatic packaging. Current local PID46446;
+  same delivery `.finish-collection.log` and `.finish-collection.pid`. It exits
+  when all six complete packages verify. Gallery server remains PID21254/8767.
+- The prior automatic goal remains usageLimited. User was asked asynchronously
+  whether to schedule separate follow-up checks or resume manually. No answer
+  and no new automation had been created at this checkpoint. Do not invent
+  approval or mark the goal complete while films remain unfinished.
