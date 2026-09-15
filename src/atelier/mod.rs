@@ -5,6 +5,7 @@
 
 pub mod aurora;
 pub mod calligraphy;
+pub mod light;
 pub mod loom;
 pub mod render;
 pub mod source;

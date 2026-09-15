@@ -153,6 +153,12 @@ function chooseFilm(side, id) {
 }
 function setMode(value) {
   if (value && (!ready.length || ready.length + references.length < 2)) return;
+  if (value && !comparing && current('left').id === current('right').id) {
+    const leftId = current('left').id;
+    const alternative = ready.find(study => study.complete && study.id !== leftId) ||
+      ready.find(study => study.id !== leftId) || references[0];
+    if (alternative) $('right-select').value = alternative.id;
+  }
   desiredTime = captureTime(); comparing = value;
   $('viewer').classList.toggle('compare', value); $('right-panel').hidden = !value;
   $('single').setAttribute('aria-pressed', String(!value));

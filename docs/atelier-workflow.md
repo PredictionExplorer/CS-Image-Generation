@@ -85,6 +85,33 @@ comparison, slow motion, and private timestamped review notes. An optional
 `reference/normal.mp4` adds the original presentation to the comparison menu.
 Only verified complete studies count toward the six-film collection.
 
+### Collect completed packages as they arrive
+
+`finish_collection.py` is a finite build step for the six studies on
+`user@100.76.88.48` under `/home/user/tidal-silk/six-studies-b7`. It checks every
+60 seconds, copies only the nine final media/provenance files, verifies the local
+movie hashes with the gallery validator, and rebuilds the gallery after arrivals.
+It exits successfully once all six validate, or exits with status 1 after the
+default 48-hour limit. Existing verified packages remain untouched; any replaced
+incomplete folder is retained under a hidden `.before-finish-…` name. Browser
+review notes remain untouched. The limit bounds network calls and waiting; local
+hash validation or gallery rebuilding already in progress is allowed to finish.
+
+Run this only after the remote render/finish jobs have been started. To let this
+one build step continue independently of a terminal or model turn:
+
+```sh
+nohup python3 tools/atelier/finish_collection.py \
+  --output /path/to/collection > /path/to/collection-finish.log 2>&1 < /dev/null &
+```
+
+Without `--output`, it uses the sibling
+`CS-Image-Generation/output/six-art-studies-b7` delivery folder. `--once` checks
+and copies currently finished packages in one pass, then exits with status 1 if
+any remain pending. `--timeout-hours` and `--poll-seconds` accept finite positive
+values. SSH uses the existing noninteractive authentication; no scheduled job or
+remote mutation is created. Logs report changed states and completed packages.
+
 ## Reproducibility
 
 Fixed source samples, stable geometry ordering and deterministic per-pixel

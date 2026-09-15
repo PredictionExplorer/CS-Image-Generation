@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "seed": "0xb7f327f9f722",
+  "orbit_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+  "executable_sha256": "9413987918c54369fa3b8ce27af03cbc5422c58f1243606ced36618cc4d8ada9",
+  "source_history_start_fraction": 0.0,
+  "config": {
+    "kind": "light",
+    "frames": 1802,
+    "fps": 60,
+    "temporal_samples": 16,
+    "shutter_fraction": 0.5,
+    "prelude_fraction": 0.0,
+    "camera": {
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 12.0
+      },
+      "target": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "up": {
+        "x": 0.0,
+        "y": 1.0,
+        "z": 0.0
+      },
+      "orthographic_height": 6.0
+    },
+    "render": {
+      "width": 3840,
+      "height": 2160,
+      "aa": 3,
+      "exposure": 0.75,
+      "background": {
+        "x": 0.002,
+        "y": 0.0017,
+        "z": 0.003
+      },
+      "key_strength": 0.0,
+      "rim_strength": 0.0,
+      "fill_strength": 0.0,
+      "light_rotation_degrees": 20.0,
+      "bloom_strength": 0.06
+    },
+    "light": {
+      "source_axes": [
+        {
+          "x": 0.9775173637530767,
+          "y": 0.07416319035834007,
+          "z": -0.19738192611560845
+        },
+        {
+          "x": -0.13152225722147193,
+          "y": 0.946134321388188,
+          "z": -0.29585763763452494
+        },
+        {
+          "x": 0.16480806842082663,
+          "y": 0.31516609444416055,
+          "z": 0.9346168377983626
+        }
+      ],
+      "source_scales": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "source_motion": [
+        3.1,
+        1.7
+      ],
+      "power_modulation": 0.1,
+      "lenses": [
+        {
+          "enabled": true,
+          "semi_axes": [
+            1.0,
+            0.72
+          ],
+          "angle_degrees": -20.0,
+          "power": 1.55,
+          "coma": 0.08
+        },
+        {
+          "enabled": true,
+          "semi_axes": [
+            0.9,
+            0.65
+          ],
+          "angle_degrees": 35.0,
+          "power": 1.7,
+          "coma": -0.1
+        },
+        {
+          "enabled": true,
+          "semi_axes": [
+            1.1,
+            0.8
+          ],
+          "angle_degrees": 78.0,
+          "power": 1.45,
+          "coma": 0.06
+        }
+      ],
+      "source_grid": [
+        2304,
+        1536
+      ],
+      "source_domain": [
+        9.6,
+        6.4
+      ],
+      "source_center": [
+        0.0,
+        0.0
+      ],
+      "receiver_distance": 8.0,
+      "refractive_index": 1.5,
+      "reference_wavelength_nm": 550.0,
+      "dispersion": 0.008,
+      "max_ray_slope": 0.25,
+      "incident_irradiance": 0.55,
+      "footprint_pixels": 0.9,
+      "display": "dark_gain",
+      "receiver_tint": {
+        "x": 0.82,
+        "y": 0.78,
+        "z": 0.68
+      },
+      "ambient_irradiance": 0.035,
+      "gain_scale": 1.0
+    }
+  },
+  "rendered_frames": [
+    900
+  ],
+  "complete": true
+}

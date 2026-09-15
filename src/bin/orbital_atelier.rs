@@ -13,7 +13,8 @@ use std::{
 };
 use three_body_problem::{
     atelier::{
-        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, aurora, calligraphy, loom, render,
+        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, light, loom,
+        render,
     },
     silk::cache,
 };
@@ -105,6 +106,8 @@ struct StudyConfig {
     loom: Option<loom::LoomConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     aurora: Option<aurora::AuroraConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    light: Option<light::LightConfig>,
 }
 
 impl Default for StudyConfig {
@@ -121,6 +124,7 @@ impl Default for StudyConfig {
             calligraphy: Some(calligraphy::CalligraphyConfig::default()),
             loom: None,
             aurora: None,
+            light: None,
         }
     }
 }
@@ -148,6 +152,8 @@ struct Receipt {
     triangles: usize,
     strands: usize,
     seconds: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    light_samples: Option<Vec<light::LightDiagnostics>>,
 }
 
 fn json(path: &Path, value: &impl Serialize) -> SilkResult<()> {
@@ -191,6 +197,33 @@ fn art_scene(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResul
     }
 }
 
+struct ArtFrame {
+    pixels: Vec<V3>,
+    geometry: [usize; 3],
+    light: Option<light::LightDiagnostics>,
+}
+
+fn art_frame(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResult<ArtFrame> {
+    if config.kind == "light" {
+        let frame = light::render_linear(
+            source,
+            time,
+            config.light.as_ref().ok_or("Missing Light Cast parameters")?,
+            &config.camera,
+            &config.render,
+        )?;
+        frame.diagnostics.validate()?;
+        Ok(ArtFrame { pixels: frame.pixels, geometry: [0; 3], light: Some(frame.diagnostics) })
+    } else {
+        let scene = art_scene(source, time, config)?;
+        Ok(ArtFrame {
+            pixels: render::render_linear(&scene, &config.camera, &config.render)?,
+            geometry: [scene.vertices.len(), scene.triangles.len(), scene.strands.len()],
+            light: None,
+        })
+    }
+}
+
 fn main() -> SilkResult<()> {
     let args = Args::parse();
     if let Some(threads) = args.threads {
@@ -203,6 +236,39 @@ fn main() -> SilkResult<()> {
     match args.command {
         Action::Config { output, preset } => {
             let config = match preset.as_str() {
+                "light" | "light-ivory" | "light-dark" => {
+                    let dark = preset == "light-dark";
+                    StudyConfig {
+                        kind: "light".into(),
+                        temporal_samples: 16,
+                        calligraphy: None,
+                        light: Some(light::LightConfig {
+                            display: if dark {
+                                light::LightDisplay::DarkGain
+                            } else {
+                                light::LightDisplay::Ivory
+                            },
+                            ..light::LightConfig::default()
+                        }),
+                        prelude_fraction: 0.0,
+                        camera: Camera {
+                            position: V3::new(0.0, 0.0, 12.0),
+                            target: V3::ZERO,
+                            orthographic_height: 6.0,
+                            ..Camera::default()
+                        },
+                        render: RenderConfig {
+                            exposure: if dark { 0.75 } else { 1.15 },
+                            background: V3::new(0.002, 0.0017, 0.003),
+                            key_strength: 0.0,
+                            rim_strength: 0.0,
+                            fill_strength: 0.0,
+                            bloom_strength: if dark { 0.06 } else { 0.015 },
+                            ..RenderConfig::default()
+                        },
+                        ..StudyConfig::default()
+                    }
+                }
                 "aurora" => StudyConfig {
                     kind: "aurora".into(),
                     calligraphy: None,
@@ -294,16 +360,25 @@ fn main() -> SilkResult<()> {
                     config.calligraphy.get_or_insert_with(calligraphy::CalligraphyConfig::default);
                     config.loom = None;
                     config.aurora = None;
+                    config.light = None;
                 }
                 "loom" => {
                     config.loom.get_or_insert_with(loom::LoomConfig::default);
                     config.calligraphy = None;
                     config.aurora = None;
+                    config.light = None;
                 }
                 "aurora" => {
                     config.aurora.get_or_insert_with(aurora::AuroraConfig::default);
                     config.calligraphy = None;
                     config.loom = None;
+                    config.light = None;
+                }
+                "light" => {
+                    config.light.get_or_insert_with(light::LightConfig::default);
+                    config.calligraphy = None;
+                    config.loom = None;
+                    config.aurora = None;
                 }
                 _ => return Err(format!("Unsupported study: {}", config.kind).into()),
             }
@@ -367,6 +442,7 @@ fn main() -> SilkResult<()> {
                     let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(&path))?)?;
                     if receipt.recipe_sha256 == hash
                         && receipt.png_sha256 == cache::file_hash(&path)?
+                        && verify_light_samples(&manifest.config, frame, &receipt).is_ok()
                     {
                         let dims = image::image_dimensions(&path)?;
                         if dims == (manifest.config.render.width, manifest.config.render.height) {
@@ -380,29 +456,41 @@ fn main() -> SilkResult<()> {
                 let c = &manifest.config;
                 let mut accumulated = Vec::new();
                 let mut geometry = [0; 3];
+                let mut light_samples = Vec::new();
                 let mut shutter_start = fraction;
                 let mut shutter_end = fraction;
                 for sample in 0..c.temporal_samples {
-                    let offset = ((sample as f64 + 0.5) / c.temporal_samples as f64 - 0.5)
-                        * c.shutter_fraction
-                        / (c.frames - 1) as f64;
-                    let time = (fraction + offset).clamp(0.0, 1.0);
+                    let time = expected_sample_time(c, frame, sample);
                     if sample == 0 {
                         shutter_start = time;
                     }
                     shutter_end = time;
-                    let scene = art_scene(&source, time, c)?;
-                    geometry = [scene.vertices.len(), scene.triangles.len(), scene.strands.len()];
-                    let linear = render::render_linear(&scene, &c.camera, &c.render)?;
+                    let product = art_frame(&source, time, c)?;
+                    geometry = product.geometry;
+                    if let Some(diagnostics) = product.light {
+                        light_samples.push(diagnostics);
+                    }
+                    let linear = product.pixels;
                     let weight = 1.0 / c.temporal_samples as f64;
                     if accumulated.is_empty() {
                         accumulated = linear;
                         accumulated.par_iter_mut().for_each(|v| *v *= weight);
                     } else {
+                        if linear.len() != accumulated.len() {
+                            return Err("Sub-frame image dimensions changed".into());
+                        }
                         accumulated
                             .par_iter_mut()
                             .zip(linear.par_iter())
                             .for_each(|(a, b)| *a += *b * weight);
+                    }
+                    if c.kind == "light" {
+                        eprintln!(
+                            "light frame {frame}: shutter sample {}/{}, {:.1}s elapsed",
+                            sample + 1,
+                            c.temporal_samples,
+                            instant.elapsed().as_secs_f64()
+                        );
                     }
                 }
                 let pixels = render::finish_linear(accumulated, &c.render)?;
@@ -421,6 +509,7 @@ fn main() -> SilkResult<()> {
                         triangles: geometry[1],
                         strands: geometry[2],
                         seconds: instant.elapsed().as_secs_f64(),
+                        light_samples: (!light_samples.is_empty()).then_some(light_samples),
                     },
                 )?;
                 eprintln!(
@@ -554,13 +643,41 @@ fn read_assembly_chunks(input: &[PathBuf]) -> SilkResult<Vec<AssemblyChunk>> {
 
 fn expected_frame_timing(config: &StudyConfig, frame: usize) -> [f64; 3] {
     let fraction = frame as f64 / (config.frames - 1) as f64;
-    let at = |sample: usize| {
-        let offset = ((sample as f64 + 0.5) / config.temporal_samples as f64 - 0.5)
-            * config.shutter_fraction
-            / (config.frames - 1) as f64;
-        (fraction + offset).clamp(0.0, 1.0)
-    };
-    [fraction, at(0), at(config.temporal_samples - 1)]
+    [
+        fraction,
+        expected_sample_time(config, frame, 0),
+        expected_sample_time(config, frame, config.temporal_samples - 1),
+    ]
+}
+
+fn expected_sample_time(config: &StudyConfig, frame: usize, sample: usize) -> f64 {
+    let fraction = frame as f64 / (config.frames - 1) as f64;
+    let offset = ((sample as f64 + 0.5) / config.temporal_samples as f64 - 0.5)
+        * config.shutter_fraction
+        / (config.frames - 1) as f64;
+    (fraction + offset).clamp(0.0, 1.0)
+}
+
+fn verify_light_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -> SilkResult<()> {
+    if config.kind != "light" {
+        return if receipt.light_samples.is_none() {
+            Ok(())
+        } else {
+            Err("Non-optical frame has unexpected light-transport diagnostics".into())
+        };
+    }
+    let samples = receipt.light_samples.as_ref().ok_or("Missing light-transport diagnostics")?;
+    if samples.len() != config.temporal_samples {
+        return Err("Incomplete light-transport shutter samples".into());
+    }
+    for (index, sample) in samples.iter().enumerate() {
+        sample.validate()?;
+        if sample.source_fraction.to_bits() != expected_sample_time(config, frame, index).to_bits()
+        {
+            return Err("Light-transport diagnostics have inconsistent source timing".into());
+        }
+    }
+    Ok(())
 }
 
 fn verify_assembly_frame(
@@ -572,6 +689,7 @@ fn verify_assembly_frame(
     let source_receipt = sidecar(&source);
     let receipt_bytes = fs::read(&source_receipt)?;
     let receipt: Receipt = serde_json::from_slice(&receipt_bytes)?;
+    verify_light_samples(&chunk.manifest.config, frame, &receipt)?;
     if receipt.recipe_sha256 != chunk.recipe_sha256 {
         return Err(format!("Frame {frame} receipt does not match its source chunk recipe").into());
     }
@@ -834,6 +952,7 @@ fn encode(
     for &frame in &manifest.rendered_frames {
         let path = frame_path(input, frame);
         let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(&path))?)?;
+        verify_light_samples(c, frame, &receipt)?;
         if receipt.recipe_sha256 != hash || receipt.png_sha256 != cache::file_hash(&path)? {
             return Err(format!("Frame {frame} failed its integrity check").into());
         }
@@ -952,6 +1071,7 @@ mod assembly_tests {
         assert!(manifest.config.calligraphy.is_some());
         assert!(manifest.config.loom.is_none());
         assert!(manifest.config.aurora.is_none());
+        assert!(manifest.config.light.is_none());
         assert_eq!(
             recipe_hash(&manifest).unwrap(),
             "f40ec9d064ca6c7711f1955998c26ac183c9f3b6cc7bd477cb41e8578b1b9748"
@@ -967,10 +1087,65 @@ mod assembly_tests {
         assert!(manifest.config.calligraphy.is_none());
         assert!(manifest.config.loom.is_some());
         assert!(manifest.config.aurora.is_none());
+        assert!(manifest.config.light.is_none());
         assert_eq!(
             recipe_hash(&manifest).unwrap(),
             "dac3b725dd71d3accbb0042d61ebde3174c8956c95720c2c4702eb669ba2a0b7"
         );
+    }
+
+    #[test]
+    fn archived_v11_aurora_keeps_its_original_recipe_hash() {
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../tests/fixtures/atelier-v11-aurora-manifest.json"
+        ))
+        .unwrap();
+        assert!(manifest.config.aurora.is_some());
+        assert!(manifest.config.light.is_none());
+        assert_eq!(
+            recipe_hash(&manifest).unwrap(),
+            "bf17b61e3f8f304bc4eedb52d1fa4a8a0f72b42d6ed4d213f2901c3c91272acd"
+        );
+    }
+
+    #[test]
+    fn archived_v12_light_keeps_its_original_recipe_hash() {
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../tests/fixtures/atelier-v12-light-manifest.json"
+        ))
+        .unwrap();
+        assert!(manifest.config.light.is_some());
+        assert_eq!(
+            recipe_hash(&manifest).unwrap(),
+            "6a9d84428443f4138865dad8d2eea7fa504b71ea24a3ad7a61b6e023faef3abd"
+        );
+    }
+
+    #[test]
+    fn light_receipts_require_complete_optical_samples_and_legacy_receipts_do_not() {
+        let config = StudyConfig {
+            kind: "light".into(),
+            calligraphy: None,
+            light: Some(light::LightConfig::default()),
+            ..StudyConfig::default()
+        };
+        let mut receipt = Receipt {
+            recipe_sha256: String::new(),
+            png_sha256: String::new(),
+            source_fraction: 0.0,
+            shutter_start_fraction: 0.0,
+            shutter_end_fraction: 0.0,
+            vertices: 0,
+            triangles: 0,
+            strands: 0,
+            seconds: 0.0,
+            light_samples: None,
+        };
+        assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_ok());
+        assert!(verify_light_samples(&config, 0, &receipt).is_err());
+        receipt.light_samples = Some(Vec::new());
+        assert!(verify_light_samples(&config, 0, &receipt).is_err());
+        assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_err());
     }
 
     fn manifest(frames: &[usize]) -> Manifest {
@@ -1018,6 +1193,7 @@ mod assembly_tests {
                     triangles: 10,
                     strands: 5,
                     seconds: 0.25,
+                    light_samples: None,
                 },
             )
             .unwrap();

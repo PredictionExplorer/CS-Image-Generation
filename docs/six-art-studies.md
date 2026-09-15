@@ -56,8 +56,8 @@ Local delivery: `CS-Image-Generation/output/six-art-studies-b7`.
 |---|---|
 | Tidal Calligraphy | Complete: both 4K/60 films verified and copied to the local collection |
 | Gravity Loom | Selected v08 spindle; full 4K/60 film rendering, motion review pending |
-| Aurora Veils | Refined full-detail v11; final texture proofs rendering before full film |
-| Light Cast by Gravity | Pending |
+| Aurora Veils | Selected v11; complete 4K/60 film rendering, full motion review pending |
+| Light Cast by Gravity | Implementing spectral phase lenses and conservative flux rendering |
 | Orbital Engraving | Pending |
 | Eclipse Garden | Pending |
 
@@ -322,3 +322,39 @@ fixture guards compatibility with Calligraphy artifacts.
   has not started. Use 12 wavelength groups from the existing spectral/CIE data
   for its initial high-detail optical render, rather than the proposal's original
   three-band starting point. Preserve energy and deterministic accumulation.
+
+### Aurora film started; Light Cast implementation
+
+- v11 final texture proofs at frames 0, 900 and 1670 were inspected and selected.
+  Irregular fine rays remove the residual repeating comb while preserving the
+  quieter opal/cyan/violet treatment. Full-source v10 composition checkpoints
+  remain applicable because this final revision changes only fixed fine detail.
+- Selected recipe: `tools/atelier/recipes/03-aurora-b7.json`, mirrored as
+  `configs/03-aurora.json`. Immutable renderer `bin/atelier-v11` is archived with
+  source commit `8276089` and `bin/atelier-v11-source.tar.gz` / build metadata.
+- Full Aurora render started around 09:16 UTC, driver PID 106870, with 16 ranges,
+  four active ranges and 32 workers total. Progress: `logs/aurora-final-v11.log`;
+  job record: `03-aurora/final-job.json`. It will assemble and finish both movies
+  after every range completes. Increase its worker allocation after Loom ends
+  if useful; preserve the existing boundaries, binary and requested recipe.
+- Loom renderer v08 is likewise archived with source commit `1a3097b`, a source
+  tarball and build metadata. Its driver remains PID 98271, four active ranges
+  of 28 workers. Around 09:23 it had 525 frames and four complete ranges; Aurora
+  had 12 frames. These are progress counts, not completion claims.
+- Light Cast implementation begins only after Aurora's implementation and
+  selected recipe are frozen. Geometry/config/spectral grouping lives in
+  `src/atelier/light.rs`; conservative CPU accumulation in `light/accumulate.rs`.
+  Root integrates the new direct linear-frame path with existing encoding.
+- Planned public API: `light::render_linear(source,time,config,camera,render)`
+  returns `LightFrame { pixels, diagnostics }`. Frontal camera target, size and
+  roll control the receiving plane; unsupported tilt is rejected. Config display
+  is `LightDisplay::Ivory` or `DarkGain`. Twelve contiguous groups of the existing
+  64-bin CIE XYZ weights preserve the existing observer normalization.
+- Initial Light quality uses 2304×1536 source cells, 12 wavelength groups, 3×3
+  receiving-plane sampling and **16** shutter samples. A conservative bound on
+  the fastest lens center is about 31 final pixels per frame; four shutter
+  samples could separate a caustic narrower than one pixel. No lower-detail
+  final film is planned.
+- Light receipts will preserve diagnostics for every exact shutter sample;
+  assembly and encoding will reject missing/truncated, non-finite or mistimed
+  optical records. Legacy receipt and recipe compatibility remains tested.
