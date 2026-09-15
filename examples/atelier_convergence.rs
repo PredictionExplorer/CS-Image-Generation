@@ -4,6 +4,8 @@
 //! `atelier_convergence --config recipe.json --orbit orbit.bin --frame 1670
 //! --crop 1400,700,256,256 --output comparison.json --png-dir comparison --run`.
 //! Set either reference factor to one to isolate the other comparison axis.
+//! The native PNG is published atomically before the reference starts; a
+//! separate progress JSON distinguishes it from the final comparison report.
 
 use clap::Parser;
 use rayon::prelude::*;
@@ -57,6 +59,9 @@ struct Args {
     /// Save native.png and reference.png after linear reference downsampling.
     #[arg(long)]
     png_dir: Option<PathBuf>,
+    /// Progress JSON; defaults to PNG-dir/progress.json or OUTPUT.progress.json.
+    #[arg(long)]
+    progress: Option<PathBuf>,
     /// Explicitly start the two renders. Without this flag, only print the plan.
     #[arg(long)]
     run: bool,
@@ -244,6 +249,17 @@ fn validate(config: &StudyConfig, args: &Args) -> SilkResult<()> {
     }
     if args.double_light_source_grid && config.kind != "light" {
         return Err("--double-light-source-grid applies only to Light".into());
+    }
+    if let Some(progress) = progress_path(args)
+        && (args.output.as_ref() == Some(&progress)
+            || args.png_dir.as_ref().is_some_and(|directory| {
+                progress == directory.join("native.png")
+                    || progress == directory.join("reference.png")
+            }))
+    {
+        return Err(
+            "progress JSON must have a separate path from the comparison and previews".into()
+        );
     }
     Ok(())
 }
@@ -668,13 +684,86 @@ fn compare(native: &[V3], reference: &[V3], crop: Crop, background: f64) -> Silk
     })
 }
 
+fn atomic_write(path: &Path, write: impl FnOnce(&Path) -> SilkResult<()>) -> SilkResult<()> {
+    if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    let mut filename = path.file_name().ok_or("output needs a filename")?.to_os_string();
+    filename.push(format!(".partial-{}", std::process::id()));
+    let temporary = path.with_file_name(filename);
+    let result = (|| {
+        write(&temporary)?;
+        fs::OpenOptions::new().write(true).open(&temporary)?.sync_all()?;
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn write_json_atomic(value: &impl Serialize, path: &Path) -> SilkResult<()> {
+    let text = serde_json::to_string_pretty(value)?;
+    atomic_write(path, |temporary| {
+        fs::write(temporary, format!("{text}\n"))?;
+        Ok(())
+    })
+}
+
+fn save_preview(colors: &[V3], render: &RenderConfig, path: &Path) -> SilkResult<()> {
+    // Finishing consumes its buffer. The comparison retains the original,
+    // untouched linear values while its independently finished preview exists.
+    let image = render::finish_linear(colors.to_vec(), render)?;
+    atomic_write(path, |temporary| {
+        image.save_with_format(temporary, image::ImageFormat::Png)?;
+        Ok(())
+    })
+}
+
+fn progress_path(args: &Args) -> Option<PathBuf> {
+    args.progress
+        .clone()
+        .or_else(|| args.png_dir.as_ref().map(|directory| directory.join("progress.json")))
+        .or_else(|| args.output.as_ref().map(|output| output.with_extension("progress.json")))
+}
+
+fn write_progress(args: &Args, value: &impl Serialize) -> SilkResult<()> {
+    if let Some(path) = progress_path(args) {
+        write_json_atomic(value, &path)?;
+    }
+    Ok(())
+}
+
+fn publish_native(
+    native: &[V3],
+    summary: &PassSummary,
+    pass: &Pass,
+    args: &Args,
+    plan: &impl Serialize,
+) -> SilkResult<Option<PathBuf>> {
+    let preview = if let Some(directory) = &args.png_dir {
+        let path = directory.join("native.png");
+        save_preview(native, &pass.render, &path)?;
+        Some(path)
+    } else {
+        None
+    };
+    write_progress(
+        args,
+        &serde_json::json!({
+            "status":"native_pass_complete_reference_pending",
+            "native_pass_complete":true, "reference_pass_complete":false,
+            "native_preview":preview, "native":summary, "plan":plan,
+        }),
+    )?;
+    Ok(preview)
+}
+
 fn emit(value: &impl Serialize, output: Option<&Path>) -> SilkResult<()> {
     let text = serde_json::to_string_pretty(value)?;
     if let Some(path) = output {
-        if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, format!("{text}\n"))?;
+        write_json_atomic(value, path)?;
     }
     println!("{text}");
     Ok(())
@@ -722,10 +811,49 @@ fn main() -> SilkResult<()> {
     }
     let orbit = cache::read_orbit(&args.orbit)?;
     let source = OrbitSeries::new(&orbit)?;
-    let (native, native_summary) =
-        render_pass("native", &source, &config, args.frame, &native_pass)?;
-    let (reference, reference_summary) =
-        render_pass("reference", &source, &config, args.frame, &reference_pass)?;
+    write_progress(
+        &args,
+        &serde_json::json!({
+            "status":"native_running_reference_pending",
+            "native_pass_complete":false, "reference_pass_complete":false, "plan":plan,
+        }),
+    )?;
+    let (native, native_summary) = match render_pass(
+        "native",
+        &source,
+        &config,
+        args.frame,
+        &native_pass,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            write_progress(
+                &args,
+                &serde_json::json!({"status":"native_failed", "error":error.to_string(), "plan":plan}),
+            )?;
+            return Err(error);
+        }
+    };
+    let native_preview = publish_native(&native, &native_summary, &native_pass, &args, &plan)?;
+    let (reference, reference_summary) = match render_pass(
+        "reference",
+        &source,
+        &config,
+        args.frame,
+        &reference_pass,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            write_progress(
+                &args,
+                &serde_json::json!({
+                    "status":"reference_failed", "native_pass_complete":true, "reference_pass_complete":false,
+                    "native_preview":native_preview, "native":native_summary, "error":error.to_string(), "plan":plan,
+                }),
+            )?;
+            return Err(error);
+        }
+    };
     let reference = downsample(&reference, args.crop, args.spatial_factor)?;
     // Eclipse also contains meaningful values below the configured background;
     // retain total luminance weights for its opaque dark forms, as for Ivory.
@@ -741,14 +869,9 @@ fn main() -> SilkResult<()> {
         0.0
     };
     let metrics = compare(&native, &reference, args.crop, background)?;
-    let previews = if let Some(directory) = &args.png_dir {
-        fs::create_dir_all(directory)?;
-        let native_path = directory.join("native.png");
+    let previews = if let (Some(directory), Some(native_path)) = (&args.png_dir, native_preview) {
         let reference_path = directory.join("reference.png");
-        render::finish_linear(native, &native_pass.render)?
-            .save_with_format(&native_path, image::ImageFormat::Png)?;
-        render::finish_linear(reference, &native_pass.render)?
-            .save_with_format(&reference_path, image::ImageFormat::Png)?;
+        save_preview(&reference, &native_pass.render, &reference_path)?;
         Some([native_path, reference_path])
     } else {
         None
@@ -762,6 +885,13 @@ fn main() -> SilkResult<()> {
             "metrics":metrics, "previews":previews,
         }),
         args.output.as_deref(),
+    )?;
+    write_progress(
+        &args,
+        &serde_json::json!({
+            "status":"complete", "native_pass_complete":true, "reference_pass_complete":true,
+            "comparison":args.output, "previews":previews, "plan":plan,
+        }),
     )
 }
 
@@ -951,6 +1081,88 @@ mod tests {
             [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0].map(|x| V3::new(x, x * 0.5, x * 0.25));
         let result = downsample(&values, crop, 2).unwrap();
         assert_eq!(result, [V3::new(5.0, 2.5, 1.25), V3::new(9.0, 4.5, 2.25)]);
+    }
+
+    #[test]
+    fn native_preview_and_pending_progress_publish_without_touching_final_comparison() {
+        let directory = tempfile::tempdir().unwrap();
+        let comparison = directory.path().join("comparison.json");
+        fs::write(&comparison, "previous complete comparison\n").unwrap();
+        let args = Args::try_parse_from([
+            "atelier_convergence",
+            "--config",
+            "unused.json",
+            "--orbit",
+            "unused.orbit",
+            "--frame",
+            "0",
+            "--crop",
+            "0,0,2,1",
+            "--run",
+            "--png-dir",
+            directory.path().to_str().unwrap(),
+            "--output",
+            comparison.to_str().unwrap(),
+        ])
+        .unwrap();
+        let mut config = study();
+        config.render.width = 2;
+        config.render.height = 1;
+        config.render.bloom_strength = 0.0;
+        let pass = make_pass(&config, args.crop, 1, 1, false).unwrap();
+        let native = [V3::new(0.2, 0.3, 0.4), V3::new(0.01, 0.02, 0.03)];
+        let original = native;
+        let summary = PassSummary {
+            seconds: 0.0,
+            clamped_midpoints: vec![0.0],
+            raw_exposure_intervals: vec![[0.0; 2]],
+            pixel_samples: 2,
+            light: None,
+            engraving: None,
+            eclipse: None,
+        };
+        let path =
+            publish_native(&native, &summary, &pass, &args, &serde_json::json!({"fixture":true}))
+                .unwrap()
+                .unwrap();
+        assert_eq!(image::image_dimensions(&path).unwrap(), (2, 1));
+        assert_eq!(native, original);
+        let progress: serde_json::Value =
+            serde_json::from_slice(&fs::read(progress_path(&args).unwrap()).unwrap()).unwrap();
+        assert_eq!(progress["status"], "native_pass_complete_reference_pending");
+        assert_eq!(progress["native_pass_complete"], true);
+        assert_eq!(progress["reference_pass_complete"], false);
+        assert_eq!(fs::read_to_string(&comparison).unwrap(), "previous complete comparison\n");
+        assert!(!directory.path().join("reference.png").exists());
+        let hash = cache::file_hash(&path).unwrap();
+        assert!(save_preview(&[], &pass.render, &path).is_err());
+        assert_eq!(cache::file_hash(&path).unwrap(), hash);
+        assert!(
+            fs::read_dir(directory.path()).unwrap().all(|entry| {
+                !entry.unwrap().file_name().to_string_lossy().contains(".partial-")
+            })
+        );
+    }
+
+    #[test]
+    fn progress_path_cannot_replace_the_final_comparison() {
+        let args = Args::try_parse_from([
+            "atelier_convergence",
+            "--config",
+            "unused.json",
+            "--orbit",
+            "unused.orbit",
+            "--frame",
+            "0",
+            "--crop",
+            "0,0,2,1",
+            "--output",
+            "comparison.json",
+            "--progress",
+            "comparison.json",
+        ])
+        .unwrap();
+        assert!(validate(&study(), &args).is_err());
     }
 
     #[test]

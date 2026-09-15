@@ -58,6 +58,8 @@ pub(super) struct Petal {
     inside_lipschitz: f64,
     rolling_radius: f64,
     curve_roundoff: f64,
+    #[cfg(test)]
+    fixed_root_reference: bool,
 }
 
 impl Petal {
@@ -96,6 +98,8 @@ impl Petal {
             inside_lipschitz,
             rolling_radius: 0.0,
             curve_roundoff: 0.0,
+            #[cfg(test)]
+            fixed_root_reference: false,
         };
         result.nodes =
             std::array::from_fn(|i| result.local_jet(TAU * i as f64 / CONTOUR_INTERVALS as f64));
@@ -256,6 +260,81 @@ impl Petal {
         value
     }
 
+    fn root_residual_limit(&self, tolerance: f64) -> f64 {
+        // Along the boundary, the inverse-map Lipschitz bound implies
+        // |C'|>=1/L. This gives a conservative curvature radius even when the
+        // tighter rolling-disk preparation cannot prove one for a thin shape.
+        let rough = ((1.0 / (self.second_derivative_bound * self.inside_lipschitz.powi(2)))
+            * (1.0 - 1024.0 * f64::EPSILON))
+            .next_down();
+        let normal_radius = self.rolling_radius.max(rough.max(0.0));
+        (tolerance * 1e-4).min(1e-12).min(normal_radius * INSIDE_NORMAL_TOLERANCE * 1e-3)
+    }
+
+    fn stationary_root_candidate(&self, point: Point, low: f64, high: f64, tolerance: f64) -> Jet {
+        #[cfg(test)]
+        if self.fixed_root_reference {
+            return self.stationary_root(point, low, high);
+        }
+        self.stationary_root_converged(point, low, high, tolerance).0
+    }
+
+    fn stationary_root_converged(
+        &self,
+        point: Point,
+        mut low: f64,
+        mut high: f64,
+        tolerance: f64,
+    ) -> (Jet, usize) {
+        let threshold = self.root_residual_limit(tolerance);
+        let mut theta = f64::midpoint(low, high);
+        let mut value = self.local_jet(theta);
+        for iteration in 1..=ROOT_ITERATIONS {
+            let delta = subtract(value.point, point);
+            let gradient = dot(delta, value.first);
+            if gradient == 0.0 || high - low < 1e-12 {
+                return (value, iteration);
+            }
+            let speed = value.first[0].hypot(value.first[1]);
+            let speed_lower = (speed * (1.0 - 8.0 * f64::EPSILON)).next_down();
+            let products = (delta[0] * value.first[0]).abs() + (delta[1] * value.first[1]).abs();
+            let coordinate_error = 16.0
+                * f64::EPSILON
+                * (1.0
+                    + point[0].abs().max(point[1].abs())
+                    + value.point[0].abs().max(value.point[1].abs()));
+            let gradient_upper =
+                (gradient.abs() + 8.0 * f64::EPSILON * products + coordinate_error * speed)
+                    .next_up();
+            let residual_upper = (gradient_upper / speed_lower).next_up();
+            if threshold.is_finite()
+                && threshold > 0.0
+                && speed_lower > 0.0
+                && residual_upper.is_finite()
+                && residual_upper <= threshold
+            {
+                // This only proposes a foot. The unchanged outside or rolling
+                // disk certificate still accepts it or requests the complete
+                // original search, whose fixed-28-budget solver is untouched.
+                return (value, iteration);
+            }
+            if gradient < 0.0 {
+                low = theta;
+            } else {
+                high = theta;
+            }
+            let curvature = dot(value.first, value.first) + dot(delta, value.second);
+            let next = theta - gradient / curvature;
+            theta = if curvature > 0.0 && next > low && next < high && next.is_finite() {
+                next
+            } else {
+                f64::midpoint(low, high)
+            };
+            value = self.local_jet(theta);
+        }
+        (value, ROOT_ITERATIONS)
+    }
+
     fn update_closest(point: Point, jet: Jet, closest: &mut Closest) {
         let delta = subtract(jet.point, point);
         let distance = delta[0].hypot(delta[1]);
@@ -404,7 +483,12 @@ impl Petal {
                 } else if gb == 0.0 {
                     b
                 } else {
-                    self.stationary_root(local, index as f64 * step, (index + 1) as f64 * step)
+                    self.stationary_root_candidate(
+                        local,
+                        index as f64 * step,
+                        (index + 1) as f64 * step,
+                        tolerance,
+                    )
                 };
                 if let Some(projection) = self.inside_disk_certificate(local, jet, tolerance) {
                     return Some(projection);
@@ -427,7 +511,12 @@ impl Petal {
                 } else if gb == 0.0 {
                     b
                 } else {
-                    self.stationary_root(local, index as f64 * step, (index + 1) as f64 * step)
+                    self.stationary_root_candidate(
+                        local,
+                        index as f64 * step,
+                        (index + 1) as f64 * step,
+                        tolerance,
+                    )
                 };
                 if self.outside_foot(local, jet, tolerance) {
                     let tangent = normalize(jet.first);
@@ -678,6 +767,39 @@ fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
 mod tests {
     use super::*;
 
+    fn fixed_root_counted(
+        petal: &Petal,
+        point: Point,
+        mut low: f64,
+        mut high: f64,
+    ) -> (Jet, usize) {
+        // Literal fixed-28-budget reference: the only exits are the original
+        // exact-zero gradient and tiny bracket. There is no residual shortcut.
+        let mut theta = f64::midpoint(low, high);
+        let mut value = petal.local_jet(theta);
+        for iteration in 1..=ROOT_ITERATIONS {
+            let delta = subtract(value.point, point);
+            let gradient = dot(delta, value.first);
+            if gradient == 0.0 || high - low < 1e-12 {
+                return (value, iteration);
+            }
+            if gradient < 0.0 {
+                low = theta;
+            } else {
+                high = theta;
+            }
+            let curvature = dot(value.first, value.first) + dot(delta, value.second);
+            let next = theta - gradient / curvature;
+            theta = if curvature > 0.0 && next > low && next < high && next.is_finite() {
+                next
+            } else {
+                f64::midpoint(low, high)
+            };
+            value = petal.local_jet(theta);
+        }
+        (value, ROOT_ITERATIONS)
+    }
+
     fn probe_ball(center: Point, radius: f64, mut check: impl FnMut(Point)) {
         check(center);
         for fraction in [0.5, 1.0] {
@@ -705,6 +827,7 @@ mod tests {
         // tests because the old global search can choose a roundoff-near foot.
         let mut outside_only = *petal;
         outside_only.rolling_radius = 0.0;
+        outside_only.fixed_root_reference = true;
         let optimized = outside_only.distance_normal_with_tolerance(point, requested);
         assert_eq!(optimized.0.to_bits(), original.0.to_bits(), "distance at {point:?}");
         assert_eq!(
@@ -1266,6 +1389,143 @@ mod tests {
                     "composite difference {difference:?} at {point:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn residual_stop_reduces_iterations_against_the_unchanged_fixed_solver() {
+        let config = EclipseConfig::default();
+        let mut fixed_iterations = 0;
+        let mut stopped_iterations = 0;
+        let mut roots = 0;
+        for shape in config.petals {
+            let petal = Petal::new(shape, [0.0; 2], 1.0);
+            let tolerance = shape.light_sigma * 1e-6;
+            assert!(petal.root_residual_limit(tolerance) <= 1e-12);
+            for index in 0..64 {
+                let theta = TAU * (f64::from(index) + 0.37) / 64.0;
+                let jet = petal.local_jet(theta);
+                let tangent = normalize(jet.first);
+                let normal = [tangent[1], -tangent[0]];
+                for offset in [-0.5 * petal.rolling_radius, shape.light_sigma] {
+                    let point = add(jet.point, normal.map(|v| offset * v));
+                    let step = TAU / CONTOUR_INTERVALS as f64;
+                    for interval in 0..CONTOUR_INTERVALS {
+                        let a = petal.nodes[interval];
+                        let b = petal.nodes[interval + 1];
+                        let ga = dot(subtract(a.point, point), a.first);
+                        let gb = dot(subtract(b.point, point), b.first);
+                        if ga < 0.0 && gb > 0.0 {
+                            let low = interval as f64 * step;
+                            let high = (interval + 1) as f64 * step;
+                            let (reference, fixed) = fixed_root_counted(&petal, point, low, high);
+                            let unchanged = petal.stationary_root(point, low, high);
+                            assert_eq!(
+                                reference.point.map(f64::to_bits),
+                                unchanged.point.map(f64::to_bits)
+                            );
+                            assert_eq!(
+                                reference.first.map(f64::to_bits),
+                                unchanged.first.map(f64::to_bits)
+                            );
+                            assert_eq!(
+                                reference.second.map(f64::to_bits),
+                                unchanged.second.map(f64::to_bits)
+                            );
+                            let (_, stopped) =
+                                petal.stationary_root_converged(point, low, high, tolerance);
+                            assert!(stopped <= fixed);
+                            fixed_iterations += fixed;
+                            stopped_iterations += stopped;
+                            roots += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(roots > 300);
+        assert!(
+            stopped_iterations * 4 < fixed_iterations * 3,
+            "{roots} roots: stopped {stopped_iterations}, fixed {fixed_iterations}"
+        );
+    }
+
+    #[test]
+    fn early_root_candidates_preserve_fixed_reference_geometry_normals_and_radiance() {
+        let config = EclipseConfig::default();
+        let centers = [[-0.8, -0.3], [0.7, 0.2], [0.0, 1.0]];
+        let actual = std::array::from_fn(|i| Petal::new(config.petals[i], centers[i], 1.06));
+        let reference = actual.map(|mut petal| {
+            petal.fixed_root_reference = true;
+            petal
+        });
+        for (new, old) in actual.iter().zip(&reference) {
+            for index in 0_u32..128 {
+                let boundary = new.contour(TAU * (f64::from(index) + 0.17) / 128.0);
+                let tolerance = if index.is_multiple_of(2) {
+                    new.shape.light_sigma * 1e-6
+                } else {
+                    config.edge_width * config.integration_tolerance * 0.25
+                };
+                for offset in [
+                    -3.5 * new.shape.light_sigma,
+                    -new.shape.light_sigma,
+                    -1e-9,
+                    0.0,
+                    1e-9,
+                    new.shape.light_sigma,
+                    3.5 * new.shape.light_sigma,
+                ] {
+                    let point = add(boundary.position, boundary.normal.map(|v| offset * v));
+                    let a = new.distance_normal_with_tolerance(point, tolerance);
+                    let b = old.distance_normal_with_tolerance(point, tolerance);
+                    assert!(
+                        (a.0 - b.0).abs() <= tolerance + 1e-11,
+                        "distance {a:?} vs fixed {b:?}"
+                    );
+                    let difference = subtract(a.1, b.1);
+                    assert!(
+                        difference[0].hypot(difference[1]) < 2e-6,
+                        "normal {a:?} vs fixed {b:?}"
+                    );
+                    let emitter = add(point, new.shape.light_offset);
+                    let color = crescent(emitter, new, &config) - crescent(emitter, old, &config);
+                    assert!(
+                        color.x.abs().max(color.y.abs()).max(color.z.abs()) < 1e-5,
+                        "crescent {color:?}"
+                    );
+                }
+            }
+        }
+        let background = V3::new(0.0005, 0.00035, 0.00065);
+        let sample = |point: Point, petals: &[Petal; 3]| {
+            let t = transmission(point, petals, &config);
+            let light =
+                petals.iter().fold(background, |sum, petal| sum + crescent(point, petal, &config));
+            light * t + config.dark_color * (1.0 - t)
+        };
+        for y in 0..=32 {
+            for x in 0..=40 {
+                let point = [-3.2 + 6.4 * f64::from(x) / 40.0, -2.7 + 5.4 * f64::from(y) / 32.0];
+                let color = sample(point, &actual) - sample(point, &reference);
+                assert!(
+                    color.x.abs().max(color.y.abs()).max(color.z.abs()) < 1e-5,
+                    "composite {color:?} at {point:?}"
+                );
+            }
+        }
+        let unproven = Petal::new(
+            EclipsePetalConfig { shear: 0.3, shoulder: 0.22, ..config.petals[0] },
+            [0.0; 2],
+            1.0,
+        );
+        let mut fixed = unproven;
+        fixed.fixed_root_reference = true;
+        for point in [[0.0; 2], [-0.8, 0.2], [0.1, 1.5], [1.4, -0.8]] {
+            let a = unproven.distance_normal(point);
+            let b = fixed.distance_normal(point);
+            assert_eq!(a.0.to_bits(), b.0.to_bits());
+            assert_eq!(a.1.map(f64::to_bits), b.1.map(f64::to_bits));
         }
     }
 }
