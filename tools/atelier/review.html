@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Six studies of one orbit</title>
+<style>
+:root{color-scheme:dark;--bg:#101012;--panel:#19191c;--line:#343438;--ink:#f1eee8;--muted:#b8b3aa;--accent:#e9d8af}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,select,textarea{font:inherit}button,a,select,input{accent-color:var(--accent)}button,select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 13px;cursor:pointer}button:hover,select:hover{border-color:var(--muted)}button[aria-pressed=true]{background:var(--accent);color:#171511;border-color:var(--accent)}button:focus-visible,a:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:4px}button:disabled{opacity:.4;cursor:default}a{color:var(--accent);text-underline-offset:4px}main{max-width:1700px;margin:auto;padding:42px 36px 70px}header{display:flex;justify-content:space-between;gap:30px;align-items:end;margin-bottom:28px}h1{font-family:Georgia,serif;font-size:clamp(30px,4vw,54px);font-weight:400;letter-spacing:-.025em;line-height:1.1;margin:0 0 12px}.eyebrow{text-transform:uppercase;letter-spacing:.15em;font-size:11px;color:var(--accent);margin:0 0 14px}.muted{color:var(--muted)}header p{margin:0}.small{font-size:12px}.modes,.controls,.rating,.links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.viewer{display:grid;grid-template-columns:1fr;gap:18px}.viewer.compare{grid-template-columns:1fr 1fr}.film{min-width:0}.film-title{display:flex;gap:12px;align-items:center;margin:0 0 12px}.film-title select{width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;padding-left:0;font-size:17px}.film-title span{color:var(--muted);font-size:12px}video{display:block;width:100%;aspect-ratio:16/9;background:#060609;object-fit:contain;border-radius:2px}.caption{min-height:48px;font-size:13px;color:var(--muted);margin:12px 0 0}.controls{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0;margin:20px 0 34px;gap:12px}.timeline{display:flex;align-items:center;gap:12px;flex:1;min-width:180px}.timeline input{width:100%;min-width:80px}.clock{font-variant-numeric:tabular-nums;white-space:nowrap;min-width:98px;font-size:12px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:42px 0 18px}h2{font:400 25px/1.3 Georgia,serif;margin:0}.studies{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px 20px}.study{padding:0;text-align:left;background:none;border:0;border-radius:0;position:relative}.study-placeholder{display:grid;place-items:center;width:100%;aspect-ratio:16/9;background:var(--panel);color:var(--muted);border:2px solid transparent;font-size:12px}.film-time{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11px;color:var(--muted)}.study img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--panel);border:2px solid transparent;border-radius:2px}.study[aria-pressed=true]{background:none;color:var(--ink)}.study[aria-pressed=true] img{border-color:var(--accent)}.study-name{display:block;margin-top:10px;font-size:16px}.study-index{font-size:11px;color:var(--muted);margin-right:8px}.study-status{font-size:11px;display:block;margin:5px 0;color:var(--muted)}.notes{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:46px}.notes h2{margin-bottom:12px}textarea{resize:vertical;width:100%;min-height:125px;background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:14px;margin:12px 0 5px}.rating button{font-size:12px;padding:6px 12px}.note-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}.links{gap:18px;margin-top:16px;font-size:12px}.footer{margin-top:46px;border-top:1px solid var(--line);padding-top:20px;display:flex;justify-content:space-between;gap:24px;font-size:12px;color:var(--muted)}[hidden]{display:none!important}.error{color:#ffc6ac;font-size:13px;padding:12px 0}.art-stage:fullscreen{background:var(--bg);padding:30px;overflow:auto}.art-stage:fullscreen video{max-height:74vh}.art-stage:fullscreen .controls{margin-bottom:0}@media(max-width:800px){main{padding:24px 18px 40px}header{display:block}.modes{margin-top:22px}.viewer.compare{grid-template-columns:1fr}.studies{grid-template-columns:repeat(2,minmax(0,1fr))}.notes{grid-template-columns:1fr}.footer{display:block}.footer p{margin:8px 0}.controls{gap:9px}.caption{min-height:0}}
+</style>
+</head>
+<body>
+<main>
+<header><div><p class="eyebrow">A study in motion</p><h1>Six studies of one orbit</h1><p class="muted">One seed. Six visual languages. The complete recorded movement.</p><p class="muted small" style="margin-top:8px">0xb7f327f9f722 &nbsp;·&nbsp; 4K &nbsp;·&nbsp; 60 fps &nbsp;·&nbsp; 30.03 seconds</p></div><div class="modes" role="group" aria-label="Viewing mode"><button id="single" aria-pressed="true">Single film</button><button id="compare" aria-pressed="false">Compare two</button></div></header>
+<section class="art-stage" id="stage" aria-label="Film review">
+<div class="viewer" id="viewer">
+<article class="film"><div class="film-title"><span id="left-label">Film</span><select id="left-select" aria-label="Choose the first film"></select><output id="left-time" class="film-time" aria-label="First film time" hidden>0:00.00</output></div><video id="left-video" preload="metadata" playsinline aria-label="First artwork film"></video><p class="caption" id="left-description"></p></article>
+<article class="film" id="right-panel" hidden><div class="film-title"><span>B</span><select id="right-select" aria-label="Choose the second film"></select><output id="right-time" class="film-time" aria-label="Second film time">0:00.00</output></div><video id="right-video" preload="metadata" playsinline aria-label="Second artwork film"></video><p class="caption" id="right-description"></p></article>
+</div>
+<div class="controls"><button id="play">Play</button><button id="restart" aria-label="Restart both films">Restart</button><div class="timeline"><span class="clock" id="clock">0:00.00 / 0:30.03</span><input id="seek" type="range" min="0" max="30.033333" step="0.016667" value="0" aria-label="Playback position"></div><select id="speed" aria-label="Playback speed"><option value="1">Normal speed</option><option value="0.5">Half speed</option><option value="0.25">Quarter speed</option></select><select id="quality" aria-label="Picture quality"><option value="master">Highest quality</option><option value="video">Compatibility version</option></select><button id="encounter">Encounter · 27.8s</button><button id="fullscreen">Full screen</button></div>
+<p id="media-error" class="error" role="status" hidden></p>
+</section>
+<div class="section-title"><h2>The collection</h2><span class="small muted" id="collection-hint">Choose a film to view</span></div>
+<section class="studies" id="studies" aria-label="Six film choices"></section>
+<section class="notes" aria-label="Your review notes">
+<div><div class="note-heading"><h2 id="note-title">Your notes</h2><select id="note-select" aria-label="Film to write notes about"></select></div><div class="rating" role="group" aria-label="Your impression"><button data-rating="favorite" aria-pressed="false">Favorite</button><button data-rating="keep" aria-pressed="false">Keep exploring</button><button data-rating="rework" aria-pressed="false">Needs a new direction</button></div><textarea id="note" aria-label="Notes about this film" placeholder="What feels beautiful? Which moments work? What would you change?"></textarea><p class="small muted" id="save-status">Notes stay in this browser.</p><div class="controls" style="border:0;margin:8px 0;padding:0"><button id="mark-time">Mark this moment</button><button id="export">Export review notes</button></div></div>
+<div><h2>Look closely</h2><p class="muted">Watch the large shapes first, then the movement between them. Slow playback reveals the fine threads, transparent layers, and changes in light.</p><p class="muted">The encounter button moves both films to the same physical event, when bodies A and C pass closest in this interval. Each film interprets that movement differently.</p><div class="links"><a id="download-web" download>Download this film</a><a id="download-master" download>10-bit master</a><a id="recipe-link">Recipe and provenance</a></div></div>
+</section>
+<footer class="footer"><p>All artwork is generated from the recorded orbit with Rust on CPUs.</p><p id="complete-label">Full-resolution source frames and recipes are archived.</p></footer>
+</main>
+<script>
+const studies = /*STUDY_DATA*/;
+const $ = id => document.getElementById(id);
+const left = $('left-video'), right = $('right-video');
+const videos = [left, right];
+const states = new Map(videos.map(video => [video, {ready:false, generation:0, target:0}]));
+const artworks = studies.filter(study => !study.reference);
+const references = studies.filter(study => study.reference && study.ready);
+const ready = artworks.filter(study => study.ready);
+const first = ready[0] || artworks[0], second = ready[1] || references[0] || first;
+let comparing = false, playing = false, desiredTime = 0, playToken = 0;
+$('quality').value = 'master';
+const storageKey = 'six-art-studies-b7-review-v1';
+let notes = {}, canSave = true;
+try {
+  const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) notes = saved;
+} catch { canSave = false; }
+
+function option(study) {
+  const element = document.createElement('option');
+  element.value = study.id;
+  element.textContent = study.title + (study.ready ? '' : ' — in development');
+  element.disabled = !study.ready;
+  return element;
+}
+for (const study of artworks) {
+  $('left-select').append(option(study));
+  $('right-select').append(option(study));
+  const noteOption = option(study); noteOption.disabled = false;
+  $('note-select').append(noteOption);
+  const button = document.createElement('button');
+  button.className = 'study'; button.dataset.id = study.id;
+  button.setAttribute('aria-pressed', 'false'); button.disabled = !study.ready;
+  if (study.poster) {
+    const image = document.createElement('img');
+    image.alt = study.title; image.loading = 'lazy'; image.src = study.poster;
+    button.append(image);
+  } else {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'study-placeholder';
+    placeholder.textContent = study.reference ? 'Private QA reference' : 'In development';
+    button.append(placeholder);
+  }
+  const title = document.createElement('span'); title.className = 'study-name';
+  const number = document.createElement('span'); number.className = 'study-index';
+  number.textContent = study.number;
+  title.append(number, document.createTextNode(study.title));
+  const status = document.createElement('span'); status.className = 'study-status';
+  status.textContent = study.complete ? 'Full film · 4K / 60 fps' :
+    study.reference ? 'Private QA reference' : study.ready ? 'Development preview' : 'In development';
+  button.append(title, status);
+  button.onclick = () => chooseFilm('left', study.id);
+  $('studies').append(button);
+}
+for (const reference of references) $('right-select').append(option(reference));
+function current(side) {
+  return studies.find(study => study.id === $(side + '-select').value) || first;
+}
+function activeVideos() { return comparing ? videos : [left]; }
+function activeStudies() { return comparing ? [current('left'), current('right')] : [current('left')]; }
+function showStatus(message) { $('media-error').textContent = message; $('media-error').hidden = !message; }
+function setLink(id, path) {
+  $(id).hidden = !path;
+  if (path) $(id).href = path; else $(id).removeAttribute('href');
+}
+function markSelection() {
+  document.querySelectorAll('.study').forEach(button =>
+    button.setAttribute('aria-pressed', String(button.dataset.id === current('left').id)));
+  const study = current('left');
+  setLink('download-web', study.ready && study.video);
+  setLink('download-master', study.ready && study.master);
+  setLink('recipe-link', study.recipe);
+}
+function updateQuality() {
+  const available = activeStudies().every(study => study.master);
+  $('quality').querySelector('[value="master"]').disabled = !available;
+  if (!available && $('quality').value === 'master') $('quality').value = 'video';
+}
+function pauseMedia() { playToken++; videos.forEach(video => video.pause()); }
+function failPlayback(message) {
+  playing = false; pauseMedia(); $('play').textContent = 'Play'; showStatus(message);
+}
+function playActive() {
+  if (!playing || !activeVideos().every(video => states.get(video).ready)) return;
+  const token = ++playToken;
+  Promise.all(activeVideos().map(video => video.play())).catch(error => {
+    if (token !== playToken || error.name === 'AbortError') return;
+    failPlayback('Playback could not start. Use Play again, or download the film below.');
+  });
+}
+function captureTime() {
+  return states.get(left).ready && Number.isFinite(left.currentTime) ? left.currentTime : desiredTime;
+}
+function loadSources() {
+  desiredTime = captureTime(); pauseMedia(); updateQuality();
+  for (const [side, video] of [['left', left], ['right', right]]) {
+    const study = current(side), state = states.get(video);
+    $(side + '-description').textContent = study.description;
+    if (!study.ready) continue;
+    const generation = ++state.generation;
+    state.ready = false; state.target = desiredTime;
+    video.poster = study.poster || '';
+    video.playbackRate = +$('speed').value;
+    video.onloadedmetadata = () => {
+      if (state.generation !== generation) return;
+      state.ready = true;
+      video.currentTime = Math.min(state.target, Number.isFinite(video.duration) ? video.duration : state.target);
+      if (video === left) $('seek').max = Number.isFinite(video.duration) ? video.duration : 30.033333;
+      updateClock(); playActive();
+    };
+    video.src = $('quality').value === 'master' && study.master ? study.master : study.video;
+    video.load();
+  }
+  markSelection(); updateMarkAvailability();
+}
+function chooseFilm(side, id) {
+  if (!studies.some(study => study.id === id && study.ready)) return;
+  $(side + '-select').value = id;
+  if (side === 'left') { $('note-select').value = id; loadNote(); }
+  showStatus(''); loadSources();
+}
+function setMode(value) {
+  if (value && (!ready.length || ready.length + references.length < 2)) return;
+  desiredTime = captureTime(); comparing = value;
+  $('viewer').classList.toggle('compare', value); $('right-panel').hidden = !value;
+  $('single').setAttribute('aria-pressed', String(!value));
+  $('compare').setAttribute('aria-pressed', String(value));
+  $('left-label').textContent = value ? 'A' : 'Film'; $('left-time').hidden = !value;
+  loadSources();
+}
+function togglePlay() {
+  if (!ready.length) return;
+  if (playing) { playing = false; pauseMedia(); $('play').textContent = 'Play'; }
+  else {
+    if (left.ended || (Number.isFinite(left.duration) && left.currentTime >= left.duration - 0.01)) seek(0);
+    playing = true; showStatus(''); $('play').textContent = 'Pause'; playActive();
+  }
+}
+function seek(time) {
+  const duration = Number.isFinite(left.duration) ? left.duration : 30.033333;
+  desiredTime = Math.max(0, Math.min(time, duration));
+  for (const video of videos) {
+    const state = states.get(video); state.target = desiredTime;
+    if (state.ready) video.currentTime = Math.min(desiredTime, Number.isFinite(video.duration) ? video.duration : desiredTime);
+  }
+  updateClock();
+}
+function stamp(time) {
+  const seconds = Math.max(0, time || 0);
+  return Math.floor(seconds / 60) + ':' + (seconds % 60).toFixed(2).padStart(5, '0');
+}
+function updateClock() {
+  const time = states.get(left).ready ? left.currentTime : desiredTime;
+  $('clock').textContent = stamp(time) + ' / ' + stamp(left.duration || 30.033333);
+  $('seek').value = time || 0;
+  $('left-time').textContent = stamp(time);
+  $('right-time').textContent = stamp(states.get(right).ready ? right.currentTime : desiredTime);
+}
+function tick() {
+  updateClock();
+  if (comparing && playing && states.get(left).ready && states.get(right).ready &&
+      left.readyState >= 2 && right.readyState >= 2 && !left.seeking && !right.seeking) {
+    const delta = right.currentTime - left.currentTime;
+    if (Math.abs(delta) > 0.12) right.currentTime = Math.min(left.currentTime, right.duration);
+    else right.playbackRate = left.playbackRate * (Math.abs(delta) > 0.025 ? (delta > 0 ? 0.985 : 1.015) : 1);
+  }
+  requestAnimationFrame(tick);
+}
+left.addEventListener('ended', () => {
+  playing = false; pauseMedia();
+  if (states.get(right).ready) right.currentTime = Math.min(left.currentTime, right.duration);
+  $('play').textContent = 'Play'; updateClock();
+});
+for (const video of videos) video.addEventListener('error', () => {
+  if (!video.error || !video.getAttribute('src') || !activeVideos().includes(video)) return;
+  if ($('quality').value === 'master') {
+    $('quality').value = 'video'; loadSources();
+    showStatus('Using the compatibility version for playback in this browser.');
+  } else failPlayback('This film could not be loaded. Open the gallery using the supplied review server, or download the film directly.');
+});
+
+function save() {
+  for (const [id, entry] of Object.entries(notes)) if (!entry.text?.trim() && !entry.rating) delete notes[id];
+  try { localStorage.setItem(storageKey, JSON.stringify(notes)); canSave = true; }
+  catch { canSave = false; }
+  $('save-status').textContent = canSave ? 'Notes saved in this browser.' : 'Use Export review notes to keep your notes.';
+}
+function noteVideo() {
+  const id = $('note-select').value;
+  if (id === current('left').id && current('left').ready) return left;
+  if (comparing && id === current('right').id && current('right').ready) return right;
+  return null;
+}
+function updateMarkAvailability() { $('mark-time').disabled = !noteVideo(); }
+function loadNote() {
+  const entry = notes[$('note-select').value] || {};
+  $('note').value = entry.text || '';
+  document.querySelectorAll('[data-rating]').forEach(button =>
+    button.setAttribute('aria-pressed', String(button.dataset.rating === entry.rating)));
+  updateMarkAvailability();
+}
+$('note').oninput = () => {
+  const id = $('note-select').value;
+  notes[id] = {...(notes[id] || {}), text:$('note').value, updated:new Date().toISOString()}; save();
+};
+document.querySelectorAll('[data-rating]').forEach(button => button.onclick = () => {
+  const id = $('note-select').value, entry = notes[id] || {};
+  entry.rating = entry.rating === button.dataset.rating ? null : button.dataset.rating;
+  notes[id] = entry; save(); loadNote();
+});
+$('note-select').onchange = loadNote;
+$('mark-time').onclick = () => {
+  const video = noteVideo(); if (!video) return;
+  const note = $('note');
+  note.value += (note.value && !note.value.endsWith('\n') ? '\n' : '') + '[' + stamp(video.currentTime) + '] ';
+  note.dispatchEvent(new Event('input')); note.focus();
+};
+$('export').onclick = () => {
+  const blob = new Blob([JSON.stringify({seed:'0xb7f327f9f722',exported:new Date().toISOString(),
+    studies:artworks.map(study => ({id:study.id,title:study.title,...(notes[study.id] || {})}))}, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob), link = document.createElement('a');
+  link.href = url; link.download = 'six-art-studies-review.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+$('single').onclick = () => setMode(false); $('compare').onclick = () => setMode(true);
+$('play').onclick = togglePlay; $('restart').onclick = () => seek(0);
+$('seek').oninput = event => seek(+event.target.value);
+$('speed').onchange = () => { left.playbackRate = right.playbackRate = +$('speed').value; };
+$('quality').onchange = () => { showStatus(''); loadSources(); };
+// The recorded endpoints span 1,801 frame intervals; the encoded film also holds its final frame.
+$('encounter').onclick = () => seek(0.9274619274619275 * (1801 / 60));
+$('fullscreen').onclick = () => {
+  const action = document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen();
+  action.catch(() => showStatus('Full screen is unavailable in this browser.'));
+};
+document.addEventListener('fullscreenchange', () => {
+  $('fullscreen').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+});
+$('left-select').onchange = event => chooseFilm('left', event.target.value);
+$('right-select').onchange = event => chooseFilm('right', event.target.value);
+document.addEventListener('keydown', event => {
+  if (event.code === 'Space' && !['TEXTAREA','INPUT','SELECT','BUTTON'].includes(document.activeElement.tagName)) {
+    event.preventDefault(); togglePlay();
+  }
+});
+$('left-select').value = first.id; $('right-select').value = second.id; $('note-select').value = first.id;
+$('compare').disabled = !ready.length || ready.length + references.length < 2;
+if (!ready.length) {
+  for (const id of ['play','restart','seek','speed','quality','encounter','fullscreen']) $(id).disabled = true;
+  showStatus('The films are still in development.');
+} else loadSources();
+loadNote(); markSelection();
+const completed = studies.filter(study => study.complete && !study.reference).length;
+const total = studies.filter(study => !study.reference).length;
+const previews = artworks.filter(study => study.ready && !study.complete).length;
+$('complete-label').textContent = completed === total ? 'Six complete films · full-resolution sources archived' :
+  completed + ' of ' + total + ' films complete' + (previews ? ' · ' + previews + (previews === 1 ? ' private preview' : ' private previews') : '');
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

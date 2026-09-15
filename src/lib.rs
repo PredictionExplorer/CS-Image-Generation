@@ -28,6 +28,8 @@
 pub(crate) mod analysis;
 /// High-level generation pipeline: seed parsing, simulation orchestration, and output.
 pub mod app;
+/// Six artistic interpretations of recorded three-body motion.
+pub mod atelier;
 /// Body drift transforms applied between simulation frames.
 pub mod drift;
 /// Drift parameter resolution and validation.

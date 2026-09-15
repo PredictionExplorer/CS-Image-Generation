@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "tidal_silk"
 path = "src/bin/tidal_silk.rs"
 
+[[bin]]
+name = "orbital_atelier"
+path = "src/bin/orbital_atelier.rs"
+
 [lints.rust]
 warnings     = "deny"
 missing_docs = "deny"

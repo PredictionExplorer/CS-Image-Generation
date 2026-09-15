@@ -1,0 +1,188 @@
+{
+  "kind": "calligraphy",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 4,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.5,
+  "camera": {
+    "position": {
+      "x": -4.61125895189473,
+      "y": 6.194204585658133,
+      "z": 1.6028072502755757
+    },
+    "target": {
+      "x": 0.07378946269483416,
+      "y": -0.103617970591791,
+      "z": 0.05757186272404746
+    },
+    "up": {
+      "x": -0.4002124071305978,
+      "y": -0.07359688168664742,
+      "z": -0.9134623846578107
+    },
+    "orthographic_height": 3.329397307161773
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 3,
+    "exposure": 0.45,
+    "background": {
+      "x": 0.0022,
+      "y": 0.003,
+      "z": 0.0055
+    },
+    "key_strength": 1.3,
+    "rim_strength": 1.5,
+    "fill_strength": 0.17,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.055
+  },
+  "calligraphy": {
+    "history_fraction": 0.48,
+    "history_arc_length": 6.0,
+    "segments": 2048,
+    "across_segments": 64,
+    "ribbon_width": 0.6,
+    "body_widths": [
+      0.9,
+      0.9,
+      0.78
+    ],
+    "tail_taper": 0.62,
+    "head_taper": 0.15,
+    "fan_strength": 0.42,
+    "turn_slimming": 0.5,
+    "proximity_slimming": 0.28,
+    "arc_width_limit": 0.12,
+    "curvature_width_limit": 0.6,
+    "width_slope_limit": 0.65,
+    "width_transition": 0.28,
+    "camber": 0.065,
+    "corrugation_amplitude": 0.024,
+    "corrugation_count": 2.75,
+    "corrugation_pitch": 2.1,
+    "roll_degrees": [
+      95,
+      90,
+      65
+    ],
+    "roll_amplitude_degrees": 25,
+    "roll_pitch": 8.0,
+    "roll_phase_degrees": [
+      0.0,
+      120.0,
+      240.0
+    ],
+    "surface_opacity": 0.12,
+    "fiber_count": 144,
+    "fringe_count": 24,
+    "fiber_segments": 768,
+    "fiber_radius": 0.00038,
+    "fiber_optical_depth": 0.45,
+    "fiber_brightness": 1.35,
+    "fiber_sheen": 1.0,
+    "fiber_roughness": 0.22,
+    "fiber_emission": 0.0,
+    "fiber_tint_variation": 0.28,
+    "fiber_radius_variation": 0.35,
+    "fiber_fan_strength": 0.28,
+    "fiber_fan_pitch": 3.2,
+    "fiber_wander": 0.45,
+    "fiber_length_variation": 0.18,
+    "fringe_spread": 0.5,
+    "fringe_lift": 0.09,
+    "fringe_breathing": 0.8,
+    "fringe_bundles": 3,
+    "fringe_pitch": 3.6,
+    "detail_seed": 7331,
+    "tip_glint_radius": 0.0014,
+    "echoes": false,
+    "echo_width": 0.22,
+    "echo_opacity": 0.18,
+    "materials": [
+      {
+        "front_color": {
+          "x": 0.78,
+          "y": 0.73,
+          "z": 0.62
+        },
+        "back_color": {
+          "x": 0.39,
+          "y": 0.28,
+          "z": 0.52
+        },
+        "optical_depth": {
+          "x": 0.4,
+          "y": 0.45,
+          "z": 0.54
+        },
+        "roughness": 0.29,
+        "anisotropy": 0.82,
+        "sheen": 0.48,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 140.0,
+        "fiber_strength": 0.24
+      },
+      {
+        "front_color": {
+          "x": 0.54,
+          "y": 0.66,
+          "z": 0.73
+        },
+        "back_color": {
+          "x": 0.16,
+          "y": 0.32,
+          "z": 0.4
+        },
+        "optical_depth": {
+          "x": 0.43,
+          "y": 0.34,
+          "z": 0.29
+        },
+        "roughness": 0.31,
+        "anisotropy": 0.84,
+        "sheen": 0.46,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 140.0,
+        "fiber_strength": 0.24
+      },
+      {
+        "front_color": {
+          "x": 0.69,
+          "y": 0.47,
+          "z": 0.29
+        },
+        "back_color": {
+          "x": 0.32,
+          "y": 0.14,
+          "z": 0.28
+        },
+        "optical_depth": {
+          "x": 0.26,
+          "y": 0.4,
+          "z": 0.57
+        },
+        "roughness": 0.3,
+        "anisotropy": 0.8,
+        "sheen": 0.43,
+        "emission": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "fiber_frequency": 140.0,
+        "fiber_strength": 0.24
+      }
+    ]
+  }
+}
