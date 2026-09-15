@@ -231,8 +231,9 @@ The implementation follows the composition above, with these refinements:
 - Closest-contour distance replaces the uncorrected implicit-distance proxy
   throughout the light bands. Analytic contour derivatives, safeguarded roots,
   and conservative arc bounds handle near-boundary, inside and medial cases.
-  Certified convex outside queries bypass a redundant node scan. The optimized
-  and original distance paths agree bit for bit over 8,530 tested points.
+  Certified convex outside queries bypass a redundant node scan. That exact
+  optimization preserves distance and normal bits over 8,530 tested points;
+  the newer inside certificate has separate precision comparisons below.
 - Joint quadrature compares Gauss 2×2, Gauss 3×3 and boundary-touching tensor
   Simpson estimates, returning Gauss 3×3. The independent estimates catch
   concrete Gaussian/edge cancellations missed by simpler midpoint or two-rule
@@ -268,3 +269,22 @@ Immutable v18 is rendering the first complete 4K, 128-exposure proof at frame
 900 in `06-eclipse/v18-pearl-900`, using `configs/eclipse-v18-pearl.json`.
 No Eclipse full film or artistic selection is claimed until actual proofs,
 convergence crops and motion have been reviewed.
+
+## Certified inside contour queries
+
+The inside fast path uses the Blaschke rolling-disk theorem: a convex C2 curve
+with curvature at most k has an interior tangent disk of radius 1/k at every
+boundary point. See José Ayala, [On the Blaschke rolling disk theorem](https://arxiv.org/abs/2104.05206).
+
+For each posed petal, 256 fixed angular intervals bound speed below and second
+derivative above. The minimum squared speed bound divided by the second-
+derivative bound supplies a conservative disk radius. The third-derivative
+bound is `hypot(a*(1+22*abs(shoulder)+4*abs(shear)),b)`; interval and floating-
+point allowances expand upper bounds and contract lower bounds.
+
+A refined interior foot is accepted only within 80% of this radius, with a tiny
+tangential residual, a normal-error bound below 1e-8, and candidate/disk distance
+gap no larger than one eighth of the requested distance tolerance. Every other
+query retains the complete search. The outside path is unchanged. Inside
+results are compared against the previous search using tight distance, normal,
+and linear-radiance tolerances; the more precise foot can differ by roundoff.

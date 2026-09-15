@@ -11,6 +11,8 @@ use std::f64::consts::TAU;
 const CONTOUR_INTERVALS: usize = 32;
 const DISTANCE_TOLERANCE: f64 = 2e-6;
 const ROOT_ITERATIONS: usize = 28;
+const ROLLING_INTERVALS: usize = 256;
+const INSIDE_NORMAL_TOLERANCE: f64 = 1e-8;
 
 /// World-space contour position and its oriented unit frame.
 #[derive(Clone, Copy, Debug)]
@@ -54,6 +56,8 @@ pub(super) struct Petal {
     inverse_width_floor: f64,
     normalized_x_bound: f64,
     inside_lipschitz: f64,
+    rolling_radius: f64,
+    curve_roundoff: f64,
 }
 
 impl Petal {
@@ -90,11 +94,54 @@ impl Petal {
             inverse_width_floor,
             normalized_x_bound,
             inside_lipschitz,
+            rolling_radius: 0.0,
+            curve_roundoff: 0.0,
         };
         result.nodes =
             std::array::from_fn(|i| result.local_jet(TAU * i as f64 / CONTOUR_INTERVALS as f64));
         result.nodes[CONTOUR_INTERVALS] = result.nodes[0];
+        (result.rolling_radius, result.curve_roundoff) = result.rolling_bounds();
         result
+    }
+
+    fn rolling_bounds(&self) -> (f64, f64) {
+        if !self.convex {
+            return (0.0, 0.0);
+        }
+        let [a, b] = self.semi_axes;
+        let third =
+            (a * (1.0 + 22.0 * self.shape.shoulder.abs() + 4.0 * self.shape.shear.abs())).hypot(b);
+        let roundoff = 256.0 * f64::EPSILON * (1.0 + a + b + self.second_derivative_bound + third);
+        let second_upper = (self.second_derivative_bound + roundoff).next_up();
+        let third_upper = (third + roundoff).next_up();
+        let half_width =
+            (TAU / (2.0 * ROLLING_INTERVALS as f64)).next_up() + 64.0 * f64::EPSILON * (1.0 + TAU);
+        if !second_upper.is_finite() || !third_upper.is_finite() || !roundoff.is_finite() {
+            return (0.0, 0.0);
+        }
+        let mut radius = f64::INFINITY;
+        for index in 0..ROLLING_INTERVALS {
+            let midpoint = TAU * (index as f64 + 0.5) / ROLLING_INTERVALS as f64;
+            let jet = self.local_jet(midpoint);
+            let speed_lower =
+                (jet.first[0].hypot(jet.first[1]) - roundoff - second_upper * half_width)
+                    .next_down();
+            let acceleration_upper =
+                (jet.second[0].hypot(jet.second[1]) + roundoff + third_upper * half_width)
+                    .next_up();
+            if !speed_lower.is_finite()
+                || speed_lower <= 0.0
+                || !acceleration_upper.is_finite()
+                || acceleration_upper <= 0.0
+            {
+                return (0.0, roundoff);
+            }
+            // Curvature <= |C''|/|C'|^2. Bounds over the complete angle
+            // interval, not sampled curvature alone, certify the tangent disk.
+            let squared_lower = (speed_lower * speed_lower).next_down();
+            radius = radius.min((squared_lower / acceleration_upper).next_down());
+        }
+        ((radius * (1.0 - 256.0 * f64::EPSILON)).next_down().max(0.0), roundoff)
     }
 
     fn local_jet(&self, theta: f64) -> Jet {
@@ -275,7 +322,96 @@ impl Petal {
         {
             return projection;
         }
+        if !outside
+            && self.rolling_radius > 0.0
+            && let Some(projection) = self.certified_inside_projection(local, tolerance)
+        {
+            return projection;
+        }
         self.distance_normal_original(local, tolerance, outside)
+    }
+
+    fn inside_disk_certificate(
+        &self,
+        local: Point,
+        jet: Jet,
+        tolerance: f64,
+    ) -> Option<(f64, Point)> {
+        let radius = self.rolling_radius;
+        if !self.convex || !radius.is_finite() || radius <= 0.0 {
+            return None;
+        }
+        let speed = jet.first[0].hypot(jet.first[1]);
+        let speed_lower = (speed - self.curve_roundoff).next_down();
+        if speed_lower <= 0.0 || !speed_lower.is_finite() {
+            return None;
+        }
+        let tangent = normalize(jet.first);
+        let normal = [tangent[1], -tangent[0]];
+        let offset = subtract(local, jet.point);
+        let distance = offset[0].hypot(offset[1]);
+        if !distance.is_finite() || dot(offset, normal) >= 0.0 {
+            return None;
+        }
+        let unit_error = (2.0 * self.curve_roundoff / speed_lower + 32.0 * f64::EPSILON).next_up();
+        let magnitude = 1.0
+            + local[0].abs()
+            + local[1].abs()
+            + jet.point[0].abs()
+            + jet.point[1].abs()
+            + radius
+            + distance;
+        let padding =
+            (256.0 * f64::EPSILON * magnitude + self.curve_roundoff + radius * unit_error)
+                .next_up();
+        let upper = (distance + padding).next_up();
+        if upper >= (0.8 * radius).next_down() {
+            return None;
+        }
+        let residual = dot(offset, tangent).abs();
+        if residual + padding > (tolerance * 0.125).min(1e-10 * (1.0 + distance)) {
+            return None;
+        }
+        // The normal map in this rolling collar is Lipschitz with constant
+        // 1/(rho-d). This guard controls reflected color as well as distance.
+        let normal_error = (residual + padding) / (radius - upper) + unit_error;
+        if normal_error > INSIDE_NORMAL_TOLERANCE {
+            return None;
+        }
+        // The tangent disk centered at r-rho*n lies inside the convex petal.
+        // Distance to its boundary is a global lower bound on distance to the
+        // petal boundary. Work relative to r to avoid center cancellation.
+        let from_disk_center = add(offset, normal.map(|v| radius * v));
+        let disk_distance_upper =
+            (from_disk_center[0].hypot(from_disk_center[1]) + padding).next_up();
+        let lower = (radius - disk_distance_upper).next_down().max(0.0);
+        if upper - lower > tolerance * 0.125 {
+            return None;
+        }
+        Some((-distance, self.rotate(normal)))
+    }
+
+    fn certified_inside_projection(&self, local: Point, tolerance: f64) -> Option<(f64, Point)> {
+        let step = TAU / CONTOUR_INTERVALS as f64;
+        for index in 0..CONTOUR_INTERVALS {
+            let a = self.nodes[index];
+            let b = self.nodes[index + 1];
+            let ga = dot(subtract(a.point, local), a.first);
+            let gb = dot(subtract(b.point, local), b.first);
+            if ga <= 0.0 && gb >= 0.0 {
+                let jet = if ga == 0.0 {
+                    a
+                } else if gb == 0.0 {
+                    b
+                } else {
+                    self.stationary_root(local, index as f64 * step, (index + 1) as f64 * step)
+                };
+                if let Some(projection) = self.inside_disk_certificate(local, jet, tolerance) {
+                    return Some(projection);
+                }
+            }
+        }
+        None
     }
 
     fn certified_outside_projection(&self, local: Point, tolerance: f64) -> Option<(f64, Point)> {
@@ -564,7 +700,12 @@ mod tests {
         let tolerance = requested.min(DISTANCE_TOLERANCE).max(floor);
         let outside = petal.implicit_radius(local) >= 1.0;
         let original = petal.distance_normal_original(local, tolerance, outside);
-        let optimized = petal.distance_normal_with_tolerance(point, requested);
+        // Keep this bit-level regression scoped to the exact outside/prepass
+        // optimization. The tighter inside certificate has separate tolerance
+        // tests because the old global search can choose a roundoff-near foot.
+        let mut outside_only = *petal;
+        outside_only.rolling_radius = 0.0;
+        let optimized = outside_only.distance_normal_with_tolerance(point, requested);
         assert_eq!(optimized.0.to_bits(), original.0.to_bits(), "distance at {point:?}");
         assert_eq!(
             optimized.1.map(f64::to_bits),
@@ -960,6 +1101,171 @@ mod tests {
         }
         for invalid in [-1.0, f64::INFINITY, f64::NAN] {
             assert!(!crescent_is_zero([0.0; 2], invalid, &petal));
+        }
+    }
+
+    #[test]
+    fn rolling_radius_bounds_curvature_and_keeps_every_sampled_tangent_disk_inside() {
+        let config = EclipseConfig::default();
+        for shape in config.petals {
+            for factor in [0.8, 1.0, 1.2] {
+                let petal = Petal::new(shape, [0.0; 2], factor);
+                assert!(petal.rolling_radius > 0.0 && petal.rolling_radius.is_finite());
+                let mut sampled_minimum = f64::INFINITY;
+                for index in 0..8192 {
+                    let jet = petal.local_jet(TAU * f64::from(index) / 8192.0);
+                    let speed = jet.first[0].hypot(jet.first[1]);
+                    let cross = jet.first[0] * jet.second[1] - jet.first[1] * jet.second[0];
+                    assert!(cross > 0.0);
+                    sampled_minimum = sampled_minimum.min(speed.powi(3) / cross);
+                }
+                assert!(petal.rolling_radius <= sampled_minimum);
+                for anchor in 0..64 {
+                    let jet = petal.local_jet(TAU * f64::from(anchor) / 64.0);
+                    let tangent = normalize(jet.first);
+                    let normal = [tangent[1], -tangent[0]];
+                    let center = subtract(jet.point, normal.map(|v| petal.rolling_radius * v));
+                    for index in 0..64 {
+                        let (s, c) = (TAU * f64::from(index) / 64.0).sin_cos();
+                        let point =
+                            add(center, [petal.rolling_radius * c, petal.rolling_radius * s]);
+                        assert!(petal.implicit_radius(point) <= 1.0 + 2e-12);
+                    }
+                }
+            }
+        }
+        let unproven = Petal::new(
+            EclipsePetalConfig { shear: 0.3, shoulder: 0.22, ..config.petals[0] },
+            [0.0; 2],
+            1.0,
+        );
+        assert_eq!(unproven.rolling_radius, 0.0);
+    }
+
+    #[test]
+    fn inside_rolling_certificate_matches_global_distance_and_normal_in_its_collar() {
+        let config = EclipseConfig::default();
+        let mut certified = 0;
+        for shape in config.petals {
+            for factor in [0.94, 1.06] {
+                let petal = Petal::new(shape, [0.23, -0.37], factor);
+                let mut original = petal;
+                original.rolling_radius = 0.0;
+                let tolerance = shape.light_sigma * 1e-6;
+                for index in 0..128 {
+                    let theta = TAU * f64::from(index) / 128.0;
+                    let jet = petal.local_jet(theta);
+                    let tangent = normalize(jet.first);
+                    let normal = [tangent[1], -tangent[0]];
+                    for fraction in [0.02, 0.10, 0.40, 0.79] {
+                        let distance = petal.rolling_radius * fraction;
+                        let local = subtract(jet.point, normal.map(|v| distance * v));
+                        let (signed, _) =
+                            petal.inside_disk_certificate(local, jet, tolerance).unwrap();
+                        assert!((signed + distance).abs() < 1e-12);
+                        let point = add(petal.center, petal.rotate(local));
+                        if let Some((certified_distance, certified_normal)) =
+                            petal.certified_inside_projection(petal.local(point), tolerance)
+                        {
+                            certified += 1;
+                            assert!(
+                                (certified_distance + distance).abs() < tolerance * 0.125 + 1e-11
+                            );
+                            let normal_difference =
+                                subtract(certified_normal, petal.rotate(normal));
+                            assert!(normal_difference[0].hypot(normal_difference[1]) < 1.1e-8);
+                        }
+                        let actual = petal.distance_normal(point);
+                        let expected = original.distance_normal(point);
+                        assert!(
+                            (actual.0 - expected.0).abs() <= tolerance,
+                            "distance {actual:?} vs {expected:?}"
+                        );
+                        let difference = subtract(actual.1, expected.1);
+                        assert!(
+                            difference[0].hypot(difference[1]) < 2e-6,
+                            "normal {actual:?} vs {expected:?}"
+                        );
+                    }
+                    for fraction in [0.8, 1.0] {
+                        let local = subtract(
+                            jet.point,
+                            normal.map(|v| petal.rolling_radius * fraction * v),
+                        );
+                        assert!(petal.inside_disk_certificate(local, jet, tolerance).is_none());
+                    }
+                }
+                assert!(petal.certified_inside_projection([0.0; 2], tolerance).is_none());
+            }
+        }
+        assert!(certified > 2000, "only {certified} collar queries certified");
+    }
+
+    #[test]
+    fn inside_certificate_rejects_a_small_distance_gap_with_an_unreliable_normal() {
+        let shape = EclipsePetalConfig {
+            semi_axes: [0.001; 2],
+            shear: 0.0,
+            shoulder: 0.0,
+            angle_degrees: 0.0,
+            ..EclipsePetalConfig::default()
+        };
+        let petal = Petal::new(shape, [0.0; 2], 1.0);
+        let jet = petal.local_jet(0.31);
+        let tangent = normalize(jet.first);
+        let normal = [tangent[1], -tangent[0]];
+        let depth = 0.79 * petal.rolling_radius;
+        let epsilon = 1e-11;
+        let offset = add(normal.map(|v| -depth * v), tangent.map(|v| epsilon * v));
+        let point = add(jet.point, offset);
+        let disk_offset = add(offset, normal.map(|v| petal.rolling_radius * v));
+        let distance = offset[0].hypot(offset[1]);
+        let lower = petal.rolling_radius - disk_offset[0].hypot(disk_offset[1]);
+        assert!(distance - lower < 1e-12);
+        assert!(epsilon / (petal.rolling_radius - distance) > INSIDE_NORMAL_TOLERANCE);
+        assert!(petal.inside_disk_certificate(point, jet, 1e-6).is_none());
+    }
+
+    #[test]
+    fn certified_inside_queries_preserve_inner_emitter_and_composite_radiance() {
+        let config = EclipseConfig::default();
+        let centers = [[-0.8, -0.3], [0.7, 0.2], [0.0, 1.0]];
+        let actual = std::array::from_fn(|i| Petal::new(config.petals[i], centers[i], 1.06));
+        let original = actual.map(|mut petal| {
+            petal.rolling_radius = 0.0;
+            petal
+        });
+        let background = V3::new(0.0005, 0.00035, 0.00065);
+        let sample = |point: Point, petals: &[Petal; 3]| {
+            let t = transmission(point, petals, &config);
+            let light =
+                petals.iter().fold(background, |sum, petal| sum + crescent(point, petal, &config));
+            light * t + config.dark_color * (1.0 - t)
+        };
+        for (new, old) in actual.iter().zip(&original) {
+            for index in 0..128 {
+                let boundary = new.contour(TAU * f64::from(index) / 128.0);
+                for depth in [0.05, 0.3, 0.7] {
+                    let point = add(
+                        add(boundary.position, new.shape.light_offset),
+                        boundary.normal.map(|v| -depth * new.rolling_radius * v),
+                    );
+                    let difference = crescent(point, new, &config) - crescent(point, old, &config);
+                    assert!(
+                        difference.x.abs().max(difference.y.abs()).max(difference.z.abs()) < 2e-6
+                    );
+                }
+            }
+        }
+        for y in 0..=32 {
+            for x in 0..=40 {
+                let point = [-3.2 + 6.4 * f64::from(x) / 40.0, -2.7 + 5.4 * f64::from(y) / 32.0];
+                let difference = sample(point, &actual) - sample(point, &original);
+                assert!(
+                    difference.x.abs().max(difference.y.abs()).max(difference.z.abs()) < 2e-6,
+                    "composite difference {difference:?} at {point:?}"
+                );
+            }
         }
     }
 }
