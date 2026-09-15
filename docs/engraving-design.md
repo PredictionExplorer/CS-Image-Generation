@@ -1,6 +1,7 @@
 # Orbital Engraving — first detailed design
 
-Design only; implementation begins after the fourth study is selected. Use the
+The first implementation is in `src/atelier/engraving.rs` and its `filter`
+module. Numerical checks pass; visual selection is still in progress. Use the
 unchanged `0xb7f327f9f722` orbit and the existing 1802-frame, 4K/60 clock.
 
 ## Visual direction
@@ -209,3 +210,52 @@ Archive the chosen recipe, phase-gradient ranges, minimum local groove period,
 largest temporal phase excursion, refinement/error summaries and comparison
 crops. Begin the complete fifth film only after the still and motion proof
 passes, then retain both verified 4K/60 movies and canonical RGB16 frames.
+
+## First implementation notes
+
+- `RenderConfig.aa=2` controls the initial 2×2 analytic spatial subcells. There
+  is no second independent AA control. Generic defaults retain Cartesian source
+  axes; the b7 recipe must explicitly include the fixed basis above.
+- The direct linear renderer receives the exact raw exposure-cell interval,
+  splits it at 0 and 1, and integrates held and live pieces in proportion to
+  their original durations. Diagnostic validation independently checks those
+  durations and the unchanged requested midpoint.
+- Each live interval prepares one dyadic table from `OrbitSeries`, with four
+  intervals even at the finest allowed temporal depth. Cell checks include
+  spatial corners/edge centers, temporal quarter points and mixed space/time
+  corners. Maximum depths default to five spatial and five temporal levels;
+  exhausting refinement while above tolerance is an error, not a blurred or
+  silently undersampled fallback.
+- Diagnostics distinguish inspected from accepted phase residuals, report
+  accepted envelope variation, phase gradients, temporal harmonic excursions,
+  endpoint holds and refinement counts. The phase residuals remain sampled
+  numerical evidence. Culling uses `OrbitSeries::position_bounds`, whose cubic
+  Bezier control hulls bound continuous motion; projecting the padded boxes and
+  applying the monotone tanh map preserves that protection between samples.
+- The filter evaluates all original coefficients through conjugate pairing,
+  returns raw values for range validation, and retains the broad zero-carrier
+  terms. Its only allowed negative correction is roundoff within `1e-12`.
+
+
+## Curved opening refinement
+
+The first v16 full-detail proofs felt too much like broken records. v17 adds a
+fixed, radius-dependent angular warp `theta_warped = theta + radial_twist*r` to
+both the lobe field and mouth. It changes shape without introducing a time
+phase. Per-rosette lobe amplitudes are configurable. The original zero twist
+and `[.065,.025]` lobes remain omitted from serialized recipes, preserving the
+archived v16 recipe hash and default arithmetic.
+
+The radial derivative is bounded below by
+`1-|a|-|b| - |twist|*outer_radius*(3|a|+5|b|)/(1-|a|-|b|)`.
+Validation requires this to exceed .10. Proposed twists `.8/-.65/1.0` and lobes
+`[.10,.035]` give lower bounds `.417/.501/.305`. Thus radial cuts stay ordered,
+and the warped mouth stays one connected opening on every nested contour.
+Analytic gradients retain the original polar basis and include the warp's
+radial chain-rule term. Support and mouth culling conservatively include the
+full angular range. Regression cases cover gradients, seams, radial ordering,
+legacy serialization, and a previously unsafe mouth-culling configuration.
+
+The initial v17 comparison uses exposure .35 stops and copper strength .65.
+The `flow` treatment retains carriers `64/74/54`; `fine` uses `90/100/76`.
+Neither is selected until full-resolution and motion proofs are inspected.

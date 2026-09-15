@@ -13,8 +13,8 @@ use std::{
 };
 use three_body_problem::{
     atelier::{
-        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, light, loom,
-        render,
+        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, engraving,
+        light, loom, render,
     },
     silk::cache,
 };
@@ -108,6 +108,8 @@ struct StudyConfig {
     aurora: Option<aurora::AuroraConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     light: Option<light::LightConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engraving: Option<engraving::EngravingConfig>,
 }
 
 impl Default for StudyConfig {
@@ -125,6 +127,7 @@ impl Default for StudyConfig {
             loom: None,
             aurora: None,
             light: None,
+            engraving: None,
         }
     }
 }
@@ -154,6 +157,8 @@ struct Receipt {
     seconds: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     light_samples: Option<Vec<light::LightDiagnostics>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engraving_samples: Option<Vec<engraving::EngravingDiagnostics>>,
 }
 
 fn json(path: &Path, value: &impl Serialize) -> SilkResult<()> {
@@ -201,9 +206,15 @@ struct ArtFrame {
     pixels: Vec<V3>,
     geometry: [usize; 3],
     light: Option<light::LightDiagnostics>,
+    engraving: Option<engraving::EngravingDiagnostics>,
 }
 
-fn art_frame(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResult<ArtFrame> {
+fn art_frame(
+    source: &OrbitSeries,
+    time: f64,
+    raw_cell_interval: [f64; 2],
+    config: &StudyConfig,
+) -> SilkResult<ArtFrame> {
     if config.kind == "light" {
         let frame = light::render_linear(
             source,
@@ -213,13 +224,35 @@ fn art_frame(source: &OrbitSeries, time: f64, config: &StudyConfig) -> SilkResul
             &config.render,
         )?;
         frame.diagnostics.validate()?;
-        Ok(ArtFrame { pixels: frame.pixels, geometry: [0; 3], light: Some(frame.diagnostics) })
+        Ok(ArtFrame {
+            pixels: frame.pixels,
+            geometry: [0; 3],
+            light: Some(frame.diagnostics),
+            engraving: None,
+        })
+    } else if config.kind == "engraving" {
+        let frame = engraving::render_linear(
+            source,
+            time,
+            raw_cell_interval,
+            config.engraving.as_ref().ok_or("Missing Engraving parameters")?,
+            &config.camera,
+            &config.render,
+        )?;
+        frame.diagnostics.validate()?;
+        Ok(ArtFrame {
+            pixels: frame.pixels,
+            geometry: [0; 3],
+            light: None,
+            engraving: Some(frame.diagnostics),
+        })
     } else {
         let scene = art_scene(source, time, config)?;
         Ok(ArtFrame {
             pixels: render::render_linear(&scene, &config.camera, &config.render)?,
             geometry: [scene.vertices.len(), scene.triangles.len(), scene.strands.len()],
             light: None,
+            engraving: None,
         })
     }
 }
@@ -236,6 +269,30 @@ fn main() -> SilkResult<()> {
     match args.command {
         Action::Config { output, preset } => {
             let config = match preset.as_str() {
+                "engraving" => StudyConfig {
+                    kind: "engraving".into(),
+                    temporal_samples: 16,
+                    calligraphy: None,
+                    engraving: Some(engraving::EngravingConfig::default()),
+                    prelude_fraction: 0.0,
+                    camera: Camera {
+                        position: V3::new(0.0, 0.0, 12.0),
+                        target: V3::ZERO,
+                        orthographic_height: 6.8,
+                        ..Camera::default()
+                    },
+                    render: RenderConfig {
+                        aa: 2,
+                        exposure: 0.0,
+                        background: V3::new(0.0030, 0.0018, 0.0048),
+                        key_strength: 0.0,
+                        rim_strength: 0.0,
+                        fill_strength: 0.0,
+                        bloom_strength: 0.0,
+                        ..RenderConfig::default()
+                    },
+                    ..StudyConfig::default()
+                },
                 "light" | "light-ivory" | "light-dark" => {
                     let dark = preset == "light-dark";
                     StudyConfig {
@@ -380,7 +437,17 @@ fn main() -> SilkResult<()> {
                     config.loom = None;
                     config.aurora = None;
                 }
+                "engraving" => {
+                    config.engraving.get_or_insert_with(engraving::EngravingConfig::default);
+                    config.calligraphy = None;
+                    config.loom = None;
+                    config.aurora = None;
+                    config.light = None;
+                }
                 _ => return Err(format!("Unsupported study: {}", config.kind).into()),
+            }
+            if config.kind != "engraving" {
+                config.engraving = None;
             }
             if config.frames < 2 || config.fps == 0 || every == 0 || config.temporal_samples == 0 {
                 return Err("Require at least two frames, positive fps and positive stride".into());
@@ -443,6 +510,7 @@ fn main() -> SilkResult<()> {
                     if receipt.recipe_sha256 == hash
                         && receipt.png_sha256 == cache::file_hash(&path)?
                         && verify_light_samples(&manifest.config, frame, &receipt).is_ok()
+                        && verify_engraving_samples(&manifest.config, frame, &receipt).is_ok()
                     {
                         let dims = image::image_dimensions(&path)?;
                         if dims == (manifest.config.render.width, manifest.config.render.height) {
@@ -457,6 +525,7 @@ fn main() -> SilkResult<()> {
                 let mut accumulated = Vec::new();
                 let mut geometry = [0; 3];
                 let mut light_samples = Vec::new();
+                let mut engraving_samples = Vec::new();
                 let mut shutter_start = fraction;
                 let mut shutter_end = fraction;
                 for sample in 0..c.temporal_samples {
@@ -465,10 +534,14 @@ fn main() -> SilkResult<()> {
                         shutter_start = time;
                     }
                     shutter_end = time;
-                    let product = art_frame(&source, time, c)?;
+                    let product =
+                        art_frame(&source, time, expected_sample_interval(c, frame, sample), c)?;
                     geometry = product.geometry;
                     if let Some(diagnostics) = product.light {
                         light_samples.push(diagnostics);
+                    }
+                    if let Some(diagnostics) = product.engraving {
+                        engraving_samples.push(diagnostics);
                     }
                     let linear = product.pixels;
                     let weight = 1.0 / c.temporal_samples as f64;
@@ -484,9 +557,10 @@ fn main() -> SilkResult<()> {
                             .zip(linear.par_iter())
                             .for_each(|(a, b)| *a += *b * weight);
                     }
-                    if c.kind == "light" {
+                    if matches!(c.kind.as_str(), "light" | "engraving") {
                         eprintln!(
-                            "light frame {frame}: shutter sample {}/{}, {:.1}s elapsed",
+                            "{} frame {frame}: shutter sample {}/{}, {:.1}s elapsed",
+                            c.kind,
                             sample + 1,
                             c.temporal_samples,
                             instant.elapsed().as_secs_f64()
@@ -510,6 +584,8 @@ fn main() -> SilkResult<()> {
                         strands: geometry[2],
                         seconds: instant.elapsed().as_secs_f64(),
                         light_samples: (!light_samples.is_empty()).then_some(light_samples),
+                        engraving_samples: (!engraving_samples.is_empty())
+                            .then_some(engraving_samples),
                     },
                 )?;
                 eprintln!(
@@ -658,6 +734,47 @@ fn expected_sample_time(config: &StudyConfig, frame: usize, sample: usize) -> f6
     (fraction + offset).clamp(0.0, 1.0)
 }
 
+fn expected_sample_interval(config: &StudyConfig, frame: usize, sample: usize) -> [f64; 2] {
+    let fraction = frame as f64 / (config.frames - 1) as f64;
+    [sample, sample + 1].map(|edge| {
+        fraction
+            + (edge as f64 / config.temporal_samples as f64 - 0.5) * config.shutter_fraction
+                / (config.frames - 1) as f64
+    })
+}
+
+fn verify_engraving_samples(
+    config: &StudyConfig,
+    frame: usize,
+    receipt: &Receipt,
+) -> SilkResult<()> {
+    if config.kind != "engraving" {
+        return if receipt.engraving_samples.is_none() {
+            Ok(())
+        } else {
+            Err("Non-engraving frame has unexpected engraving diagnostics".into())
+        };
+    }
+    let samples = receipt.engraving_samples.as_ref().ok_or("Missing engraving diagnostics")?;
+    if samples.len() != config.temporal_samples {
+        return Err("Incomplete engraving exposure cells".into());
+    }
+    for (index, sample) in samples.iter().enumerate() {
+        sample.validate()?;
+        let expected = expected_sample_interval(config, frame, index);
+        if sample.source_fraction.to_bits() != expected_sample_time(config, frame, index).to_bits()
+            || sample
+                .raw_cell_interval
+                .iter()
+                .zip(expected)
+                .any(|(a, b)| a.to_bits() != b.to_bits())
+        {
+            return Err("Engraving diagnostics have inconsistent exposure timing".into());
+        }
+    }
+    Ok(())
+}
+
 fn verify_light_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -> SilkResult<()> {
     if config.kind != "light" {
         return if receipt.light_samples.is_none() {
@@ -690,6 +807,7 @@ fn verify_assembly_frame(
     let receipt_bytes = fs::read(&source_receipt)?;
     let receipt: Receipt = serde_json::from_slice(&receipt_bytes)?;
     verify_light_samples(&chunk.manifest.config, frame, &receipt)?;
+    verify_engraving_samples(&chunk.manifest.config, frame, &receipt)?;
     if receipt.recipe_sha256 != chunk.recipe_sha256 {
         return Err(format!("Frame {frame} receipt does not match its source chunk recipe").into());
     }
@@ -953,6 +1071,7 @@ fn encode(
         let path = frame_path(input, frame);
         let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(&path))?)?;
         verify_light_samples(c, frame, &receipt)?;
+        verify_engraving_samples(c, frame, &receipt)?;
         if receipt.recipe_sha256 != hash || receipt.png_sha256 != cache::file_hash(&path)? {
             return Err(format!("Frame {frame} failed its integrity check").into());
         }
@@ -1122,6 +1241,19 @@ mod assembly_tests {
     }
 
     #[test]
+    fn archived_v16_engraving_keeps_its_original_recipe_hash() {
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../tests/fixtures/atelier-v16-engraving-manifest.json"
+        ))
+        .unwrap();
+        assert!(manifest.config.engraving.is_some());
+        assert_eq!(
+            recipe_hash(&manifest).unwrap(),
+            "994f194a5f5fd722aba2dc6178b5aa87d24715725860c58a0742df466f975b29"
+        );
+    }
+
+    #[test]
     fn light_receipts_require_complete_optical_samples_and_legacy_receipts_do_not() {
         let config = StudyConfig {
             kind: "light".into(),
@@ -1140,12 +1272,55 @@ mod assembly_tests {
             strands: 0,
             seconds: 0.0,
             light_samples: None,
+            engraving_samples: None,
         };
         assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_light_samples(&config, 0, &receipt).is_err());
         receipt.light_samples = Some(Vec::new());
         assert!(verify_light_samples(&config, 0, &receipt).is_err());
         assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_err());
+    }
+
+    #[test]
+    fn exposure_cells_cover_the_complete_unclamped_shutter_without_gaps() {
+        let config = StudyConfig { frames: 3, temporal_samples: 16, ..StudyConfig::default() };
+        for (frame, expected) in [(0, [-0.125, 0.125]), (1, [0.375, 0.625]), (2, [0.875, 1.125])] {
+            let cells: Vec<_> =
+                (0..16).map(|index| expected_sample_interval(&config, frame, index)).collect();
+            assert_eq!(cells[0][0], expected[0]);
+            assert_eq!(cells[15][1], expected[1]);
+            assert!(cells.windows(2).all(|pair| pair[0][1].to_bits() == pair[1][0].to_bits()));
+        }
+        assert_eq!(expected_sample_time(&config, 0, 0), 0.0);
+        assert_eq!(expected_sample_time(&config, 2, 15), 1.0);
+    }
+
+    #[test]
+    fn engraving_receipts_require_their_exposure_cell_records() {
+        let config = StudyConfig {
+            kind: "engraving".into(),
+            calligraphy: None,
+            engraving: Some(engraving::EngravingConfig::default()),
+            ..StudyConfig::default()
+        };
+        let mut receipt = Receipt {
+            recipe_sha256: String::new(),
+            png_sha256: String::new(),
+            source_fraction: 0.0,
+            shutter_start_fraction: 0.0,
+            shutter_end_fraction: 0.0,
+            vertices: 0,
+            triangles: 0,
+            strands: 0,
+            seconds: 0.0,
+            light_samples: None,
+            engraving_samples: None,
+        };
+        assert!(verify_engraving_samples(&StudyConfig::default(), 0, &receipt).is_ok());
+        assert!(verify_engraving_samples(&config, 0, &receipt).is_err());
+        receipt.engraving_samples = Some(Vec::new());
+        assert!(verify_engraving_samples(&config, 0, &receipt).is_err());
+        assert!(verify_engraving_samples(&StudyConfig::default(), 0, &receipt).is_err());
     }
 
     fn manifest(frames: &[usize]) -> Manifest {
@@ -1194,6 +1369,7 @@ mod assembly_tests {
                     strands: 5,
                     seconds: 0.25,
                     light_samples: None,
+                    engraving_samples: None,
                 },
             )
             .unwrap();

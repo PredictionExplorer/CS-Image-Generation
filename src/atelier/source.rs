@@ -258,6 +258,67 @@ impl OrbitSeries {
             .then(|| self.body_at(body, fraction))
     }
 
+    /// Conservative world-space position bounds over an inclusive visible interval.
+    ///
+    /// Every touched dense cubic uses its complete Bezier control-point hull,
+    /// including excursions between recorded knots. Partial intervals may
+    /// therefore receive a slightly wider bound than their exact extrema.
+    /// Floating-point padding covers control conversion and position evaluation;
+    /// the source's existing interpolation and recorded values are unchanged.
+    /// Returns `None` for invalid bodies, non-finite or reversed intervals, or
+    /// times outside `[0, 1]`, including the optional negative prehistory.
+    pub fn position_bounds(&self, body: usize, start: f64, end: f64) -> Option<(V3, V3)> {
+        if body >= 3 || !(0.0..=1.0).contains(&start) || !(start..=1.0).contains(&end) {
+            return None;
+        }
+        let segments = self.positions.len() - 1;
+        let first = ((start * segments as f64).floor() as usize).min(segments - 1);
+        let last = ((end * segments as f64).floor() as usize).min(segments - 1);
+        let mut minimum = [f64::INFINITY; 3];
+        let mut maximum = [f64::NEG_INFINITY; 3];
+        let mut magnitude = [1.0_f64; 3];
+        for left in first..=last {
+            let p = self.positions[left][body];
+            let q = self.positions[left + 1][body];
+            let a = slope(&self.positions, body, left);
+            let b = slope(&self.positions, body, left + 1);
+            // These controls describe exactly the same dense Hermite cubic.
+            // Its Bernstein weights are nonnegative and sum to one on [0,1].
+            let controls = [p, p + a / 3.0, q - b / 3.0, q];
+            for axis in 0..3 {
+                for control in controls {
+                    minimum[axis] = minimum[axis].min(control.axis(axis));
+                    maximum[axis] = maximum[axis].max(control.axis(axis));
+                }
+                magnitude[axis] = magnitude[axis].max(
+                    p.axis(axis).abs()
+                        + q.axis(axis).abs()
+                        + a.axis(axis).abs()
+                        + b.axis(axis).abs(),
+                );
+            }
+        }
+        if start == end {
+            // Held endpoint exposure needs only the single unchanged position,
+            // not the neighboring segment's entire motion envelope.
+            let position = evaluate(&self.positions, body, start).position;
+            minimum = std::array::from_fn(|axis| position.axis(axis));
+            maximum = minimum;
+        }
+        for axis in 0..3 {
+            // The normalized dense source is finite and small. This exceeds
+            // the bounded rounding accumulation in the existing cubic basis
+            // evaluation and in the four control-point conversions above.
+            let padding = 128.0 * f64::EPSILON * magnitude[axis];
+            minimum[axis] = (minimum[axis] - padding).next_down();
+            maximum[axis] = (maximum[axis] + padding).next_up();
+        }
+        Some((
+            V3::new(minimum[0], minimum[1], minimum[2]),
+            V3::new(maximum[0], maximum[1], maximum[2]),
+        ))
+    }
+
     fn body_at(&self, body: usize, fraction: f64) -> BodySample {
         if fraction < 0.0 {
             return self.prelude_body_at(body, fraction);
@@ -820,6 +881,106 @@ mod tests {
         assert!(series.sample(1.0 + 1e-12).is_none());
         assert!(series.sample(f64::NAN).is_none());
         assert!(series.sample_body(3, 0.5).is_none());
+    }
+
+    #[test]
+    fn continuous_position_bounds_cover_overshoot_missed_by_sparse_samples() {
+        let samples =
+            [-6.0, 0.0, 0.0, -3.0].map(|x| [V3::new(x, 0.0, 0.0), V3::ZERO, V3::ZERO]).to_vec();
+        let series = OrbitSeries::new(&orbit(samples)).unwrap();
+        let start = 1.0 / 3.0;
+        let end = 2.0 / 3.0;
+        let sparse_max = (0..=4)
+            .map(|i| {
+                series
+                    .sample_body(0, start + (end - start) * f64::from(i) / 4.0)
+                    .unwrap()
+                    .position
+                    .x
+            })
+            .fold(f64::NEG_INFINITY, f64::max);
+        // The middle segment has p=q=0, slopes 3 and -1.5 before the shared
+        // normalization. Its maximum occurs at t=1-1/sqrt(3), not a quarter.
+        let peak_time = (2.0 - 1.0 / 3.0_f64.sqrt()) / 3.0;
+        let peak = series.sample_body(0, peak_time).unwrap().position;
+        assert!(peak.x > sparse_max + 1e-3);
+        let (minimum, maximum) = series.position_bounds(0, start, end).unwrap();
+        assert!(maximum.x >= peak.x);
+        assert!(minimum.x <= peak.x);
+        assert!(maximum.x > series.bounds().1.x);
+    }
+
+    #[test]
+    fn continuous_position_bounds_contain_partial_segments_knots_and_endpoints() {
+        let samples = (0..=64)
+            .map(|i| {
+                std::array::from_fn(|body| {
+                    let t = f64::from(i) / 64.0 * TAU + body as f64;
+                    V3::new(t.sin(), 0.7 * (3.7 * t).cos(), 0.4 * (5.3 * t).sin())
+                })
+            })
+            .collect();
+        let series = OrbitSeries::new(&orbit(samples)).unwrap();
+        let knot = 17.0_f64 / 64.0;
+        for (start, end) in [
+            (0.0, 1.0),
+            (0.0, 0.017),
+            (0.125, 0.132),
+            (0.499, 0.501),
+            (0.873, 1.0),
+            (knot.next_down(), knot.next_up()),
+            (0.0, 0.0),
+            (0.422, 0.422),
+            (1.0, 1.0),
+        ] {
+            for body in 0..3 {
+                let (minimum, maximum) = series.position_bounds(body, start, end).unwrap();
+                assert!(minimum.is_finite() && maximum.is_finite());
+                for i in 0..=1000 {
+                    let time = start + (end - start) * f64::from(i) / 1000.0;
+                    let point = series.sample_body(body, time).unwrap().position;
+                    for axis in 0..3 {
+                        assert!(
+                            (minimum.axis(axis)..=maximum.axis(axis)).contains(&point.axis(axis)),
+                            "body {body}, interval {start}..{end}, time {time}, axis {axis}: {point:?} outside {minimum:?}..{maximum:?}"
+                        );
+                    }
+                }
+                if start == end {
+                    assert!((maximum - minimum).length() < 1e-11);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn position_bounds_reject_invalid_queries_and_preserve_source_bits() {
+        let (original, _) = replay_fixture(3);
+        let series = OrbitSeries::with_prelude(&original, 0.4).unwrap();
+        let times = [0.0, 0.17, 0.5, 0.91, 1.0];
+        let before = times.map(|time| series.sample(time).unwrap());
+        for (body, start, end) in [
+            (3, 0.0, 1.0),
+            (usize::MAX, 0.5, 0.5),
+            (0, -0.01, 0.1),
+            (0, 0.9, 1.01),
+            (0, 0.7, 0.3),
+            (0, f64::NAN, 0.5),
+            (0, 0.5, f64::NAN),
+            (0, f64::NEG_INFINITY, 0.5),
+            (0, 0.5, f64::INFINITY),
+        ] {
+            assert!(series.position_bounds(body, start, end).is_none());
+        }
+        for body in 0..3 {
+            assert!(series.position_bounds(body, 0.0, 1.0).is_some());
+        }
+        for (time, previous) in times.into_iter().zip(before) {
+            let current = series.sample(time).unwrap();
+            for body in 0..3 {
+                assert_same_bits(previous.bodies[body], current.bodies[body]);
+            }
+        }
     }
 
     #[test]

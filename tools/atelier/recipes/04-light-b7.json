@@ -1,0 +1,134 @@
+{
+  "kind": "light",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 16,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.0,
+  "camera": {
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 12.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 5.6
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 3,
+    "exposure": 0.8,
+    "background": {
+      "x": 0.002,
+      "y": 0.0017,
+      "z": 0.003
+    },
+    "key_strength": 0.0,
+    "rim_strength": 0.0,
+    "fill_strength": 0.0,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.035
+  },
+  "light": {
+    "source_axes": [
+      {
+        "x": 0.9775173637530767,
+        "y": 0.07416319035834007,
+        "z": -0.19738192611560845
+      },
+      {
+        "x": -0.13152225722147193,
+        "y": 0.946134321388188,
+        "z": -0.29585763763452494
+      },
+      {
+        "x": 0.16480806842082663,
+        "y": 0.31516609444416055,
+        "z": 0.9346168377983626
+      }
+    ],
+    "source_scales": [
+      1.5,
+      1.5,
+      1.5
+    ],
+    "source_motion": [
+      1.4,
+      0.85
+    ],
+    "power_modulation": 0.1,
+    "lenses": [
+      {
+        "enabled": true,
+        "semi_axes": [
+          2.5,
+          0.7
+        ],
+        "angle_degrees": -18.0,
+        "power": 2.35,
+        "coma": 0.15,
+        "bend": 0.3
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          2.1,
+          0.8
+        ],
+        "angle_degrees": 42.0,
+        "power": 1.85,
+        "coma": -0.15,
+        "bend": -0.35
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          1.8,
+          0.9
+        ],
+        "angle_degrees": 104.0,
+        "power": 1.4,
+        "coma": 0.12,
+        "bend": 0.25
+      }
+    ],
+    "source_grid": [
+      3072,
+      2048
+    ],
+    "source_domain": [
+      12.0,
+      8.0
+    ],
+    "source_center": [
+      0.0,
+      0.0
+    ],
+    "receiver_distance": 24.0,
+    "refractive_index": 1.5,
+    "reference_wavelength_nm": 550.0,
+    "dispersion": 0.008,
+    "max_ray_slope": 0.25,
+    "incident_irradiance": 0.55,
+    "footprint_pixels": 0.9,
+    "display": "dark_gain",
+    "receiver_tint": {
+      "x": 0.82,
+      "y": 0.78,
+      "z": 0.68
+    },
+    "ambient_irradiance": 0.035,
+    "gain_scale": 0.008,
+    "gain_exponent": 2.0
+  }
+}

@@ -358,3 +358,49 @@ fixture guards compatibility with Calligraphy artifacts.
 - Light receipts will preserve diagnostics for every exact shutter sample;
   assembly and encoding will reject missing/truncated, non-finite or mistimed
   optical records. Legacy receipt and recipe compatibility remains tested.
+
+### September 15 continuation — current delivery and render state
+
+This section supersedes the earlier progress snapshots above.
+
+- Calligraphy and Gravity Loom are complete locally in the six-art-studies-b7
+  collection. Both full 3840×2160, 1802-frame, 60 fps films passed complete decode
+  verification. Loom's master SHA256 is
+  `eff41917c85588ab9bfbd566ce264c6deeec49a34889926860de070a7cc0911e`.
+  Full Loom playback, source seeking and synchronized comparison were checked;
+  dense weave interference remains visible when reduced to a small display.
+- The loopback gallery at `http://127.0.0.1:8767/` was restarted as local PID
+  21254 after the older server lost its output pipe. Detached collection helper
+  PID 25231 copies only verified complete packages, rebuilds the gallery as each
+  arrives, and exits when all six are complete. Logs are `.review-server.log`
+  and `.finish-collection.log` in the delivery root. The gallery currently has
+  two complete films; unfinished studies are not presented as complete.
+- Aurora resumed with immutable v11 and the identical frozen recipe and ranges,
+  with 112 workers across four active ranges. Server driver PID 109919;
+  `logs/aurora-final-v11.log`. At approximately 16:54 UTC it had 1288 PNGs;
+  the count of render.json files includes active range manifests and is not a
+  completed-range count. Automatic assembly, encoding and verification follow.
+- Light Cast by Gravity is frozen as immutable v15, source commit `7b2ef6a`.
+  The selected bright curved phase-lens recipe is now
+  `tools/atelier/recipes/04-light-b7.json`, mirrored as `configs/04-light.json`.
+  It uses 3072×2048 source cells, 12 wavelength groups, 3×3 receiver sampling,
+  16 half-frame shutter samples, dark-gain exponent 2, scale .008, exposure .8
+  stops and bloom .035. Four-kilopixel center/end proofs were inspected after
+  rejecting the dimmer .0012 gain-scale treatment. Full film driver PID 126535
+  uses 32 workers in four active ranges and immutable v15. Log:
+  `logs/light-final-v15.log`. Full motion and convergence review remain pending.
+- Engraving v16 passes 99 atelier and 13 CLI tests plus native all-target Clippy.
+  It filters the complete combined engraving phase over space and exposure;
+  receipts record every exact exposure cell and its adaptive residuals. Source
+  bounds conservatively enclose the existing continuous Hermite trajectory
+  without changing its evaluation. Native 4K proofs at 900 and 1670 were
+  technically sound but too reminiscent of three broken vinyl records.
+- Engraving refinement adds fixed radial twist to the lobe and open-mouth fields,
+  with full analytic gradients and a strictly positive radial derivative bound.
+  Proposed twists .8/-.65/1.0 and lobe amplitudes .10/.035 retain ordered cuts
+  while bending the openings. Zero twist and original lobes are omitted from
+  serialization to preserve old hashes; an actual v16 manifest is now archived
+  as a compatibility fixture. New proofs must be reviewed before film selection.
+- Eclipse Garden remains design-only in `docs/eclipse-garden-design.md` until
+  Engraving's visual treatment is selected. All six films, motion review, and
+  final collection delivery remain the task; it is not complete at two films.
