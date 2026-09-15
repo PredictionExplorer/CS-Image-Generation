@@ -476,3 +476,73 @@ curve the PNG crops have SSIM .999904, and visual inspection showed the same
 curves/fringes without a clear artistic improvement. Evidence remains in
 `04-light/qa-convergence-fast.json` and its native/reference PNG directory.
 This supports the tested crop; full-film motion review remains outstanding.
+
+### Current continuation checkpoint — 2026-09-15 19:35 UTC
+
+- Engraving is selected and its complete film is rendering. Immutable v17;
+  `configs/05-engraving.json` / `tools/atelier/recipes/05-engraving-b7.json`.
+  Detached server driver PID164853,48workers/four active ranges/16total.
+  Log `logs/engraving-final-v17.log`, record `05-engraving/final-job.json`.
+- Engraving opening frames0–47 and encounter1646–1717 are complete native
+  4K/60 HEVC excerpts. All frames decode and exact source PTS were verified.
+  Root reviewed opening/encounter/closest approach/release in the private IAB
+  page, including quarter speed. File paths:
+  `05-engraving/v17-motion-review/{opening,encounter}.mp4` with JSON provenance.
+  Local copies are in delivery `.development/engraving/`. Broad interference
+  is intentional; fine detail is less clear in a small display. Experimental
+  1080p/720p linear-light proxies remain private; 720p loses too much detail.
+- An additional curved-mouth Engraving crop at frame900,(1450,825),192×192
+  agrees with doubled spatial/temporal reference to .0124% foreground-weighted
+  luminance RMS, maximum linear channel difference .000366. Evidence:
+  `05-engraving/qa-curved-mouth.json`. The earlier fast interior crop also passed.
+- All six Rust CPU renderers are implemented. Full films remain complete only
+  for Calligraphy and Loom. Aurora (PID109919) and Light (PID126535) continue;
+  Aurora had1713 of1802 final frames at19:34. Count only final-chunk PNGs,
+  excluding development proofs. The existing local collector still runs.
+- Eclipse v18's initial pearl look was rejected after seeing its progressive
+  image: three broad oval shapes with conspicuous straight lashes. V21's first
+  thinner variants were too quiet. The chosen direction is now **Opal**, with
+  slender asymmetric petals, thin cool pearl crescents, and sweeping fine fans.
+  Recipe `configs/eclipse-v21-opal.json`, local selected copy
+  `tools/atelier/recipes/06-eclipse-b7.json`. It remains a visual selection under
+  validation; no full Eclipse film has started yet.
+- Opal uses semi-axes(.44,1.70),(.68,1.30),(.36,1.62); shoulders .22/-.22/.20;
+  light sigmas .0252/.0252/.02016 and reduced offsets; bends2.0/-1.6/1.8;
+  1536hairs/body with12 long accents,64chords each; lengths .04–.20 with long
+  .20–.32; radii .00035–.00070; corona fraction .25. Palette is cool pearl
+  (.83,.92,1), muted rose(.68,.42,.52), copper(.48,.24,.12). AA3 and all128
+  half-frame exposures stay unchanged. Fixed camera height7.4, zero bloom.
+- Opal's continuous audit bounds motion at19.9957pixels/frame, .078109pixels
+  per exposure step, and crop margin65.976pixels. Required count67, chosen128.
+  Audit `06-eclipse/v21-opal-audit.json`. Progressive views at0,900,1659,1801
+  were inspected; the merged contours reveal newly shaped luminous openings.
+- Full 128-exposure Opal proofs continue at0,900,1659,1801 using immutablev21.
+  Logs `logs/eclipse-opal-{0,1659,1801}.log` and
+  `logs/eclipse-v21-opal-900.log`. Original v18, duplicatev19, warm Plume, and
+  earlier Feather/Slender trials were deliberately stopped after art selection;
+  their partial manifests/previews are retained, not finished deliverables.
+- Renderer versions: v18=e6f4357; exact region caching v19=84bf5e1;
+  labelled progressive CLI previews=375b8a9 (`atelier-v19-progress`);
+  certified inside projections v20=090cb8e; broader permitted corona bends
+  v21=d8fa800. Source archives and build metadata exist on the server for
+  v18/v19/v20/v21. V21 passes30Eclipse tests and native all-target Clippy;
+  previous CLI15 and full atelier127 checks remain recorded.
+- Inside projection uses an outward-bounded rolling-disk certificate with
+  explicit normal accuracy and the original fallback. It may improve rounding
+  relative to the old search; tests require tight distance/normal/radiance
+  agreement, not invented bit identity. Exact empty-region caching is separately
+  checked bit for bit. An additional strict early-stop optimization for already
+  converged stationary roots is under independent implementation/review; it is
+  not built or selected yet.
+- Progressive previews are `.progress-NNNNNN.png` plus explicit development
+  sidecars. They are separate from canonical `frame_NNNNNN.png`, use a cloned
+  accumulator, and cannot enter final assembly. They permit composition review
+  while expensive complete exposures continue.
+- The convergence helper now records its executable SHA. An update to publish
+  native-pass PNGs early, separately from pending-reference status, is being
+  built by the performance/QA agent. It will run Opal's shoulder crop at900,
+  (1840,220),256×256,128native/256reference exposures and2×spatial resolution.
+- Root's IAB is available (gallery tab1, private Engraving review tab2). The
+  Aurora-review agent currently has only Brave and correctly avoided it;
+  root must perform Aurora playback if that remains the case. The agent is
+  watching Aurora until21:34 UTC and will notify when rendering ends.

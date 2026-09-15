@@ -1,0 +1,171 @@
+{
+  "kind": "eclipse",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 128,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.0,
+  "camera": {
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 12.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 7.4
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 3,
+    "exposure": 0.0,
+    "background": {
+      "x": 0.0005,
+      "y": 0.00035,
+      "z": 0.00065
+    },
+    "key_strength": 0.0,
+    "rim_strength": 0.0,
+    "fill_strength": 0.0,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.0
+  },
+  "eclipse": {
+    "source_axes": [
+      {
+        "x": 0.9775173637530767,
+        "y": 0.07416319035834007,
+        "z": -0.19738192611560845
+      },
+      {
+        "x": -0.13152225722147193,
+        "y": 0.946134321388188,
+        "z": -0.29585763763452494
+      },
+      {
+        "x": 0.16480806842082663,
+        "y": 0.31516609444416055,
+        "z": 0.9346168377983626
+      }
+    ],
+    "source_scales": [
+      1.5,
+      1.5,
+      1.5
+    ],
+    "source_motion": [
+      2.55,
+      1.35
+    ],
+    "breathing": 0.06,
+    "petals": [
+      {
+        "enabled": true,
+        "semi_axes": [
+          0.44,
+          1.7
+        ],
+        "angle_degrees": -32.0,
+        "shear": 0.2,
+        "shoulder": 0.22,
+        "light_offset": [
+          -0.049,
+          0.06999999999999999
+        ],
+        "light_sigma": 0.0252,
+        "light_gain": 0.95,
+        "corona_bend": 2.0
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          0.68,
+          1.3
+        ],
+        "angle_degrees": 52.0,
+        "shear": -0.16,
+        "shoulder": -0.22,
+        "light_offset": [
+          -0.041999999999999996,
+          0.063
+        ],
+        "light_sigma": 0.0252,
+        "light_gain": 0.7,
+        "corona_bend": -1.6
+      },
+      {
+        "enabled": true,
+        "semi_axes": [
+          0.36,
+          1.62
+        ],
+        "angle_degrees": 117.0,
+        "shear": 0.24,
+        "shoulder": 0.2,
+        "light_offset": [
+          -0.034999999999999996,
+          0.055999999999999994
+        ],
+        "light_sigma": 0.02016,
+        "light_gain": 0.5,
+        "corona_bend": 1.8
+      }
+    ],
+    "smooth_join": 0.025,
+    "edge_width": 0.003,
+    "light_direction": [
+      -0.62,
+      0.78
+    ],
+    "pearl": {
+      "x": 0.83,
+      "y": 0.92,
+      "z": 1.0
+    },
+    "rose": {
+      "x": 0.68,
+      "y": 0.42,
+      "z": 0.52
+    },
+    "copper": {
+      "x": 0.48,
+      "y": 0.24,
+      "z": 0.12
+    },
+    "dark_color": {
+      "x": 0.0001,
+      "y": 7e-05,
+      "z": 0.00012
+    },
+    "corona_hairs": 1536,
+    "corona_long_hairs": 12,
+    "anchor_intervals": 8192,
+    "corona_segments": 64,
+    "corona_lengths": [
+      0.04,
+      0.2
+    ],
+    "corona_long_lengths": [
+      0.2,
+      0.32
+    ],
+    "corona_radii": [
+      0.00035,
+      0.0007
+    ],
+    "corona_fraction": 0.25,
+    "corona_seed": 202254975629090,
+    "minimum_sigma_pixels": 0.25,
+    "integration_tolerance": 0.0001,
+    "max_spatial_depth": 6
+  }
+}
