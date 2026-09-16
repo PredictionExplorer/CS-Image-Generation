@@ -157,8 +157,13 @@ quality evidence, and final artifact locations are recorded below as obtained.
 - The original full-motion development film rendered and decoded completely and
   played to its ending in the browser. Final high-resolution film verification is
   recorded with the delivered files.
-- Three pre-existing native SIMD accuracy tests fail identically in unchanged
+- The initial baseline audit found three native SIMD accuracy failures in unchanged
   commit `4f0a106`: `test_avx2_vectorized_exp_accuracy`, `test_simd_matches_scalar`,
-  and `test_simd_scalar_parity_exhaustive`. Crystal does not call that SIMD spectral
-  accumulation path. Baseline and new-build failure logs are retained separately;
-  they are not represented as passing tests.
+  and `test_simd_scalar_parity_exhaustive`. Their common cause was a degree-seven
+  exponential approximation whose truncation error exceeded its accuracy target.
+  A separate correction extends that polynomial to degree twelve without changing
+  existing tolerances, range reduction, or output contracts. All twenty native
+  SIMD tests now pass. A 142,571-input regression measured maximum absolute error
+  of 2.22e-16, down from 4.97e-9. AVX2-native historical image hashes are not promised
+  unchanged; scalar and NEON paths are unchanged. Crystal does not call this SIMD
+  accumulation path, and its frozen v06 rendering jobs were left untouched.

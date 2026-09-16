@@ -142,9 +142,12 @@ fn finalize_rgba(
 
 /// Fully vectorized 1 - exp(-x) for 4 f64 lanes using AVX2+FMA.
 ///
-/// Uses Cody-Waite range reduction with a degree-7 Taylor polynomial,
+/// Uses Cody-Waite range reduction with a degree-12 Taylor polynomial,
 /// keeping the entire computation in SIMD registers (no scalar fallback).
-/// Input x must be non-negative; relative error < 2e-11 for x in [0, 700].
+/// Input x must be non-negative. On the reduced interval `|r| <= ln(2)/2`,
+/// the exponential's analytic Taylor remainder is below `2.4e-16`, before
+/// floating-point rounding. As in the scalar path, subtraction near zero is
+/// cancellation-limited; accuracy there is measured with an absolute tolerance.
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
 #[inline]
 unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
@@ -167,6 +170,11 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
         let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
 
+        let c12 = _mm256_set1_pd(1.0 / 479_001_600.0);
+        let c11 = _mm256_set1_pd(1.0 / 39_916_800.0);
+        let c10 = _mm256_set1_pd(1.0 / 3_628_800.0);
+        let c9 = _mm256_set1_pd(1.0 / 362_880.0);
+        let c8 = _mm256_set1_pd(1.0 / 40_320.0);
         let c7 = _mm256_set1_pd(1.984_126_984_126_984e-4);
         let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
         let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
@@ -175,7 +183,12 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let c2 = _mm256_set1_pd(0.5);
         let one = _mm256_set1_pd(1.0);
 
-        let p = _mm256_fmadd_pd(c7, r, c6);
+        let p = _mm256_fmadd_pd(c12, r, c11);
+        let p = _mm256_fmadd_pd(p, r, c10);
+        let p = _mm256_fmadd_pd(p, r, c9);
+        let p = _mm256_fmadd_pd(p, r, c8);
+        let p = _mm256_fmadd_pd(p, r, c7);
+        let p = _mm256_fmadd_pd(p, r, c6);
         let p = _mm256_fmadd_pd(p, r, c5);
         let p = _mm256_fmadd_pd(p, r, c4);
         let p = _mm256_fmadd_pd(p, r, c3);
@@ -556,6 +569,67 @@ mod tests {
                 "vectorized exp error for x={x}: got={result} expected={expected} rel={rel_err:.2e}"
             );
         }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+    #[test]
+    fn test_avx2_exp_dense_range_and_reduction_boundaries() {
+        use std::arch::x86_64::*;
+
+        // An independent scalar libm reference across the useful unsaturated
+        // range, every nearest-integer reduction boundary up to the input cap,
+        // adjacent representable values, and logarithmically tiny/large inputs.
+        let mut inputs = Vec::with_capacity(150_000);
+        for index in 0..=131_072_u32 {
+            inputs.push(40.0 * f64::from(index) / 131_072.0);
+        }
+        for interval in 0..=1009_u32 {
+            let boundary = (f64::from(interval) + 0.5) * std::f64::consts::LN_2;
+            inputs.extend([
+                boundary.next_down().next_down(),
+                boundary.next_down(),
+                boundary,
+                boundary.next_up(),
+                boundary.next_up().next_up(),
+            ]);
+            for offset in [-1e-7, -1e-10, -1e-12, 1e-12, 1e-10, 1e-7] {
+                inputs.push(boundary + offset);
+            }
+        }
+        for index in 0..=384_u32 {
+            inputs.push(10.0_f64.powf(-16.0 + 22.0 * f64::from(index) / 384.0));
+        }
+        inputs.extend([700.0_f64.next_down(), 700.0, 700.0_f64.next_up()]);
+
+        let mut maximum_error = 0.0_f64;
+        let mut worst_input = 0.0_f64;
+        for chunk in inputs.chunks(4) {
+            let lanes: [f64; 4] = std::array::from_fn(|lane| chunk[lane.min(chunk.len() - 1)]);
+            let mut actual = [0.0; 4];
+            // SAFETY: this test has the same AVX2 compilation gate as the kernel;
+            // both loads/stores address exactly four allocated f64 elements.
+            unsafe {
+                let packed = _mm256_loadu_pd(lanes.as_ptr());
+                _mm256_storeu_pd(actual.as_mut_ptr(), one_minus_exp_neg_avx2(packed));
+            }
+            for (&input, &output) in chunk.iter().zip(&actual) {
+                assert!(output.is_finite() && (0.0..=1.0).contains(&output));
+                let expected = 1.0 - (-input).exp();
+                let error = (output - expected).abs();
+                if error > maximum_error {
+                    maximum_error = error;
+                    worst_input = input;
+                }
+            }
+        }
+        eprintln!(
+            "AVX2 dense exponential: {} inputs, max absolute error={maximum_error:.17e} at x={worst_input:.17e}",
+            inputs.len()
+        );
+        assert!(
+            maximum_error < 1e-15,
+            "dense exponential error={maximum_error:.17e} at x={worst_input:.17e}"
+        );
     }
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
