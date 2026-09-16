@@ -390,11 +390,7 @@ def experiment(args):
     output = args.output.resolve()
     previous = None
     if output.exists():
-        if (
-            not args.resume
-            or not output.is_dir()
-            or not (output / "request.json").is_file()
-        ):
+        if not args.resume or not output.is_dir() or not (output / "request.json").is_file():
             raise ValueError(
                 "Output already exists; use a new directory or --resume with identical inputs"
             )

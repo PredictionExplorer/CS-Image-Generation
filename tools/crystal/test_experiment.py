@@ -195,9 +195,7 @@ class ExperimentTests(unittest.TestCase):
                 raise RuntimeError("bad <renderer>")
 
             with (
-                mock.patch.object(
-                    experiment, "run_process", side_effect=failed_renderer
-                ),
+                mock.patch.object(experiment, "run_process", side_effect=failed_renderer),
                 self.assertRaises(RuntimeError),
             ):
                 experiment.experiment(args)
@@ -259,12 +257,8 @@ class ExperimentTests(unittest.TestCase):
             self.assertNotIn("spectral_floor", archived["crystal"]["optics"])
             self.assertNotIn("calligraphy", archived)
             self.assertEqual(archived["crystal"]["surface_depth"], 0.65)
-            self.assertEqual(
-                archived["crystal"]["field"]["preconditioner"], "incomplete_cholesky"
-            )
-            self.assertEqual(
-                experiment.finite_json(args.output / "base-recipe.json"), requested
-            )
+            self.assertEqual(archived["crystal"]["field"]["preconditioner"], "incomplete_cholesky")
+            self.assertEqual(experiment.finite_json(args.output / "base-recipe.json"), requested)
             summary = experiment.finite_json(args.output / "summary.json")
             self.assertTrue(summary["complete"])
             proof_manifest = experiment.finite_json(args.output / summary["proofs"][0]["manifest"])
