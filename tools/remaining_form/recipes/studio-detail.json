@@ -1,0 +1,177 @@
+{
+  "blender_version": "4.5.14",
+  "camera": {
+    "depth_of_field": false,
+    "f_stop": 11.0,
+    "sensor_width_mm": 36.0
+  },
+  "cameras": {
+    "back": {
+      "lens_mm": 65.0,
+      "position": [
+        -7.0,
+        11.0,
+        6.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "front": {
+      "lens_mm": 115,
+      "position": [
+        -8,
+        4.08,
+        6.96
+      ],
+      "target": [
+        0,
+        0,
+        0.2
+      ]
+    },
+    "side": {
+      "lens_mm": 65.0,
+      "position": [
+        12.0,
+        -6.0,
+        5.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "ground": {
+    "color": [
+      0.038,
+      0.041,
+      0.043
+    ],
+    "gap_mm": 0.15,
+    "height_units": -1.654,
+    "roughness": 0.8,
+    "size_units": 80.0
+  },
+  "lights": [
+    {
+      "color": [
+        1,
+        0.95,
+        0.84
+      ],
+      "name": "Key",
+      "position": [
+        -3,
+        -6,
+        8
+      ],
+      "power_watts": 2.0,
+      "size": [
+        4,
+        3
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.3
+      ]
+    },
+    {
+      "color": [
+        0.81,
+        0.9,
+        1.0
+      ],
+      "name": "Fill",
+      "position": [
+        5.0,
+        -2.0,
+        4.0
+      ],
+      "power_watts": 0.22,
+      "size": [
+        5.0,
+        5.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.1
+      ]
+    },
+    {
+      "color": [
+        1.0,
+        0.96,
+        0.9
+      ],
+      "name": "Shoulder",
+      "position": [
+        1.0,
+        4.0,
+        6.0
+      ],
+      "power_watts": 1.2,
+      "size": [
+        3.0,
+        4.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.3
+      ]
+    }
+  ],
+  "material": {
+    "base_color": [
+      0.76,
+      0.735,
+      0.67
+    ],
+    "ior": 1.48,
+    "kind": "porcelain",
+    "roughness": 0.3,
+    "smooth_normals": true,
+    "subsurface_radius_mm": 0.65,
+    "subsurface_rgb": [
+      1.0,
+      0.88,
+      0.72
+    ]
+  },
+  "meters_per_unit": 0.05,
+  "model_rotation_degrees": [
+    -90,
+    0,
+    0
+  ],
+  "render": {
+    "denoise": true,
+    "exposure": 0.3,
+    "look": "AgX - Medium High Contrast",
+    "max_bounces": 12,
+    "resolution": [
+      1440,
+      1440
+    ],
+    "samples": 128,
+    "seed": 17017,
+    "threads": 4,
+    "view_transform": "AgX"
+  },
+  "schema_version": 1,
+  "world": {
+    "color": [
+      0.18,
+      0.22,
+      0.26
+    ],
+    "strength": 0.04
+  }
+}

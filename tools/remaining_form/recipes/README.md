@@ -10,6 +10,8 @@ Form*. They use recording `0xb7f327f9f722.orbit`, SHA-256
 | `sculpture-film.json` | The same continuous field, 176-node motion preview |
 | `studio.json` | 1920 × 1600 porcelain still, 256 Cycles samples |
 | `studio-film.json` | 768 × 640 motion preview, 32 Cycles samples |
+| `studio-second.json` | 1440 × 1200 view at the end of the camera movement |
+| `studio-detail.json` | 1440 × 1440 close view of the same sculpture |
 
 The field uses a fixed ellipsoid blank, broad transported cutters, cumulative
 dose, and a small declared rounding of the intersection. Neither the planar
@@ -21,10 +23,12 @@ Both geometry recipes explicitly use continuous field-gradient shading normals.
 The renderer preserves these custom normals so the light follows the carving
 field rather than the tessellation pattern.
 
-The geometry recipes differ only in sampling resolution. The photographic
-recipes differ only in image dimensions and sample count. Lower motion resolution
-is a preview tradeoff, not a different artwork or a print master. Both use
-explicit denoising and archive the scene-linear EXR as well as the display PNG.
+The geometry recipes differ only in sampling resolution. The main still and
+film studio recipes differ only in image dimensions and sample count. Lower
+motion resolution provides a quicker preview. Every studio uses explicit
+denoising and archives the scene-linear EXR as well as the display PNG.
+Use `--view front` with each named studio recipe; the alternate views set that
+camera explicitly and preserve the material, lights, model pose, and floor.
 
 For the selected short film, use 96 excavation frames, 48 camera-examination
 frames at -28°, 24 fps, and the default one-second opening/two-second closing

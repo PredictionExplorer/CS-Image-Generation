@@ -78,3 +78,8 @@ pre-existing test ignored, no test exclusions. All-target Clippy, formatting,
 16 Python contract tests, and Ruff checks passed. These checks establish software
 and numerical behavior; the artistic judgment comes from inspecting the stills,
 multiple views, and the moving sequence.
+
+The linear-master export was checked independently: reopening an archived EXR
+and applying the saved scene's display settings reproduced all 9,216,000 RGB16
+channel values of its PNG exactly. The EXR contained finite scene-linear values
+above 1.0, retaining highlight information before the display transform.
