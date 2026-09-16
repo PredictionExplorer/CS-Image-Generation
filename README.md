@@ -36,6 +36,16 @@ study includes a full 4K/60 film, a 10-bit HEVC master, and verified provenance.
 See [the study log](docs/six-art-studies.md) for the current completion state and
 [the atelier workflow](docs/atelier-workflow.md) for rendering and review.
 
+## Polarized Crystal experiment
+
+The independent `orbital_atelier` renderer includes **Polarized Crystal**, a
+shared elastic field viewed through spectral polarization and a polished lens.
+Its selected Nocturne recipe produces stills and films from an existing frozen
+`.orbit` recording. The normal production artwork pipeline is unchanged.
+
+See [the model, rendering commands, and quality evidence](docs/polarized-crystal.md)
+and [the selected recipe](tools/crystal/recipes/nocturne.json).
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)

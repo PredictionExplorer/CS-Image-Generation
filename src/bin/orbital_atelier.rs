@@ -1,4 +1,4 @@
-//! Render and archive six artistic interpretations of a frozen physical orbit.
+//! Render and archive artistic interpretations of a frozen physical orbit.
 use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -13,8 +13,8 @@ use std::{
 };
 use three_body_problem::{
     atelier::{
-        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, eclipse,
-        engraving, light, loom, render,
+        Camera, OrbitSeries, RenderConfig, Scene, SilkResult, V3, aurora, calligraphy, crystal,
+        eclipse, engraving, light, loom, render,
     },
     silk::cache,
 };
@@ -46,6 +46,13 @@ enum Action {
         output: PathBuf,
         #[arg(long, default_value = "default")]
         preset: String,
+    },
+    /// Validate and write a canonical Crystal recipe without loading an orbit.
+    ResolveCrystal {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
     /// Render original RGB16 PNG frames, with compatible interruption recovery.
     Render {
@@ -124,6 +131,8 @@ struct StudyConfig {
     engraving: Option<engraving::EngravingConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     eclipse: Option<eclipse::EclipseConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crystal: Option<crystal::CrystalConfig>,
 }
 
 impl Default for StudyConfig {
@@ -143,6 +152,7 @@ impl Default for StudyConfig {
             light: None,
             engraving: None,
             eclipse: None,
+            crystal: None,
         }
     }
 }
@@ -176,6 +186,8 @@ struct Receipt {
     engraving_samples: Option<Vec<engraving::EngravingDiagnostics>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     eclipse_samples: Option<Vec<eclipse::EclipseDiagnostics>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crystal_samples: Option<Vec<crystal::CrystalDiagnostics>>,
 }
 
 fn json(path: &Path, value: &impl Serialize) -> SilkResult<()> {
@@ -254,6 +266,7 @@ struct ArtFrame {
     light: Option<light::LightDiagnostics>,
     engraving: Option<engraving::EngravingDiagnostics>,
     eclipse: Option<eclipse::EclipseDiagnostics>,
+    crystal: Option<crystal::CrystalDiagnostics>,
 }
 
 fn art_frame(
@@ -261,8 +274,35 @@ fn art_frame(
     time: f64,
     raw_cell_interval: [f64; 2],
     config: &StudyConfig,
+    prepared_crystal: Option<&crystal::PreparedCrystal>,
 ) -> SilkResult<ArtFrame> {
-    if config.kind == "eclipse" {
+    if config.kind == "crystal" {
+        let frame =
+            prepared_crystal.ok_or("Missing prepared Polarized Crystal state")?.render_linear(
+                source,
+                time,
+                config.crystal.as_ref().ok_or("Missing Polarized Crystal parameters")?,
+                &config.camera,
+                &config.render,
+            )?;
+        verify_crystal_sample(config, time, &frame.diagnostics)?;
+        if frame.pixels.len() != config.render.width as usize * config.render.height as usize
+            || frame
+                .pixels
+                .iter()
+                .any(|pixel| !pixel.x.is_finite() || !pixel.y.is_finite() || !pixel.z.is_finite())
+        {
+            return Err("Invalid Polarized Crystal frame timing, dimensions or pixels".into());
+        }
+        Ok(ArtFrame {
+            pixels: frame.pixels,
+            geometry: [0; 3],
+            light: None,
+            engraving: None,
+            eclipse: None,
+            crystal: Some(frame.diagnostics),
+        })
+    } else if config.kind == "eclipse" {
         let frame = eclipse::render_linear(
             source,
             time,
@@ -277,6 +317,7 @@ fn art_frame(
             light: None,
             engraving: None,
             eclipse: Some(frame.diagnostics),
+            crystal: None,
         })
     } else if config.kind == "light" {
         let frame = light::render_linear(
@@ -293,6 +334,7 @@ fn art_frame(
             light: Some(frame.diagnostics),
             engraving: None,
             eclipse: None,
+            crystal: None,
         })
     } else if config.kind == "engraving" {
         let frame = engraving::render_linear(
@@ -310,6 +352,7 @@ fn art_frame(
             light: None,
             engraving: Some(frame.diagnostics),
             eclipse: None,
+            crystal: None,
         })
     } else {
         let scene = art_scene(source, time, config)?;
@@ -319,8 +362,54 @@ fn art_frame(
             light: None,
             engraving: None,
             eclipse: None,
+            crystal: None,
         })
     }
+}
+
+fn crystal_preset() -> StudyConfig {
+    // The versioned, visually selected recipe is the single preset definition.
+    // Parsing and validation are covered by the CLI's preset regression test.
+    serde_json::from_str(include_str!("../../tools/crystal/recipes/nocturne.json"))
+        .expect("the built-in Crystal recipe is valid")
+}
+
+fn validate_crystal_recipe(config: &StudyConfig) -> SilkResult<()> {
+    if config.kind == "crystal" {
+        if config.prelude_fraction != 0.0 {
+            return Err("Polarized Crystal requires prelude_fraction=0; memory starts at the original recording".into());
+        }
+        if config.frames < 2
+            || config.fps == 0
+            || config.temporal_samples == 0
+            || !config.shutter_fraction.is_finite()
+            || !(0.0..=1.0).contains(&config.shutter_fraction)
+            || !config.prelude_fraction.is_finite()
+            || config.prelude_fraction < 0.0
+        {
+            return Err("Invalid Polarized Crystal film settings".into());
+        }
+        crystal::validate(
+            config.crystal.as_ref().ok_or("Missing Polarized Crystal parameters")?,
+            &config.camera,
+            &config.render,
+        )?;
+    }
+    Ok(())
+}
+
+fn resolve_crystal(mut config: StudyConfig) -> SilkResult<StudyConfig> {
+    if config.kind != "crystal" {
+        return Err("resolve-crystal requires a Polarized Crystal recipe".into());
+    }
+    config.calligraphy = None;
+    config.loom = None;
+    config.aurora = None;
+    config.light = None;
+    config.engraving = None;
+    config.eclipse = None;
+    validate_crystal_recipe(&config)?;
+    Ok(config)
 }
 
 fn main() -> SilkResult<()> {
@@ -333,6 +422,10 @@ fn main() -> SilkResult<()> {
     }
     let started = Instant::now();
     match args.command {
+        Action::ResolveCrystal { config, output } => {
+            let recipe = resolve_crystal(serde_json::from_slice(&fs::read(config)?)?)?;
+            json(&output, &recipe)?;
+        }
         Action::AuditEclipse { orbit, config, output } => {
             let c: StudyConfig = serde_json::from_slice(&fs::read(&config)?)?;
             if c.kind != "eclipse" {
@@ -357,6 +450,7 @@ fn main() -> SilkResult<()> {
         }
         Action::Config { output, preset } => {
             let config = match preset.as_str() {
+                "crystal" => crystal_preset(),
                 "eclipse" => StudyConfig {
                     kind: "eclipse".into(),
                     temporal_samples: 128,
@@ -526,6 +620,9 @@ fn main() -> SilkResult<()> {
                 config.render.aa = aa;
             }
             match config.kind.as_str() {
+                "crystal" => {
+                    config = resolve_crystal(config)?;
+                }
                 "eclipse" => {
                     config.eclipse.get_or_insert_with(eclipse::EclipseConfig::default);
                     config.calligraphy = None;
@@ -573,6 +670,9 @@ fn main() -> SilkResult<()> {
             if config.kind != "engraving" {
                 config.engraving = None;
             }
+            if config.kind != "crystal" {
+                config.crystal = None;
+            }
             if config.frames < 2 || config.fps == 0 || every == 0 || config.temporal_samples == 0 {
                 return Err("Require at least two frames, positive fps and positive stride".into());
             }
@@ -584,6 +684,8 @@ fn main() -> SilkResult<()> {
             if !config.prelude_fraction.is_finite() || config.prelude_fraction < 0.0 {
                 return Err("Prelude fraction must be finite and nonnegative".into());
             }
+            // Validate optical and camera settings before reading/preparing the expensive field.
+            validate_crystal_recipe(&config)?;
             let frames: Vec<usize> = if let Some(frame) = frame {
                 if frame >= config.frames {
                     return Err("Frame is outside the film".into());
@@ -627,31 +729,28 @@ fn main() -> SilkResult<()> {
                 return Err("Existing images have no matching manifest".into());
             }
             json(&manifest_path, &manifest)?;
+            let mut prepared_crystal = None;
             for &frame in &manifest.rendered_frames {
                 let path = frame_path(&output, frame);
-                if !overwrite && path.exists() && sidecar(&path).exists() {
-                    let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(&path))?)?;
-                    if receipt.recipe_sha256 == hash
-                        && receipt.png_sha256 == cache::file_hash(&path)?
-                        && verify_light_samples(&manifest.config, frame, &receipt).is_ok()
-                        && verify_engraving_samples(&manifest.config, frame, &receipt).is_ok()
-                        && verify_eclipse_samples(&manifest.config, frame, &receipt).is_ok()
-                    {
-                        let dims = image::image_dimensions(&path)?;
-                        if dims == (manifest.config.render.width, manifest.config.render.height) {
-                            eprintln!("Reusing frame {frame}");
-                            continue;
-                        }
-                    }
+                if !overwrite && frame_is_reusable(&path, &manifest.config, frame, &hash)? {
+                    eprintln!("Reusing frame {frame}");
+                    continue;
                 }
                 let instant = Instant::now();
                 let fraction = frame as f64 / (manifest.config.frames - 1) as f64;
                 let c = &manifest.config;
+                if c.kind == "crystal" && prepared_crystal.is_none() {
+                    prepared_crystal = Some(crystal::PreparedCrystal::new(
+                        &source,
+                        c.crystal.as_ref().ok_or("Missing Polarized Crystal parameters")?,
+                    )?);
+                }
                 let mut accumulated = Vec::new();
                 let mut geometry = [0; 3];
                 let mut light_samples = Vec::new();
                 let mut engraving_samples = Vec::new();
                 let mut eclipse_samples = Vec::new();
+                let mut crystal_samples = Vec::new();
                 let mut shutter_start = fraction;
                 let mut shutter_end = fraction;
                 for sample in 0..c.temporal_samples {
@@ -660,8 +759,13 @@ fn main() -> SilkResult<()> {
                         shutter_start = time;
                     }
                     shutter_end = time;
-                    let product =
-                        art_frame(&source, time, expected_sample_interval(c, frame, sample), c)?;
+                    let product = art_frame(
+                        &source,
+                        time,
+                        expected_sample_interval(c, frame, sample),
+                        c,
+                        prepared_crystal.as_ref(),
+                    )?;
                     geometry = product.geometry;
                     if let Some(diagnostics) = product.light {
                         light_samples.push(diagnostics);
@@ -671,6 +775,9 @@ fn main() -> SilkResult<()> {
                     }
                     if let Some(diagnostics) = product.eclipse {
                         eclipse_samples.push(diagnostics);
+                    }
+                    if let Some(diagnostics) = product.crystal {
+                        crystal_samples.push(diagnostics);
                     }
                     let linear = product.pixels;
                     let weight = 1.0 / c.temporal_samples as f64;
@@ -693,7 +800,7 @@ fn main() -> SilkResult<()> {
                     {
                         write_progress_preview(&output, frame, sample + 1, c, &hash, &accumulated)?;
                     }
-                    if matches!(c.kind.as_str(), "light" | "engraving" | "eclipse") {
+                    if matches!(c.kind.as_str(), "light" | "engraving" | "eclipse" | "crystal") {
                         eprintln!(
                             "{} frame {frame}: shutter sample {}/{}, {:.1}s elapsed",
                             c.kind,
@@ -723,6 +830,7 @@ fn main() -> SilkResult<()> {
                         engraving_samples: (!engraving_samples.is_empty())
                             .then_some(engraving_samples),
                         eclipse_samples: (!eclipse_samples.is_empty()).then_some(eclipse_samples),
+                        crystal_samples: (!crystal_samples.is_empty()).then_some(crystal_samples),
                     },
                 )?;
                 eprintln!(
@@ -880,6 +988,99 @@ fn expected_sample_interval(config: &StudyConfig, frame: usize, sample: usize) -
     })
 }
 
+fn verify_crystal_sample(
+    config: &StudyConfig,
+    timeline_fraction: f64,
+    sample: &crystal::CrystalDiagnostics,
+) -> SilkResult<()> {
+    let style = config.crystal.as_ref().ok_or("Missing Polarized Crystal parameters")?;
+    sample.validate()?;
+    use crystal::field::PreconditionerKind::{IncompleteCholesky, Jacobi};
+    match (
+        style.field.preconditioner,
+        sample.field.preconditioner,
+        sample.field.preconditioner_fallback,
+    ) {
+        (Jacobi, Jacobi, false)
+        | (IncompleteCholesky, IncompleteCholesky, false)
+        | (IncompleteCholesky, Jacobi, true) => {}
+        _ => {
+            return Err(
+                "Polarized Crystal diagnostics do not match the requested preconditioner or its declared fallback".into()
+            );
+        }
+    }
+    let source_fraction = style.freeze_source_fraction.unwrap_or(timeline_fraction);
+    let sweep = timeline_fraction * timeline_fraction * (3.0 - 2.0 * timeline_fraction);
+    let offset = style.polarizer_sweep_degrees * sweep;
+    let expected_forcing_samples = if source_fraction == 0.0
+        || style.field.memory_fraction == 0.0
+        || style.field.memory_weight == 0.0
+    {
+        1
+    } else {
+        style.field.memory_samples + usize::from(style.field.memory_weight < 1.0)
+    };
+    let history_start = if style.field.memory_weight == 0.0 {
+        source_fraction
+    } else {
+        (source_fraction - style.field.memory_fraction).max(0.0)
+    };
+    if sample.timeline_fraction.to_bits() != timeline_fraction.to_bits()
+        || sample.source_fraction.to_bits() != source_fraction.to_bits()
+        || sample.polarizer_offset_degrees.to_bits() != offset.to_bits()
+        || sample.material_pixels > config.render.width as usize * config.render.height as usize
+        || sample.field.history_start.to_bits() != history_start.to_bits()
+        || sample.field.forcing_samples != expected_forcing_samples
+        || sample.field.cg_iterations > style.field.cg_max_iterations
+        || sample.field.relative_residual > style.field.cg_tolerance
+    {
+        return Err(
+            "Polarized Crystal diagnostics do not match the recipe's timing or numerical settings"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn verify_crystal_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -> SilkResult<()> {
+    if config.kind != "crystal" {
+        return if receipt.crystal_samples.is_none() {
+            Ok(())
+        } else {
+            Err("Non-Crystal frame has unexpected Polarized Crystal diagnostics".into())
+        };
+    }
+    validate_crystal_recipe(config)?;
+    if frame >= config.frames {
+        return Err("Polarized Crystal receipt frame is outside the film".into());
+    }
+    let samples =
+        receipt.crystal_samples.as_ref().ok_or("Missing Polarized Crystal diagnostics")?;
+    if samples.len() != config.temporal_samples {
+        return Err("Incomplete Polarized Crystal exposure diagnostics".into());
+    }
+    let actual =
+        [receipt.source_fraction, receipt.shutter_start_fraction, receipt.shutter_end_fraction];
+    if actual
+        .into_iter()
+        .zip(expected_frame_timing(config, frame))
+        .any(|(a, b)| a.to_bits() != b.to_bits())
+        || !receipt.seconds.is_finite()
+        || receipt.seconds < 0.0
+        || [receipt.vertices, receipt.triangles, receipt.strands] != [0; 3]
+        || receipt.light_samples.is_some()
+        || receipt.engraving_samples.is_some()
+        || receipt.eclipse_samples.is_some()
+    {
+        return Err("Polarized Crystal receipt has inconsistent timing or diagnostics".into());
+    }
+    for (index, sample) in samples.iter().enumerate() {
+        verify_crystal_sample(config, expected_sample_time(config, frame, index), sample)?;
+    }
+    Ok(())
+}
+
 fn verify_eclipse_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -> SilkResult<()> {
     if config.kind != "eclipse" {
         return if receipt.eclipse_samples.is_none() {
@@ -973,6 +1174,28 @@ fn verify_light_samples(config: &StudyConfig, frame: usize, receipt: &Receipt) -
     Ok(())
 }
 
+fn frame_is_reusable(
+    path: &Path,
+    config: &StudyConfig,
+    frame: usize,
+    recipe_sha256: &str,
+) -> SilkResult<bool> {
+    if !path.exists() || !sidecar(path).exists() {
+        return Ok(false);
+    }
+    let receipt: Receipt = serde_json::from_slice(&fs::read(sidecar(path))?)?;
+    if receipt.recipe_sha256 != recipe_sha256
+        || receipt.png_sha256 != cache::file_hash(path)?
+        || verify_light_samples(config, frame, &receipt).is_err()
+        || verify_engraving_samples(config, frame, &receipt).is_err()
+        || verify_eclipse_samples(config, frame, &receipt).is_err()
+        || verify_crystal_samples(config, frame, &receipt).is_err()
+    {
+        return Ok(false);
+    }
+    Ok(image::image_dimensions(path)? == (config.render.width, config.render.height))
+}
+
 fn verify_assembly_frame(
     chunk: &AssemblyChunk,
     chunk_index: usize,
@@ -985,6 +1208,7 @@ fn verify_assembly_frame(
     verify_light_samples(&chunk.manifest.config, frame, &receipt)?;
     verify_engraving_samples(&chunk.manifest.config, frame, &receipt)?;
     verify_eclipse_samples(&chunk.manifest.config, frame, &receipt)?;
+    verify_crystal_samples(&chunk.manifest.config, frame, &receipt)?;
     if receipt.recipe_sha256 != chunk.recipe_sha256 {
         return Err(format!("Frame {frame} receipt does not match its source chunk recipe").into());
     }
@@ -1250,6 +1474,7 @@ fn encode(
         verify_light_samples(c, frame, &receipt)?;
         verify_engraving_samples(c, frame, &receipt)?;
         verify_eclipse_samples(c, frame, &receipt)?;
+        verify_crystal_samples(c, frame, &receipt)?;
         if receipt.recipe_sha256 != hash || receipt.png_sha256 != cache::file_hash(&path)? {
             return Err(format!("Frame {frame} failed its integrity check").into());
         }
@@ -1361,6 +1586,279 @@ mod assembly_tests {
     use super::*;
 
     #[test]
+    fn crystal_resolution_canonicalizes_defaults_and_inactive_blocks() {
+        let mut raw = serde_json::to_value(crystal_preset()).unwrap();
+        raw["crystal"]["optics"]["spectral_peaks"] = serde_json::json!([]);
+        raw["crystal"]["optics"]["spectral_floor"] = serde_json::json!(1.0);
+        raw["crystal"].as_object_mut().unwrap().remove("surface_depth");
+        raw["calligraphy"] =
+            serde_json::to_value(calligraphy::CalligraphyConfig::default()).unwrap();
+        let resolved = resolve_crystal(serde_json::from_value(raw).unwrap()).unwrap();
+        let canonical = serde_json::to_value(&resolved).unwrap();
+        assert!(canonical.get("calligraphy").is_none());
+        assert!(canonical["crystal"]["optics"].get("spectral_peaks").is_none());
+        assert!(canonical["crystal"]["optics"].get("spectral_floor").is_none());
+        assert_eq!(canonical["crystal"]["surface_depth"], 0.65);
+        assert_eq!(serde_json::to_value(resolve_crystal(resolved).unwrap()).unwrap(), canonical);
+        assert!(resolve_crystal(StudyConfig::default()).is_err());
+    }
+
+    fn crystal_receipt(config: &StudyConfig, frame: usize) -> Receipt {
+        let style = config.crystal.as_ref().unwrap();
+        let [source_fraction, shutter_start_fraction, shutter_end_fraction] =
+            expected_frame_timing(config, frame);
+        let samples = (0..config.temporal_samples)
+            .map(|index| {
+                let time = expected_sample_time(config, frame, index);
+                let source = style.freeze_source_fraction.unwrap_or(time);
+                let forcing_samples = if source == 0.0
+                    || style.field.memory_fraction == 0.0
+                    || style.field.memory_weight == 0.0
+                {
+                    1
+                } else {
+                    style.field.memory_samples + usize::from(style.field.memory_weight < 1.0)
+                };
+                crystal::CrystalDiagnostics {
+                    timeline_fraction: time,
+                    source_fraction: source,
+                    polarizer_offset_degrees: style.polarizer_sweep_degrees
+                        * (time * time * (3.0 - 2.0 * time)),
+                    field: crystal::field::FieldDiagnostics {
+                        preconditioner: style.field.preconditioner,
+                        forcing_samples,
+                        history_start: if style.field.memory_weight == 0.0 {
+                            source
+                        } else {
+                            (source - style.field.memory_fraction).max(0.0)
+                        },
+                        ..crystal::field::FieldDiagnostics::default()
+                    },
+                    material_pixels: 1,
+                    maximum_radiance: 0.1,
+                }
+            })
+            .collect();
+        Receipt {
+            recipe_sha256: String::new(),
+            png_sha256: String::new(),
+            source_fraction,
+            shutter_start_fraction,
+            shutter_end_fraction,
+            vertices: 0,
+            triangles: 0,
+            strands: 0,
+            seconds: 0.1,
+            light_samples: None,
+            engraving_samples: None,
+            eclipse_samples: None,
+            crystal_samples: Some(samples),
+        }
+    }
+
+    #[test]
+    fn crystal_preset_has_explicit_parameters_and_full_source_movie_settings() {
+        let config = crystal_preset();
+        validate_crystal_recipe(&config).unwrap();
+        assert_eq!(config.kind, "crystal");
+        assert!(config.crystal.is_some());
+        assert!(config.calligraphy.is_none());
+        assert_eq!((config.frames, config.fps, config.temporal_samples), (1802, 60, 4));
+        assert_eq!((config.render.width, config.render.height, config.render.aa), (3840, 2160, 2));
+        assert_eq!(config.prelude_fraction, 0.0);
+        assert_eq!(config.camera.orthographic_height, 6.4);
+        let value = serde_json::to_value(&config).unwrap();
+        for inactive in ["calligraphy", "loom", "aurora", "light", "engraving", "eclipse"] {
+            assert!(value.get(inactive).is_none());
+        }
+        let roundtrip: StudyConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(serde_json::to_vec(&config).unwrap(), serde_json::to_vec(&roundtrip).unwrap());
+    }
+
+    #[test]
+    fn crystal_requires_parameters_and_valid_settings_before_field_preparation() {
+        let missing: StudyConfig = serde_json::from_str(r#"{"kind":"crystal"}"#).unwrap();
+        assert!(validate_crystal_recipe(&missing).is_err());
+        let mut invalid = crystal_preset();
+        invalid.render.width = 0;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid = crystal_preset();
+        invalid.camera.position = invalid.camera.target;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid = crystal_preset();
+        invalid.temporal_samples = 0;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid = crystal_preset();
+        invalid.shutter_fraction = f64::NAN;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid = crystal_preset();
+        invalid.prelude_fraction = 0.36;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid = crystal_preset();
+        invalid.crystal.as_mut().unwrap().polarizer_sweep_degrees = 90.0;
+        assert!(validate_crystal_recipe(&invalid).is_err());
+        invalid.crystal.as_mut().unwrap().freeze_source_fraction = Some(0.5);
+        validate_crystal_recipe(&invalid).unwrap();
+    }
+
+    #[test]
+    fn crystal_receipts_require_complete_finite_correctly_timed_evidence() {
+        let config = crystal_preset();
+        for frame in [0, 900, 1801] {
+            let receipt = crystal_receipt(&config, frame);
+            verify_crystal_samples(&config, frame, &receipt).unwrap();
+            let mutations: [fn(&mut Receipt); 13] = [
+                |r| r.crystal_samples = None,
+                |r| {
+                    r.crystal_samples.as_mut().unwrap().pop();
+                },
+                |r| r.crystal_samples.as_mut().unwrap()[0].timeline_fraction = 0.3,
+                |r| r.crystal_samples.as_mut().unwrap()[0].source_fraction = 0.4,
+                |r| r.crystal_samples.as_mut().unwrap()[0].maximum_radiance = f64::NAN,
+                |r| r.crystal_samples.as_mut().unwrap()[0].field.relative_residual = f64::NAN,
+                |r| r.crystal_samples.as_mut().unwrap()[0].field.history_start += 0.125,
+                |r| r.crystal_samples.as_mut().unwrap()[0].field.forcing_samples += 1,
+                |r| r.crystal_samples.as_mut().unwrap()[0].material_pixels = usize::MAX,
+                |r| r.source_fraction = 0.3,
+                |r| r.seconds = f64::INFINITY,
+                |r| r.vertices = 1,
+                |r| r.light_samples = Some(Vec::new()),
+            ];
+            for mutation in mutations {
+                let mut invalid = receipt.clone();
+                mutation(&mut invalid);
+                assert!(verify_crystal_samples(&config, frame, &invalid).is_err());
+            }
+            assert!(verify_crystal_samples(&StudyConfig::default(), frame, &receipt).is_err());
+        }
+        let mut legacy = crystal_receipt(&config, 0);
+        legacy.crystal_samples = None;
+        verify_crystal_samples(&StudyConfig::default(), 0, &legacy).unwrap();
+        assert!(serde_json::to_value(&legacy).unwrap().get("crystal_samples").is_none());
+    }
+
+    #[test]
+    fn crystal_receipts_require_the_requested_preconditioner_or_an_explicit_ic_fallback() {
+        use crystal::field::PreconditionerKind::{IncompleteCholesky, Jacobi};
+        let mut config = crystal_preset();
+        config.crystal.as_mut().unwrap().field.preconditioner = IncompleteCholesky;
+        let receipt = crystal_receipt(&config, 900);
+        verify_crystal_samples(&config, 900, &receipt).unwrap();
+
+        let mut fallback = receipt.clone();
+        fallback.crystal_samples.as_mut().unwrap()[0].field.preconditioner = Jacobi;
+        assert!(verify_crystal_samples(&config, 900, &fallback).is_err());
+        fallback.crystal_samples.as_mut().unwrap()[0].field.preconditioner_fallback = true;
+        verify_crystal_samples(&config, 900, &fallback).unwrap();
+        fallback.crystal_samples.as_mut().unwrap()[0].field.preconditioner_diagonal_shift = 1e-4;
+        assert!(verify_crystal_samples(&config, 900, &fallback).is_err());
+
+        let mut shifted = receipt.clone();
+        shifted.crystal_samples.as_mut().unwrap()[0].field.preconditioner_diagonal_shift = 1e-4;
+        verify_crystal_samples(&config, 900, &shifted).unwrap();
+        shifted.crystal_samples.as_mut().unwrap()[0].field.preconditioner_fallback = true;
+        assert!(verify_crystal_samples(&config, 900, &shifted).is_err());
+        shifted.crystal_samples.as_mut().unwrap()[0].field.preconditioner_fallback = false;
+        for invalid_shift in [-1.0, 0.5, f64::NAN] {
+            shifted.crystal_samples.as_mut().unwrap()[0].field.preconditioner_diagonal_shift =
+                invalid_shift;
+            assert!(verify_crystal_samples(&config, 900, &shifted).is_err());
+        }
+
+        config.crystal.as_mut().unwrap().field.preconditioner = Jacobi;
+        let jacobi = crystal_receipt(&config, 900);
+        verify_crystal_samples(&config, 900, &jacobi).unwrap();
+        let mut mislabeled = jacobi.clone();
+        mislabeled.crystal_samples.as_mut().unwrap()[0].field.preconditioner = IncompleteCholesky;
+        assert!(verify_crystal_samples(&config, 900, &mislabeled).is_err());
+        let mut false_fallback = jacobi;
+        false_fallback.crystal_samples.as_mut().unwrap()[0].field.preconditioner_fallback = true;
+        assert!(verify_crystal_samples(&config, 900, &false_fallback).is_err());
+    }
+
+    #[test]
+    fn missing_legacy_preconditioner_evidence_is_jacobi_and_never_invented_ic() {
+        use crystal::field::PreconditionerKind::{IncompleteCholesky, Jacobi};
+        let mut config = crystal_preset();
+        config.crystal.as_mut().unwrap().field.preconditioner = IncompleteCholesky;
+        let mut value = serde_json::to_value(crystal_receipt(&config, 900)).unwrap();
+        for sample in value["crystal_samples"].as_array_mut().unwrap() {
+            let field = sample["field"].as_object_mut().unwrap();
+            for key in
+                ["preconditioner", "preconditioner_diagonal_shift", "preconditioner_fallback"]
+            {
+                field.remove(key);
+            }
+        }
+        let receipt: Receipt = serde_json::from_value(value).unwrap();
+        for sample in receipt.crystal_samples.as_ref().unwrap() {
+            assert_eq!(sample.field.preconditioner, Jacobi);
+            assert!(!sample.field.preconditioner_fallback);
+            assert_eq!(sample.field.preconditioner_diagonal_shift, 0.0);
+        }
+        assert!(verify_crystal_samples(&config, 900, &receipt).is_err());
+        config.crystal.as_mut().unwrap().field.preconditioner = Jacobi;
+        verify_crystal_samples(&config, 900, &receipt).unwrap();
+    }
+
+    #[test]
+    fn crystal_examination_keeps_frozen_mechanics_separate_from_polarizer_time() {
+        let mut config = crystal_preset();
+        let style = config.crystal.as_mut().unwrap();
+        style.freeze_source_fraction = Some(0.625);
+        style.polarizer_sweep_degrees = 90.0;
+        for frame in [0, 900, 1801] {
+            let receipt = crystal_receipt(&config, frame);
+            verify_crystal_samples(&config, frame, &receipt).unwrap();
+            let first = &receipt.crystal_samples.as_ref().unwrap()[0];
+            assert_eq!(first.source_fraction, 0.625);
+            let mut invalid = receipt.clone();
+            invalid.crystal_samples.as_mut().unwrap()[0].source_fraction = first.timeline_fraction;
+            assert!(verify_crystal_samples(&config, frame, &invalid).is_err());
+            let mut invalid = receipt;
+            invalid.crystal_samples.as_mut().unwrap()[0].polarizer_offset_degrees += 0.25;
+            assert!(verify_crystal_samples(&config, frame, &invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn crystal_resume_and_assembly_reject_frames_without_verified_exposure_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("crystal");
+        let mut manifest = manifest(&[0, 1, 2, 3]);
+        manifest.config = StudyConfig {
+            frames: 4,
+            temporal_samples: 2,
+            render: RenderConfig { width: 4, height: 4, aa: 1, ..crystal_preset().render },
+            ..crystal_preset()
+        };
+        manifest.source_history_start_fraction = 0.0;
+        chunk(&directory, &manifest);
+        let hash = recipe_hash(&manifest).unwrap();
+        for &frame in &manifest.rendered_frames {
+            let path = frame_path(&directory, frame);
+            assert!(!frame_is_reusable(&path, &manifest.config, frame, &hash).unwrap());
+            let mut receipt = crystal_receipt(&manifest.config, frame);
+            receipt.recipe_sha256.clone_from(&hash);
+            receipt.png_sha256 = cache::file_hash(&path).unwrap();
+            json(&sidecar(&path), &receipt).unwrap();
+            assert!(frame_is_reusable(&path, &manifest.config, frame, &hash).unwrap());
+        }
+        let chunks = read_assembly_chunks(std::slice::from_ref(&directory)).unwrap();
+        verify_assembly_frame(&chunks[0], 0, 0).unwrap();
+        let path = frame_path(&directory, 0);
+        let mut receipt: Receipt =
+            serde_json::from_slice(&fs::read(sidecar(&path)).unwrap()).unwrap();
+        receipt.crystal_samples.as_mut().unwrap().pop();
+        json(&sidecar(&path), &receipt).unwrap();
+        assert!(!frame_is_reusable(&path, &manifest.config, 0, &hash).unwrap());
+        assert!(verify_assembly_frame(&chunks[0], 0, 0).is_err());
+        let movie = temp.path().join("invalid.mp4");
+        assert!(encode(&directory, &movie, false, 1, false).is_err());
+        assert!(!movie.exists());
+    }
+
+    #[test]
     fn eclipse_receipts_require_complete_correctly_timed_geometry_records() {
         let config = StudyConfig {
             kind: "eclipse".into(),
@@ -1399,6 +1897,7 @@ mod assembly_tests {
             light_samples: None,
             engraving_samples: None,
             eclipse_samples: None,
+            crystal_samples: None,
         };
         assert!(verify_eclipse_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_eclipse_samples(&config, 0, &receipt).is_err());
@@ -1428,6 +1927,8 @@ mod assembly_tests {
         assert!(manifest.config.loom.is_none());
         assert!(manifest.config.aurora.is_none());
         assert!(manifest.config.light.is_none());
+        assert!(manifest.config.crystal.is_none());
+        assert!(serde_json::to_value(&manifest.config).unwrap().get("crystal").is_none());
         assert_eq!(
             recipe_hash(&manifest).unwrap(),
             "f40ec9d064ca6c7711f1955998c26ac183c9f3b6cc7bd477cb41e8578b1b9748"
@@ -1511,6 +2012,7 @@ mod assembly_tests {
             light_samples: None,
             engraving_samples: None,
             eclipse_samples: None,
+            crystal_samples: None,
         };
         assert!(verify_light_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_light_samples(&config, 0, &receipt).is_err());
@@ -1554,6 +2056,7 @@ mod assembly_tests {
             light_samples: None,
             engraving_samples: None,
             eclipse_samples: None,
+            crystal_samples: None,
         };
         assert!(verify_engraving_samples(&StudyConfig::default(), 0, &receipt).is_ok());
         assert!(verify_engraving_samples(&config, 0, &receipt).is_err());
@@ -1610,6 +2113,7 @@ mod assembly_tests {
                     light_samples: None,
                     engraving_samples: None,
                     eclipse_samples: None,
+                    crystal_samples: None,
                 },
             )
             .unwrap();

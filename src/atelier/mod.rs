@@ -1,10 +1,11 @@
-//! Six artistic interpretations of one recorded three-body motion.
+//! Artistic interpretations of one recorded three-body motion.
 //!
 //! Physical trajectories remain frozen. Designed geometry, optics and graphic
 //! fields turn their motion into distinct artworks using deterministic CPU work.
 
 pub mod aurora;
 pub mod calligraphy;
+pub mod crystal;
 pub mod eclipse;
 pub mod engraving;
 pub mod light;

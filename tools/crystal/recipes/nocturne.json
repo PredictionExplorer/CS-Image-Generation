@@ -1,0 +1,127 @@
+{
+  "kind": "crystal",
+  "frames": 1802,
+  "fps": 60,
+  "temporal_samples": 4,
+  "shutter_fraction": 0.5,
+  "prelude_fraction": 0.0,
+  "camera": {
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 12.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "up": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0
+    },
+    "orthographic_height": 6.4
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "aa": 2,
+    "exposure": 0.4,
+    "background": {
+      "x": 0.0025,
+      "y": 0.003,
+      "z": 0.004
+    },
+    "key_strength": 0.0,
+    "rim_strength": 0.0,
+    "fill_strength": 0.0,
+    "light_rotation_degrees": 20.0,
+    "bloom_strength": 0.0
+  },
+  "crystal": {
+    "field": {
+      "domain_half_size": [
+        4.4,
+        3.4
+      ],
+      "grid": [
+        257,
+        193
+      ],
+      "source_axes": [
+        {
+          "x": 1.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        {
+          "x": 0.0,
+          "y": 1.0,
+          "z": 0.0
+        }
+      ],
+      "motion_scale": 0.9,
+      "poisson_ratio": 0.3,
+      "load_softness": 0.36,
+      "load_elongation": 3.0,
+      "load_strength": 0.6,
+      "encounter_scale": 0.8,
+      "memory_fraction": 0.045,
+      "memory_weight": 0.55,
+      "memory_samples": 24,
+      "cg_tolerance": 1e-9,
+      "cg_max_iterations": 2500,
+      "preconditioner": "incomplete_cholesky"
+    },
+    "optics": {
+      "retardance_scale_nm": 18000.0,
+      "polarizer_degrees": 18.0,
+      "incident_intensity": 1.0,
+      "spectral_peaks": [
+        {
+          "center_nm": 525.0,
+          "width_nm": 18.0,
+          "weight": 1.0
+        },
+        {
+          "center_nm": 595.0,
+          "width_nm": 16.0,
+          "weight": 0.7
+        },
+        {
+          "center_nm": 440.0,
+          "width_nm": 15.0,
+          "weight": 0.55
+        }
+      ],
+      "spectral_floor": 0.02
+    },
+    "uniform_pre_stress": [
+      0.016989356881873897,
+      -0.016989356881873897,
+      0.012343490298141937
+    ],
+    "semi_axes": [
+      3.55,
+      2.15
+    ],
+    "rotation_degrees": -12.0,
+    "outline_asymmetry": 0.055,
+    "surface_depth": 0.85,
+    "refractive_index": 1.5,
+    "center_thickness": 1.0,
+    "edge_thickness": 0.85,
+    "interior_feather": 0.09,
+    "absorption": {
+      "x": 0.1,
+      "y": 0.07,
+      "z": 0.05
+    },
+    "surface_strength": 1.4,
+    "edge_strength": 0.09,
+    "freeze_source_fraction": null,
+    "polarizer_sweep_degrees": 0.0,
+    "cache_presentation": true
+  }
+}
