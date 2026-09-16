@@ -167,3 +167,27 @@ quality evidence, and final artifact locations are recorded below as obtained.
   of 2.22e-16, down from 4.97e-9. AVX2-native historical image hashes are not promised
   unchanged; scalar and NEON paths are unchanged. Crystal does not call this SIMD
   accumulation path, and its frozen v06 rendering jobs were left untouched.
+
+## Delivered Nocturne study
+
+The completed local collection is `output/polarized-crystal/final/` in this
+worktree. `index.html` provides the viewing page; all of its media links are
+relative and can be used offline. The collection includes:
+
+- Two 7680 × 4320 RGB16 stills: the opening state and close encounter.
+- A 38.05-second 3840 × 2160 / 60 fps film: 1802 original-motion frames followed
+  by 481 frozen-state optical-examination frames. The two encoded segments were
+  joined by lossless stream copy with explicit frame-exact durations.
+- Browser H.264 and 10-bit HEVC versions, plus the examination as a separate film.
+- The frozen orbit, selected recipes, source archives, hashes, and quality evidence.
+
+Both full films contain 2283 frames and decoded completely without errors.
+Browser checks covered playback through the ending, seeking into the optical
+passage, HEVC playback, half speed, and mode switching. The final repository
+checks passed 722 Rust tests (one pre-existing ignored test, no exclusions),
+seven helper tests, strict Clippy, Rust formatting, and Ruff lint/formatting.
+
+Renderer v06 is frozen from implementation commit `b2721ed`; later helper
+formatting and the separate unused-SIMD correction do not alter those frames.
+The collection's `provenance.json` distinguishes the renderer snapshot from the
+current code archive, and `delivery-manifest.json` records final asset hashes.
