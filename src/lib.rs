@@ -43,6 +43,8 @@ pub mod nft_traits;
 pub(crate) mod oklab;
 /// Active post-processing effects and composable effect-chain traits.
 pub mod post_effects;
+/// Persistent three-dimensional excavation driven by recorded physical motion.
+pub mod remaining;
 /// Rendering pipeline: histogram passes, tonemapping, effects, and video output.
 pub mod render;
 /// CPU cloth simulation and physically lit Tidal Silk artwork.

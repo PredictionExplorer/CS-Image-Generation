@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "blender_version": "4.5.14",
+  "meters_per_unit": 0.05,
+  "model_rotation_degrees": [
+    90.0,
+    0.0,
+    0.0
+  ],
+  "cameras": {
+    "front": {
+      "position": [
+        7.0,
+        -11.0,
+        6.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lens_mm": 65.0
+    },
+    "side": {
+      "position": [
+        12.0,
+        -6.0,
+        5.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lens_mm": 65.0
+    },
+    "back": {
+      "position": [
+        -7.0,
+        11.0,
+        6.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lens_mm": 65.0
+    }
+  },
+  "camera": {
+    "sensor_width_mm": 36.0,
+    "depth_of_field": false,
+    "f_stop": 11.0
+  },
+  "lights": [
+    {
+      "name": "Key",
+      "position": [
+        -4.0,
+        -5.0,
+        8.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.3
+      ],
+      "size": [
+        5.0,
+        4.0
+      ],
+      "power_watts": 2.4,
+      "color": [
+        1.0,
+        0.96,
+        0.89
+      ]
+    },
+    {
+      "name": "Fill",
+      "position": [
+        5.0,
+        -2.0,
+        4.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.1
+      ],
+      "size": [
+        5.0,
+        5.0
+      ],
+      "power_watts": 0.22,
+      "color": [
+        0.81,
+        0.9,
+        1.0
+      ]
+    },
+    {
+      "name": "Shoulder",
+      "position": [
+        1.0,
+        4.0,
+        6.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.3
+      ],
+      "size": [
+        3.0,
+        4.0
+      ],
+      "power_watts": 0.7,
+      "color": [
+        1.0,
+        0.96,
+        0.9
+      ]
+    }
+  ],
+  "world": {
+    "color": [
+      0.26,
+      0.25,
+      0.23
+    ],
+    "strength": 0.055
+  },
+  "ground": {
+    "height_units": null,
+    "gap_mm": 0.15,
+    "size_units": 80.0,
+    "color": [
+      0.19,
+      0.175,
+      0.153
+    ],
+    "roughness": 0.8
+  },
+  "material": {
+    "kind": "porcelain",
+    "base_color": [
+      0.76,
+      0.735,
+      0.67
+    ],
+    "roughness": 0.29,
+    "ior": 1.48,
+    "subsurface_radius_mm": 0.65,
+    "subsurface_rgb": [
+      1.0,
+      0.88,
+      0.72
+    ],
+    "smooth_normals": true
+  },
+  "render": {
+    "resolution": [
+      1600,
+      1200
+    ],
+    "samples": 256,
+    "seed": 17017,
+    "threads": 4,
+    "denoise": false,
+    "exposure": 0.0,
+    "view_transform": "AgX",
+    "look": "AgX - Medium High Contrast",
+    "max_bounces": 12
+  }
+}

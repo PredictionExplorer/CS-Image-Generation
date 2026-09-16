@@ -1,0 +1,31 @@
+{
+  "resolution": 176,
+  "source_fraction": 1.0,
+  "field": {
+    "cutter_axes": [
+      1.2,
+      0.95,
+      0.75
+    ],
+    "dose_strength": 1.0,
+    "dose_threshold": 0.016,
+    "time_samples": 2048,
+    "stock_mode": "ellipsoid",
+    "stock_samples": 96,
+    "stock_radius": 0.45,
+    "ellipsoid_center": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "ellipsoid_axes": [
+      1.9,
+      1.65,
+      1.45
+    ],
+    "reveal": null,
+    "rim_rounding": 0.16,
+    "grid_margin": 0.1
+  },
+  "surface_normals": "field"
+}

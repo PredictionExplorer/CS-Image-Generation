@@ -21,6 +21,10 @@ path = "src/bin/tidal_silk.rs"
 name = "orbital_atelier"
 path = "src/bin/orbital_atelier.rs"
 
+[[bin]]
+name = "remaining_form"
+path = "src/bin/remaining_form.rs"
+
 [lints.rust]
 warnings     = "deny"
 missing_docs = "deny"

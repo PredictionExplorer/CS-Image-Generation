@@ -46,6 +46,16 @@ Its selected Nocturne recipe produces stills and films from an existing frozen
 See [the model, rendering commands, and quality evidence](docs/polarized-crystal.md)
 and [the selected recipe](tools/crystal/recipes/nocturne.json).
 
+## The Remaining Form
+
+The independent **`remaining_form`** executable turns a recorded three-body orbit
+into cumulative excavation of a solid. It exports audited three-dimensional
+meshes; a pinned Blender/Cycles adapter photographs them as porcelain and builds
+films of the carving and the completed object.
+
+See [the geometry, rendering, and archive guide](docs/remaining-form.md) and
+[the selected study recipes](tools/remaining_form/recipes/README.md).
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
