@@ -56,6 +56,16 @@ films of the carving and the completed object.
 See [the geometry, rendering, and archive guide](docs/remaining-form.md) and
 [the selected study recipes](tools/remaining_form/recipes/README.md).
 
+## The Shell That Remembers
+
+The experimental **`remembering_shell`** executable grows an open porcelain wall
+from the changing proportions and turning of the recorded three-body triangle.
+Fine growth ribs follow cumulative travel; completed rings retain their shape as
+new material appears. The selected finish pairs ivory with a celadon interior.
+
+See [the model and reproduction guide](docs/remembering-shell.md) and
+[the selected recipes](tools/remembering_shell/recipes/README.md).
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)

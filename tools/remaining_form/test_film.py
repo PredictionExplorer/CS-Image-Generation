@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import math
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -100,6 +101,118 @@ class FilmTests(unittest.TestCase):
             position = frame["camera_position"]
             self.assertAlmostEqual(math.hypot(position[0] - 0.5, position[1] - 0.25), first_radius)
             self.assertEqual(position[2], 2.0)
+
+    def test_explicit_source_clock_changes_only_excavation_fractions(self):
+        camera = {"position": [3.0, -4.0, 2.0], "target": [0.5, 0.25, -0.5]}
+        count = 72
+        times = [
+            6 * (i / (count - 1)) ** 3 - 8 * (i / (count - 1)) ** 4 + 3 * (i / (count - 1)) ** 5
+            for i in range(count)
+        ]
+        original_times = times[:]
+        linear = film.frame_plan(count, 18, 35.0, camera)
+        mapped = film.frame_plan(count, 18, 35.0, camera, times)
+        self.assertEqual(times, original_times)
+        self.assertEqual([frame["source_fraction"] for frame in mapped[:count]], times)
+        self.assertLess(mapped[1]["source_fraction"], linear[1]["source_fraction"])
+        for before, after in zip(linear[:count], mapped[:count], strict=True):
+            self.assertEqual(
+                {k: v for k, v in before.items() if k != "source_fraction"},
+                {k: v for k, v in after.items() if k != "source_fraction"},
+            )
+        self.assertEqual(mapped[count:], linear[count:])
+        explicit_linear = [i / (count - 1) for i in range(count)]
+        self.assertEqual(linear, film.frame_plan(count, 18, 35.0, camera, explicit_linear))
+
+    def test_source_times_reject_invalid_order_endpoints_count_and_nonfinite_values(self):
+        camera = {"position": [3, -4, 2], "target": [0, 0, 0]}
+        valid = [i / 23 for i in range(24)]
+        invalid = [valid[:-1], {"times": valid}]
+        for index, value in [
+            (0, 0.001),
+            (23, 0.999),
+            (12, valid[11]),
+            (12, -0.1),
+            (12, float("nan")),
+            (12, float("inf")),
+            (12, True),
+            (12, "0.5"),
+        ]:
+            changed = valid[:]
+            changed[index] = value
+            invalid.append(changed)
+        reversed_pair = valid[:]
+        reversed_pair[11], reversed_pair[12] = reversed_pair[12], reversed_pair[11]
+        invalid.append(reversed_pair)
+        for times in invalid:
+            with self.subTest(times=times), self.assertRaises(ValueError):
+                film.frame_plan(24, 0, 0, camera, times)
+
+    def test_source_times_file_is_hashed_frozen_and_archived_without_rendering(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            orbit = folder / "source.orbit"
+            orbit.write_bytes(b"orbit fixture")
+            geometry = folder / "geometry.json"
+            film.write_json(geometry, {"source_fraction": 1.0})
+            studio = copy.deepcopy(adapter.DEFAULTS)
+            studio["ground"]["height_units"] = -2.0
+            studio_path = folder / "studio.json"
+            film.write_json(studio_path, studio)
+            times = [float((i / 23) ** 2) for i in range(24)]
+            times_path = folder / "times.json"
+            film.write_json(times_path, times)
+            args = film.parser().parse_args(
+                [
+                    "--builder",
+                    sys.executable,
+                    "--blender",
+                    sys.executable,
+                    "--ffmpeg",
+                    sys.executable,
+                    "--render-script",
+                    str(Path(__file__).with_name("render.py")),
+                    "--orbit",
+                    str(orbit),
+                    "--geometry-recipe",
+                    str(geometry),
+                    "--studio-recipe",
+                    str(studio_path),
+                    "--source-times",
+                    str(times_path),
+                    "--frames",
+                    "24",
+                    "--output",
+                    str(folder / "film"),
+                ]
+            )
+            with (
+                mock.patch.object(film, "resolve_geometry", return_value={"source_fraction": 1.0}),
+                mock.patch.object(
+                    film, "run_phase", side_effect=RuntimeError("stop before rendering")
+                ),
+                self.assertRaisesRegex(RuntimeError, "stop before rendering"),
+            ):
+                film.run(args)
+            request = film.read_json(args.output / "request.json")
+            self.assertEqual(request["inputs"]["source_times"]["sha256"], film.digest(times_path))
+            self.assertEqual([frame["source_fraction"] for frame in request["frames"]], times)
+            self.assertEqual(film.read_json(args.output / "inputs" / "source-times.json"), times)
+
+            args.output = folder / "changed-input"
+
+            def mutate_during_resolution(*_):
+                film.write_json(times_path, [i / 23 for i in range(24)])
+                return {"source_fraction": 1.0}
+
+            with (
+                mock.patch.object(film, "resolve_geometry", side_effect=mutate_during_resolution),
+                mock.patch.object(film, "run_phase") as render,
+                self.assertRaisesRegex(ValueError, "Input changed.*source_times"),
+            ):
+                film.run(args)
+            render.assert_not_called()
+            self.assertFalse(args.output.exists())
 
     def test_holds_are_explicit_duplicate_slots_with_exact_encoded_duration(self):
         frames = film.frame_plan(24, 6, 35.0, {"position": [3, -4, 2], "target": [0, 0, 0]})

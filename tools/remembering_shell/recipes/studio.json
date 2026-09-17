@@ -1,0 +1,185 @@
+{
+  "blender_version": "4.5.14",
+  "camera": {
+    "depth_of_field": false,
+    "f_stop": 11.0,
+    "sensor_width_mm": 36.0
+  },
+  "cameras": {
+    "back": {
+      "lens_mm": 65.0,
+      "position": [
+        -7.0,
+        11.0,
+        6.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "front": {
+      "lens_mm": 84,
+      "position": [
+        10,
+        -8,
+        7
+      ],
+      "target": [
+        -0.15,
+        -0.95,
+        1.5
+      ]
+    },
+    "side": {
+      "lens_mm": 65.0,
+      "position": [
+        12.0,
+        -6.0,
+        5.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "ground": {
+    "color": [
+      0.14,
+      0.135,
+      0.12
+    ],
+    "gap_mm": 0.15,
+    "height_units": 0.042,
+    "roughness": 0.8,
+    "size_units": 80.0
+  },
+  "lights": [
+    {
+      "color": [
+        1.0,
+        0.96,
+        0.89
+      ],
+      "name": "Key",
+      "position": [
+        0,
+        -7,
+        9
+      ],
+      "power_watts": 3,
+      "size": [
+        3.5,
+        5
+      ],
+      "target": [
+        0,
+        -0.5,
+        1.8
+      ]
+    },
+    {
+      "color": [
+        0.81,
+        0.9,
+        1.0
+      ],
+      "name": "Fill",
+      "position": [
+        5.0,
+        -2.0,
+        4.0
+      ],
+      "power_watts": 0.22,
+      "size": [
+        5.0,
+        5.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.1
+      ]
+    },
+    {
+      "color": [
+        1.0,
+        0.96,
+        0.9
+      ],
+      "name": "Shoulder",
+      "position": [
+        -3,
+        5,
+        8
+      ],
+      "power_watts": 0.7,
+      "size": [
+        3.0,
+        4.0
+      ],
+      "target": [
+        0,
+        0,
+        1.5
+      ]
+    }
+  ],
+  "material": {
+    "base_color": [
+      0.76,
+      0.735,
+      0.67
+    ],
+    "interior_color": [
+      0.36,
+      0.57,
+      0.48
+    ],
+    "interior_roughness": 0.27,
+    "ior": 1.48,
+    "kind": "porcelain",
+    "roughness": 0.34,
+    "smooth_normals": true,
+    "subsurface_radius_mm": 0.55,
+    "subsurface_rgb": [
+      1.0,
+      0.88,
+      0.72
+    ],
+    "thin_film_ior": 1.35,
+    "thin_film_nm": 0
+  },
+  "meters_per_unit": 0.05,
+  "model_rotation_degrees": [
+    0,
+    0,
+    0
+  ],
+  "render": {
+    "denoise": true,
+    "exposure": 0.0,
+    "look": "AgX - Medium High Contrast",
+    "max_bounces": 12,
+    "resolution": [
+      1920,
+      1600
+    ],
+    "samples": 256,
+    "seed": 17017,
+    "threads": 4,
+    "view_transform": "AgX"
+  },
+  "schema_version": 1,
+  "world": {
+    "color": [
+      0.26,
+      0.25,
+      0.23
+    ],
+    "strength": 0.055
+  }
+}

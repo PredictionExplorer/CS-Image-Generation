@@ -24,6 +24,7 @@ import platform
 import struct
 import sys
 import time
+from array import array
 from pathlib import Path
 
 DEFAULTS = {
@@ -75,6 +76,10 @@ DEFAULTS = {
         "kind": "clay",
         "base_color": [0.58, 0.54, 0.47],
         "roughness": 0.64,
+        "interior_color": None,
+        "interior_roughness": 0.2,
+        "thin_film_nm": 0.0,
+        "thin_film_ior": 1.35,
         "ior": 1.48,
         "subsurface_radius_mm": 0.0,
         "subsurface_rgb": [1.0, 0.88, 0.72],
@@ -203,6 +208,13 @@ def validate(config):
         raise ValueError("Material kind must be clay or porcelain")
     vector(material["base_color"], "material base_color", minimum=0.0, maximum=1.0)
     number(material["roughness"], "material roughness", 0.05, 1.0)
+    if material["interior_color"] is not None:
+        vector(material["interior_color"], "material interior_color", minimum=0.0, maximum=1.0)
+    number(material["interior_roughness"], "material interior_roughness", 0.05, 1.0)
+    number(material["thin_film_nm"], "material thin_film_nm", 0.0, 1500.0)
+    number(material["thin_film_ior"], "material thin_film_ior", 1.01, 2.5)
+    if material["thin_film_nm"] != 0.0 and material["kind"] != "porcelain":
+        raise ValueError("A nonzero thin film is supported only on the porcelain sculpture")
     number(material["ior"], "material ior", 1.01, 2.0)
     number(material["subsurface_radius_mm"], "subsurface_radius_mm", 0.0, 10.0)
     vector(material["subsurface_rgb"], "subsurface_rgb", minimum=0.01, maximum=4.0)
@@ -292,6 +304,116 @@ def runtime_identity(bpy):
     }
 
 
+def shell_material_metadata(mesh_path, mesh_sha256):
+    """Bind the semantic wall layout to this exact shell mesh and build receipt."""
+    receipt_path = mesh_path.with_name("build.json")
+    raw = receipt_path.read_bytes()
+    record = json.loads(raw)
+    encoded(record)  # Reject nonfinite metadata, including overflowed exponents.
+    if not isinstance(record, dict) or record.get("mesh_sha256") != mesh_sha256:
+        raise ValueError("Shell build receipt does not match the supplied mesh SHA256")
+    identity = record.get("identity")
+    shell = record.get("shell")
+    if (
+        not isinstance(identity, dict)
+        or type(identity.get("schema_version")) is not int
+        or identity["schema_version"] != 1
+        or not isinstance(identity.get("recipe"), dict)
+        or not isinstance(shell, dict)
+    ):
+        raise ValueError("Interior material requires a version-one shell build receipt")
+    recipe = identity["recipe"]
+    nv = recipe.get("transverse_segments")
+    nl = recipe.get("lip_segments")
+    longitudinal = recipe.get("longitudinal_segments")
+    rows = shell.get("rows")
+    ring = shell.get("ring_vertices")
+    for value, label, minimum, maximum in [
+        (nv, "transverse_segments", 32, 512),
+        (nl, "lip_segments", 3, 16),
+        (longitudinal, "longitudinal_segments", 64, 4096),
+        (rows, "rows", 2, 4097),
+        (ring, "ring_vertices", 70, 1056),
+    ]:
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f"Invalid shell layout {label}")
+    if ring != 2 * nv + 2 * nl or rows > longitudinal + 1:
+        raise ValueError("Shell ring or row count disagrees with its construction recipe")
+    vertices = rows * ring + 2 * (nv + 1)
+    triangles = 2 * (rows - 1) * ring + 8 * nv + 4 * nl
+    for key, expected in [
+        ("vertices", vertices),
+        ("normal_count", vertices),
+        ("triangles", triangles),
+    ]:
+        if type(record.get(key)) is not int or record[key] != expected:
+            raise ValueError(f"Shell build receipt has an inconsistent {key} count")
+    if ply_header(mesh_path) != {"vertex": vertices, "face": triangles}:
+        raise ValueError("PLY counts do not match the shell wall and end-cap layout")
+    return {
+        "build_receipt_sha256": hashlib.sha256(raw).hexdigest(),
+        "layout": {
+            "version": 1,
+            "rows": rows,
+            "ring_vertices": ring,
+            "transverse_segments": nv,
+            "lip_segments": nl,
+            "vertices": vertices,
+            "triangles": triangles,
+            "attribute": "shell_interior",
+            "mapping": "outer=0; inner=1; cosine-rounded-lips; cap-midpoints=0.5",
+        },
+    }
+
+
+def shell_interior_weights(layout):
+    """Continuous material coordinates around each closed shell-wall ring."""
+    nv, nl = layout["transverse_segments"], layout["lip_segments"]
+    ring = array("f", [0.0]) * (nv + 1)
+    ring.extend(0.5 - 0.5 * math.cos(math.pi * j / nl) for j in range(1, nl))
+    ring.extend([1.0] * (nv + 1))
+    ring.extend(0.5 + 0.5 * math.cos(math.pi * j / nl) for j in range(1, nl))
+    if len(ring) != layout["ring_vertices"]:
+        raise ValueError("Interior material ring weights disagree with the validated layout")
+    weights = ring * layout["rows"]
+    weights.extend([0.5] * (2 * (nv + 1)))
+    if len(weights) != layout["vertices"]:
+        raise ValueError("Interior material weights do not match the shell vertex count")
+    return weights
+
+
+def add_shell_material_attribute(mesh, material, bsdf, settings, metadata):
+    """Tint the existing wall through one BSDF without changing its geometry."""
+    layout = metadata["layout"]
+    if len(mesh.vertices) != layout["vertices"]:
+        raise ValueError("Imported vertex count does not match the verified shell material layout")
+    name = layout["attribute"]
+    if mesh.attributes.get(name) is not None:
+        raise ValueError(
+            "The reserved shell material attribute already exists on the imported mesh"
+        )
+    attribute = mesh.attributes.new(name=name, type="FLOAT", domain="POINT")
+    attribute.data.foreach_set("value", shell_interior_weights(layout))
+    nodes, links = material.node_tree.nodes, material.node_tree.links
+    coordinate = nodes.new("ShaderNodeAttribute")
+    coordinate.name = "Verified shell interior"
+    coordinate.attribute_name = name
+    color = nodes.new("ShaderNodeMixRGB")
+    color.name = "Ivory exterior to colored interior"
+    color.blend_type = "MIX"
+    color.inputs[1].default_value = (*settings["base_color"], 1.0)
+    color.inputs[2].default_value = (*settings["interior_color"], 1.0)
+    links.new(coordinate.outputs["Fac"], color.inputs[0])
+    links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
+    roughness = nodes.new("ShaderNodeMath")
+    roughness.name = "Exterior to interior roughness"
+    roughness.operation = "MULTIPLY_ADD"
+    roughness.inputs[1].default_value = settings["interior_roughness"] - settings["roughness"]
+    roughness.inputs[2].default_value = settings["roughness"]
+    links.new(coordinate.outputs["Fac"], roughness.inputs[0])
+    links.new(roughness.outputs[0], bsdf.inputs["Roughness"])
+
+
 def point_at(obj, target, Vector):
     direction = Vector(target) - obj.location
     obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
@@ -327,7 +449,7 @@ def triangle_area(a, b, c):
     return 0.5 * math.hypot(*cross)
 
 
-def build_scene(bpy, mesh_path, config, view):
+def build_scene(bpy, mesh_path, config, view, shell_material=None):
     import bmesh
     from mathutils import Vector
 
@@ -392,6 +514,14 @@ def build_scene(bpy, mesh_path, config, view):
         settings["roughness"],
         settings["ior"],
     )
+    # A constant dielectric film changes the sculpture's specular transport.
+    # Zero thickness disables it. The studio floor uses a separate material.
+    bsdf.inputs["Thin Film Thickness"].default_value = settings["thin_film_nm"]
+    bsdf.inputs["Thin Film IOR"].default_value = settings["thin_film_ior"]
+    if settings["interior_color"] is not None:
+        if shell_material is None:
+            raise ValueError("Interior material requires verified shell metadata")
+        add_shell_material_attribute(mesh, material, bsdf, settings, shell_material)
     if settings["kind"] == "porcelain":
         bsdf.subsurface_method = "RANDOM_WALK"
         bsdf.inputs["Subsurface Weight"].default_value = 1.0
@@ -629,6 +759,10 @@ def run(args):
         "view": args.view,
         "config": config,
     }
+    shell_material = None
+    if config["material"]["interior_color"] is not None:
+        shell_material = shell_material_metadata(mesh_path, request["mesh_sha256"])
+        request["shell_material"] = shell_material
     identity = hashlib.sha256(encoded(request)).hexdigest()
     output = args.output.resolve()
     if output.exists() and (not args.resume or not output.is_dir()):
@@ -652,9 +786,13 @@ def run(args):
         write_json(output / "recipe.json", config)
         receipt = {"schema_version": 1, "identity_sha256": identity, "complete": False}
         write_json(output / "receipt.json", receipt)
-        scene, geometry = build_scene(bpy, mesh_path, config, args.view)
+        scene, geometry = build_scene(bpy, mesh_path, config, args.view, shell_material)
         if digest(mesh_path) != request["mesh_sha256"]:
             raise ValueError("Mesh changed while the scene was being prepared")
+        if shell_material is not None:
+            if digest(mesh_path.with_name("build.json")) != shell_material["build_receipt_sha256"]:
+                raise ValueError("Shell build receipt changed while the scene was being prepared")
+            geometry["shell_material"] = shell_material
         text = bpy.data.texts.new("remaining-form-render.py")
         text.write(script_path.read_text(encoding="utf-8"))
         scene["remaining_form_identity"] = identity

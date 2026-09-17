@@ -25,6 +25,10 @@ path = "src/bin/orbital_atelier.rs"
 name = "remaining_form"
 path = "src/bin/remaining_form.rs"
 
+[[bin]]
+name = "remembering_shell"
+path = "src/bin/remembering_shell.rs"
+
 [lints.rust]
 warnings     = "deny"
 missing_docs = "deny"

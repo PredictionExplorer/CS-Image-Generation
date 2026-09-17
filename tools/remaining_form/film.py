@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+from itertools import pairwise
 from pathlib import Path
 
 
@@ -94,9 +95,9 @@ def run_process(command, log, cancel=None):
 
 
 def run_phase(frames, workers, job, accept, cancel):
-    """Keep at most two frame jobs active and publish through one controller."""
-    if workers not in (1, 2):
-        raise ValueError("Frame workers must be one or two")
+    """Keep at most four frame jobs active and publish through one controller."""
+    if workers not in (1, 2, 3, 4):
+        raise ValueError("Frame workers must be between one and four")
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
     try:
         futures = [pool.submit(job, frame) for frame in frames]
@@ -156,16 +157,37 @@ def fixed_studio(adapter, supplied):
     return studio
 
 
-def frame_plan(count, turntable_count, degrees, camera):
+def source_time_plan(count, supplied=None):
+    if not 24 <= count <= 721:
+        raise ValueError("Source-time count must be24..721")
+    if supplied is None:
+        return [index / (count - 1) for index in range(count)]
+    if not isinstance(supplied, list) or len(supplied) != count:
+        raise ValueError("Source-times JSON must be an array with exactly --frames entries")
+    if any(
+        type(value) not in (int, float) or not 0 <= value <= 1 or not math.isfinite(value)
+        for value in supplied
+    ):
+        raise ValueError("Source times must be finite numbers in [0,1]")
+    values = [float(value) for value in supplied]
+    if values[0] != 0.0 or values[-1] != 1.0:
+        raise ValueError("Source times must start exactly at0 and end exactly at1")
+    if any(b <= a for a, b in pairwise(values)):
+        raise ValueError("Source times must be strictly increasing")
+    return values
+
+
+def frame_plan(count, turntable_count, degrees, camera, source_times=None):
     if not 24 <= count <= 721 or not 0 <= turntable_count <= 240:
         raise ValueError("Excavation frame count must be24..721 and orbit count0..240")
     if not math.isfinite(degrees) or abs(degrees) > 360:
         raise ValueError("Turntable degrees must be finite and within -360..360")
+    times = source_time_plan(count, source_times)
     frames = [
         {
             "index": index,
             "phase": "excavation",
-            "source_fraction": index / (count - 1),
+            "source_fraction": times[index],
             "geometry_index": index,
             "camera_position": list(camera["position"]),
         }
@@ -382,7 +404,7 @@ def encode_film(args, output, request, manifest):
 
 def run(args):
     inputs = {}
-    for name in (
+    input_names = (
         "builder",
         "blender",
         "render_script",
@@ -390,7 +412,10 @@ def run(args):
         "orbit",
         "geometry_recipe",
         "studio_recipe",
-    ):
+    )
+    if args.source_times is not None:
+        input_names += ("source_times",)
+    for name in input_names:
         path = getattr(args, name).resolve(strict=True)
         if not path.is_file() or (
             name in ("builder", "blender", "ffmpeg") and not os.access(path, os.X_OK)
@@ -398,11 +423,20 @@ def run(args):
             raise ValueError(f"Invalid explicit input path: {name}")
         setattr(args, name, path)
         inputs[name] = {"path": str(path), "sha256": digest(path)}
+    source_times = (
+        source_time_plan(args.frames, read_json(args.source_times))
+        if args.source_times is not None
+        else None
+    )
     adapter = load_adapter(args.render_script)
     geometry = resolve_geometry(args.builder, args.geometry_recipe)
     studio = fixed_studio(adapter, read_json(args.studio_recipe))
     frames = frame_plan(
-        args.frames, args.turntable_frames, args.turntable_degrees, studio["cameras"]["front"]
+        args.frames,
+        args.turntable_frames,
+        args.turntable_degrees,
+        studio["cameras"]["front"],
+        source_times,
     )
     timeline = encoding_timeline(frames, args.fps, args.start_hold, args.end_hold)
     for name, source in inputs.items():
@@ -439,6 +473,8 @@ def run(args):
             (output / folder).mkdir(exist_ok=True)
         preserve(output / "inputs" / "geometry.json", encoded(geometry))
         preserve(output / "inputs" / "studio.json", encoded(studio))
+        if source_times is not None:
+            preserve(output / "inputs" / "source-times.json", encoded(source_times))
         preserve(output / "inputs" / "render.py", args.render_script.read_bytes())
         if digest(output / "inputs" / "render.py") != inputs["render_script"]["sha256"]:
             raise ValueError("Render script changed while its immutable copy was prepared")
@@ -592,9 +628,14 @@ def parser():
         result.add_argument("--" + name, type=Path, required=True)
     result.add_argument("--frames", type=int, default=144)
     result.add_argument(
+        "--source-times",
+        type=Path,
+        help="JSON array of source fractions, one per excavation frame; default is linear0..1",
+    )
+    result.add_argument(
         "--workers",
         type=int,
-        choices=(1, 2),
+        choices=(1, 2, 3, 4),
         default=1,
         help="Independent frame jobs; each child uses four threads",
     )

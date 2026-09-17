@@ -45,6 +45,8 @@ pub(crate) mod oklab;
 pub mod post_effects;
 /// Persistent three-dimensional excavation driven by recorded physical motion.
 pub mod remaining;
+/// An open shell grown from the changing three-body triangle.
+pub mod remembering_shell;
 /// Rendering pipeline: histogram passes, tonemapping, effects, and video output.
 pub mod render;
 /// CPU cloth simulation and physically lit Tidal Silk artwork.
