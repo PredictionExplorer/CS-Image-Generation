@@ -4,7 +4,7 @@
 The fixed studio must specify ground.height_units. Every excavation frame builds
 its own geometry at an explicit source fraction; orbit frames reuse the final
 mesh. No mesh interpolation, geometry resampling, or automatic camera fitting is
-performed here. At most two frame jobs run together, each child using four threads.
+performed here. At most four frame jobs run together, each child using four threads.
 --resume requires identical
 inputs and delegates mesh and scene receipt checks to their original programs.
 """
@@ -27,6 +27,8 @@ import threading
 import time
 from itertools import pairwise
 from pathlib import Path
+
+MAX_SOURCE_FRAMES = 3601
 
 
 def encoded(value):
@@ -60,6 +62,15 @@ def preserve(path, data):
     else:
         with path.open("xb") as stream:
             stream.write(data)
+
+
+def preserve_unreceipted_directory(folder, receipt):
+    """Retain interrupted child writes before retrying an owned frame directory."""
+    if folder.exists() and not (folder / receipt).exists():
+        archived = folder.with_name(f"{folder.name}.incomplete-{time.time_ns()}-{os.getpid()}")
+        folder.rename(archived)
+        return archived
+    return None
 
 
 def run_process(command, log, cancel=None):
@@ -158,8 +169,8 @@ def fixed_studio(adapter, supplied):
 
 
 def source_time_plan(count, supplied=None):
-    if not 24 <= count <= 721:
-        raise ValueError("Source-time count must be24..721")
+    if type(count) is not int or not 24 <= count <= MAX_SOURCE_FRAMES:
+        raise ValueError(f"Source-time count must be24..{MAX_SOURCE_FRAMES}")
     if supplied is None:
         return [index / (count - 1) for index in range(count)]
     if not isinstance(supplied, list) or len(supplied) != count:
@@ -170,16 +181,18 @@ def source_time_plan(count, supplied=None):
     ):
         raise ValueError("Source times must be finite numbers in [0,1]")
     values = [float(value) for value in supplied]
-    if values[0] != 0.0 or values[-1] != 1.0:
-        raise ValueError("Source times must start exactly at0 and end exactly at1")
+    # An accumulated renderer's first frame may already contain a short prefix.
+    # Explicit checkpoints preserve that prefix; they do not crop the source.
+    if values[-1] != 1.0:
+        raise ValueError("Source times must end exactly at1")
     if any(b <= a for a, b in pairwise(values)):
         raise ValueError("Source times must be strictly increasing")
     return values
 
 
 def frame_plan(count, turntable_count, degrees, camera, source_times=None):
-    if not 24 <= count <= 721 or not 0 <= turntable_count <= 240:
-        raise ValueError("Excavation frame count must be24..721 and orbit count0..240")
+    if type(turntable_count) is not int or not 0 <= turntable_count <= 240:
+        raise ValueError("Orbit frame count must be0..240")
     if not math.isfinite(degrees) or abs(degrees) > 360:
         raise ValueError("Turntable degrees must be finite and within -360..360")
     times = source_time_plan(count, source_times)
@@ -256,10 +269,28 @@ def verify_scene(adapter, folder, studio, mesh_hash, request):
         or scene["runtime"]["binary_sha256"] != request["inputs"]["blender"]["sha256"]
     ):
         raise ValueError("Scene uses a different renderer script or Blender binary")
+    compute = request.get("compute", {"device": "CPU", "device_ids": []})
+    actual = scene.get("compute")
+    if compute["device"] == "CPU":
+        if actual is not None:
+            raise ValueError("Scene uses a GPU but the film requested CPU rendering")
+    elif (
+        not isinstance(actual, dict)
+        or actual.get("backend") != compute["device"]
+        or actual.get("cpu_fallback") is not False
+        or (
+            compute["device_ids"]
+            and sorted(device["id"] for device in actual["devices"]) != compute["device_ids"]
+        )
+    ):
+        raise ValueError("Scene compute device differs from the film request")
     identity = hashlib.sha256(adapter.encoded(scene)).hexdigest()
     if not adapter.completed_matches(folder, identity):
         raise ValueError("Scene is missing complete, hash-verified render artifacts")
-    return read_json(folder / "receipt.json"), scene["runtime"]
+    runtime = scene["runtime"]
+    if actual is not None:
+        runtime = {**runtime, "compute": actual}
+    return read_json(folder / "receipt.json"), runtime
 
 
 def encode_film(args, output, request, manifest):
@@ -403,6 +434,10 @@ def encode_film(args, output, request, manifest):
 
 
 def run(args):
+    if args.device == "CPU" and args.device_id:
+        raise ValueError("--device-id requires an explicit GPU backend")
+    if args.device != "CPU" and args.workers != 1:
+        raise ValueError("GPU films require --workers 1 to avoid competing frame allocations")
     inputs = {}
     input_names = (
         "builder",
@@ -447,6 +482,7 @@ def run(args):
         "inputs": inputs,
         "runner_sha256": digest(Path(__file__)),
         "threads": 4,
+        "compute": {"device": args.device, "device_ids": sorted(args.device_id)},
         "geometry_recipe": geometry,
         "studio_recipe": studio,
         "fps": args.fps,
@@ -503,6 +539,7 @@ def run(args):
             geometry_path = output / "recipes" / f"geometry_{geometry_index:06}.json"
             preserve(geometry_path, encoded(geometry_recipe))
             if frame["phase"] == "excavation":
+                preserve_unreceipted_directory(geometry_folder, "build.json")
                 command = [
                     str(args.builder),
                     "--threads",
@@ -528,6 +565,7 @@ def run(args):
             studio_path = output / "recipes" / f"studio_{index:06}.json"
             preserve(studio_path, encoded(settings))
             scene_folder = output / "frames" / f"frame_{index:06}"
+            preserve_unreceipted_directory(scene_folder, "request.json")
             command = [
                 str(args.blender),
                 "--factory-startup",
@@ -548,6 +586,10 @@ def run(args):
                 "--view",
                 "front",
             ]
+            if args.device != "CPU":
+                command.extend(["--device", args.device])
+                for device_id in sorted(args.device_id):
+                    command.extend(["--device-id", device_id])
             if scene_folder.exists():
                 command.append("--resume")
             print(
@@ -640,6 +682,8 @@ def parser():
         help="Independent frame jobs; each child uses four threads",
     )
     result.add_argument("--fps", type=int, default=24)
+    result.add_argument("--device", choices=("CPU", "OPTIX"), default="CPU")
+    result.add_argument("--device-id", action="append", default=[], help="Exact Cycles GPU ID")
     result.add_argument("--turntable-frames", type=int, default=0)
     result.add_argument("--turntable-degrees", type=float, default=35.0)
     result.add_argument(

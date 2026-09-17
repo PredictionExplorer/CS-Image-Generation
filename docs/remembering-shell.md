@@ -232,3 +232,57 @@ ambiguous contacts. The audit defaults to 10 million pairs; a caller can choose
 a bounded cap up to 50 million. The full-resolution production mesh has the
 same content hash as the audited mesh. This is a geometric intersection check,
 not a physical fabrication or strength certification.
+
+
+## Full trajectory comparisons
+
+The full comparison uses three frozen stride-one recordings, each with one
+million recorded samples: `0xb7f327f9f722`, `0x808861c25b6c`, and
+`0xbc53af1cd380`. All geometry, material, lighting and camera controls are held
+fixed. Only the source recording changes.
+
+The original production presentation is replayed by `tidal_silk normal` from
+that same cache and its archived generation record; no candidate search runs.
+Its native output is 3840 × 2484 at 60 fps. The shell is 3840 × 3200, with
+256 samples per still and 64 per film frame, using the versioned 4K recipes.
+The chosen complete comparison has 901 frames at 30 fps (30.033 seconds).
+
+Regular movie frames 1, 3, …, 1801 are paired with shell frames built at their
+exact inclusive source checkpoints. The first pair already contains samples
+0 through 1110; the final pair contains all one million samples. Selecting
+movie checkpoints changes presentation frequency, not accumulated history.
+There are no extra holds, turntable shots, or interpolated shell meshes in the
+comparison. The earlier nine-second study also used the complete recording,
+but compressed growth into five seconds with an authored nonlinear clock.
+
+The film controller accepts 24 through 3601 source checkpoints. Explicit source
+times may begin above zero to match another cumulative renderer's first complete
+block; they must be strictly increasing and end exactly at one. Default timing
+still begins at zero. Geometry always includes the full history before each
+checkpoint.
+
+For these larger renders, `render.py` and `film.py` accept `--device OPTIX` and
+optional repeated `--device-id` values. GPU jobs use one serial frame worker.
+CPU remains the default; missing requested GPUs fail instead of switching the
+path tracer to CPU. The GPU request records its backend, hardware identity and
+GPU Open Image Denoise setting. Geometry is identical across render backends;
+pixel identity between CPU and GPU is not promised. Render requests, all frame
+receipts, linear EXRs and source meshes are retained on the render server.
+
+`tools/remembering_shell/render_collection.py` runs a finite collection from
+explicit executable, script, recipe and source paths (`--help` lists them).
+It freezes the scripts and recipes, fingerprints every source and executable,
+limits the original renderer and its encoders to twelve CPUs, and uses one GPU
+frame job. All three stills are photographed first. Completed seeds publish
+independently while the later seeds continue rendering. Restart the identical
+command to resume; unreceipted partial directories are retained separately.
+
+The output's `status.json` records running, completed and failed phases. The
+gallery refreshes automatically and uses one encoded side-by-side movie to keep
+the pair synchronized even during buffering. `comparison.py` independently
+checks physical source identity, every checkpoint, dimensions, frame counts,
+file hashes and full video decoding before declaring a seed complete. Original
+native media is preserved; the derived comparison converts the regular
+renderer's Display P3 movie to Rec.709 before placing it alongside the shell.
+`gallery/SEED/comparison.json` is the final completion receipt. A still's
+appearance in the gallery does not mean its film has completed.

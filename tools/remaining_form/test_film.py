@@ -21,6 +21,19 @@ adapter = film.load_adapter(Path(__file__).with_name("render.py"))
 
 
 class FilmTests(unittest.TestCase):
+    def test_interrupted_child_writes_are_preserved_before_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "source_000042"
+            folder.mkdir()
+            (folder / "mesh.ply").write_bytes(b"interrupted mesh")
+            archived = film.preserve_unreceipted_directory(folder, "build.json")
+            self.assertFalse(folder.exists())
+            self.assertEqual((archived / "mesh.ply").read_bytes(), b"interrupted mesh")
+            folder.mkdir()
+            (folder / "build.json").write_text('{"complete": true}')
+            self.assertIsNone(film.preserve_unreceipted_directory(folder, "build.json"))
+            self.assertTrue((folder / "build.json").exists())
+
     def test_parallel_completion_keeps_published_frames_in_timeline_order(self):
         release_first = threading.Event()
         cancel = threading.Event()
@@ -129,7 +142,6 @@ class FilmTests(unittest.TestCase):
         valid = [i / 23 for i in range(24)]
         invalid = [valid[:-1], {"times": valid}]
         for index, value in [
-            (0, 0.001),
             (23, 0.999),
             (12, valid[11]),
             (12, -0.1),
@@ -243,11 +255,34 @@ class FilmTests(unittest.TestCase):
 
     def test_invalid_frame_counts_or_hold_times_fail(self):
         camera = {"position": [3, -4, 2], "target": [0, 0, 0]}
-        for count, turns in [(23, 0), (722, 0), (24, -1), (24, 241)]:
+        for count, turns in [
+            (23, 0),
+            (film.MAX_SOURCE_FRAMES + 1, 0),
+            (True, 0),
+            (24, -1),
+            (24, 241),
+        ]:
             with self.assertRaises(ValueError):
                 film.frame_plan(count, turns, 35.0, camera)
         with self.assertRaises(ValueError):
             film.encoding_timeline(film.frame_plan(24, 0, 0, camera), 24, float("nan"), 2)
+
+    def test_complete_production_checkpoints_preserve_initial_accumulated_prefix(self):
+        checkpoints = [*range(555, 1_000_000, 555), 999_999]
+        times = [checkpoint / 999_999 for checkpoint in checkpoints[1::2]]
+        camera = {"position": [3, -4, 2], "target": [0, 0, 0]}
+        frames = film.frame_plan(901, 0, 0, camera, times)
+        self.assertEqual(len(frames), 901)
+        self.assertEqual(frames[0]["source_fraction"], 1110 / 999_999)
+        self.assertEqual(frames[-1]["source_fraction"], 1)
+        timeline = film.encoding_timeline(frames, 30, 0, 0)
+        self.assertEqual(len(timeline), 901)
+        self.assertEqual([f["source_fraction"] for f in frames], times)
+
+    def test_gpu_frames_are_serial_and_device_ids_require_gpu(self):
+        for device, ids, workers in [("OPTIX", [], 2), ("CPU", ["gpu"], 1)]:
+            with self.subTest(device=device), self.assertRaises(ValueError):
+                film.run(SimpleNamespace(device=device, device_id=ids, workers=workers))
 
     def test_mesh_receipt_must_match_frozen_source_time_and_content(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -298,6 +333,12 @@ class FilmTests(unittest.TestCase):
                 {"complete": True, "identity_sha256": identity, "artifacts": artifacts},
             )
             film.verify_scene(adapter, folder, studio, "mesh", request)
+            gpu_request = {
+                **request,
+                "compute": {"device": "OPTIX", "device_ids": ["selected-gpu"]},
+            }
+            with self.assertRaisesRegex(ValueError, "compute device"):
+                film.verify_scene(adapter, folder, studio, "mesh", gpu_request)
             (folder / "render.exr").write_bytes(b"changed linear master")
             with self.assertRaises(ValueError):
                 film.verify_scene(adapter, folder, studio, "mesh", request)

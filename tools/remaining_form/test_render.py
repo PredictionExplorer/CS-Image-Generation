@@ -7,12 +7,102 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 SPEC = importlib.util.spec_from_file_location(
     "remaining_render", Path(__file__).with_name("render.py")
 )
 renderer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(renderer)
+
+
+class ComputeDeviceTests(unittest.TestCase):
+    def fake_bpy(self, devices):
+        preferences = SimpleNamespace(
+            compute_device_type="NONE", refresh_devices=Mock(), devices=devices
+        )
+        return SimpleNamespace(
+            context=SimpleNamespace(
+                scene=SimpleNamespace(
+                    render=SimpleNamespace(), cycles=SimpleNamespace(device="CPU")
+                ),
+                preferences=SimpleNamespace(
+                    addons={"cycles": SimpleNamespace(preferences=preferences)}
+                ),
+            )
+        )
+
+    def device(self, backend, identifier, name="GPU"):
+        return SimpleNamespace(type=backend, id=identifier, name=name, use=True)
+
+    def test_default_remains_cpu_without_gpu_discovery_or_recipe_changes(self):
+        bpy = self.fake_bpy([])
+        args = renderer.parser().parse_args(["--mesh", "a", "--recipe", "b", "--output", "c"])
+        self.assertEqual(args.device, "CPU")
+        self.assertEqual(args.device_id, [])
+        self.assertNotIn("device", renderer.DEFAULTS["render"])
+        self.assertEqual(renderer.configure_compute_device(bpy), {"backend": "CPU"})
+        bpy.context.preferences.addons["cycles"].preferences.refresh_devices.assert_not_called()
+        self.assertEqual(bpy.context.scene.cycles.device, "CPU")
+
+    def test_optix_excludes_cpu_cuda_and_unrequested_gpu_and_records_actual_identity(self):
+        devices = [
+            self.device("CPU", "CPU", "CPU"),
+            self.device("CUDA", "cuda-card"),
+            self.device("OPTIX", "optix-second", "Second GPU"),
+            self.device("OPTIX", "optix-first", "First GPU"),
+        ]
+        bpy = self.fake_bpy(devices)
+        result = renderer.configure_compute_device(bpy, "OPTIX", ["optix-first"])
+        self.assertEqual([device.id for device in devices if device.use], ["optix-first"])
+        self.assertEqual(
+            result,
+            {
+                "backend": "OPTIX",
+                "scene_device": "GPU",
+                "cpu_fallback": False,
+                "denoising": {"algorithm": "OPENIMAGEDENOISE", "use_gpu": True},
+                "devices": [{"id": "optix-first", "name": "First GPU", "type": "OPTIX"}],
+            },
+        )
+        self.assertEqual(renderer.compute_device_identity(bpy, "OPTIX"), result)
+        devices[0].use = True
+        with self.assertRaisesRegex(RuntimeError, "exclusive GPU"):
+            renderer.compute_device_identity(bpy, "OPTIX")
+        self.assertTrue(devices[0].use, "Identity inspection must not repair changed selection")
+
+    def test_gpu_identity_is_order_independent_but_tracks_hardware(self):
+        devices = [self.device("OPTIX", "b"), self.device("OPTIX", "a")]
+        first = renderer.configure_compute_device(self.fake_bpy(devices), "OPTIX")
+        second = renderer.configure_compute_device(self.fake_bpy(list(reversed(devices))), "OPTIX")
+        self.assertEqual(first, second)
+        self.assertEqual([device["id"] for device in first["devices"]], ["a", "b"])
+        devices[0].name = "Replacement GPU"
+        self.assertNotEqual(
+            first, renderer.configure_compute_device(self.fake_bpy(devices), "OPTIX")
+        )
+
+    def test_unavailable_backend_missing_gpu_and_invalid_selection_fail_without_fallback(self):
+        bpy = self.fake_bpy([self.device("CPU", "CPU")])
+        with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
+            renderer.configure_compute_device(bpy, "OPTIX")
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            renderer.configure_compute_device(bpy, "OPTIX", ["missing"])
+        bpy.context.preferences.addons[
+            "cycles"
+        ].preferences.refresh_devices.side_effect = RuntimeError("driver missing")
+        with self.assertRaisesRegex(RuntimeError, "backend is unavailable"):
+            renderer.configure_compute_device(bpy, "OPTIX")
+        for backend, ids in [
+            ("CUDA", []),
+            ("CPU", ["gpu"]),
+            ("OPTIX", ["a", "a"]),
+            ("OPTIX", [""]),
+            ("OPTIX", [str(i) for i in range(9)]),
+        ]:
+            with self.subTest(backend=backend, ids=ids), self.assertRaises(ValueError):
+                renderer.configure_compute_device(bpy, backend, ids)
 
 
 class RenderContractTests(unittest.TestCase):

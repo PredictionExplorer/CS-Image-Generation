@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Photograph an unchanged Remaining Form mesh with pinned Blender/Cycles CPU.
+"""Photograph an unchanged Remaining Form mesh with pinned Blender/Cycles.
 
 Run inside the official Blender 4.5.14 build, for example:
   blender --factory-startup -b --threads 4 --python-exit-code 1 --python render.py -- \
@@ -9,6 +9,9 @@ The mesh receives one explicit rigid rotation and one uniform conversion from
 canonical units to metres. Its vertex data and topology are never edited.
 The scene, display PNG16, scene-linear RGB32 EXR, resolved recipe and receipts
 are archived together. --resume requires identical inputs and renderer identity.
+CPU is the default; --device OPTIX explicitly selects GPU rendering and fails if
+no matching device is available. Repeat --device-id to select exact Cycles IDs;
+otherwise all available OptiX devices are selected. CPU/CUDA devices are disabled.
 Fixed seeds improve repeatability; cross-platform pixel identity is not claimed.
 
 For animation, freeze ground.height_units in the recipe after the initial scene
@@ -301,6 +304,92 @@ def runtime_identity(bpy):
         "platform": platform.platform(),
         "machine": platform.machine(),
         "python": platform.python_version(),
+    }
+
+
+def configure_compute_device(bpy, backend="CPU", device_ids=None):
+    """Select only the requested Cycles backend; never silently fall back to CPU.
+
+    Preferences are process-local and can be reset by scene construction. The
+    caller configures and compares them again immediately before saving/rendering.
+    Cycles' stable device ID includes the hardware's PCI location for OptiX.
+    """
+    if backend not in ("CPU", "OPTIX"):
+        raise ValueError("Render device must be CPU or OPTIX")
+    requested = list(device_ids or [])
+    if (
+        len(requested) > 8
+        or any(not isinstance(value, str) or not value or len(value) > 1024 for value in requested)
+        or len(set(requested)) != len(requested)
+    ):
+        raise ValueError("Use at most eight distinct, nonempty Cycles device IDs")
+    if backend == "CPU" and requested:
+        raise ValueError("--device-id requires --device OPTIX")
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    if backend == "CPU":
+        scene.cycles.device = "CPU"
+        return {"backend": "CPU"}
+    try:
+        preferences = bpy.context.preferences.addons["cycles"].preferences
+        preferences.compute_device_type = backend
+        preferences.refresh_devices()
+    except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise RuntimeError(f"Requested {backend} backend is unavailable: {error}") from error
+    candidates = [device for device in preferences.devices if device.type == backend]
+    available_ids = {device.id for device in candidates}
+    missing = set(requested) - available_ids
+    if missing:
+        raise RuntimeError(f"Requested {backend} device IDs are unavailable: {sorted(missing)}")
+    selected_ids = set(requested) if requested else available_ids
+    if not selected_ids:
+        raise RuntimeError(f"No {backend} GPU is available; CPU fallback is disabled")
+    if len(selected_ids) > 8:
+        raise RuntimeError("More than eight GPUs found; select devices explicitly with --device-id")
+    for device in preferences.devices:
+        device.use = device.type == backend and device.id in selected_ids
+    selected = [device for device in preferences.devices if device.use]
+    if {device.id for device in selected} != selected_ids or any(
+        device.type != backend for device in selected
+    ):
+        raise RuntimeError("Cycles did not retain the requested exclusive GPU selection")
+    scene.cycles.device = "GPU"
+    # Keep the same OIDN algorithm, with its GPU implementation for large films.
+    # Record the requested denoising backend alongside the path-tracing device.
+    scene.cycles.denoiser = "OPENIMAGEDENOISE"
+    scene.cycles.denoising_use_gpu = True
+    return compute_device_identity(bpy, backend)
+
+
+def compute_device_identity(bpy, backend):
+    """Inspect the active selection without changing preferences or discovering devices."""
+    scene_device = bpy.context.scene.cycles.device
+    if backend == "CPU":
+        if scene_device != "CPU":
+            raise RuntimeError("Cycles did not retain CPU rendering")
+        return {"backend": "CPU"}
+    preferences = bpy.context.preferences.addons["cycles"].preferences
+    selected = [device for device in preferences.devices if device.use]
+    if (
+        backend != "OPTIX"
+        or preferences.compute_device_type != backend
+        or scene_device != "GPU"
+        or not selected
+        or any(device.type != backend for device in selected)
+    ):
+        raise RuntimeError("Cycles did not retain the requested exclusive GPU selection")
+    return {
+        "backend": backend,
+        "scene_device": scene_device,
+        "devices": sorted(
+            [{"id": device.id, "name": device.name, "type": device.type} for device in selected],
+            key=lambda device: (device["id"], device["name"]),
+        ),
+        "cpu_fallback": False,
+        "denoising": {
+            "algorithm": bpy.context.scene.cycles.denoiser,
+            "use_gpu": bpy.context.scene.cycles.denoising_use_gpu,
+        },
     }
 
 
@@ -750,6 +839,7 @@ def run(args):
         raise ValueError(f"Expected Blender 4.5.14, found {runtime['version']}")
     if not bpy.app.background:
         raise ValueError("Use a dedicated background Blender process (-b)")
+    compute = configure_compute_device(bpy, args.device, args.device_id)
     request = {
         "schema_version": 1,
         "mesh_sha256": digest(mesh_path),
@@ -759,6 +849,10 @@ def run(args):
         "view": args.view,
         "config": config,
     }
+    # Preserve the historical CPU request shape. OptiX identity binds the
+    # actual backend and hardware, so changing GPUs invalidates resume.
+    if args.device != "CPU":
+        request["compute"] = compute
     shell_material = None
     if config["material"]["interior_color"] is not None:
         shell_material = shell_material_metadata(mesh_path, request["mesh_sha256"])
@@ -787,6 +881,8 @@ def run(args):
         receipt = {"schema_version": 1, "identity_sha256": identity, "complete": False}
         write_json(output / "receipt.json", receipt)
         scene, geometry = build_scene(bpy, mesh_path, config, args.view, shell_material)
+        if configure_compute_device(bpy, args.device, args.device_id) != compute:
+            raise RuntimeError("Cycles compute devices changed while preparing the scene")
         if digest(mesh_path) != request["mesh_sha256"]:
             raise ValueError("Mesh changed while the scene was being prepared")
         if shell_material is not None:
@@ -797,6 +893,8 @@ def run(args):
         text.write(script_path.read_text(encoding="utf-8"))
         scene["remaining_form_identity"] = identity
         scene["remaining_form_recipe"] = encoded(config).decode()
+        if args.device != "CPU":
+            scene["remaining_form_compute"] = encoded(compute).decode()
         temporary_blend = output / "scene.partial.blend"
         bpy.ops.wm.save_as_mainfile(
             filepath=str(temporary_blend), check_existing=False, compress=True
@@ -804,6 +902,8 @@ def run(args):
         temporary_blend.replace(output / "scene.blend")
         render_started = time.monotonic()
         bpy.ops.render.render(write_still=False)
+        if compute_device_identity(bpy, args.device) != compute:
+            raise RuntimeError("Cycles compute devices changed during the render")
         render_seconds = time.monotonic() - render_started
         result = bpy.data.images.get("Render Result")
         if result is None:
@@ -842,6 +942,12 @@ def run(args):
             },
             determinism="fixed CPU renderer, seed and samples; no cross-platform identity promise",
         )
+        if args.device != "CPU":
+            receipt["compute"] = compute
+            receipt["determinism"] = (
+                "fixed OptiX backend, recorded GPUs, seed and samples; "
+                "no cross-platform identity promise"
+            )
         write_json(output / "receipt.json", receipt)
         print(json.dumps({"status": "complete", "output": str(output), "identity": identity}))
 
@@ -852,6 +958,13 @@ def parser():
     result.add_argument("--recipe", type=Path, required=True)
     result.add_argument("--output", type=Path, required=True)
     result.add_argument("--view", choices=("front", "side", "back"), default="front")
+    result.add_argument("--device", choices=("CPU", "OPTIX"), default="CPU")
+    result.add_argument(
+        "--device-id",
+        action="append",
+        default=[],
+        help="Exact Cycles GPU ID; repeat for up to eight GPUs (requires --device OPTIX)",
+    )
     result.add_argument("--resume", action="store_true")
     return result
 

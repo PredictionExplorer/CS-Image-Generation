@@ -8,6 +8,8 @@ Selected recording: `0xb7f327f9f722.orbit`, SHA-256
 | `shell.json` | Frozen triangle mapping and ribbed shell geometry |
 | `studio.json` | 1920 × 1600 hero photograph, 256 samples |
 | `studio-film.json` | 960 × 800 motion study, 32 samples |
+| `studio-still-4k.json` | 3840 × 3200 full-history still, 256 samples |
+| `studio-film-4k.json` | 3840 × 3200 full-history film, 64 samples |
 | `studio-second.json` | A view at the end of the camera movement |
 | `studio-detail.json` | Close examination of the growth ribs |
 | `source-times.json` | 120 monotone source times for uniform construction progress |
