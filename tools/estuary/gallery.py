@@ -62,7 +62,7 @@ margin-bottom:8px}
 width:100%;
 height:auto;
 max-height:84vh;
-object-fit:contain}video[hidden]{display:none}
+object-fit:contain}[hidden]{display:none!important}
 .toolbar{display:flex;
 gap:20px;
 align-items:center;
