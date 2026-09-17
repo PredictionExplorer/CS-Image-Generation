@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "simulation": {
+    "resolution": [
+      2560,
+      1920
+    ],
+    "steps": 7200,
+    "domain_scale": 1.6,
+    "flow_strength": 1.1,
+    "carrier_velocity": [
+      2.0,
+      0.2
+    ],
+    "stir_radius": 0.22,
+    "pair_swirl": 0.9,
+    "brush_radius": 0.035,
+    "deposition": 0.005,
+    "pigment_weights": [
+      0.7,
+      1.0,
+      0.08
+    ],
+    "initial_load": 0.6,
+    "initial_pattern": "strata",
+    "load_radius": 0.28,
+    "fade": 4.0
+  },
+  "projection": {
+    "fill": 0.78,
+    "rotation_degrees": 0.0
+  },
+  "optics": {
+    "pigments_srgb": [
+      [
+        0.045,
+        0.07,
+        0.3
+      ],
+      [
+        0.92,
+        0.9,
+        0.84
+      ],
+      [
+        0.62,
+        0.15,
+        0.09
+      ]
+    ],
+    "substrate_srgb": [
+      0.025,
+      0.05,
+      0.1
+    ],
+    "scattering": [
+      0.15,
+      18.0,
+      0.7
+    ],
+    "layer_scale": 5.0,
+    "grain": 0.008,
+    "grain_frequency": [
+      450.0,
+      340.0
+    ]
+  },
+  "render": {
+    "resolution": [
+      1600,
+      1200
+    ],
+    "frames": 301,
+    "fps": 10,
+    "temporal_samples": 1
+  }
+}

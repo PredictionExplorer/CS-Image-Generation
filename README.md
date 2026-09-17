@@ -66,6 +66,18 @@ new material appears. The selected finish pairs ivory with a celadon interior.
 See [the model and reproduction guide](docs/remembering-shell.md) and
 [the selected recipes](tools/remembering_shell/recipes/README.md).
 
+## The Estuary
+
+The independent **`python -m tools.estuary.run`** renderer turns a frozen orbit
+into a persistent field of moving pigment. The bodies stir prepared mineral
+bands and deposit paint; earlier marks stretch and fold through the full source
+interval. A headless GPU handles transport and reflective pigment optics.
+
+It archives RGB16 stills, lossless pigment state, complete movies, checked
+checkpoints and source/code/recipe provenance. See [the model, installation,
+rendering and verification guide](docs/estuary.md). Its pinned NumPy/ModernGL
+environment is separate from the standard-library helper scripts below.
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
