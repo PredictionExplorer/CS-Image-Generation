@@ -126,6 +126,24 @@ request to verify an existing result or recover a film checkpoint. Unknown
 recipes, changed source/code/hardware, missing checkpoints, and corrupted frames
 are rejected. Interrupted partial files remain available for inspection.
 
+For a finite collection, `tools.estuary.batch` resumes existing seed archives
+and publishes each verified film as it finishes. Its concurrency is bounded to
+three; choose the worker count for the available GPU memory. The selected
+recipe used approximately 2.35 GiB per renderer on the experiment server.
+
+```sh
+OPENBLAS_NUM_THREADS=4 python -m tools.estuary.batch \
+  --sources /path/to/orbit-caches \
+  --recipe tools/estuary/recipes/ultramarine.json \
+  --output /path/to/collection --workers 3 \
+  --seeds 0x808861c25b6c 0xb7f327f9f722 0xbc53af1cd380
+```
+
+`batch-request.json` binds inputs; `status.json` reports per-seed progress and
+failures. Cancellation stops only owned processes, including detached encoders.
+The batch and gallery are outside the renderer's runtime identity, so scheduler
+or presentation changes do not force physical state to be recomputed.
+
 The selected high-resolution recipe uses a 6144 × 4608 state with a 1.6 guard
 band, giving a native 3840 × 2880 visible field. It has 7,200 canonical steps and
 901 frames at 30 fps: the full source interval in 30.033 seconds. Each movie

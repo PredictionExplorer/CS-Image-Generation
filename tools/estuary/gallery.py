@@ -104,9 +104,8 @@ gap:14px}nav{flex-wrap:wrap}}
 <div>
 <span class="eyebrow">Three bodies / A painting in time</span>
 <h1>Estuary</h1>
-<p>The complete motion leaves a painting of mineral white, blue and earth.
-Each body carries its own pigment;
- their encounters stir the field.</p>
+<p>The movement of three bodies reshapes a persistent field of pigment.
+Currents fold into fine seams of ultramarine, ivory and earth.</p>
 </div>
 <aside>
 <label for="seed">Study</label>
@@ -122,7 +121,7 @@ Each body carries its own pigment;
 <div class="toolbar">
 <span id="caption">Loading paintings…</span>
 <nav>
-<button id="mode" hidden>Watch the painting grow</button>
+<button id="mode" hidden>Play the film</button>
 <a id="download" download>Download the still</a>
 <a id="movieDownload" hidden download>Download the film</a>
 </nav>
@@ -150,7 +149,7 @@ $('download').href=item.poster;
 $('caption').textContent=item.seed+' · '+item.resolution.join(' x ');
 
 $('mode').hidden=!item.film;
-$('mode').textContent='Watch the painting grow';
+$('mode').textContent='Play the film';
 $('movieDownload').hidden=!item.film;
 
 if(item.film){$('film').src=item.film;
@@ -164,7 +163,7 @@ $('mode').onclick=()=>{motion=!motion;
 $('film').hidden=!motion;
 $('poster').hidden=motion;
 
-$('mode').textContent=motion?'Return to the still':'Watch the painting grow';
+$('mode').textContent=motion?'Return to the still':'Play the film';
 if(motion){$('film').play().catch(()=>{})}else{$('film').pause()}};
 
 fetch('collection.json',{cache:'no-store'}).then(r=>{
