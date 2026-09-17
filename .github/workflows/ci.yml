@@ -22,15 +22,25 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            tools/estuary/requirements.txt
       - name: Install dev tools
         run: pip install ".[dev]"
+      - name: Install verified Estuary dependencies
+        run: python -m pip install --require-hashes -r tools/estuary/requirements.txt
       - name: Ruff format
         run: ruff format --check .
       - name: Ruff lint
         run: ruff check .
       - name: Mypy
         run: mypy
+      - name: Estuary CPU contracts
+        env:
+          # Hardware tests run explicitly on the NVIDIA experiment server.
+          ESTUARY_TEST_GPU: "0"
+          OPENBLAS_NUM_THREADS: "4"
+        run: python -W error -m unittest discover -s tools/estuary -t . -p 'test_*.py' -v
 
   fmt:
     name: Formatting
