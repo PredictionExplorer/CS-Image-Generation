@@ -84,6 +84,11 @@ def document(title):
             "nocturne:'Nocturne'};",
         ),
         (
+            "const studyDetails=study=>[families[study.group]||study.group,seedLabel(study.seed)]\n"
+            ".filter(Boolean).join(' · ');",
+            "const studyDetails=study=>seedLabel(study.seed);",
+        ),
+        (
             "$('formation').hidden=!study.formation;",
             "$('downloadFilm').hidden=!study.film;\n"
             "if(study.film){$('downloadFilm').href=study.film}"
