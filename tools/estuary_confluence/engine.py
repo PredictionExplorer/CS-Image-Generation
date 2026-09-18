@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import math
+from bisect import bisect_right
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,14 @@ import numpy as np
 from tools.estuary_studio.fresco import phase_exchange as phase_exchange
 from tools.estuary_studio.fresco import substrate_field
 
+from .mass_budget import RELATIVE_TOLERANCE as MASS_BUDGET_RTOL
+from .mass_budget import VERSION as MASS_BUDGET_VERSION
+from .mass_budget import correction_steps
+
 ROOT = Path(__file__).parent
+DIFFUSION_CFL = 0.24
+MAX_DIFFUSION_SUBSTEPS = 256
+MAX_DIFFUSION_STEPS = 500_000
 DEFAULTS = {
     "resolution": [1024, 768],
     "steps": 3600,
@@ -49,6 +57,9 @@ DEFAULTS = {
     "underpaint_release": 1.0,
     "burial_rate": 1.6,
     "mixing_rate": 1.4,
+    "diffusion_coefficient": 0.0,
+    "diffusion_min_concentration": 0.001,
+    "mass_budget_interval_steps": 0,
     "height_scale_mm": 1.6,
     "substrate_um": 18.0,
 }
@@ -72,6 +83,9 @@ def validate_config(value):
     result["resolution"] = list(resolution)
     if type(result["steps"]) is not int or not 1 <= result["steps"] <= 40000:
         raise ValueError("steps must be an integer in [1, 40000]")
+    interval = result["mass_budget_interval_steps"]
+    if type(interval) is not int or not 0 <= interval <= 40000:
+        raise ValueError("mass_budget_interval_steps must be an integer in [0, 40000]")
     bounds = {
         "domain_scale": (1, 2.5),
         "flow_strength": (0, 8),
@@ -93,6 +107,8 @@ def validate_config(value):
         "underpaint_release": (0, 10),
         "burial_rate": (0, 10),
         "mixing_rate": (0, 10),
+        "diffusion_coefficient": (0, 0.01),
+        "diffusion_min_concentration": (1e-8, 1),
         "height_scale_mm": (0, 20),
         "substrate_um": (0, 100),
     }
@@ -119,15 +135,22 @@ def validate_config(value):
     if type(flow_domain) not in (int, float) or not 1 <= flow_domain <= result["domain_scale"]:
         raise ValueError("flow_domain_scale must be within [1, domain_scale]")
     result["flow_domain_scale"] = float(flow_domain)
-    if result["initial_pattern"] not in ("strata", "pools", "scattered"):
-        raise ValueError("initial_pattern must be strata, pools or scattered")
-    if result["initial_pattern"] == "scattered":
+    if result["initial_pattern"] not in ("strata", "pools", "scattered", "engaged"):
+        raise ValueError("initial_pattern must be strata, pools, scattered or engaged")
+    if result["initial_pattern"] in ("scattered", "engaged"):
         from .layout import MAX_LOAD_RADIUS
 
         if result["underpaint_strength"] != 0:
             raise ValueError("Scattered pure pools require underpaint_strength=0")
         if result["load_radius"] > MAX_LOAD_RADIUS:
             raise ValueError(f"Scattered load_radius must not exceed {MAX_LOAD_RADIUS}")
+    if interval and (
+        result["initial_pattern"] not in ("scattered", "engaged")
+        or result["deposition"] != 0
+        or result["settling_scale"] != 0
+        or result["underpaint_strength"] != 0
+    ):
+        raise ValueError("Mass budgets require source-free, mobile-only scattered or engaged pools")
     return result
 
 
@@ -258,6 +281,110 @@ def substrate_seed(value):
     return decoded % (2**63 - 1)
 
 
+def diffusion_substeps(coefficient, dt, pixel_size):
+    """Bound explicit interdiffusion in physical coordinates, not output pixels."""
+    for value in (coefficient, dt, pixel_size):
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("Diffusion controls must be finite numbers")
+    if coefficient < 0 or dt < 0 or pixel_size <= 0:
+        raise ValueError("Diffusion requires nonnegative rates/time and positive cell size")
+    if coefficient == 0 or dt == 0:
+        return 0
+    number = coefficient * dt / pixel_size**2
+    if not math.isfinite(number):
+        raise ValueError("Diffusion interval exceeds numerical limits")
+    pieces = max(1, math.ceil(number / DIFFUSION_CFL))
+    if pieces > MAX_DIFFUSION_SUBSTEPS:
+        raise ValueError(
+            "Diffusion interval exceeds its work cap; increase canonical steps or lower D"
+        )
+    return pieces
+
+
+def interdiffusion_step(
+    pigment, wetness, *, coefficient, dt, pixel_size, minimum_concentration=0.001
+):
+    """Float64 reference for one stable, fixed-thickness interdiffusion step.
+
+    D has units of world-coordinate squared per complete source recording.
+    Symmetric face fluxes exchange color fractions at fixed local film amount.
+    This is an authored material model, not a molecularly calibrated diffusivity.
+    """
+    concentration = np.asarray(pigment, dtype=np.float64)
+    wet = np.asarray(wetness, dtype=np.float64)
+    if (
+        concentration.ndim != 3
+        or concentration.shape[:2] != wet.shape
+        or not np.isfinite(concentration).all()
+        or np.any(concentration < 0)
+        or not np.isfinite(wet).all()
+        or np.any(wet < 0)
+        or np.any(wet > 1)
+    ):
+        raise ValueError("Invalid pigment or wetness field")
+    if (
+        type(minimum_concentration) not in (int, float)
+        or not math.isfinite(minimum_concentration)
+        or minimum_concentration <= 0
+    ):
+        raise ValueError("minimum_concentration must be finite and positive")
+    pieces = diffusion_substeps(coefficient, dt, pixel_size)
+    if pieces > 1:
+        raise ValueError("Reference step exceeds the explicit stability bound")
+    result = concentration.copy()
+    if pieces == 0:
+        return result
+    amount = concentration.sum(axis=-1)
+    fraction = np.divide(
+        concentration,
+        amount[..., None],
+        out=np.zeros_like(concentration),
+        where=amount[..., None] > 0,
+    )
+    active = amount > minimum_concentration
+    scale = coefficient * dt / pixel_size**2
+    for axis in (0, 1):
+        lower, upper = [slice(None)] * 2, [slice(None)] * 2
+        lower[axis], upper[axis] = slice(None, -1), slice(1, None)
+        lower, upper = tuple(lower), tuple(upper)
+        face = (
+            scale
+            * np.minimum(wet[lower], wet[upper])
+            * np.minimum(amount[lower], amount[upper])
+            * active[lower]
+            * active[upper]
+        )
+        flux = face[..., None] * (fraction[upper] - fraction[lower])
+        result[lower] += flux
+        result[upper] -= flux
+    return result
+
+
+def mass_budget_factors(initial_mass, current_mass):
+    """Return the actual float32 channel multipliers; never invent absent paint."""
+    initial = np.asarray(initial_mass, dtype="f8")
+    current = np.asarray(current_mass, dtype="f8")
+    if (
+        initial.ndim != 1
+        or current.shape != initial.shape
+        or not np.isfinite(initial).all()
+        or not np.isfinite(current).all()
+        or np.any(initial < 0)
+        or np.any(current < 0)
+    ):
+        raise ValueError("Mass budgets require matching finite nonnegative channel amounts")
+    empty = initial == 0
+    if np.any(current[empty] != 0):
+        raise FloatingPointError("An initially empty pigment channel gained material")
+    if np.any(current[~empty] <= 0):
+        raise FloatingPointError("A pigment vanished; uniform budget restoration cannot recover it")
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        factors = np.divide(initial, current, out=np.ones_like(initial), where=~empty).astype("f4")
+    if not np.isfinite(factors).all() or np.any(factors <= 0):
+        raise FloatingPointError("Mass-budget factors exceed positive float32 limits")
+    return factors
+
+
 class Engine:
     """Four/six-channel material simulation on a dedicated OpenGL context."""
 
@@ -273,19 +400,24 @@ class Engine:
         self.events = events = validate_events(events)
         count, arrays = _palette_arrays(palette)
         self.layout = layout = None
-        if settings["initial_pattern"] == "scattered":
+        if settings["initial_pattern"] in ("scattered", "engaged"):
             from .layout import plan_layout
 
             if palette["chalk_index"] != count - 1:
                 raise ValueError("Scattered palettes must list chromatic pigments before chalk")
-            self.layout = layout = plan_layout(
-                palette["seed"],
-                count - 1,
-                settings["resolution"][0] / settings["resolution"][1],
-                load_radius=settings["load_radius"],
-                initial_load=settings["initial_load"],
-                edge_width=settings["initial_edge_width"],
-            )
+            if settings["initial_pattern"] == "engaged":
+                from .participation_layout import plan_engaged_layout
+
+                self.layout = layout = plan_engaged_layout(source, count - 1, settings)
+            else:
+                self.layout = layout = plan_layout(
+                    palette["seed"],
+                    count - 1,
+                    settings["resolution"][0] / settings["resolution"][1],
+                    load_radius=settings["load_radius"],
+                    initial_load=settings["initial_load"],
+                    edge_width=settings["initial_edge_width"],
+                )
         transport_keys = (
             "resolution",
             "steps",
@@ -346,6 +478,37 @@ class Engine:
                         gpu.reduce = gpu.ctx.compute_shader(
                             (ROOT / "shaders/reduce.glsl").read_text()
                         )
+                        gpu.diffusion = None
+                        gpu.diffusion_steps = 0
+                        gpu.maximum_diffusion_number = 0.0
+                        gpu.mass_budget_records = []
+                        gpu.mass_budget_initial = None
+                        gpu.mass_budget_schedule = correction_steps(
+                            gpu.steps, settings["mass_budget_interval_steps"]
+                        )
+                        gpu.mass_reduce = gpu.mass_scale = gpu.mass_partials = None
+                        if settings["mass_budget_interval_steps"]:
+                            gpu.mass_reduce = gpu.ctx.compute_shader(
+                                (ROOT / "shaders/mass-reduce.glsl").read_text()
+                            )
+                            gpu.mass_scale = gpu.ctx.compute_shader(
+                                (ROOT / "shaders/mass-scale.glsl").read_text()
+                            )
+                            for shader in (gpu.mass_reduce, gpu.mass_scale):
+                                shader["u_size"].value = (gpu.width, gpu.height)
+                                shader["u_input"].value = 0
+                            gpu.mass_partials = gpu.ctx.buffer(
+                                reserve=gpu.groups[0] * gpu.groups[1] * 4 * 4
+                            )
+                        if settings["diffusion_coefficient"] > 0:
+                            gpu.diffusion = gpu.ctx.compute_shader(
+                                (ROOT / "shaders/interdiffuse.glsl").read_text()
+                            )
+                            gpu.diffusion["u_size"].value = (gpu.width, gpu.height)
+                            gpu.diffusion["u_minimum"].value = settings[
+                                "diffusion_min_concentration"
+                            ]
+                            gpu.diffusion["u_has_other"].value = count > 4
                         for shader in (gpu.correct, gpu.phase, gpu.carrier_phase):
                             for key, value in (
                                 ("u_size", (gpu.width, gpu.height)),
@@ -448,8 +611,12 @@ class Engine:
                         state[..., pool["pigment_index"]] = pool["load"] * pool_profile(
                             distance_to_pool, pool["radius"], pool["edge_width"]
                         )
-                if settings["initial_pattern"] != "scattered":
+                if settings["initial_pattern"] not in ("scattered", "engaged"):
                     state *= settings["initial_load"]
+                if settings["mass_budget_interval_steps"]:
+                    gpu.mass_budget_initial = (
+                        state.sum(axis=(0, 1), dtype="f8") * (2 * gpu.domain / gpu.height) ** 2
+                    )
                 # The quiet buried accent is spatially tied to the initial
                 # triangle's strata. This is actual pigment, never an overlay.
                 under = np.zeros_like(state)
@@ -551,6 +718,8 @@ class Engine:
                 gpu.carrier[0], gpu.carrier[3] = gpu.carrier[3], gpu.carrier[0]
                 if not gpu.skip_phase:
                     gpu._exchange_phases(dt)
+                if gpu.diffusion is not None:
+                    gpu._interdiffuse(dt)
                 gpu.paint = gpu.blocks[0]
                 gpu.internal_steps += 1
                 if gpu.internal_steps > MAX_INTERNAL_STEPS:
@@ -597,6 +766,91 @@ class Engine:
                     block[0], block[3] = block[3], block[0]
                     deposits.reverse()
                     underpaints.reverse()
+
+            def _interdiffuse(gpu, dt):
+                coefficient = settings["diffusion_coefficient"]
+                pixel_size = 2 * gpu.domain / gpu.height
+                pieces = diffusion_substeps(coefficient, dt, pixel_size)
+                if not pieces:
+                    return
+                if gpu.diffusion_steps + pieces > MAX_DIFFUSION_STEPS:
+                    raise RuntimeError("Interdiffusion work cap exceeded")
+                number = coefficient * (dt / pieces) / pixel_size**2
+                gpu.maximum_diffusion_number = max(gpu.maximum_diffusion_number, number)
+                gpu.diffusion["u_lambda"].value = number
+                for _ in range(pieces):
+                    # Both packed groups read the same old material state. Only
+                    # after all writes finish may either group become current.
+                    for index, block in enumerate(gpu.blocks):
+                        other = gpu.blocks[(index + 1) % len(gpu.blocks)][0]
+                        for unit, (name, texture) in enumerate(
+                            (
+                                ("u_input", block[0]),
+                                ("u_other", other),
+                                ("u_carrier", gpu.carrier[0]),
+                            )
+                        ):
+                            texture.use(unit)
+                            gpu.diffusion[name].value = unit
+                        block[3].bind_to_image(0, read=False, write=True)
+                        gpu._dispatch(gpu.diffusion)
+                    for block in gpu.blocks:
+                        block[0], block[3] = block[3], block[0]
+                gpu.diffusion_steps += pieces
+
+            def _mass_amounts(gpu):
+                """Pairwise GPU block sums, then float64 accumulation on the CPU."""
+                sums = []
+                for block in gpu.blocks:
+                    block[0].use(0)
+                    gpu.mass_partials.bind_to_storage_buffer(0)
+                    gpu._dispatch(gpu.mass_reduce)
+                    partial = np.frombuffer(gpu.mass_partials.read(), dtype="f4").reshape(-1, 4)
+                    sums.append(partial.sum(axis=0, dtype="f8"))
+                return np.concatenate(sums)[:count] * (2 * gpu.domain / gpu.height) ** 2
+
+            def _restore_mass_budget(gpu):
+                before = gpu._mass_amounts()
+                factors = mass_budget_factors(gpu.mass_budget_initial, before)
+                for index, block in enumerate(gpu.blocks):
+                    packed = np.ones(4, dtype="f4")
+                    channels = min(4, count - index * 4)
+                    packed[:channels] = factors[index * 4 : index * 4 + channels]
+                    gpu.mass_scale["u_factors"].value = tuple(packed)
+                    block[0].use(0)
+                    block[3].bind_to_image(0, read=False, write=True)
+                    gpu._dispatch(gpu.mass_scale)
+                    block[0], block[3] = block[3], block[0]
+                gpu.paint = gpu.blocks[0]
+                after = gpu._mass_amounts()
+                if not np.allclose(after, gpu.mass_budget_initial, rtol=MASS_BUDGET_RTOL, atol=0):
+                    raise FloatingPointError("Global pigment budget could not be restored")
+                gpu.mass_budget_records.append(
+                    {
+                        "step": gpu.step,
+                        "mass_before": before.tolist(),
+                        "factors": factors.astype("f8").tolist(),
+                        "mass_after": after.tolist(),
+                    }
+                )
+
+            def advance_to(gpu, step):
+                interval = settings["mass_budget_interval_steps"]
+                if not interval:
+                    return super().advance_to(step)
+                if gpu.ctx is None:
+                    raise RuntimeError("The Estuary context has been closed")
+                if type(step) is not int or not gpu.step <= step <= gpu.steps:
+                    raise ValueError("Source step must move forward within the declared recording")
+                while gpu.step < step:
+                    next_correction = gpu.mass_budget_schedule[
+                        bisect_right(gpu.mass_budget_schedule, gpu.step)
+                    ]
+                    checkpoint = min(step, next_correction)
+                    super().advance_to(checkpoint)
+                    if gpu.step == next_correction:
+                        with gpu.ctx:
+                            gpu._restore_mass_budget()
 
             def _read(gpu, texture, factor):
                 width, height = gpu.width // factor, gpu.height // factor
@@ -732,6 +986,36 @@ class Engine:
                 "compact stream-function support inside the unchanged simulation guard; "
                 "velocity and normal transport vanish at the active boundary"
             )
+        if settings["diffusion_coefficient"] > 0:
+            self.metadata["interdiffusion"] = {
+                "model": "symmetric pigment-fraction exchange at fixed local film amount",
+                "coefficient": settings["diffusion_coefficient"],
+                "units": "world-coordinate squared per complete source recording",
+                "minimum_concentration": settings["diffusion_min_concentration"],
+                "boundary": "no flux between paint and air or through dry cells",
+                "conservation": (
+                    "local total paint and global per-pigment amounts, up to float32 rounding; "
+                    "no clipping or mass normalization"
+                ),
+                "maximum_explicit_number": DIFFUSION_CFL,
+                "maximum_substeps_per_interval": MAX_DIFFUSION_SUBSTEPS,
+                "maximum_total_substeps": MAX_DIFFUSION_STEPS,
+                "calibration": (
+                    "authored finite-rate interdiffusion, not a measured molecular diffusivity"
+                ),
+            }
+        if settings["mass_budget_interval_steps"]:
+            self.metadata["mass_budget"] = {
+                "version": MASS_BUDGET_VERSION,
+                "interval_steps": settings["mass_budget_interval_steps"],
+                "units": "world-area integral of pigment concentration",
+                "reduction": "pairwise float32 GPU workgroup sums; float64 CPU accumulation",
+                "relative_tolerance": MASS_BUDGET_RTOL,
+                "model": (
+                    "explicit uniform per-pigment budget restoration at canonical checkpoints "
+                    "and the final step; globally budgeted, not locally conservative transport"
+                ),
+            }
 
     @property
     def steps(self):
@@ -740,6 +1024,29 @@ class Engine:
     @property
     def step(self):
         return self._gpu.step
+
+    @property
+    def diagnostics(self):
+        """Actual accumulated work; captured separately from immutable inputs."""
+        return {
+            "canonical_steps": self._gpu.step,
+            "actual_transport_substeps": self._gpu.internal_steps,
+            "diffusion_substeps": self._gpu.diffusion_steps,
+            "maximum_courant": self._gpu.maximum_courant,
+            "maximum_diffusion_number": self._gpu.maximum_diffusion_number,
+        }
+
+    @property
+    def mass_budget_report(self):
+        """Return the complete correction ledger without reading or changing GPU state."""
+        if not self.config["mass_budget_interval_steps"]:
+            return None
+        return {
+            "version": MASS_BUDGET_VERSION,
+            "interval_steps": self.config["mass_budget_interval_steps"],
+            "initial_mass": self._gpu.mass_budget_initial.tolist(),
+            "corrections": copy.deepcopy(self._gpu.mass_budget_records),
+        }
 
     def advance_to(self, step):
         self._gpu.advance_to(step)

@@ -13,6 +13,7 @@ import argparse
 import copy
 import fcntl
 import hashlib
+import math
 import platform
 import shutil
 import signal
@@ -37,6 +38,7 @@ DEFAULT_RENDER = {
     "resolution": [1920, 1440],
     "still_resolution": [3840, 2880],
     "capture_resolution": None,
+    "frame_supersampling": 1,
     "formation_frames": 301,
     "orbit_frames": 145,
     "hold_frames": 24,
@@ -92,6 +94,7 @@ def validate_recipe(raw):
             "surface",
             "projection",
             "render",
+            "assessment",
         },
         "Unknown confluence recipe keys",
     )
@@ -151,6 +154,7 @@ def validate_recipe(raw):
         w, h = dimensions(render[key])
         require(w * sh == h * sw, "Image and material aspects must match")
     reduction_factor((sw, sh), tuple(render["capture_resolution"]))
+    frame_raster_resolution(render)
     for key, lo, hi in (
         ("formation_frames", 2, 1801),
         ("orbit_frames", 1, 721),
@@ -166,6 +170,32 @@ def validate_recipe(raw):
         number(render[key], key, 0, 30)
     for key in ("azimuth_start", "azimuth_end"):
         number(render[key], key, -180, 180)
+    assessment = raw.get("assessment")
+    if assessment is not None:
+        require(
+            type(assessment) is dict
+            and not assessment.keys() - {"interval_steps", "resolution", "share_threshold"},
+            "Unknown participation assessment controls",
+        )
+        assessment = {
+            "interval_steps": 120,
+            "resolution": None,
+            "share_threshold": 0.1,
+            **assessment,
+        }
+        require(
+            type(assessment["interval_steps"]) is int
+            and 1 <= assessment["interval_steps"] <= 40000,
+            "Invalid assessment interval",
+        )
+        number(assessment["share_threshold"], "share_threshold", 0.001, 0.5)
+        if assessment["resolution"] is None:
+            size = [sw, sh]
+            while size[0] > 512 and all(n % 2 == 0 for n in size):
+                size = [n // 2 for n in size]
+            assessment["resolution"] = size
+        dimensions(assessment["resolution"])
+        reduction_factor((sw, sh), tuple(assessment["resolution"]))
     return {
         "schema_version": 1,
         "name": name,
@@ -177,6 +207,65 @@ def validate_recipe(raw):
         "surface": surface,
         "projection": projection,
         "render": render,
+        "assessment": assessment,
+    }
+
+
+def frame_raster_resolution(render):
+    """Bound the intermediate frame raster before allocating GPU images."""
+    factor = render.get("frame_supersampling", 1)
+    require(type(factor) is int and factor in (1, 2), "frame_supersampling must be 1 or 2")
+    width, height = render["resolution"]
+    return dimensions([width * factor, height * factor])
+
+
+def render_frame(surface, fields, render, *, tilt_degrees, azimuth_degrees):
+    """Render a film frame or starting preview, then filter before PNG encoding.
+
+    Surface returns display-bounded linear RGB after its tone map. The equal-area
+    box integration happens in that linear space, before the PNG writer applies
+    the sRGB transfer curve. Physical state and source cadence are unaffected.
+    Native final stills deliberately do not pass through this helper.
+    """
+    factor = render.get("frame_supersampling", 1)
+    pixels = surface.render(
+        fields,
+        size=tuple(frame_raster_resolution(render)),
+        tilt_degrees=tilt_degrees,
+        azimuth_degrees=azimuth_degrees,
+    )
+    if factor == 1:
+        return pixels
+    width, height = render["resolution"]
+    return pixels.reshape(height, factor, width, factor, 3).mean(axis=(1, 3), dtype=np.float32)
+
+
+def capture_metadata(recipe):
+    render = recipe["render"]
+    native = list(recipe["simulation"]["resolution"])
+    capture = list(render["capture_resolution"])
+    factor = render.get("frame_supersampling", 1)
+    return {
+        "schema_version": 1,
+        "material_sampling": (
+            "full native material grid"
+            if capture == native
+            else "read-only GPU area averages before pigment optics"
+        ),
+        "simulation_resolution": native,
+        "capture_resolution": capture,
+        "material_reduction_factor": native[0] // capture[0],
+        "frame_supersampling": factor,
+        "frame_raster_resolution": frame_raster_resolution(render),
+        "frame_output_resolution": list(render["resolution"]),
+        "frame_filter": (
+            "none"
+            if factor == 1
+            else "equal-area 2x2 mean in linear display RGB before sRGB encoding"
+        ),
+        "final_still": (
+            "full native material grid at requested still resolution; no frame downsampling"
+        ),
     }
 
 
@@ -191,11 +280,16 @@ def surface_configs(recipe):
     }
 
 
-def resolved_layout(recipe, seed):
+def resolved_layout(recipe, seed, source=None):
     """Resolve initial geometry without a GPU or any dependence on frame cadence."""
     from tools.estuary_confluence.layout import plan_layout
 
     settings = recipe["simulation"]
+    if settings["initial_pattern"] == "engaged":
+        from tools.estuary_confluence.participation_layout import plan_engaged_layout
+
+        require(source is not None, "Engaged layout requires its complete source recording")
+        return plan_engaged_layout(source, recipe["chromatic_count"], settings)
     if settings["initial_pattern"] != "scattered":
         return None
     width, height = settings["resolution"]
@@ -207,6 +301,79 @@ def resolved_layout(recipe, seed):
         initial_load=settings["initial_load"],
         edge_width=settings["initial_edge_width"],
     )
+
+
+def equivalent_design(a, b):
+    """Permit only f64 reconstruction roundoff in source-aware design verification."""
+    if type(a) is dict and type(b) is dict:
+        return a.keys() == b.keys() and all(equivalent_design(a[k], b[k]) for k in a)
+    if type(a) is list and type(b) is list:
+        return len(a) == len(b) and all(equivalent_design(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, (float, np.floating)) and isinstance(b, (float, np.floating)):
+        return (
+            math.isfinite(a)
+            and math.isfinite(b)
+            and math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+        )
+    return type(a) is type(b) and a == b
+
+
+def assessment_steps(recipe):
+    settings = recipe.get("assessment")
+    if settings is None:
+        return []
+    end = recipe["simulation"]["steps"]
+    return sorted({*range(0, end + 1, settings["interval_steps"]), end})
+
+
+def measure(fields, recipe):
+    from tools.estuary_confluence.assessment import assess
+
+    return assess(
+        fields["pigment"],
+        recipe["chromatic_count"],
+        recipe["simulation"]["domain_scale"],
+        mass_threshold=recipe["surface"]["paint_mass_threshold"],
+        share_threshold=recipe["assessment"]["share_threshold"],
+    )
+
+
+def verify_diagnostics(value, recipe, final_step):
+    """Validate reported solver work without claiming to replay it during verification."""
+    if value is None:
+        return  # Older archives did not record these counters.
+    require(
+        type(value) is dict
+        and set(value)
+        == {
+            "canonical_steps",
+            "actual_transport_substeps",
+            "diffusion_substeps",
+            "maximum_courant",
+            "maximum_diffusion_number",
+        },
+        "Invalid solver diagnostics schema",
+    )
+    for key in ("canonical_steps", "actual_transport_substeps", "diffusion_substeps"):
+        require(type(value[key]) is int and value[key] >= 0, "Invalid solver work counter")
+    require(
+        value["canonical_steps"] == final_step
+        and final_step <= value["actual_transport_substeps"] <= 500_000,
+        "Solver diagnostics disagree with completed source steps",
+    )
+    number(value["maximum_courant"], "maximum_courant", 0, 1.50001)
+    number(value["maximum_diffusion_number"], "maximum_diffusion_number", 0, 0.240001)
+    if recipe["simulation"].get("diffusion_coefficient", 0) == 0:
+        require(
+            value["diffusion_substeps"] == 0 and value["maximum_diffusion_number"] == 0,
+            "Disabled diffusion cannot report diffusion work",
+        )
+    else:
+        require(
+            value["diffusion_substeps"] >= value["actual_transport_substeps"]
+            and value["maximum_diffusion_number"] > 0,
+            "Enabled diffusion is missing its work diagnostics",
+        )
 
 
 def field_digest(fields):
@@ -244,6 +411,17 @@ def verify_run(folder):
             required |= {"layout.json", f"{look}/initial.png"}
         if request["mode"] == "film":
             required |= {f"{look}/film.mp4", f"{look}/movie.json"}
+    if request["recipe"]["surface"].get("optics_model", "rgb") == "spectral":
+        required.add("spectral.json")
+    if request["recipe"].get("assessment") is not None:
+        required.add("assessment.json")
+    if request["recipe"]["simulation"].get("mass_budget_interval_steps", 0):
+        required.add("mass-budget.json")
+    else:
+        require(
+            "mass-budget.json" not in receipt["artifacts"],
+            "Disabled mass restoration cannot advertise a budget report",
+        )
     require(required <= receipt["artifacts"].keys(), "Required confluence artifacts are missing")
     for name, record in receipt["artifacts"].items():
         checked(folder, name, record)
@@ -259,10 +437,30 @@ def verify_run(folder):
         and read(folder / "events.json") == request["events"],
         "Archived design inputs differ",
     )
-    expected_layout = resolved_layout(request["recipe"], request["source"]["seed"])
-    require(request.get("layout") == expected_layout, "Seeded starting layout differs")
+    bound_source = None
+    if request["recipe"]["simulation"]["initial_pattern"] == "engaged":
+        w, h = request["recipe"]["simulation"]["resolution"]
+        bound_source = Source.read(
+            folder / "inputs/source.orbit", aspect=w / h, **request["recipe"]["projection"]
+        )
+        require(
+            equivalent_design(bound_source.metadata, request["source"]), "Source projection differs"
+        )
+    expected_layout = resolved_layout(request["recipe"], request["source"]["seed"], bound_source)
+    require(
+        equivalent_design(request.get("layout"), expected_layout), "Seeded starting layout differs"
+    )
     if expected_layout is not None:
-        require(read(folder / "layout.json") == expected_layout, "Archived starting pools differ")
+        require(read(folder / "layout.json") == request["layout"], "Archived starting pools differ")
+    if request["recipe"]["surface"].get("optics_model", "rgb") == "spectral":
+        from tools.estuary_confluence.spectral import validate_spectral_material
+
+        validate_spectral_material(request.get("spectral"), request["palette"])
+        require(
+            read(folder / "spectral.json") == request["spectral"], "Archived pigment spectra differ"
+        )
+    else:
+        require(request.get("spectral") is None, "RGB archive cannot contain spectral inputs")
     require(
         request["recipe"].get("palette_mode", "curated")
         == request["palette"].get("mode", "curated"),
@@ -288,6 +486,19 @@ def verify_run(folder):
         and receipt["final_step"] == request["recipe"]["simulation"]["steps"],
         "Painting does not contain the full trajectory",
     )
+    verify_diagnostics(receipt.get("solver_diagnostics"), request["recipe"], receipt["final_step"])
+    if type(request.get("capture")) is dict:
+        require(
+            request["capture"] == capture_metadata(request["recipe"]),
+            "Capture resolution or frame filtering metadata differs",
+        )
+    else:
+        require(
+            "frame_supersampling" not in request["recipe"]["render"]
+            and request.get("capture")
+            == "read-only GPU area averages; final still uses full physical state",
+            "Invalid legacy capture metadata",
+        )
     require(
         request["surface_configs"] == surface_configs(request["recipe"]),
         "Optical views differ from their recipe",
@@ -317,6 +528,30 @@ def verify_run(folder):
     validate_fields(final, request["recipe"]["chromatic_count"] + 1)
     actual_state = field_digest(final)
     require(actual_state == receipt["physical_state_sha256"], "Physical state identity differs")
+    if request["recipe"]["simulation"].get("mass_budget_interval_steps", 0):
+        from tools.estuary_confluence.mass_budget import validate_report
+
+        validate_report(
+            read(folder / "mass-budget.json"), request["recipe"], final, layout=expected_layout
+        )
+    if request["recipe"].get("assessment") is not None:
+        from tools.estuary_confluence.assessment import VERSION as assessment_version
+
+        report = read(folder / "assessment.json")
+        require(report.get("version") == assessment_version, "Assessment version differs")
+        require(report["settings"] == request["recipe"]["assessment"], "Assessment settings differ")
+        require(
+            [row["step"] for row in report["samples"]] == assessment_steps(request["recipe"])
+            and all(
+                row["source_fraction"] == row["step"] / receipt["final_step"]
+                for row in report["samples"]
+            ),
+            "Assessment does not span its canonical checkpoint schedule",
+        )
+        require(
+            report["final"] == measure(final, request["recipe"]),
+            "Final participation metrics differ",
+        )
     for look, result in receipt["looks"].items():
         require(
             result["physical_state_sha256"] == actual_state,
@@ -325,6 +560,11 @@ def verify_run(folder):
         require(
             result["poster"] == receipt["artifacts"][f"{look}/poster.png"], "View poster differs"
         )
+        if request["recipe"].get("assessment") is not None:
+            from tools.estuary_confluence.assessment import image_balance
+
+            pixels = np.load(folder / look / "poster-linear.npy", allow_pickle=False)
+            require(result.get("image_balance") == image_balance(pixels), "Image balance differs")
         if request["mode"] == "film":
             movie = read(folder / look / "movie.json")
             require(
@@ -364,7 +604,12 @@ def run(args):
     sw, sh = recipe["simulation"]["resolution"]
     source = Source.read(args.source, aspect=sw / sh, **recipe["projection"])
     palette = generate_palette(source.seed, recipe["chromatic_count"], mode=recipe["palette_mode"])
-    layout = resolved_layout(recipe, source.seed)
+    layout = resolved_layout(recipe, source.seed, source)
+    spectral = None
+    if recipe["surface"]["optics_model"] == "spectral":
+        from tools.estuary_confluence.spectral import build_spectral_material
+
+        spectral = build_spectral_material(palette)
     events = plan_events(source, recipe["encounters"])
     frames = [] if args.still_only else frame_plan(recipe)
     binaries = {}
@@ -380,10 +625,17 @@ def run(args):
         engine = Engine(source, recipe["simulation"], palette, events)
         surfaces = {}
         try:
-            require(getattr(engine, "layout", None) == layout, "Engine starting layout differs")
+            require(
+                equivalent_design(getattr(engine, "layout", None), layout),
+                "Engine starting layout differs",
+            )
             configs = surface_configs(recipe)
             for look, config in configs.items():
-                surfaces[look] = Surface(config, palette)
+                surfaces[look] = (
+                    Surface(config, palette, spectral=spectral)
+                    if spectral is not None
+                    else Surface(config, palette)
+                )
             request = {
                 "schema_version": 1,
                 "recipe": recipe,
@@ -393,6 +645,7 @@ def run(args):
                 "palette": palette,
                 "events": events,
                 "layout": layout,
+                "spectral": spectral,
                 "mode": "film" if frames else "still",
                 "frames": frames,
                 "binaries": binaries,
@@ -401,7 +654,7 @@ def run(args):
                     "simulation": engine.metadata,
                     "surfaces": {k: v.metadata for k, v in surfaces.items()},
                 },
-                "capture": "read-only GPU area averages; final still uses full physical state",
+                "capture": capture_metadata(recipe),
             }
             identity = hashlib.sha256(encoded(request)).hexdigest()
             if (output / "request.json").exists():
@@ -418,6 +671,8 @@ def run(args):
                 write(output / f"{name}.json", value)
             if layout is not None:
                 write(output / "layout.json", layout)
+            if spectral is not None:
+                write(output / "spectral.json", spectral)
             (output / "inputs").mkdir()
             shutil.copyfile(args.source, output / "inputs/source.orbit")
             require(
@@ -439,6 +694,31 @@ def run(args):
             }
             if layout is not None:
                 artifacts["layout.json"] = artifact(output / "layout.json")
+            if spectral is not None:
+                artifacts["spectral.json"] = artifact(output / "spectral.json")
+            measurements = []
+            pending = iter(assessment_steps(recipe))
+            next_checkpoint = next(pending, None)
+
+            def advance(target):
+                nonlocal next_checkpoint
+                if recipe["assessment"] is None:
+                    engine.advance_to(target)
+                    return
+                while next_checkpoint is not None and next_checkpoint <= target:
+                    engine.advance_to(next_checkpoint)
+                    sampled = engine.snapshot(resolution=tuple(recipe["assessment"]["resolution"]))
+                    measurements.append(
+                        {
+                            "step": next_checkpoint,
+                            "source_fraction": next_checkpoint / engine.steps,
+                            "metrics": measure(sampled, recipe),
+                        }
+                    )
+                    next_checkpoint = next(pending, None)
+                if engine.step < target:
+                    engine.advance_to(target)
+
             for look in surfaces:
                 (output / look).mkdir()
                 if frames:
@@ -446,9 +726,10 @@ def run(args):
             if layout is not None and not frames:
                 initial = engine.snapshot(resolution=tuple(render["capture_resolution"]))
                 for look, surface in surfaces.items():
-                    pixels = surface.render(
+                    pixels = render_frame(
+                        surface,
                         initial,
-                        size=tuple(render["resolution"]),
+                        render,
                         tilt_degrees=0.0,
                         azimuth_degrees=render["azimuth_start"],
                     )
@@ -459,7 +740,7 @@ def run(args):
             for i, frame in enumerate(frames):
                 changed = fields is None or frame["step"] != engine.step
                 if changed:
-                    engine.advance_to(frame["step"])
+                    advance(frame["step"])
                     fields = engine.snapshot(resolution=tuple(render["capture_resolution"]))
                 images = {}
                 for look, surface in surfaces.items():
@@ -468,9 +749,10 @@ def run(args):
                     if frame["phase"] == "hold":
                         shutil.copyfile(output / f"{look}/frames/{i - 1:06d}.png", path)
                     else:
-                        pixels = surface.render(
+                        pixels = render_frame(
+                            surface,
                             fields if changed else None,
-                            size=tuple(render["resolution"]),
+                            render,
                             tilt_degrees=frame["tilt_degrees"],
                             azimuth_degrees=frame["azimuth_degrees"],
                         )
@@ -492,11 +774,31 @@ def run(args):
                     )
                     print(f"CONFLUENCE_FRAME {i + 1}/{len(frames)} {frame['phase']}", flush=True)
             if not frames:
-                engine.advance_to(recipe["simulation"]["steps"])
+                advance(recipe["simulation"]["steps"])
             final = engine.snapshot()
             validate_fields(final, recipe["chromatic_count"] + 1)
+            if recipe["simulation"].get("mass_budget_interval_steps", 0):
+                from tools.estuary_confluence.mass_budget import validate_report
+
+                budget = engine.mass_budget_report
+                validate_report(budget, recipe, final, layout=layout)
+                write(output / "mass-budget.json", budget)
+                artifacts["mass-budget.json"] = artifact(output / "mass-budget.json")
             record_array(output / "final.npz", final)
             final_identity = field_digest(final)
+            if recipe["assessment"] is not None:
+                from tools.estuary_confluence.assessment import VERSION as assessment_version
+
+                write(
+                    output / "assessment.json",
+                    {
+                        "version": assessment_version,
+                        "settings": recipe["assessment"],
+                        "samples": measurements,
+                        "final": measure(final, recipe),
+                    },
+                )
+                artifacts["assessment.json"] = artifact(output / "assessment.json")
             results = {}
             for look, surface in surfaces.items():
                 pixels = surface.render(
@@ -514,6 +816,10 @@ def run(args):
                     "movie": None,
                     "physical_state_sha256": final_identity,
                 }
+                if recipe["assessment"] is not None:
+                    from tools.estuary_confluence.assessment import image_balance
+
+                    results[look]["image_balance"] = image_balance(pixels)
             write(output / "frame-ledger.json", ledger)
             for name in ("final.npz", "frame-ledger.json"):
                 artifacts[name] = artifact(output / name)
@@ -550,6 +856,7 @@ def run(args):
                     "source": source.metadata,
                     "source_fraction": 1.0,
                     "final_step": engine.step,
+                    "solver_diagnostics": getattr(engine, "diagnostics", None),
                     "physical_state_sha256": final_identity,
                     "looks": results,
                     "seconds": time.monotonic() - started,

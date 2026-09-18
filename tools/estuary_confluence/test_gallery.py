@@ -57,6 +57,9 @@ class GalleryTests(unittest.TestCase):
         simulation_updates=None,
         palette_updates=None,
         request_updates=None,
+        spectral=False,
+        assessed=False,
+        formation_frames=6,
     ):
         looks = ["layered", "homogeneous"] if looks is None else looks
         path = self.root / f"case-{len(list(self.root.glob('case-*')))}"
@@ -92,7 +95,7 @@ class GalleryTests(unittest.TestCase):
                 "render": {
                     "still_resolution": [16, 12],
                     "resolution": [16, 12],
-                    "formation_frames": 6,
+                    "formation_frames": formation_frames,
                     "hold_frames": 2,
                     "orbit_frames": orbit_frames,
                     "fps": 24,
@@ -114,6 +117,17 @@ class GalleryTests(unittest.TestCase):
             )
         elif palette_mode != "curated":
             request["recipe"]["palette_mode"] = palette_mode
+        if spectral:
+            from .spectral import build_spectral_material
+
+            request["recipe"]["surface"] = {"optics_model": "spectral"}
+            request["spectral"] = build_spectral_material(palette)
+        if assessed:
+            request["recipe"]["assessment"] = {
+                "interval_steps": 5,
+                "resolution": [128, 96],
+                "share_threshold": 0.1,
+            }
         request.update(copy.deepcopy(request_updates or {}))
         identity = hashlib.sha256(encoded(request)).hexdigest()
         files, views = {}, {}
@@ -145,13 +159,49 @@ class GalleryTests(unittest.TestCase):
                 "physical_state_sha256": physical,
                 "movie": {
                     "full_decode_verified": decode,
-                    "frames": 6 + 2 + orbit_frames - 1,
+                    "frames": formation_frames + 2 + orbit_frames - 1,
                     "fps": 24,
                     "resolution": [16, 12],
                 }
                 if film
                 else None,
             }
+            if assessed:
+                views[look]["image_balance"] = {
+                    "dominant_color_share": 0.7,
+                    "effective_color_count": 2.5,
+                }
+        if spectral:
+            write(path / "spectral.json", request["spectral"])
+            files["spectral.json"] = artifact(path / "spectral.json")
+        if assessed:
+            report = {
+                "version": "participation-fixture-v1",
+                "settings": request["recipe"]["assessment"],
+                "samples": [],
+                "final": {"painted_fraction": 0.2},
+            }
+            write(path / "assessment.json", report)
+            files["assessment.json"] = artifact(path / "assessment.json")
+        mass_interval = request["recipe"]["simulation"].get("mass_budget_interval_steps", 0)
+        if mass_interval > 0:
+            initial_mass = [0.02] * count + [0.0]
+            report = {
+                "schema_version": 1,
+                "version": "mass-budget-fixture-v1",
+                "interval_steps": mass_interval,
+                "initial_mass": initial_mass,
+                "corrections": [
+                    {
+                        "step": mass_interval,
+                        "mass_before": initial_mass,
+                        "factors": [1.0] * (count + 1),
+                        "mass_after": initial_mass,
+                    }
+                ],
+            }
+            write(path / "mass-budget.json", report)
+            files["mass-budget.json"] = artifact(path / "mass-budget.json")
         if scattered:
             write(path / "layout.json", request["layout"])
             files["layout.json"] = artifact(path / "layout.json")
@@ -160,11 +210,19 @@ class GalleryTests(unittest.TestCase):
             "identity_sha256": identity,
             "source": request["source"],
             "source_fraction": 1.0,
-            "final_step": 10,
+            "final_step": request["recipe"]["simulation"]["steps"],
             "physical_state_sha256": physical,
             "looks": views,
             "artifacts": files,
         }
+        if assessed:
+            receipt["solver_diagnostics"] = {
+                "canonical_steps": receipt["final_step"],
+                "actual_transport_substeps": receipt["final_step"],
+                "diffusion_substeps": 0,
+                "maximum_courant": 0.4,
+                "maximum_diffusion_number": 0,
+            }
         for name, value in (
             ("request", request),
             ("receipt", receipt),
@@ -639,6 +697,281 @@ class GalleryTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def convergence_cases(self, seed="0xbc53af1cd380"):
+        return [
+            self.case(
+                seed,
+                count,
+                ["layered"],
+                palette_mode="harmonic",
+                scattered=True,
+                spectral=True,
+                assessed=True,
+                formation_frames=1201,
+                simulation_updates={"initial_pattern": "engaged", "steps": 1200},
+                physical=str(count) * 64,
+            )
+            for count in (3, 5)
+        ]
+
+    def test_spectra_assessment_and_exact_formation_duration_travel_with_publication(self):
+        cases = self.convergence_cases()
+        gallery.build_gallery(self.output, cases)
+        collection, curation = gallery.verify_gallery(self.output)
+        self.assertEqual(collection["publication_version"], 2)
+        for study in collection["studies"]:
+            self.assertEqual(study["optics_model"], "spectral")
+            self.assertEqual(study["initial_pattern"], "engaged")
+            self.assertEqual(study["formation_seconds"], 50)
+            self.assertEqual(study["film_seconds"], 1205 / 24)
+            self.assertIn(study["spectral_record"], curation["artifacts"])
+            self.assertIn(study["assessment_record"], curation["artifacts"])
+            self.assertEqual(
+                read(self.output / study["spectral_record"])["palette_identity_sha256"],
+                study["palette_identity_sha256"],
+            )
+            self.assertEqual(study["image_balance"]["dominant_color_share"], 0.7)
+            self.assertEqual(study["solver_diagnostics"]["canonical_steps"], 1200)
+        for case in cases:
+            case.rename(case.with_name(case.name + "-moved"))
+        gallery.verify_gallery(self.output)
+
+    def test_rehashed_spectral_assessment_or_process_metadata_tampering_is_rejected(self):
+        gallery.build_gallery(self.output, self.convergence_cases())
+        original, curation = gallery.verify_gallery(self.output)
+        for key, value in [
+            ("optics_model", "rgb"),
+            ("initial_pattern", "scattered"),
+            ("formation_seconds", 12.5),
+            ("image_balance", None),
+            ("solver_diagnostics", None),
+            ("spectral_record", None),
+            ("assessment_record", None),
+        ]:
+            changed = copy.deepcopy(original)
+            changed["studies"][0][key] = value
+            self.rehash_collection(changed)
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                gallery.verify_gallery(self.output)
+            self.rehash_collection(original)
+        curation = read(self.output / "curation.json")
+        for key in ("spectral_record", "assessment_record"):
+            name = original["studies"][0][key]
+            path = self.output / name
+            previous = path.read_bytes()
+            record = read(path)
+            if key == "spectral_record":
+                record["pigment_reflectance"][0][0] *= 0.5
+            else:
+                record["final"]["painted_fraction"] = 0.9
+            write(path, record)
+            changed = copy.deepcopy(curation)
+            changed["artifacts"][name] = artifact(path)
+            write(self.output / "curation.json", changed)
+            with self.subTest(record=key), self.assertRaises(ValueError):
+                gallery.verify_gallery(self.output)
+            path.write_bytes(previous)
+            write(self.output / "curation.json", curation)
+
+    def test_earlier_comparisons_match_source_and_remain_portable_without_same_material_claim(self):
+        earlier = self.root / "earlier-gallery"
+        previous = [
+            self.case(
+                count=n,
+                looks=["layered"],
+                palette_mode="harmonic",
+                scattered=True,
+                physical="a" * 64,
+            )
+            for n in (3, 5)
+        ]
+        gallery.build_gallery(earlier, previous)
+        cases = self.convergence_cases()
+        gallery.build_gallery(self.output, cases, earlier_gallery=earlier)
+        collection, curation = gallery.verify_gallery(self.output)
+        self.assertEqual(len(curation["earlier_sources"]), 2)
+        for study in collection["studies"]:
+            self.assertEqual(study["earlier_caption"], "Earlier version · same trajectory")
+            self.assertNotIn("material history", study["earlier_caption"])
+            self.assertTrue((self.output / study["earlier_image"]).is_file())
+            self.assertIsNotNone(study["comparison_id"])
+            record = next(r for r in curation["earlier_sources"] if r["id"] == study["earlier_id"])
+            self.assertEqual(record["chromatic_count"], study["chromatic_count"])
+            self.assertEqual(record["palette_mode"], study["palette_mode"])
+            receipt = read(self.output / record["receipt"])
+            self.assertNotEqual(receipt["physical_state_sha256"], study["physical_state_sha256"])
+        earlier.rename(self.root / "earlier-gallery-moved")
+        for case in previous + cases:
+            case.rename(case.with_name(case.name + "-moved"))
+        gallery.verify_gallery(self.output)
+
+    def test_earlier_gallery_wrong_trajectory_and_changed_image_are_rejected(self):
+        earlier = self.root / "earlier-gallery"
+        previous = self.case(
+            looks=["layered"], palette_mode="harmonic", scattered=True, source_hash="f" * 64
+        )
+        gallery.build_gallery(earlier, [previous])
+        current = self.convergence_cases()[0]
+        with self.assertRaisesRegex(ValueError, "different source trajectory"):
+            gallery.build_gallery(self.output, [current], earlier_gallery=earlier)
+        self.assertFalse((self.output / "index.html").exists())
+        image = read(earlier / "collection.json")["studies"][0]["image"]
+        (earlier / image).write_bytes(b"changed")
+        with self.assertRaises(ValueError):
+            gallery.build_gallery(self.output, [current], earlier_gallery=earlier)
+
+    def test_earlier_caption_and_image_cannot_be_rehashed_away(self):
+        earlier = self.root / "earlier-gallery"
+        gallery.build_gallery(earlier, self.scatter_cases())
+        gallery.build_gallery(self.output, self.convergence_cases(), earlier_gallery=earlier)
+        original, curation = gallery.verify_gallery(self.output)
+        for key, value in [
+            ("earlier_caption", "Earlier version · same material history"),
+            ("earlier_image", original["studies"][0]["image"]),
+            ("earlier_id", original["studies"][1]["earlier_id"]),
+        ]:
+            changed = copy.deepcopy(original)
+            changed["studies"][0][key] = value
+            self.rehash_collection(changed)
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                gallery.verify_gallery(self.output)
+            self.rehash_collection(original)
+        name = original["studies"][0]["earlier_image"]
+        path = self.output / name
+        path.write_bytes(b"changed earlier image")
+        curation = read(self.output / "curation.json")
+        curation["artifacts"][name] = artifact(path)
+        write(self.output / "curation.json", curation)
+        with self.assertRaisesRegex(ValueError, "Earlier version image"):
+            gallery.verify_gallery(self.output)
+
+    def test_no_matching_earlier_study_does_not_invent_a_comparison(self):
+        earlier = self.root / "earlier-gallery"
+        gallery.build_gallery(earlier, self.scatter_cases("0x808861c25b6c"))
+        gallery.build_gallery(self.output, self.convergence_cases(), earlier_gallery=earlier)
+        collection, curation = gallery.verify_gallery(self.output)
+        self.assertEqual(curation["earlier_sources"], [])
+        self.assertTrue(all(s["earlier_image"] is None for s in collection["studies"]))
+
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js to exercise gallery controls")
+    def test_earlier_and_regular_controls_are_independent_and_show_actual_duration(self):
+        earlier = self.root / "earlier-gallery"
+        gallery.build_gallery(earlier, self.scatter_cases())
+        gallery.build_gallery(self.output, self.convergence_cases(), earlier_gallery=earlier)
+        collection = read(self.output / "collection.json")
+        script = re.findall(r"<script>([\s\S]*?)</script>", gallery.document("Convergence"))[0]
+        harness = """
+const vm=require('node:vm');
+const assert=require('node:assert/strict');
+const elements=new Map();
+function element(){return {attributes:{},style:{},children:[],value:'0',
+ classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+ getAttribute(k){return this.attributes[k]},removeAttribute(k){delete this[k]},
+ replaceChildren(){this.children=[]},append(...items){this.children.push(...items)},
+ pause(){},load(){},play(){return Promise.resolve()},scrollIntoView(){}}}
+const document={getElementById(id){
+ if(!elements.has(id))elements.set(id,element());
+ return elements.get(id)},createElement:element};
+const context={document,fetch:async()=>({ok:true,json:async()=>DATA})};
+vm.runInNewContext(SCRIPT,context);
+setImmediate(()=>{
+ const get=id=>elements.get(id); const study=DATA.studies[0];
+ assert.match(get('description').textContent,/50 seconds/);
+ assert.match(get('filmDuration').textContent,/50 s formation/);
+ assert.match(get('filmDuration').textContent,/50.21 s complete film/);
+ get('earlier').onclick();assert.equal(get('baseline').src,study.earlier_image);
+ assert.equal(get('comparisonCaption').textContent,'Earlier version · same trajectory');
+ assert.equal(get('earlier').attributes['aria-pressed'],'true');
+ assert.equal(get('compare').attributes['aria-pressed'],'false');
+ get('compare').onclick();assert.equal(get('baseline').src,study.baseline);
+ assert.equal(get('earlier').attributes['aria-pressed'],'false');
+ assert.equal(get('compare').attributes['aria-pressed'],'true');
+ get('starting').onclick();assert.equal(get('hero').src,study.initial);
+ assert.equal(get('fullSize').href,study.initial);
+ assert.equal(get('reference').hidden,true);
+ get('stillView').onclick();assert.equal(get('fullSize').href,study.image);
+});
+"""
+        path = self.root / "controls.js"
+        path.write_text(
+            "const DATA="
+            + json.dumps(collection)
+            + ";\nconst SCRIPT="
+            + json.dumps(script)
+            + ";\n"
+            + harness
+        )
+        result = subprocess.run(
+            [shutil.which("node"), str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enabled_mass_budget_report_is_portable_and_bound_to_case_bytes(self):
+        case = self.case(
+            looks=["layered"],
+            palette_mode="harmonic",
+            scattered=True,
+            simulation_updates={"mass_budget_interval_steps": 5},
+        )
+        gallery.build_gallery(self.output, [case])
+        collection, curation = gallery.verify_gallery(self.output)
+        study = collection["studies"][0]
+        name = study["mass_budget_record"]
+        self.assertEqual(name, curation["sources"][0]["mass_budget"])
+        self.assertEqual(
+            (self.output / name).read_bytes(), (case / "mass-budget.json").read_bytes()
+        )
+        self.assertEqual(
+            curation["artifacts"][name],
+            read(case / "receipt.json")["artifacts"]["mass-budget.json"],
+        )
+        case.rename(case.with_name(case.name + "-moved"))
+        gallery.verify_gallery(self.output)
+
+    def test_enabled_mass_budget_without_receipt_binding_cannot_be_published(self):
+        case = self.case(simulation_updates={"mass_budget_interval_steps": 5})
+        receipt = read(case / "receipt.json")
+        del receipt["artifacts"]["mass-budget.json"]
+        write(case / "receipt.json", receipt)
+        with self.assertRaisesRegex(ValueError, "bound mass-budget"):
+            gallery.build_gallery(self.output, [case])
+        self.assertFalse((self.output / "index.html").exists())
+
+    def test_disabled_and_legacy_cases_do_not_invent_mass_budget_records(self):
+        for index, settings in enumerate(({}, {"mass_budget_interval_steps": 0})):
+            case = self.case(simulation_updates=settings)
+            output = self.root / f"no-budget-{index}"
+            gallery.build_gallery(output, [case])
+            collection, curation = gallery.verify_gallery(output)
+            self.assertTrue(
+                all(study["mass_budget_record"] is None for study in collection["studies"])
+            )
+            self.assertNotIn("mass_budget", curation["sources"][0])
+
+    def test_rehashed_mass_report_and_study_link_tampering_are_rejected(self):
+        case = self.case(simulation_updates={"mass_budget_interval_steps": 5})
+        gallery.build_gallery(self.output, [case])
+        original, curation = gallery.verify_gallery(self.output)
+        changed = copy.deepcopy(original)
+        changed["studies"][0]["mass_budget_record"] = changed["studies"][0]["palette_record"]
+        self.rehash_collection(changed)
+        with self.assertRaisesRegex(ValueError, "records belong"):
+            gallery.verify_gallery(self.output)
+        self.rehash_collection(original)
+        name = original["studies"][0]["mass_budget_record"]
+        report = read(self.output / name)
+        report["corrections"][0]["factors"][0] = 0.1
+        write(self.output / name, report)
+        curation = read(self.output / "curation.json")
+        curation["artifacts"][name] = artifact(self.output / name)
+        write(self.output / "curation.json", curation)
+        with self.assertRaisesRegex(ValueError, "mass-budget report differs"):
+            gallery.verify_gallery(self.output)
 
 
 if __name__ == "__main__":

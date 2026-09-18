@@ -29,6 +29,7 @@ from .optics import palette_coefficients
 ROOT = Path(__file__).parent
 DEFAULTS = {
     "mode": "layered",
+    "optics_model": "rgb",
     "finish": "fresco",
     "paint_mass_threshold": 0.002,
     "paint_mass_reference": 0.15,
@@ -63,6 +64,8 @@ def validate_config(value=None):
     result.update(copy.deepcopy(value))
     if result["mode"] not in ("homogeneous", "layered"):
         raise ValueError("mode must be homogeneous or layered")
+    if result["optics_model"] not in ("rgb", "spectral"):
+        raise ValueError("optics_model must be rgb or spectral")
     if result["finish"] not in ("fresco", "crisp"):
         raise ValueError("finish must be fresco or crisp")
     ground = result["ground_srgb"]
@@ -165,13 +168,24 @@ def validate_fields(fields, pigment_count=None):
 class Surface:
     """Dedicated hardware context; safe to interleave with simulation contexts."""
 
-    def __init__(self, config, palette, backend="egl"):
+    def __init__(self, config, palette, backend="egl", *, spectral=None):
         import moderngl
 
         self.config = validate_config(config)
         self.palette = copy.deepcopy(palette)
         self._ratios, self._scattering, self._substrate = palette_coefficients(self.palette)
         self._pigment_count = len(self._scattering)
+        self.spectral = None
+        if self.config["optics_model"] == "spectral":
+            from .spectral import build_spectral_material, validate_spectral_material
+
+            self.spectral = (
+                build_spectral_material(self.palette)
+                if spectral is None
+                else validate_spectral_material(spectral, self.palette)
+            )
+        elif spectral is not None:
+            raise ValueError("RGB optics cannot consume a spectral material archive")
         self.ctx = moderngl.create_standalone_context(require=430, backend=backend)
         self._textures = []
         self._phase_texture = self._mix_texture = self._optics_program = None
@@ -226,7 +240,22 @@ class Surface:
                 "config": copy.deepcopy(self.config),
                 "pigment_count": self._pigment_count,
                 "palette": copy.deepcopy(self.palette),
+                "optics_model": self.config["optics_model"],
+                "spectral_material_identity": None
+                if self.spectral is None
+                else self.spectral["identity_sha256"],
             }
+            if self.spectral is not None:
+                self.metadata["optics"] = (
+                    "38-band finite-layer Kubelka-Munk, D65/CIE 1931 integration; "
+                    "synthetic RGB-reconstructed reflectance, not measured pigments"
+                )
+            if self.spectral is not None and self.spectral["version"] == "confluence-spectral-v2":
+                self.metadata["mixing"] = (
+                    "recorded mixedness blends intimate spectral reflection with "
+                    "independent pigment-column reflection composed over the lower layer; "
+                    "no resolved microscopic strands or measured mixing calibration"
+                )
             self._program = self.ctx.program(
                 vertex_shader=(ROOT / "shaders/surface.vert.glsl").read_text(),
                 fragment_shader=(ROOT / "shaders/surface.frag.glsl").read_text(),
@@ -235,7 +264,11 @@ class Surface:
                 np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes()
             )
             self._vao = self.ctx.vertex_array(self._program, [(self._quad, "2f", "in_position")])
-            optics_source = (ROOT / "shaders/optics.comp.glsl").read_text()
+            if self.spectral is None:
+                optics_file = "optics.comp.glsl"
+            else:
+                optics_file = "optics-spectral.comp.glsl"
+            optics_source = (ROOT / "shaders" / optics_file).read_text()
             optics_source = optics_source.replace(
                 "#version 430 core",
                 f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
@@ -257,8 +290,24 @@ class Surface:
         optics = self._optics_program
         optics["u_phases"].value = 3
         optics["u_mixing"].value = 4
-        optics["u_substrate"].value = tuple(self._substrate)
-        optics["u_ratios"].write(self._ratios.astype("f4").tobytes())
+        if self.spectral is None:
+            optics["u_substrate"].value = tuple(self._substrate)
+            optics["u_ratios"].write(self._ratios.astype("f4").tobytes())
+        else:
+            from .spectral import to_linear_rgb
+
+            spectra = self.spectral
+            ratio = np.asarray(spectra["absorption"]) / np.asarray(spectra["scattering"])
+            optics["u_spectral_ks"].write(ratio.astype("f4").tobytes())
+            optics["u_substrate_spectrum"].write(
+                np.asarray(spectra["substrate_reflectance"], dtype="f4").tobytes()
+            )
+            optics["u_rgb_weights"].write(
+                np.asarray(spectra["linear_srgb_weights_d65"], dtype="f4").tobytes()
+            )
+            optics["u_substrate"].value = tuple(
+                to_linear_rgb(spectra["substrate_reflectance"], spectra)
+            )
         optics["u_scattering"].write(self._scattering.astype("f4").tobytes())
         optics["u_layer_scale"].value = c["layer_scale"]
         optics["u_mix_control"].value = c["mix_control"]

@@ -21,6 +21,9 @@ from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_art
 from .palette import normalize_seed
 from .run import verify_run
 
+EARLIER_CAPTION = "Earlier version · same trajectory"
+PUBLICATION_VERSION = 2
+
 GROUPS = {"layered": "Layered", "homogeneous": "Blended"}
 TEMPLATE = Path(__file__).with_suffix(".html")
 TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
@@ -59,6 +62,64 @@ def _film_metadata(request, receipt, look):
         "film_fps": movie["fps"],
         "film_seconds": movie["frames"] / movie["fps"],
     }
+
+
+def _study_metadata(request, receipt, look):
+    recipe = request["recipe"]
+    render = recipe["render"]
+    return {
+        "optics_model": recipe.get("surface", {}).get("optics_model", "rgb"),
+        "initial_pattern": recipe["simulation"].get("initial_pattern", "pools"),
+        "formation_seconds": (
+            (render["formation_frames"] - 1) / render["fps"] if request["mode"] == "film" else None
+        ),
+        "image_balance": receipt["looks"][look].get("image_balance"),
+        "solver_diagnostics": receipt.get("solver_diagnostics"),
+    }
+
+
+def _study_key(study):
+    return (
+        study["seed"],
+        study["chromatic_count"],
+        study.get("palette_mode", "curated"),
+        study["group"],
+    )
+
+
+def _verify_earlier(output, files, record):
+    """Validate a portable earlier image against its immutable case records."""
+    require(
+        all(record[key] in files for key in ("request", "receipt", "image")),
+        "Earlier version is missing its provenance or image",
+    )
+    request = read(output / record["request"])
+    receipt = read(output / record["receipt"])
+    identity = hashlib.sha256(encoded(request)).hexdigest()
+    source, recipe = request["source"], request["recipe"]
+    look = record["group"]
+    require(
+        identity == record["identity_sha256"] == receipt["identity_sha256"]
+        and receipt["complete"] is True
+        and record["case_id"] == identity[:16],
+        "Earlier version case identity differs",
+    )
+    require(
+        record["seed"] == normalize_seed(source["seed"])
+        and record["source_sha256"] == source["sha256"]
+        and receipt["source"] == source
+        and record["chromatic_count"] == recipe["chromatic_count"]
+        and record["palette_mode"] == recipe.get("palette_mode", "curated")
+        and look in recipe["looks"],
+        "Earlier version source or study association differs",
+    )
+    require(
+        receipt["source_fraction"] == 1.0
+        and receipt["final_step"] == recipe["simulation"]["steps"]
+        and files[record["image"]] == receipt["artifacts"][f"{look}/poster.png"],
+        "Earlier version image or completed trajectory differs",
+    )
+    return record
 
 
 def _name(palette):
@@ -107,7 +168,7 @@ def _comparison_inputs(first, second, *, count_change):
         (layouts[0] is None) == (layouts[1] is None),
         "Comparison mixes scattered and legacy initial conditions",
     )
-    for key in ("simulation", "projection"):
+    for key in ("simulation", "projection", "surface"):
         require(
             first["recipe"].get(key) == second["recipe"].get(key),
             f"Comparison {key} controls differ",
@@ -229,7 +290,9 @@ def _comparisons(studies, case_requests):
     return result
 
 
-def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=False):
+def build_gallery(
+    output, cases, *, title="Confluence Fresco", allow_stills=False, earlier_gallery=None
+):
     """Publish all selected complete cases; each seed retains its CLI order."""
     require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
     require(type(allow_stills) is bool, "allow_stills must be boolean")
@@ -248,7 +311,16 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
         if seed not in seeds:
             seeds.append(seed)
         records.append((case, request, receipt))
+    earlier_collection = earlier_curation = None
+    if earlier_gallery is not None:
+        earlier_gallery = Path(earlier_gallery).resolve(strict=True)
+        earlier_collection, earlier_curation = verify_gallery(earlier_gallery)
     output = Path(output).resolve()
+    require(
+        earlier_gallery is None
+        or (output != earlier_gallery and not output.is_relative_to(earlier_gallery)),
+        "Publish outside the earlier gallery",
+    )
     require(
         all(output != case and not output.is_relative_to(case) for case in cases),
         "Publish outside immutable source archives",
@@ -256,7 +328,7 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
     output.mkdir(parents=True, exist_ok=True)
     with (output / ".publish.lock").open("a+b") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        files, studies, origins = {}, [], []
+        files, studies, origins, earlier_sources = {}, [], [], []
 
         def copy(source, name, expected):
             _copy_verified(source, output / name, expected)
@@ -281,6 +353,31 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                     case / "layout.json",
                     f"records/{case_id}/layout.json",
                     _json_artifact(request["layout"]),
+                )
+            if request.get("spectral") is not None:
+                expected = _json_artifact(request["spectral"])
+                require(
+                    receipt["artifacts"].get("spectral.json") == expected,
+                    "Spectral material is not bound to its case receipt",
+                )
+                paths["spectral"] = copy(
+                    case / "spectral.json", f"records/{case_id}/spectral.json", expected
+                )
+            if "assessment.json" in receipt["artifacts"]:
+                paths["assessment"] = copy(
+                    case / "assessment.json",
+                    f"records/{case_id}/assessment.json",
+                    receipt["artifacts"]["assessment.json"],
+                )
+            if request["recipe"]["simulation"].get("mass_budget_interval_steps", 0) > 0:
+                require(
+                    "mass-budget.json" in receipt["artifacts"],
+                    "Enabled mass restoration requires a bound mass-budget report",
+                )
+                paths["mass_budget"] = copy(
+                    case / "mass-budget.json",
+                    f"records/{case_id}/mass-budget.json",
+                    receipt["artifacts"]["mass-budget.json"],
                 )
             origins.append(
                 {
@@ -328,6 +425,10 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                         "palette_identity_sha256": palette["identity_sha256"],
                         "palette_record": paths["palette"],
                         "layout_record": paths.get("layout"),
+                        "spectral_record": paths.get("spectral"),
+                        "assessment_record": paths.get("assessment"),
+                        "mass_budget_record": paths.get("mass_budget"),
+                        **_study_metadata(request, receipt, look),
                         "swatches": _swatches(palette, include_chalk=initial is None),
                         "resolution": request["recipe"]["render"]["still_resolution"],
                         **film_metadata,
@@ -349,8 +450,56 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
             study["comparison_id"], study["baseline"], study["comparison_caption"] = comparisons[
                 study["id"]
             ]
+        earlier_index = {}
+        if earlier_collection is not None:
+            for candidate in earlier_collection["studies"]:
+                key = _study_key(candidate)
+                require(key not in earlier_index, "Ambiguous earlier version match")
+                earlier_index[key] = candidate
+            earlier_origins = {origin["id"]: origin for origin in earlier_curation["sources"]}
+        for study in studies:
+            study["earlier_id"] = study["earlier_image"] = study["earlier_caption"] = None
+            candidate = earlier_index.get(_study_key(study))
+            if candidate is None:
+                continue
+            require(
+                study["source_sha256"] == candidate["source_sha256"],
+                "Earlier version uses a different source trajectory",
+            )
+            origin = earlier_origins[candidate["case_id"]]
+            image_info = earlier_curation["artifacts"][candidate["image"]]
+            image_name = copy(
+                earlier_gallery / candidate["image"],
+                f"assets/{image_info['sha256']}/earlier.png",
+                image_info,
+            )
+            earlier_id = candidate["id"]
+            entry = {
+                "id": earlier_id,
+                "case_id": candidate["case_id"],
+                "identity_sha256": candidate["identity_sha256"],
+                "seed": candidate["seed"],
+                "chromatic_count": candidate["chromatic_count"],
+                "palette_mode": candidate.get("palette_mode", "curated"),
+                "group": candidate["group"],
+                "source_sha256": candidate["source_sha256"],
+                "image": image_name,
+            }
+            for key in ("request", "receipt"):
+                entry[key] = copy(
+                    earlier_gallery / origin[key],
+                    f"earlier/{candidate['case_id']}/{key}.json",
+                    earlier_curation["artifacts"][origin[key]],
+                )
+            earlier_sources.append(entry)
+            study["earlier_id"], study["earlier_image"], study["earlier_caption"] = (
+                earlier_id,
+                image_name,
+                EARLIER_CAPTION,
+            )
         collection = {
             "schema_version": 1,
+            "publication_version": PUBLICATION_VERSION,
             "title": title,
             "studies": studies,
             "history": "Complete trajectories; finished material stays fixed during camera motion",
@@ -368,6 +517,7 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                 "complete": True,
                 "title": title,
                 "sources": origins,
+                "earlier_sources": earlier_sources,
                 "artifacts": files,
             },
         )
@@ -391,6 +541,10 @@ def verify_gallery(output):
     require(
         collection.get("schema_version") == 1 and collection["title"] == curation["title"],
         "Gallery collection differs from its curation",
+    )
+    require(
+        collection.get("publication_version", 1) in (1, PUBLICATION_VERSION),
+        "Unsupported gallery publication",
     )
     origins = {record["id"]: record for record in curation["sources"]}
     studies = {study["id"]: study for study in collection["studies"]}
@@ -425,6 +579,52 @@ def verify_gallery(output):
                 and read(output / origin["layout"]) == request["layout"],
                 "Published starting pools differ",
             )
+        optics_model = recipe.get("surface", {}).get("optics_model", "rgb")
+        require(optics_model in ("rgb", "spectral"), "Unknown published optical model")
+        if optics_model == "spectral":
+            from .spectral import validate_spectral_material
+
+            require(
+                origin.get("spectral") in files and request.get("spectral") is not None,
+                "Published spectral material is missing",
+            )
+            require(
+                read(output / origin["spectral"]) == request["spectral"]
+                and files[origin["spectral"]] == receipt["artifacts"]["spectral.json"],
+                "Published spectral material differs",
+            )
+            validate_spectral_material(request["spectral"])
+            require(
+                request["spectral"]["palette_identity_sha256"] == palette["identity_sha256"],
+                "Published spectrum belongs to another palette",
+            )
+        else:
+            require(
+                origin.get("spectral") is None and request.get("spectral") is None,
+                "RGB view cannot advertise spectral material",
+            )
+        if "assessment.json" in receipt["artifacts"]:
+            require(
+                origin.get("assessment") in files
+                and files[origin["assessment"]] == receipt["artifacts"]["assessment.json"],
+                "Published assessment differs from its case",
+            )
+            report = read(output / origin["assessment"])
+            require(
+                report["settings"] == recipe.get("assessment"),
+                "Published assessment settings differ",
+            )
+        else:
+            require(origin.get("assessment") is None, "Unbound assessment report")
+        if recipe["simulation"].get("mass_budget_interval_steps", 0) > 0:
+            require(
+                "mass-budget.json" in receipt["artifacts"]
+                and origin.get("mass_budget") in files
+                and files[origin["mass_budget"]] == receipt["artifacts"]["mass-budget.json"],
+                "Published mass-budget report differs from its case",
+            )
+        else:
+            require(origin.get("mass_budget") is None, "Unbound mass-budget report")
         require(
             receipt["source"] == source
             and origin["source_sha256"] == source["sha256"]
@@ -461,6 +661,20 @@ def verify_gallery(output):
                 == _swatches(palette, include_chalk=request.get("layout") is None),
                 "Painting caption or palette association differs",
             )
+            metadata = _study_metadata(request, receipt, look)
+            if collection.get("publication_version", 1) >= 2 or any(
+                key in study for key in metadata
+            ):
+                require(
+                    all(study.get(key) == value for key, value in metadata.items()),
+                    "Published optics, process duration, or diagnostic metadata differs",
+                )
+                require(
+                    study.get("spectral_record") == origin.get("spectral")
+                    and study.get("assessment_record") == origin.get("assessment")
+                    and study.get("mass_budget_record") == origin.get("mass_budget"),
+                    "Published study records belong to another case",
+                )
             if request.get("layout") is not None:
                 require(
                     study.get("initial") in files
@@ -500,6 +714,31 @@ def verify_gallery(output):
             == comparisons[study["id"]],
             "Comparison source or material-history association differs",
         )
+    earlier_records = curation.get("earlier_sources", [])
+    earlier = {}
+    for record in earlier_records:
+        require(record["id"] not in earlier, "Duplicate earlier version provenance")
+        earlier[record["id"]] = _verify_earlier(output, files, record)
+    referenced = set()
+    for study in collection["studies"]:
+        earlier_id = study.get("earlier_id")
+        if earlier_id is None:
+            require(
+                study.get("earlier_image") is None and study.get("earlier_caption") is None,
+                "Unbound earlier version image",
+            )
+            continue
+        require(earlier_id in earlier, "Earlier version provenance is missing")
+        record = earlier[earlier_id]
+        require(
+            _study_key(study) == _study_key(record)
+            and study["source_sha256"] == record["source_sha256"]
+            and study.get("earlier_image") == record["image"]
+            and study.get("earlier_caption") == EARLIER_CAPTION,
+            "Earlier version comparison association differs",
+        )
+        referenced.add(earlier_id)
+    require(referenced == set(earlier), "Unreferenced earlier version provenance")
     return collection, curation
 
 
@@ -509,8 +748,17 @@ def main():
     parser.add_argument("--cases", required=True, nargs="+", type=Path)
     parser.add_argument("--title", default="Confluence Fresco")
     parser.add_argument("--allow-stills", action="store_true")
+    parser.add_argument("--earlier-gallery", type=Path)
     args = parser.parse_args()
-    print(build_gallery(args.output, args.cases, title=args.title, allow_stills=args.allow_stills))
+    print(
+        build_gallery(
+            args.output,
+            args.cases,
+            title=args.title,
+            allow_stills=args.allow_stills,
+            earlier_gallery=args.earlier_gallery,
+        )
+    )
 
 
 if __name__ == "__main__":

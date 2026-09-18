@@ -4,6 +4,89 @@ Seeded pigment, selective deposition, and revealed underpainting driven by the
 complete recorded three-body trajectory. This experiment extends Tidal Fresco
 without changing the earlier Estuary, depth, or studio packages.
 
+## Convergence studies
+
+See [EXPERIMENTS.md](EXPERIMENTS.md) for the parameter sweeps, visual judgments,
+numerical checks, and selected production settings.
+
+`recipes/convergence-three.json` and `recipes/convergence-five.json` combine
+source-aware starting pools, no imposed directional current, finite-rate pigment
+interdiffusion, and spectral color. Earlier recipes retain their original models.
+
+The `engaged-pigment-layout-v2` planner proposes separated, pure-color pools near
+the actual stirring paths. A bounded particle pilot evaluates 32 candidate
+layouts, considering the least active pigment's travel, stretching, proximity to
+other colors, and composition. It evaluates both the three- and five-pool subsets
+before selecting one shared layout. Its fixed pilot clock is independent of paint
+resolution, diffusion, optics, and film cadence. The seed, source hash, projection,
+flow settings, exact pool positions, and pilot diagnostics are archived. Pilot
+scores are approximate placement diagnostics, not proof of final pigment contact
+or artistic quality; unsuccessful eligibility is recorded explicitly.
+
+The pilot distributes 17 tracers through each pool's area and measures the mean
+nearest-other-color proximity across those tracers. A single touching edge cannot
+stand in for participation by the whole pool. The original candidate RNG namespace
+is retained explicitly, isolating the improved selection criterion from changes
+to candidate randomness.
+
+The earlier recipes impose a carrier velocity of `[2, 0.2]`. Convergence uses
+`[0, 0]`, removing that systematic rightward current while retaining the
+trajectory's own asymmetry. It does not recenter individual film frames.
+
+Interdiffusion exchanges pigment fractions across neighboring wet paint cells.
+Equal and opposite face fluxes conserve every pigment and local total thickness
+in this operator; dry paint and empty space receive no flux. Substeps enforce an
+explicit stability bound. This avoids diffusing the paint silhouette into a
+colored haze. It is an authored mixing model, not measured molecular diffusion;
+the separate advection operator still has its documented numerical mass error.
+
+Convergence also enables `simulation.mass_budget_interval_steps=12`: after each
+fixed block of canonical steps, and at the final step, a GPU reduction measures
+each pigment's global amount and positive uniform channel scaling restores its
+initial budget. This option is restricted to separated pure pools with no added
+paint, settling, or underpaint. Empty channels remain empty. `mass-budget.json`
+records every correction's step, amounts before and after, and exact applied
+factors. Verification regenerates the initial sampled pools and independently
+integrates the native final fields. This corrects global numerical paint growth;
+it does **not** make advection locally conservative or recover misplaced material
+and unresolved strands. Earlier recipes leave the option disabled.
+
+`surface.optics_model="spectral"` integrates 38 wavelength samples, 380–750 nm,
+using finite-layer Kubelka–Munk reflection and transmission. Display colors are
+reconstructed into **synthetic** spectra; they are not measured artist pigments.
+The reconstruction uses the permissively licensed Spectral.js bases and D65/CIE
+integration data, with a documented colorimetric correction. Exact spectra,
+coefficients, upstream revision, data hashes, and license attribution are saved in
+`spectral.json`. Legacy RGB optics remain available and unchanged.
+
+Spectral version 2 treats incomplete mixing as independent pigment columns over
+the lower reflector: it averages their complete reflected spectra, then blends
+with intimate-mixture reflection using the stored mixing field. It does not apply
+an arbitrary saturation boost or reconstruct fine strands lost by simulation.
+
+Optional `assessment` checkpoints record each pigment's mass, centroid, spread,
+visible share, dominant area, and contact with another substantial pigment. The
+history uses a reduced grid; the final assessment uses the native material grid.
+Reduced grids can combine unresolved neighboring strands, so their contact
+estimates are not interchangeable with native measurements. Movement, stretching,
+and contact are separate diagnostics: maximizing contact can produce dull,
+overmixed paintings. None of these measurements changes the simulation or rates
+artistic quality. Image balance and actual solver substeps are also archived.
+
+Convergence films use 1,201 formation frames, a 24-frame hold, and 144 camera
+frames: 1,369 frames at 24 fps, about 57.04 seconds. Formation spans the entire
+recorded trajectory in 50 seconds between its first and last frame. The separate
+orbital warmup is not part of the recording. Simulation steps and orbital states
+are different quantities; the receipt records both the source coverage and the
+actual paint transport work.
+
+The production Convergence recipes retain the full material grid for movie
+capture, too: neighboring pigments are shaded before any image reduction. Each
+film frame is rendered at twice its output dimensions and area-averaged in linear
+display RGB before PNG encoding. This preserves fine color boundaries and reduces
+thin-line aliasing without changing pigment state. The opt-in control is
+`render.frame_supersampling=2`; its default of `1` preserves earlier frame output.
+
 ## Scattered color studies
 
 The new `scattered-three.json`, `scattered-five.json`, and `random-five.json`
@@ -70,9 +153,10 @@ Two optical views can render **one simulation**:
 | `homogeneous` | The same total pigment interpreted as one intimately mixed layer. |
 
 The incomplete-mixing operator represents unresolved neighboring patches. It
-does not invent resolved bristles or microscopic filaments. Pigment optics use
-an RGB Kubelka–Munk approximation with authored coefficients, not measured
-spectral paint. Flow is Estuary's prescribed incompressible stirring field, not
+does not invent resolved bristles or microscopic filaments. Legacy pigment optics
+use an RGB Kubelka–Munk approximation with authored coefficients; spectral optics
+are the explicit alternative described above. Neither uses measured paint.
+Flow is Estuary's prescribed incompressible stirring field, not
 a Navier–Stokes fluid simulation. Local material exchange is conservative;
 limited MacCormack transport is not globally mass-conservative, and source tools
 add material. Relief comes from pigment volume, never displayed brightness.
@@ -149,6 +233,11 @@ uniqueness across all possible seeds.
 Each archive contains:
 
 - `request.json`, `recipe.json`, `palette.json`, and `events.json`.
+- For engaged or scattered pools, `layout.json`; for spectral optics,
+  `spectral.json`; when requested, `assessment.json` with canonical checkpoints
+  and a native-grid final report. These files are hash-bound by the receipt.
+- When global mass restoration is enabled, `mass-budget.json` with the initial
+  per-pigment budgets and every canonical correction.
 - Original `inputs/source.orbit` and copies of all four runtime packages.
 - `final.npz`: full-grid mobile, deposited, and underpaint concentrations plus
   geometry, wetness, mixing, direction, roughness, coverage, and total pigment.
@@ -185,6 +274,12 @@ identifies the changed pigment count. Images and films can be downloaded at thei
 published resolutions. Content-addressed media and copied design records keep
 the gallery verifiable if the original experiment folders move.
 
+Pass `--earlier-gallery /path/to/previous-gallery` to include an independent
+**Earlier version** comparison. It requires the same seed, pigment count, palette
+mode, optical view, and source recording. Its label identifies the earlier
+version; it does not imply identical physical history or layout. The copied
+earlier image and design records remain available inside the new gallery.
+
 ## Validation
 
 ```sh
@@ -195,8 +290,18 @@ ESTUARY_TEST_GPU=1 python -m unittest discover -s tools/estuary_confluence -t .
 CPU tests cover seed equivalence and full-bit influence, palette mixtures and
 color-count invariance, real encounter selection, conservative phase exchange,
 optical passivity, source-complete timelines, paired-view state identity,
-artifact tampering, and incomplete-run behavior. Hardware tests exercise the
-actual GPU transport and optical kernels.
+artifact tampering, and incomplete-run behavior. Convergence tests also cover
+source-aware layout determinism, conservative interdiffusion, dry/air boundaries,
+spectral colorimetry, assessment timing independent of movie captures, native
+assessment regeneration, global pigment-budget restoration, linear-light frame
+filtering, and archived solver diagnostics. Hardware tests exercise
+the actual GPU transport and optical kernels.
 
 OKLab conversion uses the public-domain sRGB matrices published by
 [Björn Ottosson](https://bottosson.github.io/posts/oklab/).
+
+Spectral reconstruction derives from
+[Spectral.js](https://github.com/rvanwijnen/spectral.js), revision
+`bb2b05c9d1e65ae824d47e3b1cc17ea32c8ee68f` (MIT, Ronald van Wijnen).
+See `spectral_data.py` and `licenses/spectral-js-MIT.txt` for the transformation
+details and preserved attribution.

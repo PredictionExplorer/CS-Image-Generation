@@ -141,6 +141,7 @@ gap:18px}.caption{display:block}.caption nav{margin-top:10px}}
 <span id="caption">Loading the studies…</span>
 <nav>
 <button id="compare" hidden aria-pressed="false">Compare</button>
+<button id="earlier" hidden aria-pressed="false">Earlier version</button>
 <button id="starting" hidden aria-pressed="false">Starting colors</button>
 <button id="motion" hidden>Play film</button>
 <button id="stillView" hidden>Still image</button>
@@ -150,6 +151,7 @@ gap:18px}.caption{display:block}.caption nav{margin-top:10px}}
 </nav>
 </div>
 <p id="motionCaption" hidden></p>
+<p id="filmDuration" hidden></p>
 <section class="paletteBlock" aria-label="Pigments in the selected painting">
 <div><span id="paletteLabel"></span> · <a id="paletteDownload" download>Palette colors</a></div>
 <ul id="palette" class="palette"></ul>
@@ -163,20 +165,39 @@ gap:18px}.caption{display:block}.caption nav{margin-top:10px}}
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let collection=null,comparing=false,referenceAvailable=false;
+let collection=null,comparing=false,referenceAvailable=false,comparisonKind='regular';
 const families={layered:'Layered',homogeneous:'Blended'};
 const seedLabel=seed=>seed?String(seed).replace(/^0x/i,'').slice(0,4).toUpperCase():'';
 const studyDetails=study=>study.initial?seedLabel(study.seed):[families[study.group],seedLabel(study.seed)].join(' · ');
 
+const secondsLabel=seconds=>Number(seconds).toFixed(2).replace(/\.?0+$/,'');
 function updateComparison(){
+const study=collection&&collection.studies[Number($('choice').value)];
+const regular=study&&(study.baseline||collection.baseline);
+const earlier=study&&study.earlier_image;
+const reference=comparisonKind==='earlier'?earlier:regular;
+referenceAvailable=Boolean(regular);
+if(!reference)comparing=false;
 $('artRow').classList.toggle('comparing',comparing);
 $('reference').hidden=!comparing;
-$('compare').hidden=!referenceAvailable;
-$('compare').textContent=comparing?'Hide comparison':'Compare';
-$('compare').setAttribute('aria-pressed',String(comparing));}
+$('compare').hidden=!regular;
+$('earlier').hidden=!earlier;
+$('compare').textContent=comparing&&comparisonKind==='regular'?'Hide comparison':'Compare';
+$('earlier').textContent=comparing&&comparisonKind==='earlier'?'Hide earlier version':'Earlier version';
+$('compare').setAttribute('aria-pressed',String(comparing&&comparisonKind==='regular'));
+$('earlier').setAttribute('aria-pressed',String(comparing&&comparisonKind==='earlier'));
+if(reference){$('baseline').src=reference}else{$('baseline').removeAttribute('src')}
+$('comparisonCaption').textContent=study
+?(comparisonKind==='earlier'?study.earlier_caption:study.comparison_caption)||'':'';
+}
 
 function select(index){const study=collection.studies[index];
-$('description').textContent=study.initial
+$('description').textContent=study.initial_pattern==='engaged'
+?'Separate colors begin where the three bodies can stir them together. '+(study.film
+?'Their full trajectory unfolds over '+secondsLabel(study.formation_seconds)+' seconds.'
+:'Their complete trajectory shapes the finished painting.')+(study.optics_model==='spectral'
+?' Overlapping pigments mix by the wavelengths of light they absorb.':'')
+:study.initial
 ?'Every color begins in its own pool. The seed chooses the colors and where they begin. Three bodies stir the paint through their complete trajectory.'
 :'Three colors or five, chosen by the seed. Washes meet, settle and reveal buried color. Every film follows the complete trajectory.';
 $('choice').value=String(index);
@@ -190,7 +211,6 @@ $('hero').hidden=false;
 $('hero').src=study.image;
 
 $('hero').alt=study.name+' · '+families[study.group];
-$('comparisonCaption').textContent=study.comparison_caption||'';
 $('paletteLabel').textContent=study.chromatic_count+(study.initial?' starting colors':' colors + shared chalk');
 $('paletteDownload').href=study.palette_record;
 $('palette').replaceChildren();
@@ -203,11 +223,10 @@ item.title=swatch.name+' · '+swatch.role+' · '+rgb.join(', ');
 item.append(chip,label);$('palette').append(item)}
 $('caption').textContent=study.name+' · '+studyDetails(study);
 $('motionCaption').hidden=true;
-const reference=study.baseline||collection.baseline;
-referenceAvailable=Boolean(reference);
-if(!referenceAvailable)comparing=false;
-if(reference){$('baseline').src=reference}else{$('baseline').removeAttribute('src')}
 updateComparison();
+$('filmDuration').hidden=!study.film;
+$('filmDuration').textContent=study.film
+?secondsLabel(study.formation_seconds)+' s formation · '+secondsLabel(study.film_seconds)+' s complete film':'';
 
 $('download').href=study.image;
 $('fullSize').href=study.image;
@@ -222,9 +241,13 @@ $('film').removeAttribute('src');
 $('film').load();
 $('film').poster=study.image;}
 $('choice').onchange=()=>select(Number($('choice').value));
-$('compare').onclick=()=>{const next=!comparing;
+$('compare').onclick=()=>{const next=!(comparing&&comparisonKind==='regular');
 select(Number($('choice').value));
-comparing=next&&referenceAvailable;
+comparisonKind='regular';comparing=next;
+updateComparison();};
+$('earlier').onclick=()=>{const next=!(comparing&&comparisonKind==='earlier');
+select(Number($('choice').value));
+comparisonKind='earlier';comparing=next;
 updateComparison();};
 $('starting').onclick=()=>{const active=$('starting').getAttribute('aria-pressed')==='true';
 const index=Number($('choice').value);select(index);
