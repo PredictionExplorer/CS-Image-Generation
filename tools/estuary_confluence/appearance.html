@@ -110,6 +110,7 @@ $('art').style.setProperty('--ground',ground(look.ground_srgb));$('caption').tex
 $('fullSize').href=look.image;$('downloadImage').href=look.image;$('studyRecord').href=p.records.request;$('parentRecord').href=p.records.parent_request;
 $('backgroundRecord').href=look.background_record;$('receiptRecord').href=p.records.receipt;
 $('playFilm').hidden=!look.film;$('downloadFilm').hidden=!look.film;
+$('playFilm').textContent=look.film?'Play film · '+Number(look.film.seconds).toFixed(2).replace(/\.?0+$/,'')+' s':'Play film';
 if(look.film){$('downloadFilm').href=look.film.src}else{$('downloadFilm').removeAttribute('href');}
 $('presentations').replaceChildren();for(const option of p.looks){const button=document.createElement('button');button.className='presentation';button.setAttribute('aria-pressed',String(option.id===activeLook));
 const chip=document.createElement('span');chip.className='groundChip';chip.style.backgroundColor=ground(option.ground_srgb);chip.setAttribute('aria-hidden','true');
@@ -124,7 +125,7 @@ $('compare').onclick=()=>{pauseFilm();comparing=!comparing;updateComparison();$(
 $('showStill').onclick=()=>selectPresentation(activeLook);
 $('playFilm').onclick=()=>{const look=lookFor(currentPainting(),activeLook);if(!look.film)return;comparing=false;updateComparison();
 $('hero').hidden=true;$('film').hidden=false;$('film').poster=look.preview;$('film').src=look.film.src;$('showStill').hidden=false;
-$('filmCaption').textContent=look.film.caption;$('filmCaption').hidden=false;$('film').play().catch(()=>{});$('stage').scrollIntoView({behavior:'smooth',block:'center'});};
+$('filmCaption').textContent=Number(look.film.seconds).toFixed(2).replace(/\.?0+$/,'')+' seconds · '+look.film.caption;$('filmCaption').hidden=false;$('film').play().catch(()=>{});$('stage').scrollIntoView({behavior:'smooth',block:'center'});};
 fetch('collection.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error('The collection is unavailable.');return response.json();}).then(data=>{
 collection=data;parentsBySeed=new Map();for(const p of data.parents){if(!parentsBySeed.has(p.seed))parentsBySeed.set(p.seed,[]);parentsBySeed.get(p.seed).push(p);}
 seeds=[...parentsBySeed.keys()];if(!seeds.length)throw Error('No completed paintings are available.');

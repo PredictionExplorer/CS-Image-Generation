@@ -87,7 +87,7 @@ alone is not evidence of a better picture. The native film reveals that differen
 The larger cohort motivated native GPU movie capture. A complete 4096 × 3072
 BC53 replay retained the exact physical-state hash and native final poster.
 The accelerated frame differed from the CPU reference by at most 1.19e-7 in linear
-RGB and produced identical encoded 8-bit pixels in that comparison. Capture with
+RGB and produced identical 8-bit PNG pixels before movie encoding in that comparison. Capture with
 2× antialiasing measured about 0.105 seconds per frame, replacing a multi-second
 full-material CPU round trip. This measurement excludes simulation advancement,
 PNG encoding, and movie encoding. It reduces runtime without reducing the

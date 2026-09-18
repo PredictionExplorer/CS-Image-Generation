@@ -149,7 +149,7 @@ rejected. Camera-only rendering uses the surface's retained material copy.
 The final still deliberately uses the established CPU snapshot/render path.
 The accelerated path was checked against that reference on a complete native
 trajectory: physical-state and final-poster values matched exactly, and the tested
-8-bit video frame was identical (maximum linear error 1.19e-7). These are measured
+8-bit PNG frame was identical before movie encoding (maximum linear error 1.19e-7). These are measured
 checks on the tested hardware, not a promise of cross-driver pixel identity.
 
 ## Scattered color studies
