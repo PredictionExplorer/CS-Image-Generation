@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "layered",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.28,
+    "blue_transmission": 0.65,
+    "coat": 0,
+    "ivory_transmission": 0.02,
+    "subsurface_mm": 0.05
+  },
+  "name": "Mineral window",
+  "relief_mm": 0,
+  "schema_version": 1
+}

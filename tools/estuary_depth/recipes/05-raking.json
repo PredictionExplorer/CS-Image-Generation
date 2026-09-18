@@ -1,0 +1,22 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "elevation_degrees": 15,
+    "key_size_m": 0.2,
+    "key_watts": 6,
+    "world_strength": 0.025
+  },
+  "material": {
+    "blue_roughness": 0.6,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ivory_roughness": 0.4,
+    "subsurface_mm": 0.1
+  },
+  "name": "Ivory at dusk",
+  "relief_mm": 4,
+  "schema_version": 1
+}

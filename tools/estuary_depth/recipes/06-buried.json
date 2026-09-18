@@ -1,0 +1,16 @@
+{
+  "camera": {
+    "tilt_degrees": 8
+  },
+  "family": "layered",
+  "lighting": {},
+  "material": {
+    "blue_transmission": 0.4,
+    "coat": 0,
+    "ivory_transmission": 0,
+    "subsurface_mm": 0.05
+  },
+  "name": "Buried drawing",
+  "relief_mm": 0,
+  "schema_version": 1
+}

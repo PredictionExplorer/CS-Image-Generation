@@ -1,0 +1,57 @@
+{
+  "camera": {
+    "azimuth_degrees": -30,
+    "orbit_end": [
+      30,
+      25
+    ],
+    "orbit_start": [
+      0,
+      -40
+    ],
+    "target": [
+      0,
+      0
+    ],
+    "tilt_degrees": 22,
+    "zoom": 1
+  },
+  "family": "hybrid",
+  "layer_gap_mm": 0.6,
+  "lighting": {
+    "azimuth_degrees": -30,
+    "elevation_degrees": 40,
+    "fill_watts": 0.15,
+    "key_size_m": 0.22,
+    "key_watts": 4,
+    "world_strength": 0.005
+  },
+  "material": {
+    "blue_roughness": 0.45,
+    "blue_transmission": 0.7,
+    "coat": 0,
+    "glass_roughness": 0.08,
+    "glass_tint": [
+      0.9,
+      0.96,
+      1
+    ],
+    "ior": 1.3,
+    "ivory_roughness": 0.38,
+    "ivory_transmission": 0,
+    "subsurface_mm": 0.05,
+    "transmission_model": "clear-glaze",
+    "vermilion_roughness": 0.35
+  },
+  "name": "Porcelain over memory",
+  "relief_mm": 3,
+  "relief_smoothing_mm": 0.35,
+  "render": {
+    "resolution": [
+      1280,
+      960
+    ],
+    "samples": 48
+  },
+  "schema_version": 1
+}

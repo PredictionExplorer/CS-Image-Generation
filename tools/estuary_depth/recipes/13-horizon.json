@@ -1,0 +1,26 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "azimuth_degrees": 70,
+    "elevation_degrees": 18,
+    "fill_watts": 0.08,
+    "key_size_m": 0.12,
+    "key_watts": 8,
+    "world_strength": 0.008
+  },
+  "material": {
+    "blue_roughness": 0.7,
+    "blue_transmission": 0,
+    "coat": 0.03,
+    "ior": 1.3,
+    "ivory_roughness": 0.28,
+    "subsurface_mm": 0.15
+  },
+  "name": "Low winter light",
+  "relief_mm": 4,
+  "render": {},
+  "schema_version": 1
+}

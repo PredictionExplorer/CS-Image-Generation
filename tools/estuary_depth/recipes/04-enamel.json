@@ -1,0 +1,16 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.24,
+    "coat": 0.16,
+    "ivory_roughness": 0.24,
+    "subsurface_mm": 0.12
+  },
+  "name": "Wet enamel",
+  "relief_mm": 5,
+  "schema_version": 1
+}

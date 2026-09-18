@@ -1,0 +1,25 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "azimuth_degrees": 140,
+    "elevation_degrees": 60,
+    "fill_watts": 0.08,
+    "key_size_m": 0.4,
+    "world_strength": 0.008
+  },
+  "material": {
+    "blue_roughness": 0.3,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ior": 1.33,
+    "ivory_roughness": 0.4,
+    "subsurface_mm": 0.15
+  },
+  "name": "Silken mineral",
+  "relief_mm": 4,
+  "render": {},
+  "schema_version": 1
+}

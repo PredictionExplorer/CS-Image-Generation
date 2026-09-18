@@ -1,0 +1,19 @@
+{
+  "camera": {
+    "tilt_degrees": 18
+  },
+  "family": "relief",
+  "lighting": {
+    "elevation_degrees": 25
+  },
+  "material": {
+    "blue_roughness": 0.48,
+    "blue_transmission": 0,
+    "coat": 0.03,
+    "ivory_roughness": 0.28,
+    "subsurface_mm": 0.15
+  },
+  "name": "Deep carved current",
+  "relief_mm": 12,
+  "schema_version": 1
+}

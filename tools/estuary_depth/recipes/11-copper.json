@@ -1,0 +1,19 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "hybrid",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.42,
+    "blue_transmission": 0.45,
+    "coat": 0.04,
+    "ivory_transmission": 0.03,
+    "metallic_accent": 0.12,
+    "micro_bump_um": 2,
+    "subsurface_mm": 0.22
+  },
+  "name": "Copper seam",
+  "relief_mm": 3,
+  "schema_version": 1
+}

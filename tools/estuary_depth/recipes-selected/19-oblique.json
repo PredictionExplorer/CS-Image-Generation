@@ -1,0 +1,39 @@
+{
+  "camera": {
+    "azimuth_degrees": -30,
+    "target": [
+      0,
+      0
+    ],
+    "tilt_degrees": 28,
+    "zoom": 1
+  },
+  "family": "relief",
+  "lighting": {
+    "azimuth_degrees": -30,
+    "elevation_degrees": 40,
+    "fill_watts": 0.15,
+    "key_size_m": 0.22,
+    "key_watts": 4,
+    "world_strength": 0.005
+  },
+  "material": {
+    "blue_roughness": 0.45,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ior": 1.3,
+    "ivory_roughness": 0.38,
+    "subsurface_mm": 0.05,
+    "vermilion_roughness": 0.35
+  },
+  "name": "Oblique porcelain",
+  "relief_mm": 5,
+  "render": {
+    "resolution": [
+      3840,
+      2880
+    ],
+    "samples": 256
+  },
+  "schema_version": 1
+}

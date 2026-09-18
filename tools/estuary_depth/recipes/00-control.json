@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "tilt_degrees": 0
+  },
+  "family": "relief",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.5,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ivory_roughness": 0.38,
+    "subsurface_mm": 0
+  },
+  "name": "Lit painting",
+  "relief_mm": 0,
+  "schema_version": 1
+}

@@ -1,0 +1,25 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "fill_watts": 0.12,
+    "key_watts": 6,
+    "world_strength": 0.018
+  },
+  "material": {
+    "blue_roughness": 0.48,
+    "blue_transmission": 0,
+    "coat": 0.03,
+    "ivory_roughness": 0.28,
+    "subsurface_mm": 0.15
+  },
+  "name": "Porcelain in shadow",
+  "relief_mm": 4,
+  "render": {
+    "look": "AgX - Medium High Contrast",
+    "view_transform": "AgX"
+  },
+  "schema_version": 1
+}

@@ -1,0 +1,26 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "azimuth_degrees": 110,
+    "elevation_degrees": 55,
+    "fill_watts": 0.12,
+    "key_size_m": 0.28,
+    "key_watts": 5,
+    "world_strength": 0.012
+  },
+  "material": {
+    "blue_roughness": 0.58,
+    "blue_transmission": 0,
+    "coat": 0.03,
+    "ior": 1.33,
+    "ivory_roughness": 0.28,
+    "subsurface_mm": 0.15
+  },
+  "name": "Soft northern light",
+  "relief_mm": 4,
+  "render": {},
+  "schema_version": 1
+}

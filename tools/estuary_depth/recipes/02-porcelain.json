@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.48,
+    "blue_transmission": 0,
+    "coat": 0.03,
+    "ivory_roughness": 0.28,
+    "subsurface_mm": 0.15
+  },
+  "name": "Porcelain banks",
+  "relief_mm": 4,
+  "schema_version": 1
+}

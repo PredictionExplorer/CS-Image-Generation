@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "hybrid",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.42,
+    "blue_transmission": 0.45,
+    "coat": 0.03,
+    "ivory_transmission": 0.03,
+    "subsurface_mm": 0.22
+  },
+  "name": "Milky edges",
+  "relief_mm": 3,
+  "schema_version": 1
+}

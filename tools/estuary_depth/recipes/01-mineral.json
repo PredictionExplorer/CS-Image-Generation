@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "tilt_degrees": 8
+  },
+  "family": "relief",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.5,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ivory_roughness": 0.38,
+    "subsurface_mm": 0.05
+  },
+  "name": "Soft mineral",
+  "relief_mm": 2,
+  "schema_version": 1
+}

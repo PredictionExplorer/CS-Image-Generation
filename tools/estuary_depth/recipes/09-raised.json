@@ -1,0 +1,15 @@
+{
+  "camera": {
+    "tilt_degrees": 8
+  },
+  "family": "hybrid",
+  "lighting": {},
+  "material": {
+    "blue_transmission": 0.35,
+    "coat": 0.02,
+    "subsurface_mm": 0.1
+  },
+  "name": "Raised current",
+  "relief_mm": 2,
+  "schema_version": 1
+}

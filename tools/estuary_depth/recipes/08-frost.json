@@ -1,0 +1,16 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "layered",
+  "lighting": {},
+  "material": {
+    "blue_roughness": 0.45,
+    "blue_transmission": 0.5,
+    "coat": 0,
+    "subsurface_mm": 0.12
+  },
+  "name": "Frosted archive",
+  "relief_mm": 0,
+  "schema_version": 1
+}

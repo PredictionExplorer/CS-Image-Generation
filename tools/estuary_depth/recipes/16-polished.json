@@ -1,0 +1,24 @@
+{
+  "camera": {
+    "tilt_degrees": 12
+  },
+  "family": "relief",
+  "lighting": {
+    "azimuth_degrees": 120,
+    "elevation_degrees": 40,
+    "key_size_m": 0.25,
+    "world_strength": 0.012
+  },
+  "material": {
+    "blue_roughness": 0.16,
+    "blue_transmission": 0,
+    "coat": 0,
+    "ior": 1.45,
+    "ivory_roughness": 0.32,
+    "subsurface_mm": 0.15
+  },
+  "name": "Polished midnight",
+  "relief_mm": 4,
+  "render": {},
+  "schema_version": 1
+}
