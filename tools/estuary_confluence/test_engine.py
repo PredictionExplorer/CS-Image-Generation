@@ -46,9 +46,21 @@ class ConfigTests(unittest.TestCase):
             {"carrier_velocity": [0, float("nan")]},
             {"initial_pattern": "noise"},
             {"bloom_strength": -1},
+            {"settling_scale": -1},
+            {"initial_pattern": "scattered"},
+            {"initial_pattern": "scattered", "underpaint_strength": 0, "load_radius": 0.5},
+            {"initial_edge_width": 0},
+            {"flow_domain_scale": 0.9},
+            {"flow_domain_scale": 2},
+            {"flow_domain_scale": float("nan")},
         ):
             with self.subTest(config=config), self.assertRaises(ValueError):
                 validate_config(config)
+
+    def test_default_flow_boundary_resolves_to_the_simulation_guard(self):
+        self.assertEqual(validate_config({})["flow_domain_scale"], 1.6)
+        self.assertEqual(validate_config({"domain_scale": 2})["flow_domain_scale"], 2)
+        self.assertEqual(validate_config({"flow_domain_scale": 1})["flow_domain_scale"], 1)
 
     def test_reduction_requires_matching_integer_ratios(self):
         self.assertEqual(reduction_factor((4096, 3072), (1024, 768)), 4)
@@ -221,6 +233,150 @@ class GPUConfluenceTests(unittest.TestCase):
         engine.close()
         with self.assertRaises(RuntimeError):
             engine.snapshot()
+
+    def test_scattered_initial_pools_are_pure_and_all_chromatic_channels_are_visible(self):
+        engine = self.engine(
+            count=5,
+            initial_pattern="scattered",
+            underpaint_strength=0,
+            settling_scale=0,
+            burial_rate=0,
+        )
+        initial = engine.snapshot()
+        self.assertEqual(len(engine.layout["pools"]), 5)
+        self.assertEqual(engine.metadata["initial_layout"], engine.layout)
+        np.testing.assert_array_equal(initial["mobile"][..., -1], 0)
+        np.testing.assert_array_equal(initial["deposit"], 0)
+        np.testing.assert_array_equal(initial["underpaint"], 0)
+        self.assertTrue(np.all(initial["mobile"][..., :5].sum(axis=(0, 1)) > 0))
+        self.assertTrue(np.all((initial["mobile"] > 0).sum(axis=-1) <= 1))
+        self.assertTrue(np.isfinite(initial["mobile"]).all())
+        engine.advance_to(engine.steps)
+        settled = engine.snapshot()
+        np.testing.assert_array_equal(settled["deposit"], 0)
+        np.testing.assert_array_equal(settled["underpaint"], 0)
+        np.testing.assert_allclose(settled["mobile"], initial["mobile"], atol=2e-6)
+
+    def test_scattered_three_and_five_have_identical_primary_pool_rasters(self):
+        a = self.engine(count=3, initial_pattern="scattered", underpaint_strength=0)
+        first, layout = a.snapshot(), a.layout
+        a.close()
+        b = self.engine(count=5, initial_pattern="scattered", underpaint_strength=0)
+        np.testing.assert_array_equal(first["mobile"][..., :3], b.snapshot()["mobile"][..., :3])
+        self.assertEqual(layout["pools"], b.layout["pools"][:3])
+
+    def test_scattered_layout_is_resolution_independent(self):
+        a = self.engine(count=5, initial_pattern="scattered", underpaint_strength=0)
+        first = a.layout
+        a.close()
+        b = self.engine(
+            count=5, resolution=[192, 144], initial_pattern="scattered", underpaint_strength=0
+        )
+        self.assertEqual(first, b.layout)
+
+    def test_zero_settling_fast_path_exactly_matches_full_phase_dispatch(self):
+        config = {
+            "count": 5,
+            "initial_pattern": "scattered",
+            "underpaint_strength": 0,
+            "settling_scale": 0,
+            "flow_strength": 0.3,
+            "carrier_velocity": [0.2, 0.1],
+        }
+        fast = self.engine(**config)
+        self.assertTrue(fast._gpu.skip_phase)
+        self.assertIn("identically zero", fast.metadata["phase_exchange"])
+        self.assertIn("no trajectory pigment source", fast.metadata["mass_limitations"])
+        fast.advance_to(fast.steps)
+        expected = fast.snapshot()
+        count = fast._gpu.internal_steps
+        fast.close()
+        full = self.engine(**config)
+        full._gpu.skip_phase = False
+        full.advance_to(full.steps)
+        for key, value in full.snapshot().items():
+            np.testing.assert_array_equal(value, expected[key])
+        self.assertEqual(full._gpu.internal_steps, count)
+
+    def test_confined_shader_matches_analytic_curl_and_is_zero_outside_visible_extent(self):
+        from tools.estuary.engine import tool_uniforms
+        from tools.estuary.flow_reference import velocity
+
+        engine = self.engine(
+            flow_domain_scale=1, flow_strength=0.7, pair_swirl=0.2, carrier_velocity=[0.3, 0.1]
+        )
+        gpu = engine._gpu
+        with gpu.ctx:
+            gpu._flow(0.37)
+            actual = np.frombuffer(gpu.velocity.read(), dtype="f4").reshape(72, 96, 2)
+        x = ((np.arange(96) + 0.5) / 96 * 2 - 1) * gpu.aspect * gpu.domain
+        y = ((np.arange(72) + 0.5) / 72 * 2 - 1) * gpu.domain
+        xx, yy = np.meshgrid(x, y)
+        points = np.stack([xx, yy], axis=-1)
+        tools, pairs = tool_uniforms(gpu.source.frame(0.37), engine.config["stir_radius"])
+        expected = velocity(
+            points,
+            tools,
+            pairs,
+            aspect=gpu.aspect,
+            stir_radius=engine.config["stir_radius"],
+            flow_strength=0.7,
+            pair_swirl=0.2,
+            domain_scale=1,
+            carrier_velocity=(0.3, 0.1),
+        )
+        np.testing.assert_allclose(actual, expected, rtol=2e-4, atol=2e-6)
+        outside = (np.abs(xx) >= gpu.aspect) | (np.abs(yy) >= 1)
+        np.testing.assert_array_equal(actual[outside], 0)
+        self.assertGreater(float(np.linalg.norm(actual[~outside], axis=-1).max()), 0)
+
+    def test_confined_flow_keeps_each_scattered_pigment_inside_the_visible_painting(self):
+        engine = self.engine(
+            count=5,
+            resolution=[192, 144],
+            steps=120,
+            initial_pattern="scattered",
+            underpaint_strength=0,
+            settling_scale=0,
+            flow_domain_scale=1,
+            flow_strength=1.1,
+            pair_swirl=0.9,
+            carrier_velocity=[2, 0.2],
+        )
+        engine.advance_to(engine.steps)
+        pigment = engine.snapshot()["pigment"][..., :5]
+        gpu = engine._gpu
+        x = ((np.arange(gpu.width) + 0.5) / gpu.width * 2 - 1) * gpu.aspect * gpu.domain
+        y = ((np.arange(gpu.height) + 0.5) / gpu.height * 2 - 1) * gpu.domain
+        outside = (np.abs(x)[None, :] >= gpu.aspect) | (np.abs(y)[:, None] >= 1)
+        total = pigment.sum(axis=(0, 1))
+        self.assertTrue(np.all(total > 0))
+        self.assertTrue(np.all(pigment[outside].sum(axis=0) / total < 1e-5))
+
+    def test_scattered_initial_state_ignores_body_mixtures_and_palette_colors(self):
+        from tools.estuary.test_engine import SourceFixture
+
+        a = self.engine(count=5, initial_pattern="scattered", underpaint_strength=0)
+        initial, layout = a.snapshot(), a.layout
+        palette, config = a.palette, a.config
+        a.close()
+        palette["pigments_srgb"] = [[0.5, 0.1, 0.2]] * 6
+        palette["body_mixtures"] = [[1, 0, 0, 0, 0, 0]] * 3
+        b = Engine(SourceFixture(), config, palette, [])
+        self.addCleanup(b.close)
+        self.assertEqual(layout, b.layout)
+        np.testing.assert_array_equal(initial["mobile"], b.snapshot()["mobile"])
+
+    def test_legacy_initialization_ignores_new_edge_control(self):
+        for pattern in ("pools", "strata"):
+            a = self.engine(initial_pattern=pattern, initial_edge_width=0.001)
+            initial = a.snapshot()
+            a.close()
+            b = self.engine(initial_pattern=pattern, initial_edge_width=0.25)
+            self.assertIsNone(b.layout)
+            for key, value in b.snapshot().items():
+                np.testing.assert_array_equal(value, initial[key])
+            b.close()
 
 
 if __name__ == "__main__":

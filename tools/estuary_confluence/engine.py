@@ -27,6 +27,7 @@ DEFAULTS = {
     "resolution": [1024, 768],
     "steps": 3600,
     "domain_scale": 1.6,
+    "flow_domain_scale": None,
     "flow_strength": 1.1,
     "carrier_velocity": [2.0, 0.2],
     "stir_radius": 0.22,
@@ -35,11 +36,13 @@ DEFAULTS = {
     "deposition": 0.025,
     "initial_load": 0.18,
     "initial_pattern": "pools",
+    "initial_edge_width": 0.02,
     "load_radius": 0.28,
     "fade": 4.0,
     "drying": 2.0,
     "wetting": 0.8,
     "granulation": 0.55,
+    "settling_scale": 1.0,
     "shoreline_strength": 1.2,
     "bloom_strength": 1.0,
     "underpaint_strength": 0.035,
@@ -77,11 +80,13 @@ def validate_config(value):
         "brush_radius": (0.002, 1),
         "deposition": (0, 100),
         "initial_load": (0, 10),
+        "initial_edge_width": (0.001, 0.25),
         "load_radius": (0.001, 2),
         "fade": (0, 20),
         "drying": (0, 30),
         "wetting": (0, 10),
         "granulation": (0, 1),
+        "settling_scale": (0, 10),
         "shoreline_strength": (0, 5),
         "bloom_strength": (0, 5),
         "underpaint_strength": (0, 2),
@@ -108,8 +113,21 @@ def validate_config(value):
     ):
         raise ValueError("carrier_velocity requires two finite values in [-8, 8]")
     result["carrier_velocity"] = list(map(float, carrier))
-    if result["initial_pattern"] not in ("strata", "pools"):
-        raise ValueError("initial_pattern must be strata or pools")
+    flow_domain = result["flow_domain_scale"]
+    if flow_domain is None:
+        flow_domain = result["domain_scale"]
+    if type(flow_domain) not in (int, float) or not 1 <= flow_domain <= result["domain_scale"]:
+        raise ValueError("flow_domain_scale must be within [1, domain_scale]")
+    result["flow_domain_scale"] = float(flow_domain)
+    if result["initial_pattern"] not in ("strata", "pools", "scattered"):
+        raise ValueError("initial_pattern must be strata, pools or scattered")
+    if result["initial_pattern"] == "scattered":
+        from .layout import MAX_LOAD_RADIUS
+
+        if result["underpaint_strength"] != 0:
+            raise ValueError("Scattered pure pools require underpaint_strength=0")
+        if result["load_radius"] > MAX_LOAD_RADIUS:
+            raise ValueError(f"Scattered load_radius must not exceed {MAX_LOAD_RADIUS}")
     return result
 
 
@@ -254,6 +272,20 @@ class Engine:
         self.palette = copy.deepcopy(palette)
         self.events = events = validate_events(events)
         count, arrays = _palette_arrays(palette)
+        self.layout = layout = None
+        if settings["initial_pattern"] == "scattered":
+            from .layout import plan_layout
+
+            if palette["chalk_index"] != count - 1:
+                raise ValueError("Scattered palettes must list chromatic pigments before chalk")
+            self.layout = layout = plan_layout(
+                palette["seed"],
+                count - 1,
+                settings["resolution"][0] / settings["resolution"][1],
+                load_radius=settings["load_radius"],
+                initial_load=settings["initial_load"],
+                edge_width=settings["initial_edge_width"],
+            )
         transport_keys = (
             "resolution",
             "steps",
@@ -285,6 +317,22 @@ class Engine:
                 try:
                     super().__init__(source, recipe, backend)
                     with gpu.ctx:
+                        if settings["flow_domain_scale"] != gpu.domain:
+                            gpu.flow.release()
+                            gpu.flow = gpu.ctx.compute_shader(
+                                (ROOT / "shaders/flow.glsl").read_text()
+                            )
+                            for key, value in {
+                                "u_size": (gpu.width, gpu.height),
+                                "u_aspect": gpu.aspect,
+                                "u_domain": gpu.domain,
+                                "u_flow_domain": settings["flow_domain_scale"],
+                                "u_radius": settings["stir_radius"],
+                                "u_strength": settings["flow_strength"],
+                                "u_pair_gain": settings["pair_swirl"],
+                                "u_carrier": tuple(settings["carrier_velocity"]),
+                            }.items():
+                                gpu.flow[key].value = value
                         gpu.correct.release()
                         gpu.correct = gpu.ctx.compute_shader(
                             (ROOT / "shaders/correct.glsl").read_text()
@@ -331,6 +379,9 @@ class Engine:
                                 gpu.domain,
                                 substrate_seed(palette["substrate_seed"]),
                             ).tobytes()
+                        )
+                        gpu.skip_phase = (
+                            settings["settling_scale"] == 0 and settings["underpaint_strength"] == 0
                         )
                         gpu._snapshot_texture = None
                         gpu._initialize_paint()
@@ -381,12 +432,24 @@ class Engine:
                             + mixtures[2, channel] * accent
                         )
                     state[..., palette["chalk_index"]] += white * 0.88
-                else:
+                elif settings["initial_pattern"] == "pools":
                     for body, p in enumerate(initial):
                         r2 = (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
                         load = gpu._compact_brush(r2 / radius**2)
                         state += load[..., None] * mixtures[body] * arrays["body_weights"][body]
-                state *= settings["initial_load"]
+                else:
+                    from .layout import pool_profile
+
+                    for pool in layout["pools"]:
+                        p = pool["position"]
+                        distance_to_pool = np.sqrt(
+                            (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
+                        )
+                        state[..., pool["pigment_index"]] = pool["load"] * pool_profile(
+                            distance_to_pool, pool["radius"], pool["edge_width"]
+                        )
+                if settings["initial_pattern"] != "scattered":
+                    state *= settings["initial_load"]
                 # The quiet buried accent is spatially tied to the initial
                 # triangle's strata. This is actual pigment, never an overlay.
                 under = np.zeros_like(state)
@@ -486,6 +549,14 @@ class Engine:
                 gpu.carrier[3].bind_to_image(0, read=False, write=True)
                 gpu._dispatch(gpu.carrier_phase)
                 gpu.carrier[0], gpu.carrier[3] = gpu.carrier[3], gpu.carrier[0]
+                if not gpu.skip_phase:
+                    gpu._exchange_phases(dt)
+                gpu.paint = gpu.blocks[0]
+                gpu.internal_steps += 1
+                if gpu.internal_steps > MAX_INTERNAL_STEPS:
+                    raise RuntimeError("Confluence transport work cap exceeded")
+
+            def _exchange_phases(gpu, dt):
                 gpu.phase["u_dt"].value = dt
                 gpu.phase["u_has_other"].value = len(gpu.blocks) > 1
                 for index, (block, deposits, underpaints) in enumerate(
@@ -513,6 +584,8 @@ class Engine:
                         values = np.zeros(4, dtype="f4")
                         channels = min(4, count - index * 4)
                         values[:channels] = arrays[key][index * 4 : index * 4 + channels]
+                        if key == "settling" and settings["settling_scale"] != 1.0:
+                            values *= settings["settling_scale"]
                         gpu.phase[uniform].value = tuple(values)
                     block[3].bind_to_image(0, read=False, write=True)
                     deposits[1].bind_to_image(1, read=False, write=True)
@@ -524,10 +597,6 @@ class Engine:
                     block[0], block[3] = block[3], block[0]
                     deposits.reverse()
                     underpaints.reverse()
-                gpu.paint = gpu.blocks[0]
-                gpu.internal_steps += 1
-                if gpu.internal_steps > MAX_INTERNAL_STEPS:
-                    raise RuntimeError("Confluence transport work cap exceeded")
 
             def _read(gpu, texture, factor):
                 width, height = gpu.width // factor, gpu.height // factor
@@ -643,6 +712,26 @@ class Engine:
                 "GPU exact integer area integration of phase concentrations before appearance"
             ),
         }
+        if layout is not None:
+            self.metadata["initial_layout"] = copy.deepcopy(layout)
+        if settings["deposition"] == 0:
+            self.metadata["mass_limitations"] = (
+                "interpolated transport may drift; no trajectory pigment source; "
+                "water events add only carrier"
+            )
+        if self._gpu.skip_phase:
+            self.metadata["phase_exchange"] = (
+                "stationary phases remain identically zero; exact exchange dispatch is skipped "
+                "because settling_scale and initial underpaint are both zero"
+            )
+        if settings["flow_domain_scale"] != settings["domain_scale"]:
+            extent = settings["flow_domain_scale"]
+            aspect = self._gpu.aspect
+            self.metadata["flow_bounds"] = [[-aspect * extent, -extent], [aspect * extent, extent]]
+            self.metadata["flow_boundary"] = (
+                "compact stream-function support inside the unchanged simulation guard; "
+                "velocity and normal transport vanish at the active boundary"
+            )
 
     @property
     def steps(self):

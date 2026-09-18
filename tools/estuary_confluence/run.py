@@ -85,6 +85,7 @@ def validate_recipe(raw):
             "schema_version",
             "name",
             "chromatic_count",
+            "palette_mode",
             "looks",
             "encounters",
             "simulation",
@@ -100,6 +101,11 @@ def validate_recipe(raw):
     )
     count = raw.get("chromatic_count", 3)
     require(type(count) is int and count in (3, 5), "Use three or five chromatic pigments")
+    palette_mode = raw.get("palette_mode", "curated")
+    require(
+        type(palette_mode) is str and palette_mode in ("curated", "harmonic", "random"),
+        "Choose a curated, harmonic, or random palette",
+    )
     name = raw.get("name", "Confluence Fresco")
     require(isinstance(name, str) and 0 < len(name) <= 100, "Painting needs a short name")
     looks = raw.get("looks", ["layered"])
@@ -164,6 +170,7 @@ def validate_recipe(raw):
         "schema_version": 1,
         "name": name,
         "chromatic_count": count,
+        "palette_mode": palette_mode,
         "looks": looks,
         "encounters": encounters,
         "simulation": simulation,
@@ -184,6 +191,24 @@ def surface_configs(recipe):
     }
 
 
+def resolved_layout(recipe, seed):
+    """Resolve initial geometry without a GPU or any dependence on frame cadence."""
+    from tools.estuary_confluence.layout import plan_layout
+
+    settings = recipe["simulation"]
+    if settings["initial_pattern"] != "scattered":
+        return None
+    width, height = settings["resolution"]
+    return plan_layout(
+        seed,
+        recipe["chromatic_count"],
+        width / height,
+        load_radius=settings["load_radius"],
+        initial_load=settings["initial_load"],
+        edge_width=settings["initial_edge_width"],
+    )
+
+
 def field_digest(fields):
     """Container-independent identity of the actual physical state."""
     sha = hashlib.sha256()
@@ -195,7 +220,7 @@ def field_digest(fields):
 
 
 def verify_run(folder):
-    from tools.estuary_confluence.palette import normalize_seed
+    from tools.estuary_confluence.palette import generate_palette, normalize_seed
     from tools.estuary_confluence.surface import validate_fields
 
     folder = Path(folder)
@@ -215,6 +240,8 @@ def verify_run(folder):
     }
     for look in request["recipe"]["looks"]:
         required |= {f"{look}/poster.png", f"{look}/poster-linear.npy"}
+        if request.get("layout") is not None:
+            required |= {"layout.json", f"{look}/initial.png"}
         if request["mode"] == "film":
             required |= {f"{look}/film.mp4", f"{look}/movie.json"}
     require(required <= receipt["artifacts"].keys(), "Required confluence artifacts are missing")
@@ -231,6 +258,24 @@ def verify_run(folder):
         and read(folder / "palette.json") == request["palette"]
         and read(folder / "events.json") == request["events"],
         "Archived design inputs differ",
+    )
+    expected_layout = resolved_layout(request["recipe"], request["source"]["seed"])
+    require(request.get("layout") == expected_layout, "Seeded starting layout differs")
+    if expected_layout is not None:
+        require(read(folder / "layout.json") == expected_layout, "Archived starting pools differ")
+    require(
+        request["recipe"].get("palette_mode", "curated")
+        == request["palette"].get("mode", "curated"),
+        "Palette algorithm differs from its recipe",
+    )
+    require(
+        request["palette"]
+        == generate_palette(
+            request["source"]["seed"],
+            request["recipe"]["chromatic_count"],
+            mode=request["recipe"].get("palette_mode", "curated"),
+        ),
+        "Palette is not derived from its seed and algorithm",
     )
     require(
         receipt["source"] == request["source"]
@@ -262,6 +307,11 @@ def verify_run(folder):
                 record == receipt["artifacts"][f"{look}/frames/{i:06d}.png"],
                 "Certified frame differs",
             )
+            if i == 0 and expected_layout is not None:
+                require(
+                    record == receipt["artifacts"][f"{look}/initial.png"],
+                    "Starting-pool image differs from the film's initial state",
+                )
     with np.load(folder / "final.npz", allow_pickle=False) as archive:
         final = {key: archive[key] for key in archive.files}
     validate_fields(final, request["recipe"]["chromatic_count"] + 1)
@@ -313,7 +363,8 @@ def run(args):
     code = runtime_identity()
     sw, sh = recipe["simulation"]["resolution"]
     source = Source.read(args.source, aspect=sw / sh, **recipe["projection"])
-    palette = generate_palette(source.seed, recipe["chromatic_count"])
+    palette = generate_palette(source.seed, recipe["chromatic_count"], mode=recipe["palette_mode"])
+    layout = resolved_layout(recipe, source.seed)
     events = plan_events(source, recipe["encounters"])
     frames = [] if args.still_only else frame_plan(recipe)
     binaries = {}
@@ -329,6 +380,7 @@ def run(args):
         engine = Engine(source, recipe["simulation"], palette, events)
         surfaces = {}
         try:
+            require(getattr(engine, "layout", None) == layout, "Engine starting layout differs")
             configs = surface_configs(recipe)
             for look, config in configs.items():
                 surfaces[look] = Surface(config, palette)
@@ -340,6 +392,7 @@ def run(args):
                 "source": source.metadata,
                 "palette": palette,
                 "events": events,
+                "layout": layout,
                 "mode": "film" if frames else "still",
                 "frames": frames,
                 "binaries": binaries,
@@ -363,6 +416,8 @@ def run(args):
             write(output / "receipt.json", {"complete": False, "identity_sha256": identity})
             for name, value in (("recipe", recipe), ("palette", palette), ("events", events)):
                 write(output / f"{name}.json", value)
+            if layout is not None:
+                write(output / "layout.json", layout)
             (output / "inputs").mkdir()
             shutil.copyfile(args.source, output / "inputs/source.orbit")
             require(
@@ -382,10 +437,24 @@ def run(args):
                 name: artifact(output / name)
                 for name in ("recipe.json", "palette.json", "events.json", "inputs/source.orbit")
             }
+            if layout is not None:
+                artifacts["layout.json"] = artifact(output / "layout.json")
             for look in surfaces:
                 (output / look).mkdir()
                 if frames:
                     (output / look / "frames").mkdir()
+            if layout is not None and not frames:
+                initial = engine.snapshot(resolution=tuple(render["capture_resolution"]))
+                for look, surface in surfaces.items():
+                    pixels = surface.render(
+                        initial,
+                        size=tuple(render["resolution"]),
+                        tilt_degrees=0.0,
+                        azimuth_degrees=render["azimuth_start"],
+                    )
+                    path = output / look / "initial.png"
+                    write_png(path, pixels, depth=8)
+                    artifacts[f"{look}/initial.png"] = artifact(path)
             fields, ledger = None, []
             for i, frame in enumerate(frames):
                 changed = fields is None or frame["step"] != engine.step
@@ -407,6 +476,9 @@ def run(args):
                         )
                         write_png(path, pixels, depth=8)
                     images[look] = artifacts[name] = artifact(path)
+                    if i == 0 and layout is not None:
+                        shutil.copyfile(path, output / look / "initial.png")
+                        artifacts[f"{look}/initial.png"] = images[look]
                 ledger.append({"frame": i, "timing": frame, "images": images})
                 if i % 24 == 0 or i == len(frames) - 1:
                     write(

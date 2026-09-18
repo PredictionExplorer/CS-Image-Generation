@@ -65,7 +65,7 @@ def _name(palette):
     return f"{palette['family'].replace('-', ' ').title()} · {palette['chromatic_count']} colors"
 
 
-def _swatches(palette):
+def _swatches(palette, *, include_chalk=True):
     count = palette["chromatic_count"] + 1
     require(
         len(palette["pigments_srgb"])
@@ -86,14 +86,89 @@ def _swatches(palette):
             "Invalid palette swatch",
         )
         result.append({"name": name, "role": role, "rgba": [*color, 1.0]})
-    return result
+    return result if include_chalk else [s for s in result if s["role"] != "chalk"]
 
 
-def _comparisons(studies):
+def _comparison_inputs(first, second, *, count_change):
+    """Check the archived experiment inputs behind a controlled comparison.
+
+    Legacy count comparisons retain their old caption and do not invent pool
+    geometry. New scattered comparisons must preserve the common pool prefix.
+    Palette comparisons may change colors but preserve every material control.
+    """
+    layouts = [request.get("layout") for request in (first, second)]
+    if count_change and layouts == [None, None]:
+        return False
+    require(
+        (layouts[0] is None) == (layouts[1] is None),
+        "Comparison mixes scattered and legacy initial conditions",
+    )
+    for key in ("simulation", "projection"):
+        require(
+            first["recipe"].get(key) == second["recipe"].get(key),
+            f"Comparison {key} controls differ",
+        )
+    for key in ("events", "code"):
+        require(first.get(key) == second.get(key), f"Comparison {key} differ")
+    if count_change:
+        counts = [request["recipe"]["chromatic_count"] for request in (first, second)]
+        require(sorted(counts) == [3, 5], "Count comparison must use three and five colors")
+        require(
+            all(
+                request["recipe"]["simulation"].get("deposition") == 0
+                for request in (first, second)
+            ),
+            "Starting-pool comparison requires zero continuing deposition",
+        )
+        require(
+            {key: value for key, value in layouts[0].items() if key not in ("count", "pools")}
+            == {key: value for key, value in layouts[1].items() if key not in ("count", "pools")},
+            "Comparison starting layout controls differ",
+        )
+        require(
+            layouts[0]["pools"][:3] == layouts[1]["pools"][:3],
+            "Comparison first three starting pools differ",
+        )
+    else:
+        require(layouts[0] == layouts[1], "Palette comparison starting layouts differ")
+    a, b = first["palette"], second["palette"]
+    for key in (
+        "substrate_srgb",
+        "substrate_seed",
+        "body_weights",
+        "underpaint_index",
+        "version",
+        "physical_version",
+    ):
+        require(a.get(key) == b.get(key), f"Comparison palette {key} differs")
+    if layouts[0] is not None:
+        require(a["substrate_srgb"] == [1, 1, 1], "Scattered comparison requires a white ground")
+    for key in ("scattering", "settling", "release", "specific_volumes", "granulation"):
+        values_a, values_b = a[key], b[key]
+        if count_change:
+            values_a, values_b = [*values_a[:3], values_a[-1]], [*values_b[:3], values_b[-1]]
+        require(values_a == values_b, f"Comparison pigment {key} differs")
+    if count_change:
+        require(
+            a["pigments_srgb"][:3] == b["pigments_srgb"][:3]
+            and a["pigments_srgb"][-1] == b["pigments_srgb"][-1],
+            "Comparison primary pigment colors differ",
+        )
+    else:
+        require(a["body_mixtures"] == b["body_mixtures"], "Palette comparison body mixtures differ")
+    return layouts[0] is not None
+
+
+def _comparisons(studies, case_requests):
     """Derive unambiguous same-source comparisons and reject false pairings."""
     indexed, source_by_seed = {}, {}
     for study in studies:
-        key = (study["seed"], study["chromatic_count"], study["group"])
+        key = (
+            study["seed"],
+            study.get("palette_mode", "curated"),
+            study["chromatic_count"],
+            study["group"],
+        )
         require(key not in indexed, "Ambiguous duplicate seed, pigment count, and optical view")
         indexed[key] = study
         source_by_seed.setdefault(study["seed"], study["source_sha256"])
@@ -104,17 +179,46 @@ def _comparisons(studies):
     result = {}
     for study in studies:
         seed, count, look = study["seed"], study["chromatic_count"], study["group"]
-        if count == 5 and look == "layered":
-            target = indexed.get((seed, 3, "layered"))
+        mode = study.get("palette_mode", "curated")
+        if mode == "random":
+            target = indexed.get((seed, "harmonic", count, look))
+            caption = "Seeded harmony · same starting pools and motion"
+            if target:
+                require(
+                    study["physical_state_sha256"] == target["physical_state_sha256"],
+                    "Palette comparison uses different physical states",
+                )
+                _comparison_inputs(
+                    case_requests[study["case_id"]],
+                    case_requests[target["case_id"]],
+                    count_change=False,
+                )
+        elif count == 5 and look == "layered":
+            target = indexed.get((seed, mode, 3, "layered"))
             caption = "Three colors · layered"
+            if target and _comparison_inputs(
+                case_requests[study["case_id"]], case_requests[target["case_id"]], count_change=True
+            ):
+                caption = "Three colors · three starting pools"
         else:
-            target = indexed.get((seed, count, "homogeneous" if look == "layered" else "layered"))
+            target = indexed.get(
+                (seed, mode, count, "homogeneous" if look == "layered" else "layered")
+            )
             caption = ("Blended" if look == "layered" else "Layered") + " · same material history"
             if target:
                 require(
                     study["physical_state_sha256"] == target["physical_state_sha256"],
                     "Optical comparison uses different physical states",
                 )
+            if target is None and mode == "harmonic" and count == 3:
+                target = indexed.get((seed, mode, 5, look))
+                caption = "Five colors · layered"
+                if target and _comparison_inputs(
+                    case_requests[study["case_id"]],
+                    case_requests[target["case_id"]],
+                    count_change=True,
+                ):
+                    caption = "Five colors · two additional starting pools"
         result[study["id"]] = (
             (target["id"], target["image"], caption) if target else (None, None, None)
         )
@@ -168,6 +272,12 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                 paths[name] = copy(
                     case / f"{name}.json", f"records/{case_id}/{name}.json", _json_artifact(value)
                 )
+            if request.get("layout") is not None:
+                paths["layout"] = copy(
+                    case / "layout.json",
+                    f"records/{case_id}/layout.json",
+                    _json_artifact(request["layout"]),
+                )
             origins.append(
                 {
                     "id": case_id,
@@ -187,6 +297,12 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                     poster_info,
                 )
                 film = None
+                initial = None
+                if request.get("layout") is not None:
+                    info = receipt["artifacts"][f"{look}/initial.png"]
+                    initial = copy(
+                        case / look / "initial.png", f"assets/{info['sha256']}/initial.png", info
+                    )
                 if request["mode"] == "film":
                     info = receipt["artifacts"][f"{look}/film.mp4"]
                     film = copy(case / look / "film.mp4", f"assets/{info['sha256']}/film.mp4", info)
@@ -200,12 +316,15 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
                         "group": look,
                         "seed": seed,
                         "chromatic_count": palette["chromatic_count"],
+                        "palette_mode": request["recipe"].get("palette_mode", "curated"),
                         "image": poster,
+                        "initial": initial,
                         "film": film,
                         "source_sha256": request["source"]["sha256"],
                         "palette_identity_sha256": palette["identity_sha256"],
                         "palette_record": paths["palette"],
-                        "swatches": _swatches(palette),
+                        "layout_record": paths.get("layout"),
+                        "swatches": _swatches(palette, include_chalk=initial is None),
                         "resolution": request["recipe"]["render"]["still_resolution"],
                         **film_metadata,
                     }
@@ -214,10 +333,14 @@ def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=Fals
         studies.sort(
             key=lambda study: (
                 seeds.index(study["seed"]),
+                study["palette_mode"] == "random",
                 rank[(study["chromatic_count"], study["group"])],
             )
         )
-        comparisons = _comparisons(studies)
+        case_requests = {
+            receipt["identity_sha256"][:16]: request for _, request, receipt in records
+        }
+        comparisons = _comparisons(studies, case_requests)
         for study in studies:
             study["comparison_id"], study["baseline"], study["comparison_caption"] = comparisons[
                 study["id"]
@@ -271,13 +394,14 @@ def verify_gallery(output):
         len(origins) == len(curation["sources"]) and len(studies) == len(collection["studies"]),
         "Duplicate source or optical-view identity",
     )
-    expected_ids = set()
+    expected_ids, case_requests = set(), {}
     for case_id, origin in origins.items():
         require(
             all(origin[key] in files for key in ("request", "receipt", "palette", "events")),
             "Source design records are not archived",
         )
         request, receipt = read(output / origin["request"]), read(output / origin["receipt"])
+        case_requests[case_id] = request
         identity = hashlib.sha256(encoded(request)).hexdigest()
         require(
             identity == receipt["identity_sha256"] == origin["identity_sha256"]
@@ -291,6 +415,12 @@ def verify_gallery(output):
             and read(output / origin["events"]) == request["events"],
             "Source design differs",
         )
+        if request.get("layout") is not None:
+            require(
+                origin.get("layout") in files
+                and read(output / origin["layout"]) == request["layout"],
+                "Published starting pools differ",
+            )
         require(
             receipt["source"] == source
             and origin["source_sha256"] == source["sha256"]
@@ -321,9 +451,20 @@ def verify_gallery(output):
                 == palette["chromatic_count"]
                 and study["palette_identity_sha256"] == palette["identity_sha256"]
                 and study["palette_record"] == origin["palette"]
-                and study["swatches"] == _swatches(palette),
+                and study.get("palette_mode", "curated") == recipe.get("palette_mode", "curated")
+                and study.get("layout_record") == origin.get("layout")
+                and study["swatches"]
+                == _swatches(palette, include_chalk=request.get("layout") is None),
                 "Painting caption or palette association differs",
             )
+            if request.get("layout") is not None:
+                require(
+                    study.get("initial") in files
+                    and files[study["initial"]] == receipt["artifacts"][f"{look}/initial.png"],
+                    "Published starting-pool image differs",
+                )
+            else:
+                require(study.get("initial") is None, "Unbound starting-pool image")
             require(
                 study["resolution"] == recipe["render"]["still_resolution"]
                 and study["image"] in files
@@ -348,7 +489,7 @@ def verify_gallery(output):
                     "A still view cannot advertise a film",
                 )
     require(expected_ids == set(studies), "Gallery contains unbound optical views")
-    comparisons = _comparisons(collection["studies"])
+    comparisons = _comparisons(collection["studies"], case_requests)
     for study in collection["studies"]:
         require(
             (study["comparison_id"], study["baseline"], study["comparison_caption"])

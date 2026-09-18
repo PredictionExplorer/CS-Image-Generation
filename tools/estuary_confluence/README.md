@@ -4,6 +4,45 @@ Seeded pigment, selective deposition, and revealed underpainting driven by the
 complete recorded three-body trajectory. This experiment extends Tidal Fresco
 without changing the earlier Estuary, depth, or studio packages.
 
+## Scattered color studies
+
+The new `scattered-three.json`, `scattered-five.json`, and `random-five.json`
+recipes give each chromatic pigment its own separate starting pool. Three colors
+means three pools; five means five. Positions, radii, and loads come from the
+complete seed through a versioned layout generator. It resolves five pools before
+selecting the count, preserving the first three exactly in count comparisons.
+Placement does not depend on palette choice, resolution, camera, or frame rate.
+
+`palette_mode="harmonic"` chooses a base hue over the full color wheel and builds
+related hues with distinct lightness and chroma. `palette_mode="random"` chooses
+the other hues independently. Both use bounded gamut mapping and checks on actual
+pigment mixtures. These are constrained random colors, not uniform random RGB
+triples; the checks preserve visible distinctions, not a promise of artistic
+quality. Neither new mode chooses colors from the old six palette families.
+`palette_mode="curated"` remains the default and preserves released palettes.
+
+The scattered recipes introduce no additional paint along body paths and disable
+settling and burial, so the moving paint leaves no stationary colored deposit.
+The three bodies still determine the flow. Its active boundary is the visible
+canvas, while the larger simulation guard remains available for camera movement.
+This keeps starting colors from circulating outside the photographed region.
+The shared chalk channel remains in
+the material format for compatibility but starts empty and stays empty.
+
+The opt-in `surface.finish="crisp"` is an intentional filled-pigment print
+interpretation. A contour of actual pigment concentration defines the silhouette;
+only a one-pixel antialiasing transition blends its edge. Inside, optical
+concentrations are normalized to a common reference while preserving pigment and
+phase proportions. Outside, the ground is exactly the requested constant color,
+unaffected by wetness, surface grain, lighting, or shadows. This display treatment
+does not alter the archived physical state or claim physically opaque thin paint.
+
+Every scattered archive includes `layout.json` with exact initial conditions and
+an `initial.png` for each optical view. For films, that image is byte-identical to
+the first frame. The gallery's **Starting colors** control shows these actual
+starting pools. Independent-color comparisons use the same layout and material
+history as their harmonic counterparts; color-count comparisons add two pools.
+
 ## What is simulated
 
 - **Three or five colored pigments plus shared chalk.** Six curated palette

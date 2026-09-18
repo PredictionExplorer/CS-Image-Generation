@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -68,6 +69,9 @@ class FakeEngine:
         self.visited, self.snapshots = [], []
         self.closed = False
         self.metadata = {"renderer": "CPU physical-history fixture"}
+        self.layout = runner.resolved_layout(
+            {"simulation": config, "chromatic_count": palette["chromatic_count"]}, source.seed
+        )
         self.instances.append(self)
 
     def advance_to(self, step):
@@ -166,6 +170,8 @@ class RecipeAndTimelineTests(unittest.TestCase):
     def test_unknown_or_incompatible_controls_fail_before_allocating_resources(self):
         changes = [
             {"chromatic_count": 4},
+            {"palette_mode": "unknown"},
+            {"palette_mode": True},
             {"looks": ["layered", "layered"]},
             {"looks": ["neon"]},
             {"encounters": 4},
@@ -355,6 +361,98 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(request["palette"]["chalk_index"], 5)
         with np.load(self.args.output / "final.npz") as fields:
             self.assertEqual(fields["pigment"].shape[-1], 6)
+
+    def scatter_recipe(self, mode="harmonic"):
+        raw = small_recipe()
+        raw.update(chromatic_count=5, palette_mode=mode, looks=["layered"])
+        raw["simulation"].update(
+            initial_pattern="scattered",
+            underpaint_strength=0,
+            settling_scale=0,
+            burial_rate=0,
+            deposition=0,
+        )
+        raw["surface"] = {"finish": "crisp"}
+        write(self.recipe, raw)
+        return raw
+
+    def test_scattered_still_archives_exact_seeded_geometry_and_initial_image(self):
+        self.scatter_recipe()
+        runner.run(self.args)
+        request, receipt = runner.verify_run(self.args.output)
+        self.assertEqual(request["palette"]["mode"], "harmonic")
+        self.assertEqual(request["layout"], FakeEngine.instances[-1].layout)
+        self.assertEqual(request["layout"], read(self.args.output / "layout.json"))
+        self.assertEqual(len(request["layout"]["pools"]), 5)
+        self.assertIn("layered/initial.png", receipt["artifacts"])
+        self.assertEqual(FakeEngine.instances[-1].visited, [10])
+        self.assertEqual(FakeEngine.instances[-1].snapshots[0][0], 0)
+
+    def test_scattered_film_initial_image_is_exact_first_frame(self):
+        self.scatter_recipe("random")
+        self.args.still_only = False
+        runner.run(self.args)
+        request, receipt = runner.verify_run(self.args.output)
+        self.assertEqual(request["palette"]["mode"], "random")
+        self.assertEqual(
+            receipt["artifacts"]["layered/initial.png"],
+            receipt["artifacts"]["layered/frames/000000.png"],
+        )
+        self.assertEqual(FakeEngine.instances[-1].visited, [0, 2, 4, 6, 8, 10])
+
+    def test_rehashed_layout_cannot_change_bound_positions(self):
+        self.scatter_recipe()
+        runner.run(self.args)
+        path = self.args.output / "layout.json"
+        layout = read(path)
+        layout["pools"][0]["position"][0] += 0.1
+        write(path, layout)
+        self.rewrite_artifact_hash("layout.json")
+        with self.assertRaisesRegex(ValueError, "starting pools"):
+            runner.verify_run(self.args.output)
+
+    def test_self_consistent_palette_edit_cannot_break_seed_derivation(self):
+        self.scatter_recipe()
+        runner.run(self.args)
+        request = read(self.args.output / "request.json")
+        palette = request["palette"]
+        palette["pigments_srgb"][0][0] += 0.005
+        del palette["identity_sha256"]
+        palette["identity_sha256"] = hashlib.sha256(
+            json.dumps(palette, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
+        write(self.args.output / "palette.json", palette)
+        write(self.args.output / "request.json", request)
+        receipt = read(self.args.output / "receipt.json")
+        receipt["identity_sha256"] = hashlib.sha256(runner.encoded(request)).hexdigest()
+        receipt["artifacts"]["palette.json"] = artifact(self.args.output / "palette.json")
+        write(self.args.output / "receipt.json", receipt)
+        with self.assertRaisesRegex(ValueError, "derived from its seed"):
+            runner.verify_run(self.args.output)
+
+    def test_initial_image_cannot_silently_use_a_later_film_frame(self):
+        self.scatter_recipe()
+        self.args.still_only = False
+        runner.run(self.args)
+        name = "layered/initial.png"
+        (self.args.output / name).write_bytes(
+            (self.args.output / "layered/frames/000005.png").read_bytes()
+        )
+        self.rewrite_artifact_hash(name)
+        with self.assertRaisesRegex(ValueError, "initial state"):
+            runner.verify_run(self.args.output)
+
+    def test_palette_modes_and_capture_cadence_preserve_resolved_pool_geometry(self):
+        first = self.scatter_recipe()
+        second = copy.deepcopy(first)
+        second["palette_mode"] = "random"
+        second["simulation"]["resolution"] = [256, 192]
+        second["render"].update(fps=30, formation_frames=11)
+        a, b = runner.validate_recipe(first), runner.validate_recipe(second)
+        self.assertEqual(
+            runner.resolved_layout(a, "0xbc53af1cd380"),
+            runner.resolved_layout(b, "0xbc53af1cd380"),
+        )
 
     def test_artifact_tampering_and_source_change_are_rejected(self):
         runner.run(self.args)

@@ -7,8 +7,8 @@ uniform sampler2D u_mixing;
 uniform vec3 u_ratios[PIGMENT_COUNT];
 uniform float u_scattering[PIGMENT_COUNT];
 uniform vec3 u_substrate;
-uniform float u_layer_scale, u_mix_control;
-uniform int u_layered;
+uniform float u_layer_scale, u_mix_control, u_mass_reference;
+uniform int u_layered, u_crisp;
 const int GROUPS = (PIGMENT_COUNT + 3) / 4;
 
 float one_minus_exp_negative(float x) {
@@ -67,10 +67,27 @@ void main() {
     if (any(greaterThanEqual(xy,imageSize(u_color_output)))) return;
     float mixedness=mix(1.0,clamp(texelFetch(u_mixing,xy,0).r,0.0,1.0),u_mix_control);
     float density[PIGMENT_COUNT];
+    // Crisp is an optical interpretation, never a change to the physical state.
+    // Keep the real mass in alpha so the contour cannot depend on palette RGB.
+    float total_mass=0.0;
+    if (u_crisp==1) {
+        for (int layer=0;layer<3;++layer) {
+            phase_density(xy,layer,density);
+            for (int i=0;i<PIGMENT_COUNT;++i) total_mass+=density[i];
+        }
+        if (total_mass<=1e-20) {
+            imageStore(u_color_output,xy,vec4(0));
+            return;
+        }
+    }
+    float density_scale=u_crisp==1 ? u_mass_reference/total_mass : 1.0;
     vec3 color=u_substrate;
     if (u_layered==1) {
         for (int layer=0;layer<3;++layer) {
             phase_density(xy,layer,density);
+            if (u_crisp==1) {
+                for (int i=0;i<PIGMENT_COUNT;++i) density[i]*=density_scale;
+            }
             vec3 r,t;
             layer_rt(density,mixedness,r,t);
             color=add_layer(color,r,t);
@@ -82,9 +99,15 @@ void main() {
             phase_density(xy,layer,phase);
             for (int i=0;i<PIGMENT_COUNT;++i) density[i]+=phase[i];
         }
+        if (u_crisp==1) {
+            for (int i=0;i<PIGMENT_COUNT;++i) density[i]*=density_scale;
+        }
         vec3 r,t;
         layer_rt(density,mixedness,r,t);
         color=add_layer(color,r,t);
     }
-    imageStore(u_color_output,xy,vec4(clamp(color,0.0,1.0),1.0));
+    color=clamp(color,0.0,1.0);
+    // Mass-premultiplied color avoids a substrate-colored interpolation fringe
+    // next to an empty texel. The surface unpremultiplies before illumination.
+    imageStore(u_color_output,xy,u_crisp==1 ? vec4(color*total_mass,total_mass) : vec4(color,1.0));
 }

@@ -5,6 +5,8 @@ import unittest
 
 import numpy as np
 
+from tools.estuary.optics import srgb_to_linear
+
 from .optics import layered_reflectance, reflectance
 from .surface import Surface, camera_basis, validate_config, validate_fields
 from .test_optics import palette
@@ -37,6 +39,11 @@ class SurfaceContracts(unittest.TestCase):
             {"height_scale": True},
             {"exposure": float("nan")},
             {"mode": "magic"},
+            {"finish": "varnish"},
+            {"paint_mass_threshold": 0},
+            {"paint_mass_reference": float("inf")},
+            {"ground_srgb": [1, True, 1]},
+            {"ground_srgb": [1, 1]},
         ):
             with self.assertRaises(ValueError):
                 validate_config(bad)
@@ -187,3 +194,139 @@ class SurfaceHardwareTests(unittest.TestCase):
             s.render(None, (64, 64))
         with self.assertRaises(ValueError):
             s.render(None, (64, 48), tilt_degrees=70)
+
+
+@unittest.skipUnless(os.environ.get("ESTUARY_TEST_GPU") == "1", "Requires hardware OpenGL 4.3")
+class CrispSurfaceHardwareTests(unittest.TestCase):
+    def make_surface(self, config=None, chosen_palette=None):
+        config = {} if config is None else config
+        surface = Surface({"finish": "crisp", **config}, chosen_palette or palette())
+        self.addCleanup(surface.close)
+        return surface
+
+    @staticmethod
+    def pure_fields(width=128, height=96, concentration=0.02):
+        state = fields(width, height)
+        for name in ("mobile", "deposit", "underpaint", "pigment"):
+            state[name].fill(0)
+        state["mobile"][..., 0] = concentration
+        state["pigment"][:] = state["mobile"]
+        return state
+
+    @staticmethod
+    def flat_config():
+        return {
+            "ambient": 1,
+            "key_strength": 0,
+            "fill_strength": 0,
+            "grain_um": 0,
+            "exposure": 1,
+            "tone_map": "none",
+            "mix_control": 0,
+        }
+
+    def test_empty_and_low_mass_have_exact_uniform_ground_for_every_camera(self):
+        ground = [0.9, 0.9, 0.9]
+        surface = self.make_surface({"ground_srgb": ground, "grain_um": 30})
+        state = self.pure_fields(concentration=0)
+        state["wetness"][:] = np.linspace(0, 1, 128, dtype="f4")[None, :]
+        state["height"][:] = np.linspace(0, 0.02, 96, dtype="f4")[:, None]
+        state["roughness"][:] = np.linspace(0, 1, 128, dtype="f4")[None, :]
+        state["direction"][..., 0] = 1
+        for mass in (0, 0.001):
+            state["deposit"][..., 0] = mass * 0.6
+            state["underpaint"][..., 1] = mass * 0.4
+            state["pigment"][:] = state["deposit"] + state["underpaint"]
+            originals = {name: value.copy() for name, value in state.items()}
+            for tilt in (0, 12, 30):
+                image = surface.render(state, (128, 96), tilt_degrees=tilt)
+                expected = np.broadcast_to(srgb_to_linear(ground).astype("f4"), image.shape)
+                np.testing.assert_array_equal(image, expected)
+            for name in state:
+                np.testing.assert_array_equal(state[name], originals[name])
+
+    def test_crisp_controls_have_no_effect_on_default_fresco_pixels(self):
+        first = self.make_surface({"finish": "fresco"})
+        second = self.make_surface(
+            {
+                "finish": "fresco",
+                "paint_mass_threshold": 0.9,
+                "paint_mass_reference": 5,
+                "ground_srgb": [0, 0.3, 0.8],
+            }
+        )
+        state = fields()
+        np.testing.assert_array_equal(first.render(state, (64, 48)), second.render(state, (64, 48)))
+
+    def test_optical_normalization_preserves_phase_ratios_and_avoids_white_fringes(self):
+        chosen = palette()
+        for count in (4, 6):
+            chosen = palette(count)
+            state = fields(count=count)
+            original = {name: value.copy() for name, value in state.items()}
+            mass = state["pigment"].sum(axis=-1)
+            scale = 0.15 / mass
+            for mode in ("homogeneous", "layered"):
+                surface = self.make_surface({"mode": mode}, chosen)
+                surface.render(state, (32, 24))
+                with surface.ctx:
+                    rgba = np.frombuffer(
+                        surface._textures[0].read(alignment=1), dtype="f4"
+                    ).reshape(24, 32, 4)
+                np.testing.assert_allclose(rgba[..., 3], mass, rtol=3e-7, atol=1e-8)
+                if mode == "homogeneous":
+                    expected = reflectance(
+                        state["pigment"] * scale[..., None], chosen, mixedness=state["mixing"]
+                    )
+                else:
+                    expected = layered_reflectance(
+                        *(
+                            state[name] * scale[..., None]
+                            for name in ("underpaint", "deposit", "mobile")
+                        ),
+                        chosen,
+                        mixedness=state["mixing"],
+                    )
+                np.testing.assert_allclose(
+                    rgba[..., :3] / rgba[..., 3, None], expected, rtol=7e-5, atol=3e-6
+                )
+                surface.close()
+            for name in state:
+                np.testing.assert_array_equal(state[name], original[name])
+
+    def test_mass_contour_is_palette_independent_and_stable_in_world_space(self):
+        state = self.pure_fields(256, 192)
+        u = (np.arange(256, dtype="f4") + 0.5) / 256
+        state["mobile"][..., 0] = 0.01 + 0.015 * (u[None, :] - 0.56)
+        state["pigment"][:] = state["mobile"]
+        config = {**self.flat_config(), "paint_mass_threshold": 0.01}
+        first = self.make_surface(config)
+        other_palette = palette()
+        other_palette["pigments_srgb"][0] = [0.7, 0.12, 0.3]
+        second = self.make_surface(config, other_palette)
+        for size in ((128, 96), (256, 192)):
+            for tilt in (0, 25):
+                masks = []
+                for surface in (first, second):
+                    image = surface.render(state, size, tilt_degrees=tilt, azimuth_degrees=0)
+                    interior = image[size[1] // 2, -10, 0]
+                    mask = (1 - image[..., 0]) / (1 - interior)
+                    masks.append(mask)
+                    edge = size[0] - float(mask.mean(axis=0).sum())
+                    expected = size[0] * (0.5 + 0.06 * 1.6 * np.cos(np.radians(tilt)))
+                    self.assertAlmostEqual(edge, expected, delta=0.02)
+                    # A silhouette may antialias one pixel, never a broad wash.
+                    partial = (mask[size[1] // 2] > 0.0001) & (mask[size[1] // 2] < 0.9999)
+                    self.assertLessEqual(int(partial.sum()), 2)
+                np.testing.assert_allclose(masks[0], masks[1], atol=2e-5, rtol=0)
+
+    def test_outside_does_not_receive_shadows_from_neighboring_paint_relief(self):
+        state = self.pure_fields(256, 192, concentration=0.0004)
+        state["mobile"][:, 100:180, 0] = 0.04
+        state["pigment"][:] = state["mobile"]
+        state["height"][:, 100:180] = 0.01
+        surface = self.make_surface({"shadow_strength": 1, "key_elevation_degrees": 12})
+        image = surface.render(state, (128, 96))
+        np.testing.assert_array_equal(image[:, :30], np.ones_like(image[:, :30]))
+        np.testing.assert_array_equal(image[:, -17:], np.ones_like(image[:, -17:]))
+        self.assertLess(float(image[:, 64:80].mean()), 0.9)

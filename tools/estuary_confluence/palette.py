@@ -1,10 +1,11 @@
-"""Reproducible, curated pigment relationships for Confluence Fresco.
+"""Reproducible pigment relationships for Confluence Fresco.
 
 These are authored RGB K--M pigments, not measured spectral artist materials.
 The palette is generated once from the complete 256-bit seed. Named hash streams
 keep changes in one choice from perturbing all the others; changing the pigment
-count adds subordinate colors without changing the principal three or the chalk.
-Color variations are bounded in OKLCH, with chroma reduced to fit sRGB.
+count preserves the principal three colors and chalk. The released curated
+default retains its exact v1 contract; procedural full-hue alternatives live in
+``procedural_palette`` and share the unchanged physical parameter streams.
 """
 
 from __future__ import annotations
@@ -250,7 +251,45 @@ def palette_quality(palette: dict) -> dict[str, float | bool]:
     }
 
 
-def generate_palette(seed: str | int, chromatic_count: int = 3) -> dict:
+def _physical_arrays(master: bytes) -> dict:
+    """The released physical parameters, independent of any color selection."""
+    physical_bases = {
+        "scattering": [0.15, 0.40, 0.70, 0.30, 0.45, 6.0],
+        "settling": [0.25, 1.1, 3.6, 1.5, 2.3, 2.2],
+        "release": [0.60, 0.35, 0.08, 0.25, 0.15, 0.24],
+        "specific_volumes": [0.05, 0.25, 0.38, 0.20, 0.30, 1.0],
+        "granulation": [0.08, 0.32, 0.80, 0.36, 0.58, 0.42],
+    }
+    return {
+        key: [
+            round(base * _range(master, f"{key}/{i}", 0.88, 1.12), 10)
+            for i, base in enumerate(values)
+        ]
+        for key, values in physical_bases.items()
+    }
+
+
+def _body_weights(master: bytes) -> list[float]:
+    return [
+        round(base * _range(master, f"body/{body}/weight", 0.9, 1.1), 10)
+        for body, base in enumerate((0.8, 0.7, 0.18))
+    ]
+
+
+def _body_mixtures(master: bytes, chromatic_count: int) -> list[list[float]]:
+    body_mixtures = []
+    for body, chalk_base in enumerate((0.008, 0.075, 0.018)):
+        row = [0.0] * (chromatic_count + 1)
+        row[-1] = chalk_base * _range(master, f"body/{body}/chalk", 0.8, 1.2)
+        if chromatic_count == 5:
+            row[3] = _range(master, f"body/{body}/extra-3", 0.065, 0.09)
+            row[4] = _range(master, f"body/{body}/extra-4", 0.035, 0.055)
+        row[body] = 1 - sum(row)
+        body_mixtures.append(row)
+    return body_mixtures
+
+
+def _curated_palette(seed: str | int, chromatic_count: int = 3) -> dict:
     """Resolve one seed into a complete, JSON-ready, versioned material palette."""
     if type(chromatic_count) is not int or chromatic_count not in (3, 5):
         raise ValueError("chromatic_count must be 3 or 5")
@@ -260,20 +299,7 @@ def generate_palette(seed: str | int, chromatic_count: int = 3) -> dict:
     roles = ["dominant", "support", "accent", "undertone", "mineral-note"]
     # Resolve five every time so count comparisons use exactly the same colors,
     # material traits, quality decision, substrate, and chalk.
-    physical_bases = {
-        "scattering": [0.15, 0.40, 0.70, 0.30, 0.45, 6.0],
-        "settling": [0.25, 1.1, 3.6, 1.5, 2.3, 2.2],
-        "release": [0.60, 0.35, 0.08, 0.25, 0.15, 0.24],
-        "specific_volumes": [0.05, 0.25, 0.38, 0.20, 0.30, 1.0],
-        "granulation": [0.08, 0.32, 0.80, 0.36, 0.58, 0.42],
-    }
-    full = {
-        key: [
-            round(base * _range(master, f"{key}/{i}", 0.88, 1.12), 10)
-            for i, base in enumerate(values)
-        ]
-        for key, values in physical_bases.items()
-    }
+    full = _physical_arrays(master)
     for attempt in range(MAX_ATTEMPTS):
         prefix = f"color/{attempt}"
         colors = [_vary(color, master, f"{prefix}/{i}") for i, color in enumerate(anchors)]
@@ -304,10 +330,7 @@ def generate_palette(seed: str | int, chromatic_count: int = 3) -> dict:
             "substrate_srgb": substrate,
             "chalk_index": chromatic_count,
             "underpaint_index": 2,
-            "body_weights": [
-                round(base * _range(master, f"body/{body}/weight", 0.9, 1.1), 10)
-                for body, base in enumerate((0.8, 0.7, 0.18))
-            ],
+            "body_weights": _body_weights(master),
             # JSON numbers cannot retain 256-bit integers in browser clients.
             # Hex preserves every bit while int(value, 16) recovers the exact
             # original entropy used by the numerical substrate generator.
@@ -319,16 +342,23 @@ def generate_palette(seed: str | int, chromatic_count: int = 3) -> dict:
             ),
         }
     )
-    body_mixtures = []
-    for body, chalk_base in enumerate((0.008, 0.075, 0.018)):
-        row = [0.0] * (chromatic_count + 1)
-        row[-1] = chalk_base * _range(master, f"body/{body}/chalk", 0.8, 1.2)
-        if chromatic_count == 5:
-            row[3] = _range(master, f"body/{body}/extra-3", 0.065, 0.09)
-            row[4] = _range(master, f"body/{body}/extra-4", 0.035, 0.055)
-        row[body] = 1 - sum(row)
-        body_mixtures.append(row)
-    palette["body_mixtures"] = body_mixtures
+    palette["body_mixtures"] = _body_mixtures(master, chromatic_count)
     payload = json.dumps(palette, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     palette["identity_sha256"] = hashlib.sha256(payload).hexdigest()
     return palette
+
+
+def generate_palette(seed: str | int, chromatic_count: int = 3, *, mode: str = "curated") -> dict:
+    """Resolve a reproducible palette; the default preserves released v1 bytes.
+
+    ``harmonic`` derives related hues from a seed-selected angle across the full
+    color circle. ``random`` independently selects chromatic hues for comparison.
+    Both procedural modes share physical coefficients and use a white ground.
+    """
+    if type(mode) is not str or mode not in ("curated", "harmonic", "random"):
+        raise ValueError("Palette mode must be curated, harmonic, or random")
+    if mode == "curated":
+        return _curated_palette(seed, chromatic_count)
+    from .procedural_palette import build_palette
+
+    return build_palette(seed, chromatic_count, mode)

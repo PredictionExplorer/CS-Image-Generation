@@ -4,21 +4,24 @@
 in vec2 screen_position;
 out vec4 frag_color;
 uniform sampler2D u_paint, u_geometry, u_finish;
-uniform vec3 u_substrate;
+uniform vec3 u_substrate, u_ground;
 uniform vec2 u_visible_size, u_full_size, u_grid_size, u_output_size;
 uniform vec3 u_camera_right, u_camera_up, u_camera_view, u_key_direction;
 uniform float u_height_scale, u_max_height;
 uniform float u_ambient, u_key_strength, u_fill_strength, u_anisotropy;
 uniform float u_roughness_scale, u_roughness_bias;
 uniform float u_grain_height, u_grain_scale, u_shadow_strength, u_occlusion_strength, u_exposure;
-uniform int u_tone_map;
+uniform int u_tone_map, u_crisp;
+uniform float u_mass_threshold;
 const float PI = 3.141592653589793;
 
 vec2 field_uv(vec2 p) { return p / u_full_size + 0.5; }
 bool inside(vec2 uv) { return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))); }
 float surface_height(vec2 p) {
     vec2 uv = field_uv(p);
-    return inside(uv) ? textureLod(u_geometry, uv, 0.0).r * u_height_scale : 0.0;
+    if (!inside(uv)) return 0.0;
+    if (u_crisp==1 && textureLod(u_paint,uv,0.0).a<u_mass_threshold) return 0.0;
+    return textureLod(u_geometry, uv, 0.0).r * u_height_scale;
 }
 
 vec3 hit_surface(vec3 origin, vec3 view) {
@@ -68,7 +71,10 @@ vec3 normal_at(vec3 point, float coverage) {
 }
 
 // Phase optics are evaluated once at material resolution, then retained on GPU.
-vec3 paint_color(vec2 uv) { return textureLod(u_paint, uv, 0.0).rgb; }
+vec3 paint_color(vec2 uv) {
+    vec4 paint=textureLod(u_paint,uv,0.0);
+    return u_crisp==1 ? paint.rgb/max(paint.a,1e-20) : paint.rgb;
+}
 
 float shadow(vec3 point, vec3 light) {
     float pixel = max(u_full_size.x / u_grid_size.x, u_full_size.y / u_grid_size.y);
@@ -129,7 +135,18 @@ void main() {
                 + u_camera_up * screen_position.y * u_visible_size.y * 0.5;
     vec3 point = hit_surface(origin, u_camera_view);
     vec2 uv = field_uv(point.xy);
-    if (!inside(uv)) { frag_color = vec4(u_substrate, 1); return; }
+    if (!inside(uv)) { frag_color = vec4(u_crisp==1 ? u_ground : u_substrate, 1); return; }
+    float crisp_coverage=1.0;
+    if (u_crisp==1) {
+        float mass=textureLod(u_paint,uv,0.0).a;
+        // Derivatives convert the fixed material-space contour into one-pixel
+        // area coverage. They do not create a broad wash or change the cutoff.
+        float pixel_span=fwidth(mass);
+        crisp_coverage=pixel_span>1e-12
+            ? clamp((mass-u_mass_threshold)/pixel_span+0.5,0.0,1.0)
+            : step(u_mass_threshold,mass);
+        if (crisp_coverage<=0.0) { frag_color=vec4(u_ground,1); return; }
+    }
     vec4 material = textureLod(u_geometry, uv, 0.0);
     vec2 axial = textureLod(u_finish, uv, 0.0).xy;
     float coherence = clamp(length(axial), 0.0, 1.0);
@@ -166,5 +183,7 @@ void main() {
         radiance *= (1.0 + luminance / 16.0) / (1.0 + luminance);
         radiance = clamp(radiance, 0.0, 1.0);
     }
-    frag_color = vec4(clamp(radiance, 0.0, 1.0), 1);
+    radiance=clamp(radiance,0.0,1.0);
+    if (u_crisp==1) radiance=mix(u_ground,radiance,crisp_coverage);
+    frag_color = vec4(radiance, 1);
 }

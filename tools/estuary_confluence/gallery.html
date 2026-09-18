@@ -119,10 +119,9 @@ gap:18px}.caption{display:block}.caption nav{margin-top:10px}}
 <main>
 <header>
 <div>
-<p class="eyebrow">Three-body painting / Confluence Fresco</p>
+<p class="eyebrow">Three-body painting / Color studies</p>
 <h1>__CONFLUENCE_TITLE_HTML__</h1>
-<p>Three colors or five, chosen by the seed. Washes meet, settle and reveal buried color.
-Every film follows the complete trajectory. Camera studies examine the finished painting.</p>
+<p id="description">Paintings shaped by complete recorded three-body trajectories.</p>
 </div>
 <select id="choice" aria-label="Choose a painting">
 </select>
@@ -142,6 +141,7 @@ Every film follows the complete trajectory. Camera studies examine the finished 
 <span id="caption">Loading the studies…</span>
 <nav>
 <button id="compare" hidden aria-pressed="false">Compare</button>
+<button id="starting" hidden aria-pressed="false">Starting colors</button>
 <button id="motion" hidden>Play film</button>
 <button id="stillView" hidden>Still image</button>
 <a id="fullSize" target="_blank" rel="noopener">Open full size</a>
@@ -159,14 +159,15 @@ Every film follows the complete trajectory. Camera studies examine the finished 
 <div class="grid" id="grid">
 </div>
 </section>
-<footer id="source">Each painting follows a complete recorded three-body trajectory. The finished material stays fixed during the camera movement. <a href="http://127.0.0.1:8786/">Earlier studies</a></footer>
+<footer id="source">Each painting follows a complete recorded three-body trajectory. The finished material stays fixed during the camera movement. <a href="http://127.0.0.1:8787/">Earlier studies</a></footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 let collection=null,comparing=false,referenceAvailable=false;
 const families={layered:'Layered',homogeneous:'Blended'};
+const palettes={curated:'Curated',harmonic:'Seeded harmony',random:'Independent colors'};
 const seedLabel=seed=>seed?String(seed).replace(/^0x/i,'').slice(0,4).toUpperCase():'';
-const studyDetails=study=>[families[study.group],seedLabel(study.seed)].join(' · ');
+const studyDetails=study=>[study.initial?palettes[study.palette_mode]:families[study.group],seedLabel(study.seed)].join(' · ');
 
 function updateComparison(){
 $('artRow').classList.toggle('comparing',comparing);
@@ -176,8 +177,13 @@ $('compare').textContent=comparing?'Hide comparison':'Compare';
 $('compare').setAttribute('aria-pressed',String(comparing));}
 
 function select(index){const study=collection.studies[index];
+$('description').textContent=study.initial
+?'Every color begins in its own pool. The seed chooses the colors and where they begin. Three bodies stir the paint through their complete trajectory.'
+:'Three colors or five, chosen by the seed. Washes meet, settle and reveal buried color. Every film follows the complete trajectory.';
 $('choice').value=String(index);
 $('stillView').hidden=true;
+$('starting').hidden=!study.initial;
+$('starting').setAttribute('aria-pressed','false');
 
 $('film').pause();
 $('film').hidden=true;
@@ -186,7 +192,7 @@ $('hero').src=study.image;
 
 $('hero').alt=study.name+' · '+families[study.group];
 $('comparisonCaption').textContent=study.comparison_caption||'';
-$('paletteLabel').textContent=study.chromatic_count+' colors + shared chalk';
+$('paletteLabel').textContent=study.chromatic_count+(study.initial?' starting colors':' colors + shared chalk');
 $('paletteDownload').href=study.palette_record;
 $('palette').replaceChildren();
 for(const swatch of study.swatches){const item=document.createElement('li');
@@ -206,6 +212,10 @@ updateComparison();
 
 $('download').href=study.image;
 $('fullSize').href=study.image;
+const filename=[study.name,seedLabel(study.seed),study.palette_mode||'curated',study.group].join('-').toLowerCase().replace(/[^a-z0-9]+/g,'-');
+$('download').download=filename+'.png';
+$('downloadFilm').download=filename+'.mp4';
+$('paletteDownload').download=filename+'-palette.json';
 $('motion').hidden=!study.film;
 $('downloadFilm').hidden=!study.film;
 if(study.film){$('downloadFilm').href=study.film}else{$('downloadFilm').removeAttribute('href')}
@@ -217,6 +227,20 @@ $('compare').onclick=()=>{const next=!comparing;
 select(Number($('choice').value));
 comparing=next&&referenceAvailable;
 updateComparison();};
+$('starting').onclick=()=>{const active=$('starting').getAttribute('aria-pressed')==='true';
+const index=Number($('choice').value);select(index);
+if(active)return;
+const study=collection.studies[index];
+if(!study.initial)return;
+comparing=false;updateComparison();
+$('hero').src=study.initial;
+$('hero').alt=study.chromatic_count+' separate seeded starting pools';
+$('fullSize').href=study.initial;
+$('download').href=study.initial;
+$('download').download=$('download').download.replace(/\.png$/,'-starting-colors.png');
+$('caption').textContent=study.name+' · Starting colors · '+seedLabel(study.seed);
+$('starting').setAttribute('aria-pressed','true');
+$('stillView').hidden=false;};
 
 function playMotion(kind){const study=collection.studies[Number($('choice').value)];
 if(!study[kind])return;
@@ -227,6 +251,7 @@ $('film').src=study[kind];
 $('hero').hidden=true;
 $('film').hidden=false;
 $('stillView').hidden=false;
+$('starting').setAttribute('aria-pressed','false');
 $('motionCaption').textContent=study.film_caption||'';
 $('motionCaption').hidden=false;
 $('film').play().catch(()=>{});}

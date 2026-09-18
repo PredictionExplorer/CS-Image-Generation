@@ -5,6 +5,12 @@ heightfield renderer. Color is evaluated once on the material grid and cached on
 GPU; camera changes cannot alter pigment mixing or temporal layers. Inputs are
 bottom-up fullguard fields, outputs top-down bounded linear RGB. Illumination is
 an analytic direct-light approximation; the material is not a volumetric fluid.
+
+The opt-in crisp finish is an authored print interpretation: actual pigment mass
+sets a hard silhouette, and a single optical mass reference gives filled colors
+without a dilute fringe. Geometry and illumination stay inside that silhouette;
+the outside is an unlit constant ground. Antialiasing spans one output pixel,
+not a physical feather or animated threshold. The archived state is untouched.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from tools.estuary.optics import srgb_to_linear
 from tools.estuary_studio.surface import _current, _number, camera_basis
 
 from .optics import palette_coefficients
@@ -22,6 +29,10 @@ from .optics import palette_coefficients
 ROOT = Path(__file__).parent
 DEFAULTS = {
     "mode": "layered",
+    "finish": "fresco",
+    "paint_mass_threshold": 0.002,
+    "paint_mass_reference": 0.15,
+    "ground_srgb": [1.0, 1.0, 1.0],
     "mix_control": 1.0,
     "canvas_width_m": 0.4,
     "domain_scale": 1.6,
@@ -52,9 +63,17 @@ def validate_config(value=None):
     result.update(copy.deepcopy(value))
     if result["mode"] not in ("homogeneous", "layered"):
         raise ValueError("mode must be homogeneous or layered")
+    if result["finish"] not in ("fresco", "crisp"):
+        raise ValueError("finish must be fresco or crisp")
+    ground = result["ground_srgb"]
+    if type(ground) not in (list, tuple) or len(ground) != 3:
+        raise ValueError("ground_srgb needs three display-sRGB values")
+    result["ground_srgb"] = [_number(value, "ground_srgb", 0, 1) for value in ground]
     if result["tone_map"] not in ("reinhard", "none"):
         raise ValueError("tone_map must be reinhard or none")
     limits = {
+        "paint_mass_threshold": (1e-6, 1),
+        "paint_mass_reference": (1e-4, 10),
         "mix_control": (0, 1),
         "canvas_width_m": (0.05, 4),
         "domain_scale": (1.25, 3),
@@ -196,6 +215,13 @@ class Surface:
                 "microtexture": (
                     "stationary support grain, physical metres, pixel-footprint filtered"
                 ),
+                "finish": (
+                    "fresco: physical phase amount controls optical thickness; "
+                    "crisp: total-mass contour with one-pixel antialiasing and "
+                    "mass-normalized filled pigment colors over an unlit constant ground; "
+                    "crisp deliberately removes dilution cues without changing simulation state"
+                ),
+                "mass_units": "stored pigment concentration per material area, before RGB optics",
                 "cross_device_pixel_identity": False,
                 "config": copy.deepcopy(self.config),
                 "pigment_count": self._pigment_count,
@@ -224,6 +250,10 @@ class Surface:
     def _bind_config(self):
         c, p = self.config, self._program
         p["u_substrate"].value = tuple(self._substrate)
+        crisp = int(c["finish"] == "crisp")
+        p["u_crisp"].value = crisp
+        p["u_mass_threshold"].value = c["paint_mass_threshold"]
+        p["u_ground"].value = tuple(srgb_to_linear(c["ground_srgb"]))
         optics = self._optics_program
         optics["u_phases"].value = 3
         optics["u_mixing"].value = 4
@@ -233,6 +263,8 @@ class Surface:
         optics["u_layer_scale"].value = c["layer_scale"]
         optics["u_mix_control"].value = c["mix_control"]
         optics["u_layered"].value = int(c["mode"] == "layered")
+        optics["u_crisp"].value = crisp
+        optics["u_mass_reference"].value = c["paint_mass_reference"]
         for name in (
             "height_scale",
             "ambient",
