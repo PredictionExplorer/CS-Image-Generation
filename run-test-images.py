@@ -23,7 +23,7 @@ import typing
 from pathlib import Path
 
 from _utils import check_ffmpeg, compute_aesthetic_metrics, fmt_duration, resolve_binary
-from run import REQUIRED_PACKAGE_FILES, EXPECTED_SPECTRAL_BINS, SPECTRAL_FILE_RE
+from run import EXPECTED_SPECTRAL_BINS, REQUIRED_PACKAGE_FILES, SPECTRAL_FILE_RE
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"

@@ -1,18 +1,18 @@
 """Semantic tests: temporary files and fake process handles only; never signal jobs."""
 
-from dataclasses import replace
 import contextlib
 import copy
 import io
 import itertools
 import json
 import os
-from pathlib import Path
 import signal
 import tempfile
 import time
 import unittest
-from unittest import mock
+from dataclasses import replace
+from pathlib import Path
+from unittest.mock import patch
 
 import rebalance_collection as rc
 
@@ -55,7 +55,9 @@ class FakeProcesses:
                 hook()
         elif signum == signal.SIGCONT:
             self.table[current.pid] = replace(current, state="S")
-        elif signum == signal.SIGKILL or (signum == signal.SIGTERM and current.pid not in self.ignore_term):
+        elif signum == signal.SIGKILL or (
+            signum == signal.SIGTERM and current.pid not in self.ignore_term
+        ):
             self.table.pop(current.pid)
 
     def close(self, _pin):
@@ -80,12 +82,22 @@ class FakeProcesses:
     def spawn(self, command, cwd, environment, log, python):
         pid = 900000 + len(self.launches)
         image = python.stat()
-        process = rc.Proc(pid, 999, pid * 10, self.uid, str(python), image.st_dev,
-                          image.st_ino, cwd, tuple(command), "S")
+        process = rc.Proc(
+            pid,
+            999,
+            pid * 10,
+            self.uid,
+            str(python),
+            image.st_dev,
+            image.st_ino,
+            cwd,
+            tuple(command),
+            "S",
+        )
         self.table[pid] = process
         self.logs[pid] = str(log)
         self.launches.append((list(command), cwd, dict(environment)))
-        with open(log, "ab") as stream:
+        with Path(log).open("ab") as stream:
             stream.write(b"restarted driver output\n")
         if self.crash_after_spawn:
             self.crash_after_spawn = False
@@ -106,7 +118,10 @@ class Fixture:
         self.paths.private.mkdir(mode=0o700)
         self.paths.python.write_text("fixed python")
         self.paths.orbit.write_text("fixed orbit")
-        known = {str(self.paths.python): rc.digest(self.paths.python), str(self.paths.orbit): rc.digest(self.paths.orbit)}
+        known = {
+            str(self.paths.python): rc.digest(self.paths.python),
+            str(self.paths.orbit): rc.digest(self.paths.orbit),
+        }
         for name in rc.SCRIPT_HASHES:
             path = self.paths.scripts / name
             path.write_text("fixed " + name)
@@ -120,24 +135,62 @@ class Fixture:
             known[str(binary)] = spec.binary_hash
             root = self.paths.output(spec)
             root.mkdir()
-            recipe = {"kind": spec.slug.split("-", 1)[1], "frames": 1802, "render": {"aa": 3, "quality": "unchanged"}}
+            recipe = {
+                "kind": spec.slug.split("-", 1)[1],
+                "frames": 1802,
+                "render": {"aa": 3, "quality": "unchanged"},
+            }
             for path in (self.paths.config(spec), root / "render-request.json"):
                 path.write_text(json.dumps(recipe))
-            command = ["python3", str(self.paths.scripts / "render_study.py"), "--orbit", str(self.paths.orbit),
-                       "--config", str(self.paths.config(spec)), "--output", str(root), "--executable", str(binary),
-                       "--workers", str(spec.initial_workers), "--chunks", "16", "--parallel-ranges", "4", "--poster-frame", "900"]
-            (root / "final-job.json").write_text(json.dumps({"pid": spec.initial_pid, "command": command, "preserve_me": "metadata"}))
+            command = [
+                "python3",
+                str(self.paths.scripts / "render_study.py"),
+                "--orbit",
+                str(self.paths.orbit),
+                "--config",
+                str(self.paths.config(spec)),
+                "--output",
+                str(root),
+                "--executable",
+                str(binary),
+                "--workers",
+                str(spec.initial_workers),
+                "--chunks",
+                "16",
+                "--parallel-ranges",
+                "4",
+                "--poster-frame",
+                "900",
+            ]
+            (root / "final-job.json").write_text(
+                json.dumps({"pid": spec.initial_pid, "command": command, "preserve_me": "metadata"})
+            )
             self.paths.log(spec).write_text("original driver output\n")
             image = self.paths.python.stat()
-            self.proc.table[spec.initial_pid] = rc.Proc(spec.initial_pid, 1, spec.initial_start, self.proc.uid,
-                str(self.paths.python), image.st_dev, image.st_ino, str(base.parent), tuple(command), "S")
+            self.proc.table[spec.initial_pid] = rc.Proc(
+                spec.initial_pid,
+                1,
+                spec.initial_start,
+                self.proc.uid,
+                str(self.paths.python),
+                image.st_dev,
+                image.st_ino,
+                str(base.parent),
+                tuple(command),
+                "S",
+            )
             self.proc.logs[spec.initial_pid] = str(self.paths.log(spec))
             for index in range(16):
                 chunk = root / f"final-chunk-{index}"
                 chunk.mkdir()
-                manifest = {"config": recipe, "seed": "0xb7f327f9f722", "executable_sha256": spec.binary_hash,
-                            "orbit_sha256": known[str(self.paths.orbit)],
-                            "rendered_frames": list(range(1802 * index // 16, 1802 * (index + 1) // 16)), "complete": False}
+                manifest = {
+                    "config": recipe,
+                    "seed": "0xb7f327f9f722",
+                    "executable_sha256": spec.binary_hash,
+                    "orbit_sha256": known[str(self.paths.orbit)],
+                    "rendered_frames": list(range(1802 * index // 16, 1802 * (index + 1) // 16)),
+                    "complete": False,
+                }
                 (chunk / "render.json").write_text(json.dumps(manifest))
             for suffix in (".png", ".png.json", ".png.partial"):
                 (root / "final-chunk-0" / ("frame_000000" + suffix)).write_text("keep these bytes")
@@ -152,9 +205,18 @@ class Fixture:
 
     def add_renderer(self, job, index, pid):
         image = self.paths.binary(job.spec).stat()
-        process = rc.Proc(pid, job.record["pid"], pid * 10, self.proc.uid,
-                          str(self.paths.binary(job.spec)), image.st_dev, image.st_ino,
-                          str(self.paths.base.parent), tuple(self.collection.renderer_command(job, index)), "S")
+        process = rc.Proc(
+            pid,
+            job.record["pid"],
+            pid * 10,
+            self.proc.uid,
+            str(self.paths.binary(job.spec)),
+            image.st_dev,
+            image.st_ino,
+            str(self.paths.base.parent),
+            tuple(self.collection.renderer_command(job, index)),
+            "S",
+        )
         self.proc.table[pid] = process
         return process
 
@@ -201,8 +263,14 @@ class RebalancerTests(unittest.TestCase):
                     if len(target) == 1:
                         self.assertEqual(next(iter(target.values())), 128)
                 current.update(target)
-        self.assertEqual(rc.allocations({"03-aurora"}, initial), {"04-light": 32, "05-engraving": 32, "06-eclipse": 64})
-        self.assertEqual(rc.allocations({"03-aurora", "05-engraving"}, initial), {"04-light": 64, "06-eclipse": 64})
+        self.assertEqual(
+            rc.allocations({"03-aurora"}, initial),
+            {"04-light": 32, "05-engraving": 32, "06-eclipse": 64},
+        )
+        self.assertEqual(
+            rc.allocations({"03-aurora", "05-engraving"}, initial),
+            {"04-light": 64, "06-eclipse": 64},
+        )
 
     def test_dry_plan_and_unchanged_allocations_have_no_mutations(self):
         f = self.fixture
@@ -215,7 +283,9 @@ class RebalancerTests(unittest.TestCase):
         f.complete("03-aurora")
         plan = rc.dry_plan(f.controller)
         changed = [job for job in plan["jobs"] if job["action"] == "restart"]
-        self.assertEqual([(job["slug"], job["desired_workers"]) for job in changed], [("05-engraving", 32)])
+        self.assertEqual(
+            [(job["slug"], job["desired_workers"]) for job in changed], [("05-engraving", 32)]
+        )
 
     def test_pid_reuse_and_foreign_child_block_before_signals(self):
         f = self.fixture
@@ -236,8 +306,11 @@ class RebalancerTests(unittest.TestCase):
     def test_paths_duplicate_options_and_changed_files_are_rejected(self):
         f = self.fixture
         job = f.job()
-        for modified in [job.command + ["--workers", "64"], job.command + ["--overwrite", "true"],
-                         [value.replace("final", "other") for value in job.command]]:
+        for modified in [
+            [*job.command, "--workers", "64"],
+            [*job.command, "--overwrite", "true"],
+            [value.replace("final", "other") for value in job.command],
+        ]:
             if modified == job.command:
                 continue
             with self.assertRaises(rc.UnsafeJob):
@@ -251,16 +324,45 @@ class RebalancerTests(unittest.TestCase):
             f.controller.begin(job, 32)
         self.assertEqual(f.proc.signals, [])
 
+    def test_writer_matching_remains_lexical_without_following_symlinks(self):
+        f = self.fixture
+        job = f.job()
+        outside = f.paths.base.parent / "redirected-output"
+        outside.mkdir()
+        alias = f.paths.output(job.spec) / "final-chunk-link"
+        alias.symlink_to(outside, target_is_directory=True)
+        self.assertFalse(alias.resolve().is_relative_to(f.paths.output(job.spec)))
+        process = f.add_renderer(job, 0, 777777)
+        command = list(process.argv)
+        command[command.index("--output") + 1] = os.path.relpath(alias, process.cwd)
+        process = replace(process, argv=tuple(command))
+        self.assertEqual(f.collection.writers(job, [process]), [process])
+        self.assertEqual(f.proc.signals, [])
+
+    def test_descriptor_symlink_target_remains_a_string(self):
+        f = self.fixture
+        process = f.proc.table[f.job().record["pid"]]
+        expected = f.paths.base / "render.log"
+        with patch.object(Path, "readlink", return_value=expected):
+            actual = rc.Processes.output_path(process, 1)
+        self.assertIsInstance(actual, str)
+        self.assertEqual(actual, str(expected))
+
     def test_renderer_started_during_discovery_is_captured_after_freeze(self):
         f = self.fixture
         job = f.job()
         old_child = next(value for value in f.proc.all() if value.ppid == job.record["pid"])
         new_pid = 777777
+
         def queued_replacement():
             f.proc.table.pop(old_child.pid)
             f.add_renderer(job, 1, new_pid)
+
         f.proc.on_stop = queued_replacement
-        before = {path: path.read_bytes() for path in (f.paths.output(job.spec) / "final-chunk-0").iterdir()}
+        before = {
+            path: path.read_bytes()
+            for path in (f.paths.output(job.spec) / "final-chunk-0").iterdir()
+        }
         f.controller.begin(job, 32)
         signals = f.proc.signals
         self.assertEqual(signals[0][2], signal.SIGSTOP)
@@ -268,7 +370,14 @@ class RebalancerTests(unittest.TestCase):
         self.assertFalse(any(pid == old_child.pid for pid, _, _ in signals))
         self.assertEqual(len(f.proc.launches), 1)
         new_command = f.proc.launches[0][0]
-        self.assertEqual([i for i, pair in enumerate(zip(job.command, new_command)) if pair[0] != pair[1]], [job.command.index("--workers") + 1])
+        self.assertEqual(
+            [
+                i
+                for i, pair in enumerate(zip(job.command, new_command, strict=False))
+                if pair[0] != pair[1]
+            ],
+            [job.command.index("--workers") + 1],
+        )
         self.assertEqual(new_command[new_command.index("--workers") + 1], "32")
         self.assertTrue(all(path.read_bytes() == value for path, value in before.items()))
         updated = rc.read_json(f.paths.output(job.spec) / "final-job.json")
@@ -280,21 +389,48 @@ class RebalancerTests(unittest.TestCase):
     def test_finisher_transition_is_resumed_and_not_terminated(self):
         f = self.fixture
         job = f.job()
+
         def finish_transition():
             for child in list(f.proc.all()):
                 if child.ppid == job.record["pid"]:
                     f.proc.table.pop(child.pid)
-            command = [str(f.paths.python.with_name("python3")), str(f.paths.scripts / "finish_study.py"),
-                       "--output", str(f.paths.output(job.spec)), "--executable", str(f.paths.binary(job.spec)),
-                       "--poster-frame", "900", "--encoder-threads", "16"]
-            command += [part for i in range(16) for part in ("--input", str(f.paths.output(job.spec) / f"final-chunk-{i}"))]
+            command = [
+                str(f.paths.python.with_name("python3")),
+                str(f.paths.scripts / "finish_study.py"),
+                "--output",
+                str(f.paths.output(job.spec)),
+                "--executable",
+                str(f.paths.binary(job.spec)),
+                "--poster-frame",
+                "900",
+                "--encoder-threads",
+                "16",
+            ]
+            command += [
+                part
+                for i in range(16)
+                for part in ("--input", str(f.paths.output(job.spec) / f"final-chunk-{i}"))
+            ]
             image = f.paths.python.stat()
-            f.proc.table[888888] = rc.Proc(888888, job.record["pid"], 888, f.proc.uid, str(f.paths.python), image.st_dev, image.st_ino,
-                                          str(f.paths.base.parent), tuple(command), "S")
+            f.proc.table[888888] = rc.Proc(
+                888888,
+                job.record["pid"],
+                888,
+                f.proc.uid,
+                str(f.paths.python),
+                image.st_dev,
+                image.st_ino,
+                str(f.paths.base.parent),
+                tuple(command),
+                "S",
+            )
+
         f.proc.on_stop = finish_transition
         with self.assertRaises(rc.Deferred):
             f.controller.begin(job, 32)
-        self.assertEqual([signum for _, _, signum in f.proc.signals], [signal.SIGSTOP, signal.SIGCONT])
+        self.assertEqual(
+            [signum for _, _, signum in f.proc.signals], [signal.SIGSTOP, signal.SIGCONT]
+        )
         self.assertIn(888888, f.proc.table)
         self.assertEqual(f.proc.launches, [])
         self.assertIsNone(f.controller.state["transaction"])
@@ -304,7 +440,11 @@ class RebalancerTests(unittest.TestCase):
         job = f.job()
         child = next(value for value in f.proc.all() if value.ppid == job.record["pid"])
         f.proc.ignore_term.add(child.pid)
-        others = {value.pid for value in f.proc.all() if value.ppid != job.record["pid"] and value.pid != job.record["pid"]}
+        others = {
+            value.pid
+            for value in f.proc.all()
+            if value.ppid != job.record["pid"] and value.pid != job.record["pid"]
+        }
         f.controller.begin(job, 32)
         self.assertIn((child.pid, child.start, signal.SIGKILL), f.proc.signals)
         self.assertTrue(others.issubset(f.proc.table))
@@ -326,10 +466,12 @@ class RebalancerTests(unittest.TestCase):
     def test_record_before_ledger_crash_recovers_same_launched_process(self):
         f = self.fixture
         real_save = f.controller.save
+
         def fail_after_record():
             if f.controller.state["transaction"] is None and f.job().workers == 32:
                 raise RuntimeError("simulated death after job publication")
             real_save()
+
         f.controller.save = fail_after_record
         with self.assertRaises(RuntimeError):
             f.controller.begin(f.job(), 32)
@@ -392,10 +534,12 @@ class RebalancerTests(unittest.TestCase):
         f = self.fixture
         deadline = f.state["deadline_unix"]
         self.assertEqual(f.reloaded().state["deadline_unix"], deadline)
-        with rc.controller_lock(f.paths.private):
-            with self.assertRaises(rc.UnsafeJob):
-                with rc.controller_lock(f.paths.private):
-                    self.fail("duplicate controller acquired the lock")
+        with (
+            rc.controller_lock(f.paths.private),
+            self.assertRaises(rc.UnsafeJob),
+            rc.controller_lock(f.paths.private),
+        ):
+            self.fail("duplicate controller acquired the lock")
         expired = copy.deepcopy(f.state)
         expired["deadline_unix"] = time.time() - 1
         expired["started_unix"] = expired["deadline_unix"] - 1
