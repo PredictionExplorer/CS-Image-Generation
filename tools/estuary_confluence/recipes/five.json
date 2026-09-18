@@ -1,0 +1,52 @@
+{
+  "chromatic_count": 5,
+  "encounters": 3,
+  "looks": [
+    "layered"
+  ],
+  "name": "Confluence Fresco",
+  "render": {
+    "azimuth_end": 35,
+    "azimuth_start": -35,
+    "capture_resolution": [
+      2048,
+      1536
+    ],
+    "formation_frames": 301,
+    "fps": 24,
+    "hold_frames": 24,
+    "orbit_frames": 145,
+    "orbit_tilt_degrees": 12,
+    "resolution": [
+      1920,
+      1440
+    ],
+    "still_resolution": [
+      3840,
+      2880
+    ],
+    "still_tilt_degrees": 8
+  },
+  "schema_version": 1,
+  "simulation": {
+    "burial_rate": 1.6,
+    "deposition": 0.025,
+    "drying": 4.5,
+    "initial_load": 0.18,
+    "initial_pattern": "pools",
+    "resolution": [
+      4096,
+      3072
+    ],
+    "steps": 3600,
+    "underpaint_strength": 0
+  },
+  "surface": {
+    "ambient": 0.2,
+    "exposure": 1.1,
+    "fill_strength": 0.13,
+    "key_elevation_degrees": 23,
+    "key_strength": 3.35,
+    "layer_scale": 48
+  }
+}

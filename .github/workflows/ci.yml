@@ -50,7 +50,12 @@ jobs:
         env:
           ESTUARY_TEST_GPU: "0"
           OPENBLAS_NUM_THREADS: "4"
-        run: python -W error -m unittest discover -s tools/estuary_studio -p 'test_*.py' -v
+        run: python -W error -m unittest discover -s tools/estuary_studio -t . -p 'test_*.py' -v
+      - name: Confluence Fresco CPU contracts
+        env:
+          ESTUARY_TEST_GPU: "0"
+          OPENBLAS_NUM_THREADS: "4"
+        run: python -W error -m unittest discover -s tools/estuary_confluence -t . -p 'test_*.py' -v
 
   fmt:
     name: Formatting

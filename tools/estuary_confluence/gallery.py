@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Publish complete Confluence films, paintings, palettes, and fair comparisons.
+
+One physical archive can supply two optical views. Published media are content
+addressed; copied request/receipt/palette/event records retain their association
+after the original experiment directories move. Comparison relationships are
+derived from the archived source, pigment count, and physical-state identity.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import html
+from pathlib import Path
+
+from tools.estuary_studio.common import artifact, checked, encoded, read, require, write
+from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_artifact
+
+from .palette import normalize_seed
+from .run import verify_run
+
+GROUPS = {"layered": "Layered", "homogeneous": "Blended"}
+TEMPLATE = Path(__file__).with_suffix(".html")
+TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
+
+
+def document(title):
+    """Fill only the escaped title in Confluence's independent HTML template."""
+    require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
+    template = TEMPLATE.read_text(encoding="utf-8")
+    require(template.count(TITLE_TOKEN) == 2, "Gallery title placeholders differ")
+    return template.replace(TITLE_TOKEN, html.escape(title))
+
+
+def _film_metadata(request, receipt, look):
+    names = ("film_caption", "film_resolution", "film_frames", "film_fps", "film_seconds")
+    if request["mode"] == "still":
+        return dict.fromkeys(names)
+    render, movie = request["recipe"]["render"], receipt["looks"][look]["movie"]
+    frames = render["formation_frames"] + render["hold_frames"] + render["orbit_frames"] - 1
+    require(
+        movie["full_decode_verified"] is True,
+        "Film needs complete decode evidence",
+    )
+    require(
+        movie["frames"] == frames
+        and movie["fps"] == render["fps"]
+        and movie["resolution"] == render["resolution"],
+        "Film metadata differs from its complete timeline",
+    )
+    return {
+        "film_caption": (
+            FILM_CAPTION if render["orbit_frames"] > 1 else "Complete formation of the painting"
+        ),
+        "film_resolution": movie["resolution"],
+        "film_frames": movie["frames"],
+        "film_fps": movie["fps"],
+        "film_seconds": movie["frames"] / movie["fps"],
+    }
+
+
+def _name(palette):
+    return f"{palette['family'].replace('-', ' ').title()} · {palette['chromatic_count']} colors"
+
+
+def _swatches(palette):
+    count = palette["chromatic_count"] + 1
+    require(
+        len(palette["pigments_srgb"])
+        == len(palette["pigment_names"])
+        == len(palette["pigment_roles"])
+        == count,
+        "Palette swatch dimensions differ",
+    )
+    result = []
+    for name, role, color in zip(
+        palette["pigment_names"], palette["pigment_roles"], palette["pigments_srgb"], strict=True
+    ):
+        require(
+            type(name) is str
+            and type(role) is str
+            and len(color) == 3
+            and all(type(v) in (int, float) and 0 <= v <= 1 for v in color),
+            "Invalid palette swatch",
+        )
+        result.append({"name": name, "role": role, "rgba": [*color, 1.0]})
+    return result
+
+
+def _comparisons(studies):
+    """Derive unambiguous same-source comparisons and reject false pairings."""
+    indexed, source_by_seed = {}, {}
+    for study in studies:
+        key = (study["seed"], study["chromatic_count"], study["group"])
+        require(key not in indexed, "Ambiguous duplicate seed, pigment count, and optical view")
+        indexed[key] = study
+        source_by_seed.setdefault(study["seed"], study["source_sha256"])
+        require(
+            source_by_seed[study["seed"]] == study["source_sha256"],
+            "Comparison seed refers to different source trajectories",
+        )
+    result = {}
+    for study in studies:
+        seed, count, look = study["seed"], study["chromatic_count"], study["group"]
+        if count == 5 and look == "layered":
+            target = indexed.get((seed, 3, "layered"))
+            caption = "Three colors · layered"
+        else:
+            target = indexed.get((seed, count, "homogeneous" if look == "layered" else "layered"))
+            caption = ("Blended" if look == "layered" else "Layered") + " · same material history"
+            if target:
+                require(
+                    study["physical_state_sha256"] == target["physical_state_sha256"],
+                    "Optical comparison uses different physical states",
+                )
+        result[study["id"]] = (
+            (target["id"], target["image"], caption) if target else (None, None, None)
+        )
+    return result
+
+
+def build_gallery(output, cases, *, title="Confluence Fresco", allow_stills=False):
+    """Publish all selected complete cases; each seed retains its CLI order."""
+    require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
+    require(type(allow_stills) is bool, "allow_stills must be boolean")
+    cases = [Path(case).resolve(strict=True) for case in cases]
+    require(bool(cases), "Choose at least one completed confluence")
+    records, identities, prefixes, seeds = [], set(), set(), []
+    for case in cases:
+        request, receipt = verify_run(case)
+        identity = receipt["identity_sha256"]
+        require(identity not in identities, "A physical case was selected more than once")
+        require(identity[:16] not in prefixes, "Truncated case identity collision")
+        identities.add(identity)
+        prefixes.add(identity[:16])
+        require(allow_stills or request["mode"] == "film", "Every selected painting needs its film")
+        seed = normalize_seed(request["source"]["seed"])
+        if seed not in seeds:
+            seeds.append(seed)
+        records.append((case, request, receipt))
+    output = Path(output).resolve()
+    require(
+        all(output != case and not output.is_relative_to(case) for case in cases),
+        "Publish outside immutable source archives",
+    )
+    output.mkdir(parents=True, exist_ok=True)
+    with (output / ".publish.lock").open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        files, studies, origins = {}, [], []
+
+        def copy(source, name, expected):
+            _copy_verified(source, output / name, expected)
+            files[name] = expected
+            return name
+
+        for case, request, receipt in records:
+            identity, palette = receipt["identity_sha256"], request["palette"]
+            case_id, seed = identity[:16], normalize_seed(request["source"]["seed"])
+            paths = {}
+            for name, value in (
+                ("request", request),
+                ("receipt", receipt),
+                ("palette", palette),
+                ("events", request["events"]),
+            ):
+                paths[name] = copy(
+                    case / f"{name}.json", f"records/{case_id}/{name}.json", _json_artifact(value)
+                )
+            origins.append(
+                {
+                    "id": case_id,
+                    "identity_sha256": identity,
+                    "case": str(case),
+                    "source_sha256": request["source"]["sha256"],
+                    **paths,
+                }
+            )
+            for look in request["recipe"]["looks"]:
+                require(look in GROUPS, "Unknown optical view")
+                film_metadata = _film_metadata(request, receipt, look)
+                poster_info = receipt["artifacts"][f"{look}/poster.png"]
+                poster = copy(
+                    case / look / "poster.png",
+                    f"assets/{poster_info['sha256']}/poster.png",
+                    poster_info,
+                )
+                film = None
+                if request["mode"] == "film":
+                    info = receipt["artifacts"][f"{look}/film.mp4"]
+                    film = copy(case / look / "film.mp4", f"assets/{info['sha256']}/film.mp4", info)
+                studies.append(
+                    {
+                        "id": f"{case_id}-{look}",
+                        "case_id": case_id,
+                        "identity_sha256": identity,
+                        "physical_state_sha256": receipt["looks"][look]["physical_state_sha256"],
+                        "name": _name(palette),
+                        "group": look,
+                        "seed": seed,
+                        "chromatic_count": palette["chromatic_count"],
+                        "image": poster,
+                        "film": film,
+                        "source_sha256": request["source"]["sha256"],
+                        "palette_identity_sha256": palette["identity_sha256"],
+                        "palette_record": paths["palette"],
+                        "swatches": _swatches(palette),
+                        "resolution": request["recipe"]["render"]["still_resolution"],
+                        **film_metadata,
+                    }
+                )
+        rank = {(3, "layered"): 0, (5, "layered"): 1, (3, "homogeneous"): 2, (5, "homogeneous"): 3}
+        studies.sort(
+            key=lambda study: (
+                seeds.index(study["seed"]),
+                rank[(study["chromatic_count"], study["group"])],
+            )
+        )
+        comparisons = _comparisons(studies)
+        for study in studies:
+            study["comparison_id"], study["baseline"], study["comparison_caption"] = comparisons[
+                study["id"]
+            ]
+        collection = {
+            "schema_version": 1,
+            "title": title,
+            "studies": studies,
+            "history": "Complete trajectories; finished material stays fixed during camera motion",
+        }
+        write(output / "collection.json", collection)
+        partial = output / "index.html.partial"
+        partial.write_text(document(title))
+        partial.replace(output / "index.html")
+        for name in ("collection.json", "index.html"):
+            files[name] = artifact(output / name)
+        write(
+            output / "curation.json",
+            {
+                "schema_version": 1,
+                "complete": True,
+                "title": title,
+                "sources": origins,
+                "artifacts": files,
+            },
+        )
+        verify_gallery(output)
+    return output / "index.html"
+
+
+def verify_gallery(output):
+    """Verify portable publication against each archived request and receipt."""
+    output = Path(output)
+    curation = read(output / "curation.json")
+    require(
+        curation.get("schema_version") == 1 and curation.get("complete") is True,
+        "Incomplete gallery curation",
+    )
+    files = curation["artifacts"]
+    require({"collection.json", "index.html"} <= files.keys(), "Missing gallery documents")
+    for name, info in files.items():
+        checked(output, name, info)
+    collection = read(output / "collection.json")
+    require(
+        collection.get("schema_version") == 1 and collection["title"] == curation["title"],
+        "Gallery collection differs from its curation",
+    )
+    origins = {record["id"]: record for record in curation["sources"]}
+    studies = {study["id"]: study for study in collection["studies"]}
+    require(
+        len(origins) == len(curation["sources"]) and len(studies) == len(collection["studies"]),
+        "Duplicate source or optical-view identity",
+    )
+    expected_ids = set()
+    for case_id, origin in origins.items():
+        require(
+            all(origin[key] in files for key in ("request", "receipt", "palette", "events")),
+            "Source design records are not archived",
+        )
+        request, receipt = read(output / origin["request"]), read(output / origin["receipt"])
+        identity = hashlib.sha256(encoded(request)).hexdigest()
+        require(
+            identity == receipt["identity_sha256"] == origin["identity_sha256"]
+            and case_id == identity[:16]
+            and receipt["complete"] is True,
+            "Source case identity differs",
+        )
+        palette, recipe, source = request["palette"], request["recipe"], request["source"]
+        require(
+            read(output / origin["palette"]) == palette
+            and read(output / origin["events"]) == request["events"],
+            "Source design differs",
+        )
+        require(
+            receipt["source"] == source
+            and origin["source_sha256"] == source["sha256"]
+            and receipt["source_fraction"] == 1
+            and receipt["final_step"] == recipe["simulation"]["steps"],
+            "Published case does not represent its complete source",
+        )
+        for look in recipe["looks"]:
+            study_id = f"{case_id}-{look}"
+            expected_ids.add(study_id)
+            require(study_id in studies, "Missing selected optical view")
+            study = studies[study_id]
+            require(
+                study["case_id"] == case_id
+                and study["identity_sha256"] == identity
+                and study["physical_state_sha256"]
+                == receipt["physical_state_sha256"]
+                == receipt["looks"][look]["physical_state_sha256"],
+                "Physical-state association differs",
+            )
+            require(
+                study["name"] == _name(palette)
+                and study["group"] == look
+                and study["seed"] == normalize_seed(source["seed"])
+                and study["source_sha256"] == source["sha256"]
+                and study["chromatic_count"]
+                == recipe["chromatic_count"]
+                == palette["chromatic_count"]
+                and study["palette_identity_sha256"] == palette["identity_sha256"]
+                and study["palette_record"] == origin["palette"]
+                and study["swatches"] == _swatches(palette),
+                "Painting caption or palette association differs",
+            )
+            require(
+                study["resolution"] == recipe["render"]["still_resolution"]
+                and study["image"] in files
+                and files[study["image"]] == receipt["artifacts"][f"{look}/poster.png"],
+                "Published painting image differs",
+            )
+            if request["mode"] == "film":
+                require(
+                    study["film"] in files
+                    and files[study["film"]] == receipt["artifacts"][f"{look}/film.mp4"]
+                    and all(
+                        study[key] == value
+                        for key, value in _film_metadata(request, receipt, look).items()
+                    ),
+                    "Published film or formation caption differs",
+                )
+            else:
+                require(
+                    request["mode"] == "still"
+                    and study["film"] is None
+                    and all(study[key] is None for key in _film_metadata(request, receipt, look)),
+                    "A still view cannot advertise a film",
+                )
+    require(expected_ids == set(studies), "Gallery contains unbound optical views")
+    comparisons = _comparisons(collection["studies"])
+    for study in collection["studies"]:
+        require(
+            (study["comparison_id"], study["baseline"], study["comparison_caption"])
+            == comparisons[study["id"]],
+            "Comparison source or material-history association differs",
+        )
+    return collection, curation
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--cases", required=True, nargs="+", type=Path)
+    parser.add_argument("--title", default="Confluence Fresco")
+    parser.add_argument("--allow-stills", action="store_true")
+    args = parser.parse_args()
+    print(build_gallery(args.output, args.cases, title=args.title, allow_stills=args.allow_stills))
+
+
+if __name__ == "__main__":
+    main()
