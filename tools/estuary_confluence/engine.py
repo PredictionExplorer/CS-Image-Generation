@@ -1054,5 +1054,33 @@ class Engine:
     def snapshot(self, resolution=None):
         return self._gpu.snapshot(resolution)
 
+    def gpu_frame(self):
+        """Borrow the current material textures until the next physical advance.
+
+        The consumer validates the owner and source-step token before use. It
+        must neither mutate these textures nor release the engine's context.
+        No simulation work or CPU material readback occurs in this accessor.
+        """
+        if self._gpu.ctx is None:
+            raise RuntimeError("The Estuary context has been closed")
+        from .gpu_frame import GPUFrame
+
+        return GPUFrame.capture(
+            owner=self,
+            context=self._gpu.ctx,
+            token=(self.step, self._gpu.internal_steps),
+            size=(self._gpu.width, self._gpu.height),
+            pigment_count=len(self.palette["pigments_srgb"]),
+            chalk_index=self.palette["chalk_index"],
+            mobile=tuple(block[0] for block in self._gpu.blocks),
+            deposit=tuple(group[0] for group in self._gpu.deposits),
+            underpaint=tuple(group[0] for group in self._gpu.underpaints),
+            carrier=self._gpu.carrier[0],
+            tooth=self._gpu.tooth,
+            specific_volumes=tuple(self.palette["specific_volumes"]),
+            height_scale_mm=self.config["height_scale_mm"],
+            substrate_um=self.config["substrate_um"],
+        )
+
     def close(self):
         self._gpu.close()

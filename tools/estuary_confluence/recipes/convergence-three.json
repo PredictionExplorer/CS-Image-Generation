@@ -14,6 +14,7 @@
   "render": {
     "azimuth_end": 35,
     "azimuth_start": -35,
+    "capture_pipeline": "native-gpu",
     "capture_resolution": [
       4096,
       3072

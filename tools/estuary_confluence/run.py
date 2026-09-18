@@ -26,6 +26,7 @@ import numpy as np
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.estuary.optics import srgb_to_linear
 from tools.estuary.run import encode_movie, write_array, write_png
 from tools.estuary.source import Source
 from tools.estuary_studio.common import artifact, checked, digest, encoded, read, require, write
@@ -38,6 +39,7 @@ DEFAULT_RENDER = {
     "resolution": [1920, 1440],
     "still_resolution": [3840, 2880],
     "capture_resolution": None,
+    "capture_pipeline": "cpu",
     "frame_supersampling": 1,
     "formation_frames": 301,
     "orbit_frames": 145,
@@ -154,6 +156,11 @@ def validate_recipe(raw):
         w, h = dimensions(render[key])
         require(w * sh == h * sw, "Image and material aspects must match")
     reduction_factor((sw, sh), tuple(render["capture_resolution"]))
+    require(render["capture_pipeline"] in ("cpu", "native-gpu"), "Unknown capture pipeline")
+    require(
+        render["capture_pipeline"] != "native-gpu" or render["capture_resolution"] == [sw, sh],
+        "Native GPU capture requires the full simulation grid",
+    )
     frame_raster_resolution(render)
     for key, lo, hi in (
         ("formation_frames", 2, 1801),
@@ -228,6 +235,14 @@ def render_frame(surface, fields, render, *, tilt_degrees, azimuth_degrees):
     Native final stills deliberately do not pass through this helper.
     """
     factor = render.get("frame_supersampling", 1)
+    if render.get("capture_pipeline", "cpu") == "native-gpu":
+        return surface.render_gpu(
+            fields,
+            size=tuple(render["resolution"]),
+            supersampling=factor,
+            tilt_degrees=tilt_degrees,
+            azimuth_degrees=azimuth_degrees,
+        )
     pixels = surface.render(
         fields,
         size=tuple(frame_raster_resolution(render)),
@@ -244,8 +259,14 @@ def capture_metadata(recipe):
     render = recipe["render"]
     native = list(recipe["simulation"]["resolution"])
     capture = list(render["capture_resolution"])
+    pipeline = render.get("capture_pipeline", "cpu")
+    require(pipeline in ("cpu", "native-gpu"), "Unknown capture pipeline")
+    require(
+        pipeline != "native-gpu" or capture == native,
+        "Native GPU capture requires the full simulation grid",
+    )
     factor = render.get("frame_supersampling", 1)
-    return {
+    result = {
         "schema_version": 1,
         "material_sampling": (
             "full native material grid"
@@ -267,6 +288,16 @@ def capture_metadata(recipe):
             "full native material grid at requested still resolution; no frame downsampling"
         ),
     }
+    if "capture_pipeline" in render:
+        result["capture_pipeline"] = pipeline
+    return result
+
+
+def capture_frame(engine, render):
+    """Retain native GPU material, or use the explicit legacy CPU capture path."""
+    if render.get("capture_pipeline", "cpu") == "native-gpu":
+        return engine.gpu_frame()
+    return engine.snapshot(resolution=tuple(render["capture_resolution"]))
 
 
 def surface_configs(recipe):
@@ -495,6 +526,7 @@ def verify_run(folder):
     else:
         require(
             "frame_supersampling" not in request["recipe"]["render"]
+            and "capture_pipeline" not in request["recipe"]["render"]
             and request.get("capture")
             == "read-only GPU area averages; final still uses full physical state",
             "Invalid legacy capture metadata",
@@ -564,7 +596,13 @@ def verify_run(folder):
             from tools.estuary_confluence.assessment import image_balance
 
             pixels = np.load(folder / look / "poster-linear.npy", allow_pickle=False)
-            require(result.get("image_balance") == image_balance(pixels), "Image balance differs")
+            require(
+                result.get("image_balance")
+                == image_balance(
+                    pixels, srgb_to_linear(request["recipe"]["surface"]["ground_srgb"])
+                ),
+                "Image balance differs",
+            )
         if request["mode"] == "film":
             movie = read(folder / look / "movie.json")
             require(
@@ -630,12 +668,11 @@ def run(args):
                 "Engine starting layout differs",
             )
             configs = surface_configs(recipe)
+            surface_options = {"spectral": spectral} if spectral is not None else {}
+            if recipe["render"]["capture_pipeline"] == "native-gpu":
+                surface_options["gpu_frame"] = engine.gpu_frame()
             for look, config in configs.items():
-                surfaces[look] = (
-                    Surface(config, palette, spectral=spectral)
-                    if spectral is not None
-                    else Surface(config, palette)
-                )
+                surfaces[look] = Surface(config, palette, **surface_options)
             request = {
                 "schema_version": 1,
                 "recipe": recipe,
@@ -724,7 +761,7 @@ def run(args):
                 if frames:
                     (output / look / "frames").mkdir()
             if layout is not None and not frames:
-                initial = engine.snapshot(resolution=tuple(render["capture_resolution"]))
+                initial = capture_frame(engine, render)
                 for look, surface in surfaces.items():
                     pixels = render_frame(
                         surface,
@@ -741,7 +778,7 @@ def run(args):
                 changed = fields is None or frame["step"] != engine.step
                 if changed:
                     advance(frame["step"])
-                    fields = engine.snapshot(resolution=tuple(render["capture_resolution"]))
+                    fields = capture_frame(engine, render)
                 images = {}
                 for look, surface in surfaces.items():
                     name = f"{look}/frames/{i:06d}.png"
@@ -819,7 +856,9 @@ def run(args):
                 if recipe["assessment"] is not None:
                     from tools.estuary_confluence.assessment import image_balance
 
-                    results[look]["image_balance"] = image_balance(pixels)
+                    results[look]["image_balance"] = image_balance(
+                        pixels, srgb_to_linear(recipe["surface"]["ground_srgb"])
+                    )
             write(output / "frame-ledger.json", ledger)
             for name in ("final.npz", "frame-ledger.json"):
                 artifacts[name] = artifact(output / name)

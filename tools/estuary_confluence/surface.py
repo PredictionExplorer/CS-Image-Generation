@@ -17,13 +17,15 @@ from __future__ import annotations
 
 import copy
 import math
+from functools import wraps
 from pathlib import Path
 
 import numpy as np
 
 from tools.estuary.optics import srgb_to_linear
-from tools.estuary_studio.surface import _current, _number, camera_basis
+from tools.estuary_studio.surface import _number, camera_basis
 
+from .gpu_frame import GPUFrame
 from .optics import palette_coefficients
 
 ROOT = Path(__file__).parent
@@ -165,10 +167,23 @@ def validate_fields(fields, pigment_count=None):
     return arrays
 
 
-class Surface:
-    """Dedicated hardware context; safe to interleave with simulation contexts."""
+def _current(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        if self.ctx is None:
+            raise RuntimeError("The painting surface context has been closed")
+        if self._borrowed_frame is not None:
+            self._borrowed_frame.require_owner()
+        with self.ctx:
+            return method(self, *args, **kwargs)
 
-    def __init__(self, config, palette, backend="egl", *, spectral=None):
+    return wrapped
+
+
+class Surface:
+    """Own a hardware context or safely borrow an Engine's native context."""
+
+    def __init__(self, config, palette, backend="egl", *, spectral=None, gpu_frame=None):
         import moderngl
 
         self.config = validate_config(config)
@@ -186,96 +201,130 @@ class Surface:
             )
         elif spectral is not None:
             raise ValueError("RGB optics cannot consume a spectral material archive")
-        self.ctx = moderngl.create_standalone_context(require=430, backend=backend)
+        self._borrowed_frame = None
+        self._owns_context = gpu_frame is None
+        if gpu_frame is not None:
+            if not isinstance(gpu_frame, GPUFrame):
+                raise ValueError("A borrowed surface requires an Engine GPUFrame")
+            gpu_frame.validate()
+            if gpu_frame.pigment_count != self._pigment_count:
+                raise ValueError("GPU frame and palette have different pigment counts")
+            self._borrowed_frame = gpu_frame
+            self.ctx = gpu_frame.context
+        else:
+            self.ctx = moderngl.create_standalone_context(require=430, backend=backend)
         self._textures = []
+        self._gpu_pack = self._gpu_summary = self._gpu_reduce = self._gpu_reduced = None
+        self._gpu_reduced_size = None
         self._phase_texture = self._mix_texture = self._optics_program = None
         self._target = self._framebuffer = self._vao = self._quad = self._program = None
         self._grid_size = self._target_size = None
         self._scaled_max_height = None
         try:
-            if any(
-                v in self.ctx.info["GL_RENDERER"].lower()
-                for v in ("llvmpipe", "softpipe", "software")
-            ):
-                raise RuntimeError("Painting experiments require a hardware GPU")
-            self.metadata = {
-                "renderer": self.ctx.info["GL_RENDERER"],
-                "vendor": self.ctx.info["GL_VENDOR"],
-                "version": self.ctx.info["GL_VERSION"],
-                "moderngl": moderngl.__version__,
-                "backend": backend,
-                "geometry": "orthographic heightfield ray intersection, 128 steps and 8 bisections",
-                "lighting": (
-                    "deterministic 5-point area-light quadrature; "
-                    "anisotropic GGX; heightfield shadows"
-                ),
-                "optics": (
-                    "authored RGB finite-layer Kubelka-Munk; "
-                    "phase-resolved reflection/transmission stacking"
-                ),
-                "mixing": (
-                    "bounded intimate and unresolved areal operator mixture; "
-                    "statistically independent layer patches; "
-                    "not resolved filaments or measured spectral paint"
-                ),
-                "limitations": (
-                    "single-valued surface; approximate direct lighting; "
-                    "no overhangs, refraction or multiple scattering"
-                ),
-                "output": (
-                    "top-down float32 linear sRGB; "
-                    "extended luminance Reinhard (white=4) or clipped linear; bounded [0,1]"
-                ),
-                "microtexture": (
-                    "stationary support grain, physical metres, pixel-footprint filtered"
-                ),
-                "finish": (
-                    "fresco: physical phase amount controls optical thickness; "
-                    "crisp: total-mass contour with one-pixel antialiasing and "
-                    "mass-normalized filled pigment colors over an unlit constant ground; "
-                    "crisp deliberately removes dilution cues without changing simulation state"
-                ),
-                "mass_units": "stored pigment concentration per material area, before RGB optics",
-                "cross_device_pixel_identity": False,
-                "config": copy.deepcopy(self.config),
-                "pigment_count": self._pigment_count,
-                "palette": copy.deepcopy(self.palette),
-                "optics_model": self.config["optics_model"],
-                "spectral_material_identity": None
-                if self.spectral is None
-                else self.spectral["identity_sha256"],
-            }
-            if self.spectral is not None:
-                self.metadata["optics"] = (
-                    "38-band finite-layer Kubelka-Munk, D65/CIE 1931 integration; "
-                    "synthetic RGB-reconstructed reflectance, not measured pigments"
+            with self.ctx:
+                if any(
+                    v in self.ctx.info["GL_RENDERER"].lower()
+                    for v in ("llvmpipe", "softpipe", "software")
+                ):
+                    raise RuntimeError("Painting experiments require a hardware GPU")
+                self.metadata = {
+                    "renderer": self.ctx.info["GL_RENDERER"],
+                    "vendor": self.ctx.info["GL_VENDOR"],
+                    "version": self.ctx.info["GL_VERSION"],
+                    "moderngl": moderngl.__version__,
+                    "backend": backend,
+                    "context_ownership": "owned"
+                    if self._owns_context
+                    else "borrowed simulation context",
+                    "native_gpu_capture": (
+                        "read-only live phase textures copied to Surface-owned staging; "
+                        "GPU geometry and "
+                        "existing pigment optics; optional GPU 2x2 linear display-RGB filtering; "
+                        "only an 8-byte validation summary and final image return to CPU"
+                    )
+                    if not self._owns_context
+                    else None,
+                    "geometry": (
+                        "orthographic heightfield ray intersection, 128 steps and 8 bisections"
+                    ),
+                    "lighting": (
+                        "deterministic 5-point area-light quadrature; "
+                        "anisotropic GGX; heightfield shadows"
+                    ),
+                    "optics": (
+                        "authored RGB finite-layer Kubelka-Munk; "
+                        "phase-resolved reflection/transmission stacking"
+                    ),
+                    "mixing": (
+                        "bounded intimate and unresolved areal operator mixture; "
+                        "statistically independent layer patches; "
+                        "not resolved filaments or measured spectral paint"
+                    ),
+                    "limitations": (
+                        "single-valued surface; approximate direct lighting; "
+                        "no overhangs, refraction or multiple scattering"
+                    ),
+                    "output": (
+                        "top-down float32 linear sRGB; "
+                        "extended luminance Reinhard (white=4) or clipped linear; bounded [0,1]"
+                    ),
+                    "microtexture": (
+                        "stationary support grain, physical metres, pixel-footprint filtered"
+                    ),
+                    "finish": (
+                        "fresco: physical phase amount controls optical thickness; "
+                        "crisp: total-mass contour with one-pixel antialiasing and "
+                        "mass-normalized filled pigment colors over an unlit constant ground; "
+                        "crisp deliberately removes dilution cues without changing simulation state"
+                    ),
+                    "mass_units": (
+                        "stored pigment concentration per material area, before RGB optics"
+                    ),
+                    "cross_device_pixel_identity": False,
+                    "config": copy.deepcopy(self.config),
+                    "pigment_count": self._pigment_count,
+                    "palette": copy.deepcopy(self.palette),
+                    "optics_model": self.config["optics_model"],
+                    "spectral_material_identity": None
+                    if self.spectral is None
+                    else self.spectral["identity_sha256"],
+                }
+                if self.spectral is not None:
+                    self.metadata["optics"] = (
+                        "38-band finite-layer Kubelka-Munk, D65/CIE 1931 integration; "
+                        "synthetic RGB-reconstructed reflectance, not measured pigments"
+                    )
+                if (
+                    self.spectral is not None
+                    and self.spectral["version"] == "confluence-spectral-v2"
+                ):
+                    self.metadata["mixing"] = (
+                        "recorded mixedness blends intimate spectral reflection with "
+                        "independent pigment-column reflection composed over the lower layer; "
+                        "no resolved microscopic strands or measured mixing calibration"
+                    )
+                self._program = self.ctx.program(
+                    vertex_shader=(ROOT / "shaders/surface.vert.glsl").read_text(),
+                    fragment_shader=(ROOT / "shaders/surface.frag.glsl").read_text(),
                 )
-            if self.spectral is not None and self.spectral["version"] == "confluence-spectral-v2":
-                self.metadata["mixing"] = (
-                    "recorded mixedness blends intimate spectral reflection with "
-                    "independent pigment-column reflection composed over the lower layer; "
-                    "no resolved microscopic strands or measured mixing calibration"
+                self._quad = self.ctx.buffer(
+                    np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes()
                 )
-            self._program = self.ctx.program(
-                vertex_shader=(ROOT / "shaders/surface.vert.glsl").read_text(),
-                fragment_shader=(ROOT / "shaders/surface.frag.glsl").read_text(),
-            )
-            self._quad = self.ctx.buffer(
-                np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes()
-            )
-            self._vao = self.ctx.vertex_array(self._program, [(self._quad, "2f", "in_position")])
-            if self.spectral is None:
-                optics_file = "optics.comp.glsl"
-            else:
-                optics_file = "optics-spectral.comp.glsl"
-            optics_source = (ROOT / "shaders" / optics_file).read_text()
-            optics_source = optics_source.replace(
-                "#version 430 core",
-                f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
-                1,
-            )
-            self._optics_program = self.ctx.compute_shader(optics_source)
-            self._bind_config()
+                self._vao = self.ctx.vertex_array(
+                    self._program, [(self._quad, "2f", "in_position")]
+                )
+                if self.spectral is None:
+                    optics_file = "optics.comp.glsl"
+                else:
+                    optics_file = "optics-spectral.comp.glsl"
+                optics_source = (ROOT / "shaders" / optics_file).read_text()
+                optics_source = optics_source.replace(
+                    "#version 430 core",
+                    f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
+                    1,
+                )
+                self._optics_program = self.ctx.compute_shader(optics_source)
+                self._bind_config()
         except BaseException:
             self.close()
             raise
@@ -349,6 +398,9 @@ class Surface:
         No CPU arrays are retained and no object-identity caching is performed:
         mutating an earlier caller array cannot silently alter the uploaded paint.
         """
+        return self._render_buffer(fields, size, tilt_degrees, azimuth_degrees, readback=True)
+
+    def _render_buffer(self, fields, size, tilt_degrees, azimuth_degrees, *, readback):
         import moderngl
 
         if fields is None:
@@ -392,24 +444,7 @@ class Surface:
                             "Camera leaves the guarded painting; reduce tilt or relief"
                         )
         if arrays is not None:
-            if self._grid_size != (grid_width, grid_height):
-                for texture in self._textures:
-                    texture.release()
-                self._textures = [
-                    self.ctx.texture((grid_width, grid_height), n, dtype="f4") for n in (4, 4, 2)
-                ]
-                for texture in self._textures:
-                    texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    texture.repeat_x = texture.repeat_y = False
-                if self._phase_texture is not None:
-                    self._phase_texture.release()
-                    self._mix_texture.release()
-                groups = (self._pigment_count + 3) // 4
-                self._phase_texture = self.ctx.texture_array(
-                    (grid_width, grid_height, groups * 3), 4, dtype="f4"
-                )
-                self._mix_texture = self.ctx.texture((grid_width, grid_height), 1, dtype="f4")
-                self._grid_size = (grid_width, grid_height)
+            self._ensure_grid(grid_width, grid_height)
             geometry = np.empty((grid_height, grid_width, 4), dtype="f4")
             geometry[..., 0], geometry[..., 1] = arrays["height"], arrays["wetness"]
             geometry[..., 2], geometry[..., 3] = arrays["roughness"], arrays["coverage"]
@@ -439,6 +474,8 @@ class Surface:
         self.ctx.viewport = (0, 0, width, height)
         self.ctx.disable(moderngl.BLEND | moderngl.DEPTH_TEST | moderngl.CULL_FACE)
         self._vao.render(mode=moderngl.TRIANGLE_STRIP)
+        if not readback:
+            return None
         result = (
             np.frombuffer(self._target.read(alignment=1), dtype="f4")
             .reshape(height, width, 3)[::-1]
@@ -446,6 +483,153 @@ class Surface:
         )
         if not np.isfinite(result).all() or np.any(result < 0):
             raise FloatingPointError("Surface rendering produced nonfinite or negative radiance")
+        return result
+
+    def _ensure_grid(self, grid_width, grid_height):
+        import moderngl
+
+        if self._grid_size == (grid_width, grid_height):
+            return
+        for texture in self._textures:
+            texture.release()
+        self._textures = [
+            self.ctx.texture((grid_width, grid_height), n, dtype="f4") for n in (4, 4, 2)
+        ]
+        for texture in self._textures:
+            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            texture.repeat_x = texture.repeat_y = False
+        if self._phase_texture is not None:
+            self._phase_texture.release()
+            self._mix_texture.release()
+        groups = (self._pigment_count + 3) // 4
+        self._phase_texture = self.ctx.texture_array(
+            (grid_width, grid_height, groups * 3), 4, dtype="f4"
+        )
+        self._mix_texture = self.ctx.texture((grid_width, grid_height), 1, dtype="f4")
+        self._grid_size = (grid_width, grid_height)
+
+    def _prepare_gpu_frame(self, frame):
+        frame.validate()
+        if frame.context is not self.ctx or frame._owner() is not self._borrowed_frame._owner():
+            raise ValueError("GPU frame belongs to a different borrowed simulation context")
+        if frame.pigment_count != self._pigment_count:
+            raise ValueError("GPU frame and palette have different pigment counts")
+        width, height = frame.size
+        self._ensure_grid(width, height)
+        if self._gpu_pack is None:
+            source = (
+                (ROOT / "shaders/gpu-frame.comp.glsl")
+                .read_text()
+                .replace(
+                    "#version 430 core",
+                    f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
+                    1,
+                )
+            )
+            self._gpu_pack = self.ctx.compute_shader(source)
+            self._gpu_summary = self.ctx.buffer(reserve=8)
+        phases = (*frame.underpaint, *frame.deposit, *frame.mobile)
+        for unit, texture in enumerate(phases):
+            texture.use(unit)
+        program = self._gpu_pack
+        program["u_phase"].value = tuple(range(len(phases)))
+        frame.carrier.use(len(phases))
+        frame.tooth.use(len(phases) + 1)
+        program["u_carrier"].value = len(phases)
+        program["u_tooth"].value = len(phases) + 1
+        program["u_specific_volumes"].write(
+            np.asarray(frame.specific_volumes, dtype="f4").tobytes()
+        )
+        program["u_height_scale_mm"].value = frame.height_scale_mm
+        program["u_substrate_height_m"].value = frame.substrate_um * 1e-6
+        program["u_chalk_index"].value = frame.chalk_index
+        self._phase_texture.bind_to_image(0, read=False, write=True)
+        self._textures[1].bind_to_image(1, read=False, write=True)
+        self._textures[2].bind_to_image(2, read=False, write=True)
+        self._mix_texture.bind_to_image(3, read=False, write=True)
+        self._gpu_summary.write(b"\0" * 8)
+        self._gpu_summary.bind_to_storage_buffer(0)
+        program.run((width + 15) // 16, (height + 15) // 16)
+        self.ctx.memory_barrier()
+        summary = np.frombuffer(self._gpu_summary.read(), dtype="u4")
+        if summary[1]:
+            self._scaled_max_height = None
+            raise FloatingPointError(
+                "Native GPU material fields are nonfinite or outside supported bounds"
+            )
+        self._scaled_max_height = float(summary[:1].view("f4")[0]) * self.config["height_scale"]
+        self._phase_texture.use(3)
+        self._mix_texture.use(4)
+        self._textures[0].bind_to_image(0, read=False, write=True)
+        self._optics_program.run((width + 15) // 16, (height + 15) // 16)
+        self.ctx.memory_barrier()
+        frame.validate()
+
+    @_current
+    def render_gpu(
+        self,
+        frame=None,
+        size=(1280, 960),
+        tilt_degrees=0.0,
+        azimuth_degrees=-30.0,
+        *,
+        supersampling=1,
+    ):
+        """Capture a live Engine view without reading material arrays back to CPU.
+
+        The view is consumed synchronously. After capture, camera-only calls may
+        pass None to reuse Surface-owned frozen material even if Engine advances.
+        The borrowed engine context must remain alive until this surface closes.
+        Pixel calculations use float32 GPU arithmetic; the CPU snapshot/render
+        path remains the numerical reference and unchanged final-still path.
+        """
+        if self._borrowed_frame is None:
+            raise ValueError("Native GPU rendering requires a borrowed GPUFrame at construction")
+        if type(supersampling) is not int or supersampling not in (1, 2):
+            raise ValueError("GPU frame supersampling must be 1 or 2")
+        if (
+            type(size) not in (tuple, list)
+            or len(size) != 2
+            or any(type(value) is not int or value < 4 for value in size)
+        ):
+            raise ValueError("GPU output needs two integer dimensions")
+        raster = tuple(value * supersampling for value in size)
+        if max(raster) > 12288 or raster[0] * raster[1] > 50_000_000:
+            raise ValueError("Supersampled GPU frame exceeds the image budget")
+        camera_basis(tilt_degrees, azimuth_degrees)
+        if frame is not None:
+            if not isinstance(frame, GPUFrame):
+                raise ValueError("Native material input must be an Engine GPUFrame")
+            self._prepare_gpu_frame(frame)
+        self._render_buffer(None, raster, tilt_degrees, azimuth_degrees, readback=False)
+        if supersampling == 1:
+            result = (
+                np.frombuffer(self._target.read(alignment=1), dtype="f4")
+                .reshape(size[1], size[0], 3)[::-1]
+                .copy()
+            )
+        else:
+            if self._gpu_reduce is None:
+                self._gpu_reduce = self.ctx.compute_shader(
+                    (ROOT / "shaders/frame-reduce.comp.glsl").read_text()
+                )
+                self._gpu_reduce["u_input"].value = 0
+            if self._gpu_reduced_size != tuple(size):
+                if self._gpu_reduced is not None:
+                    self._gpu_reduced.release()
+                self._gpu_reduced = self.ctx.texture(tuple(size), 4, dtype="f4")
+                self._gpu_reduced_size = tuple(size)
+            self._target.use(0)
+            self._gpu_reduced.bind_to_image(0, read=False, write=True)
+            self._gpu_reduce.run((size[0] + 15) // 16, (size[1] + 15) // 16)
+            self.ctx.memory_barrier()
+            result = (
+                np.frombuffer(self._gpu_reduced.read(alignment=1), dtype="f4")
+                .reshape(size[1], size[0], 4)[::-1, :, :3]
+                .copy()
+            )
+        if not np.isfinite(result).all() or np.any(result < 0) or np.any(result > 1):
+            raise FloatingPointError("Native frame produced invalid linear RGB")
         return result
 
     def _upload_optics(self, arrays, width, height):
@@ -467,25 +651,39 @@ class Surface:
         self.ctx.memory_barrier()
 
     def close(self):
-        """Release owned GPU resources; repeated cleanup is safe."""
+        """Release owned images/programs, never borrowed Engine resources."""
         if self.ctx is None:
             return
-        with self.ctx:
-            for resource in (
-                self._framebuffer,
-                self._target,
-                *self._textures,
-                self._vao,
-                self._quad,
-                self._program,
-                self._phase_texture,
-                self._mix_texture,
-                self._optics_program,
-            ):
-                if resource is not None:
-                    resource.release()
-        self.ctx.release()
+        resources = (
+            self._framebuffer,
+            self._target,
+            *self._textures,
+            self._vao,
+            self._quad,
+            self._program,
+            self._phase_texture,
+            self._mix_texture,
+            self._optics_program,
+            self._gpu_pack,
+            self._gpu_summary,
+            self._gpu_reduce,
+            self._gpu_reduced,
+        )
+        # Closing the engine first destroys its GL context. Do not issue any GL
+        # calls through the released context; its driver already owns reclamation.
+        alive = self._borrowed_frame is None or self._borrowed_frame.owner_alive()
+        if alive:
+            with self.ctx:
+                for resource in resources:
+                    if resource is not None:
+                        resource.release()
+        if self._owns_context:
+            self.ctx.release()
         self.ctx = None
+        self._textures = []
+        self._framebuffer = self._target = self._vao = self._quad = self._program = None
+        self._phase_texture = self._mix_texture = self._optics_program = None
+        self._gpu_pack = self._gpu_summary = self._gpu_reduce = self._gpu_reduced = None
 
     def __enter__(self):
         return self

@@ -1,0 +1,321 @@
+{
+  "archive_root": "/home/user/estuary-convergence/sources/ten-seeds-v1",
+  "exporter_sha256": "2192e58590fb593e371232b871066031ebcb9fdc66abd81d00e949b4b24fc261",
+  "name": "Ten-seed Convergence cohort",
+  "numeric_contract": "Pinned native production exporter. Control recording is byte-identical; cross-architecture regeneration requires separate verification.",
+  "schema_version": 1,
+  "selection_policy": {
+    "additional_100k_records": [
+      "0x6210d183445b5dd5",
+      "0xa0c78ebadfb75018",
+      "0x5584badfb5d82790",
+      "0x2d01093da35729b3",
+      "0xceddf97909f39cc2"
+    ],
+    "additional_matching_30k_records": [
+      "0x5b26dc8faef2",
+      "0xb08c219a243f"
+    ],
+    "retained": [
+      "0xb7f327f9f722",
+      "0xbc53af1cd380",
+      "0x808861c25b6c"
+    ],
+    "rule": "Ascending SHA-256 of canonical seed ASCII; first five distinct eligible archived seeds",
+    "scope": "Diversity study across seeds; candidate budget and original selection resolution differ and are preserved, not controlled as one search-algorithm experiment.",
+    "selection_ranking": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+    "selection_ranking_sha256": "41bb9c721bedb09265b5bd5afc3c9baec8ce092c37c10226c9a9657a2d83df3f"
+  },
+  "sources": [
+    {
+      "generation_record_sha256": "b8e314e6dc93ad7f8f07a41539ea95c39298110c11f4dd9ee4fbb409ccb256d0",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "164265b7caa4e2fbf3dd4216ddeb0c59fb7726b124f54c48ff2ce9d77a58352e",
+      "seed": "0xb7f327f9f722",
+      "selection": {
+        "candidate_count": 30000,
+        "candidate_index": 24539,
+        "chaos_weight": 1.0,
+        "equil_weight": 14.316864284243733,
+        "retry_count": 0,
+        "selection_resolution": [
+          1920,
+          1242
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652"
+    },
+    {
+      "generation_record_sha256": "a41bfff2b971af2f3396c56615e67da0c6add8966ce3e619a8d503d2f4657b74",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "50b07d57e5df77620bb5d57a5c5feb482956981ebb9fb3425216ebcfdbf04bcc",
+      "seed": "0xbc53af1cd380",
+      "selection": {
+        "candidate_count": 30000,
+        "candidate_index": 29321,
+        "chaos_weight": 1.0,
+        "equil_weight": 0.7673601497489116,
+        "retry_count": 0,
+        "selection_resolution": [
+          1920,
+          1242
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749"
+    },
+    {
+      "generation_record_sha256": "ddd196489b9b250d71dce1cf72f81f4a4c59a35bc09518f408510110a6c74c56",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "bf562a3d7f49a40f0b9b75316502fd2a65652579a4e479aec12a7e1afa904a14",
+      "seed": "0x808861c25b6c",
+      "selection": {
+        "candidate_count": 30000,
+        "candidate_index": 14324,
+        "chaos_weight": 1.0,
+        "equil_weight": 4.732554429237184,
+        "retry_count": 0,
+        "selection_resolution": [
+          1920,
+          1242
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3"
+    },
+    {
+      "generation_record_sha256": "fd2ea5b657d41a25d7c958a0fb1f110e57526847298bb7549b94c5b9e62cb2a3",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "4ddc7415a225a25d2757e3bd7c452b307811e3b4e13b02814241e97e7da635ad",
+      "seed": "0x5b26dc8faef2",
+      "selection": {
+        "candidate_count": 30000,
+        "candidate_index": 17327,
+        "chaos_weight": 1.0,
+        "equil_weight": 0.5318642955703761,
+        "retry_count": 0,
+        "selection_resolution": [
+          1920,
+          1242
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8"
+    },
+    {
+      "generation_record_sha256": "89b2a064ff9db7fcd39893d5dffe87f628379ecf2c192ec913ec2e9a11acaf89",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "6812a601fe63914d94489ed1a91d462c0e6b5d050cd74a6aaacf5509051149aa",
+      "seed": "0xb08c219a243f",
+      "selection": {
+        "candidate_count": 30000,
+        "candidate_index": 14703,
+        "chaos_weight": 1.0,
+        "equil_weight": 3.4857738835730174,
+        "retry_count": 0,
+        "selection_resolution": [
+          1920,
+          1242
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393"
+    },
+    {
+      "generation_record_sha256": "f3674c8fcd6bc559d930545535eb673337aa7c5dfa5b079fbdb2ad4a7b7e1feb",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "ac21cacdf2f618ceb681d0fc634c1fc03cb5a1ea2b4c9601a5b4128349d1f781",
+      "seed": "0x6210d183445b5dd5",
+      "selection": {
+        "candidate_count": 100000,
+        "candidate_index": 61175,
+        "chaos_weight": 1.0,
+        "equil_weight": 18.115885472988438,
+        "retry_count": 0,
+        "selection_resolution": [
+          3456,
+          2234
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0"
+    },
+    {
+      "generation_record_sha256": "ee725e51dbafd23e6a9543afa42fe6a3e8f305243f01430c6b8e7e124ae4fb8a",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "759d3e2b19bf9687b4cbbfe58eacf34500fdf9af2e27597fbd880f9e826e2de4",
+      "seed": "0xa0c78ebadfb75018",
+      "selection": {
+        "candidate_count": 100000,
+        "candidate_index": 33851,
+        "chaos_weight": 1.0,
+        "equil_weight": 0.5075547458244151,
+        "retry_count": 0,
+        "selection_resolution": [
+          3456,
+          2234
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070"
+    },
+    {
+      "generation_record_sha256": "5ff936f6eb2842e8d12a4dfcc625d40a2654b7474c0c584b1495bd41aff4d617",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "a2ddfd5be004bbd4046b76d8ba82f610e8928e90a104b01cee6427eedebbcb86",
+      "seed": "0x5584badfb5d82790",
+      "selection": {
+        "candidate_count": 100000,
+        "candidate_index": 21030,
+        "chaos_weight": 1.0,
+        "equil_weight": 0.614998181328736,
+        "retry_count": 0,
+        "selection_resolution": [
+          3456,
+          2234
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4"
+    },
+    {
+      "generation_record_sha256": "52e737e108199327759b5756274298c5f5b875b451b66fa4c8b0f96f53fc8245",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "4cb79d060a8afd43e8b27370d94253edafe321cc4d5b12ae12253a1e4b19e648",
+      "seed": "0x2d01093da35729b3",
+      "selection": {
+        "candidate_count": 100000,
+        "candidate_index": 89150,
+        "chaos_weight": 1.0,
+        "equil_weight": 0.21366847554584767,
+        "retry_count": 0,
+        "selection_resolution": [
+          3456,
+          2234
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243"
+    },
+    {
+      "generation_record_sha256": "797d9836f53bbae642c6357000ff27760ec4d5db4642f72c9a9aad75c6a1e3ea",
+      "physics": {
+        "coordinate_frame": "original-Newtonian-center-of-mass",
+        "gravitational_constant": 9.8,
+        "integration_dt": 0.001,
+        "integrator": "production-yoshida4-native-f64-v1",
+        "recording_steps": 1000000,
+        "sample_stride": 1,
+        "warmup_steps": 1000000
+      },
+      "recorded_duration": 999.999,
+      "samples": 1000000,
+      "samples_sha256": "036998484dee30a4ca0469c6099d281337c4916f92ad0897907929d2c61b02c7",
+      "seed": "0xceddf97909f39cc2",
+      "selection": {
+        "candidate_count": 100000,
+        "candidate_index": 37698,
+        "chaos_weight": 1.0,
+        "equil_weight": 4.047229775849889,
+        "retry_count": 0,
+        "selection_resolution": [
+          3456,
+          2234
+        ],
+        "weights_randomized": true
+      },
+      "sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8"
+    }
+  ]
+}

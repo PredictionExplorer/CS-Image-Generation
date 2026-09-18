@@ -87,6 +87,71 @@ display RGB before PNG encoding. This preserves fine color boundaries and reduce
 thin-line aliasing without changing pigment state. The opt-in control is
 `render.frame_supersampling=2`; its default of `1` preserves earlier frame output.
 
+## Background and lighting studies
+
+`appearance.py` renders eight presentations of an already verified painting:
+White, Charcoal, Midnight Blue, Aubergine, Palette Night, Grazing Light, Raised
+Paint, and Satin Reflection. The first five isolate the visible ground color.
+The last three also change lighting, displayed relief, or surface reflection and
+viewing angle. Pigment concentrations, trajectories, material coefficients, and
+the pigment's optical backing remain unchanged. These are appearance studies,
+not new physical simulations or a simulation of pigment on black primer.
+
+Palette Night uses a principal pigment hue, restrained OKLCH chroma, and
+full-seed-derived variations in darkness and hue. It preserves the shared ground
+across three/five-color comparisons. Every view archives its exact sRGB and linear
+ground colors, derivation, seed, palette binding, and identity. Background
+validation retains those exact archived colors while allowing tiny numerical
+roundoff when another platform regenerates the derivation. Image balance uses
+contrast against the actual ground; its original white-ground result is retained.
+
+```sh
+python -m tools.estuary_confluence.appearance \
+  --case /path/to/verified-physical-artwork \
+  --output /path/to/new-appearance-study
+
+python -m tools.estuary_confluence.appearance_gallery \
+  --studies /path/to/study-a /path/to/study-b \
+  --output /path/to/new-appearance-gallery
+```
+
+Appearance archives bind the parent request, receipt, and actual material hash;
+their read-only fields are checked before and after rendering. They include all
+resolved controls, background records, full-resolution images, linear rasters,
+previews, and the rendering code. The parent physical archive remains the source
+of the original recording and material arrays. The gallery copies images and
+provenance without duplicating large linear rasters. Optional `--films` accepts
+only verified films matching the physical state, source, pigment palette,
+spectra, simulation, selected surface, and final still camera. Unmatched films
+are recorded without being attached to the wrong presentation.
+
+The expanded cohort is pinned in `recipes/ten-seeds.json`. All ten recordings use
+the same production Yoshida4 f64 physics, G=9.8, dt=0.001, one million warm-up
+steps, and one million recorded states. The first five trajectories were selected
+from 30,000 candidates; the final five from 100,000. This difference is explicit
+in the records: the cohort explores variety across seeds, not the effect of the
+trajectory-selection algorithm. The five additional archived records were chosen
+by stable SHA-256 ordering of canonical seeds. Exporter identity, original
+generation records, initial-condition bits, and complete orbit files are retained.
+
+## Native movie capture
+
+`render.capture_pipeline="native-gpu"` keeps full-resolution material textures on
+the GPU through geometry preparation, spectral optics, lighting and optional 2×
+frame reduction. It requires capture resolution equal to simulation resolution.
+Only a small validation summary and the final linear RGB frame return to the CPU;
+the full material snapshot is still archived at completion. The default `"cpu"`
+path remains available for comparison and older workflows.
+
+`Engine.gpu_frame()` is a read-only, current-step view. Borrowed-context surfaces
+do not own the simulation context; explicit stale views and closed owners are
+rejected. Camera-only rendering uses the surface's retained material copy.
+The final still deliberately uses the established CPU snapshot/render path.
+The accelerated path was checked against that reference on a complete native
+trajectory: physical-state and final-poster values matched exactly, and the tested
+8-bit video frame was identical (maximum linear error 1.19e-7). These are measured
+checks on the tested hardware, not a promise of cross-driver pixel identity.
+
 ## Scattered color studies
 
 The new `scattered-three.json`, `scattered-five.json`, and `random-five.json`

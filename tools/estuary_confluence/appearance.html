@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__APPEARANCE_GALLERY_TITLE__</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#242824;background:#efeee8;color-scheme:light}
+*{box-sizing:border-box}body{margin:0}button,select{font:inherit;color:inherit}
+button,a,select{touch-action:manipulation}button{cursor:pointer}a{color:inherit;text-underline-offset:4px}
+button:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid #446958;outline-offset:5px}
+[hidden]{display:none!important}main{max-width:1760px;margin:auto;padding:26px 4vw 60px}
+header{display:flex;justify-content:space-between;align-items:end;gap:32px;margin-bottom:22px}
+.eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#6d776e;margin:0 0 10px}
+h1,h2{font-family:Georgia,serif;font-weight:400;letter-spacing:-.04em;margin:0}
+h1{font-size:clamp(34px,3.5vw,50px);line-height:1.04}h2{font-size:29px}
+.intro{font-size:12px;line-height:1.6;color:#687067;max-width:535px;margin:10px 0 0}
+.choices{display:flex;gap:16px;align-items:end;flex-wrap:wrap}
+.choices label{display:grid;gap:7px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6d776e}
+select{min-height:38px;border:1px solid #bcc1b7;background:transparent;padding:8px 30px 8px 10px;font-size:12px;letter-spacing:0;text-transform:none}
+select:disabled{color:#73796e;opacity:1}#seedChoice{min-width:135px}
+.presentations{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.presentation{display:flex;align-items:center;gap:7px;border:1px solid transparent;background:none;padding:7px 10px;font-size:11px;border-radius:2px}
+.presentation[aria-pressed="true"]{border-color:#899484;background:#fff9}
+.groundChip{width:13px;height:13px;border:1px solid #0002;border-radius:50%;display:inline-block}
+.stage{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.stage.comparing{grid-template-columns:repeat(2,minmax(0,1fr))}
+figure{margin:0;min-width:0}.art{background:var(--ground,#fff)}
+img,video{display:block;width:100%;height:auto;object-fit:contain}
+.art>img,.art>video,.reference img{max-height:max(260px,calc(100svh - 285px))}
+figcaption{font-size:11px;color:#71796e;line-height:1.5;margin-top:8px}
+.caption{display:flex;justify-content:space-between;gap:14px;align-items:center;margin:13px 0 0;flex-wrap:wrap}
+#caption{font-size:12px;line-height:1.4;color:#4e594f}
+nav{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:11px}
+nav button{border:0;border-bottom:1px solid #8c9688;padding:0 0 3px;background:none;font-size:11px}
+#filmCaption{font-size:11px;color:#70796c;line-height:1.6;margin:10px 0 0}
+.collection{margin-top:42px}.collectionHeader{display:flex;justify-content:space-between;gap:20px;align-items:baseline}
+.collectionHeader p{margin:0;font-size:11px;line-height:1.5;color:#70796c}
+.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:22px 18px;margin-top:22px}
+.card{border:0;padding:0;text-align:left;background:none;min-width:0}
+.card img{aspect-ratio:4/3;object-fit:contain;background:var(--ground,#fff)}
+.card[aria-pressed="true"] img{outline:2px solid #667760;outline-offset:4px}
+.cardLabel{display:flex;justify-content:space-between;gap:8px;margin-top:11px;font-size:11px;color:#465047}
+.card small{font-size:10px;color:#7a8276}
+.records{margin-top:27px;font-size:11px;color:#747d70}.records summary{cursor:pointer;width:max-content}
+.records nav{margin-top:13px;gap:14px}.records p{max-width:650px;line-height:1.7}
+footer{margin-top:32px;padding-top:17px;border-top:1px solid #cbd0c4;display:flex;justify-content:space-between;gap:20px;font-size:10px;line-height:1.6;color:#778070}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}header{align-items:start}.choices{gap:10px}}
+@media(max-width:760px){main{padding:22px 18px 40px}header{display:block}.choices{margin-top:20px}.intro{max-width:420px}
+.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 14px}.stage.comparing{grid-template-columns:minmax(0,1fr)}
+.art>img,.art>video,.reference img{max-height:max(250px,calc(100svh - 360px))}.caption{align-items:start}.caption nav{gap:14px}.collectionHeader{display:block}.collectionHeader p{margin-top:8px}footer{display:block}footer a{display:inline-block;margin-top:8px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div><p class="eyebrow">Convergence / Grounds & light</p><h1>__APPEARANCE_GALLERY_TITLE__</h1>
+<p class="intro">A three-body dance, held in paint. Explore the same finished compositions through different grounds, light, and surface depth.</p></div>
+<div class="choices">
+<label>Seed<select id="seedChoice" aria-label="Choose a seed"></select></label>
+<label>Colors<select id="countChoice" aria-label="Choose a color count"></select></label>
+</div>
+</header>
+<div id="presentations" class="presentations" role="group" aria-label="Choose a presentation"></div>
+<section id="stage" class="stage" aria-label="Selected painting">
+<figure><div class="art" id="art"><img id="hero" alt="The selected painting"><video id="film" controls playsinline preload="metadata" hidden></video></div></figure>
+<figure class="reference" id="reference" hidden><img id="whiteImage" alt="The same painting presented on white"><figcaption>White · the same finished painting</figcaption></figure>
+</section>
+<div class="caption"><span id="caption" role="status">Loading the paintings…</span>
+<nav aria-label="Painting actions">
+<button id="compare" aria-pressed="false" hidden>Compare with White</button>
+<button id="playFilm" hidden>Play film</button><button id="showStill" hidden>Still image</button>
+<a id="fullSize" target="_blank" rel="noopener">Open full size</a><a id="downloadImage" download>Download image</a>
+<a id="downloadFilm" download hidden>Download film</a>
+</nav></div>
+<p id="filmCaption" hidden></p>
+<section class="collection" aria-label="Seed collection"><div class="collectionHeader"><h2>The collection</h2><p id="collectionNote"></p></div><div class="grid" id="grid"></div></section>
+<details class="records"><summary>Artwork records</summary><p>Each presentation preserves the same completed pigment and material state. Films appear only where the painting, colors, presentation, and camera match.</p>
+<nav><a id="studyRecord" target="_blank" rel="noopener">Presentation</a><a id="parentRecord" target="_blank" rel="noopener">Original painting</a><a id="backgroundRecord" target="_blank" rel="noopener">Ground colors</a><a id="receiptRecord" target="_blank" rel="noopener">Verification</a></nav>
+</details>
+<footer><span>Three-body trajectories. Seeded colors. One physical painting beneath each set of presentations.</span><a href="http://127.0.0.1:8788/">Earlier color studies</a></footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let collection,parentsBySeed,seeds,activeSeed,activeCount,activeLook,comparing=false;
+const shortSeed=seed=>seed.replace(/^0x/i,'').slice(0,8).toUpperCase();
+const currentPainting=()=>parentsBySeed.get(activeSeed).find(p=>p.chromatic_count===activeCount);
+const lookFor=(p,id)=>p.looks.find(look=>look.id===id)||p.looks.find(look=>look.id==='white')||p.looks[0];
+const ground=color=>'rgb('+color.map(v=>Math.round(v*255)).join(',')+')';
+function pauseFilm(){const film=$('film');film.pause();film.removeAttribute('src');film.load();film.hidden=true;$('hero').hidden=false;$('showStill').hidden=true;$('filmCaption').hidden=true;}
+function updateComparison(){const p=currentPainting(),white=p.looks.find(v=>v.id==='white');
+const possible=Boolean(white)&&activeLook!=='white';if(!possible)comparing=false;
+$('compare').hidden=!possible;$('compare').setAttribute('aria-pressed',String(comparing));
+$('compare').textContent=comparing?'Hide comparison':'Compare with White';
+$('stage').classList.toggle('comparing',comparing);$('reference').hidden=!comparing;
+if(white){$('whiteImage').src=white.image}else{$('whiteImage').removeAttribute('src');}}
+function refreshGrid(){
+$('grid').replaceChildren();for(const seed of seeds){const variants=parentsBySeed.get(seed);
+const p=variants.find(v=>v.chromatic_count===activeCount)||variants.find(v=>v.chromatic_count===5)||variants[0];
+const look=lookFor(p,activeLook);const card=document.createElement('button');card.className='card';
+card.setAttribute('aria-pressed',String(seed===activeSeed));card.setAttribute('aria-label','Seed '+shortSeed(seed)+', '+p.chromatic_count+' colors');
+const image=document.createElement('img');image.src=look.preview;image.alt=look.name+' · seed '+shortSeed(seed);image.loading='lazy';image.style.setProperty('--ground',ground(look.ground_srgb));
+const label=document.createElement('span');label.className='cardLabel';const name=document.createElement('span');name.textContent=shortSeed(seed);
+const count=document.createElement('small');count.textContent=p.chromatic_count+' colors';label.append(name,count);card.append(image,label);
+card.onclick=()=>{selectParent(seed,p.chromatic_count);$('stage').scrollIntoView({behavior:'smooth',block:'center'});};$('grid').append(card);}
+$('collectionNote').textContent=seeds.length+' seeds · '+(currentPainting().looks.find(v=>v.id===activeLook)?.name||'Selected presentation');}
+function selectPresentation(id){pauseFilm();const p=currentPainting(),look=lookFor(p,id);activeLook=look.id;
+$('hero').src=look.image;$('hero').alt=look.name+' · '+p.chromatic_count+' colors · seed '+shortSeed(p.seed);
+$('art').style.setProperty('--ground',ground(look.ground_srgb));$('caption').textContent=shortSeed(p.seed)+' · '+p.chromatic_count+' colors · '+look.name;
+$('fullSize').href=look.image;$('downloadImage').href=look.image;$('studyRecord').href=p.records.request;$('parentRecord').href=p.records.parent_request;
+$('backgroundRecord').href=look.background_record;$('receiptRecord').href=p.records.receipt;
+$('playFilm').hidden=!look.film;$('downloadFilm').hidden=!look.film;
+if(look.film){$('downloadFilm').href=look.film.src}else{$('downloadFilm').removeAttribute('href');}
+$('presentations').replaceChildren();for(const option of p.looks){const button=document.createElement('button');button.className='presentation';button.setAttribute('aria-pressed',String(option.id===activeLook));
+const chip=document.createElement('span');chip.className='groundChip';chip.style.backgroundColor=ground(option.ground_srgb);chip.setAttribute('aria-hidden','true');
+const label=document.createElement('span');label.textContent=option.name;button.append(chip,label);button.onclick=()=>selectPresentation(option.id);$('presentations').append(button);}
+updateComparison();refreshGrid();}
+function selectParent(seed,count){activeSeed=seed;const variants=parentsBySeed.get(seed);activeCount=variants.some(p=>p.chromatic_count===count)?count:(variants.find(p=>p.chromatic_count===5)||variants[0]).chromatic_count;
+$('seedChoice').value=seed;$('countChoice').replaceChildren();for(const p of [...variants].sort((a,b)=>a.chromatic_count-b.chromatic_count)){const option=document.createElement('option');option.value=String(p.chromatic_count);option.textContent=p.chromatic_count+' colors';$('countChoice').append(option);}
+$('countChoice').value=String(activeCount);$('countChoice').disabled=variants.length===1;selectPresentation(activeLook);}
+$('seedChoice').onchange=()=>selectParent($('seedChoice').value,activeCount);
+$('countChoice').onchange=()=>selectParent(activeSeed,Number($('countChoice').value));
+$('compare').onclick=()=>{pauseFilm();comparing=!comparing;updateComparison();};
+$('showStill').onclick=()=>selectPresentation(activeLook);
+$('playFilm').onclick=()=>{const look=lookFor(currentPainting(),activeLook);if(!look.film)return;comparing=false;updateComparison();
+$('hero').hidden=true;$('film').hidden=false;$('film').poster=look.preview;$('film').src=look.film.src;$('showStill').hidden=false;
+$('filmCaption').textContent=look.film.caption;$('filmCaption').hidden=false;$('film').play().catch(()=>{});};
+fetch('collection.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error('The collection is unavailable.');return response.json();}).then(data=>{
+collection=data;parentsBySeed=new Map();for(const p of data.parents){if(!parentsBySeed.has(p.seed))parentsBySeed.set(p.seed,[]);parentsBySeed.get(p.seed).push(p);}
+seeds=[...parentsBySeed.keys()];if(!seeds.length)throw Error('No completed paintings are available.');
+for(const seed of seeds){const option=document.createElement('option');option.value=seed;option.textContent=shortSeed(seed);$('seedChoice').append(option);}
+activeLook=data.default_presentation||'palette-night';selectParent(seeds[0],5);
+}).catch(error=>{$('caption').textContent=error.message;});
+</script>
+</body>
+</html>

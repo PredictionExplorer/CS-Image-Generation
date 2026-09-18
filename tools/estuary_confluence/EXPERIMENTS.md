@@ -64,3 +64,31 @@ global budgets, clean empty channels, valid capture/filter metadata, and full
 movie decoding. A separate still and film using identical physical controls must
 produce the same final material hash. Preserve the previous gallery for direct
 visual comparison.
+
+## Ten-seed background study
+
+The follow-up expands the original cohort to ten seeds, with five-color paintings
+for every seed and the original three-color paintings retained for comparison.
+Source identities and selection settings are pinned in `recipes/ten-seeds.json`;
+the source archive is `sources/ten-seeds-v1` on the same experiment host.
+
+Eight presentations reuse each completed material state: five ground colors and
+three additional lighting/relief treatments. Palette Night derives its dark hue
+from the actual seeded palette. The source palette's optical backing stays fixed,
+so the background-only views isolate presentation rather than silently changing
+the pigment model. Each appearance study retains parent identities and hashes,
+exact controls, its code, and full-resolution outputs.
+
+The ten-seed review also measures movement separately from final pigment contact.
+Some pigments form strongly stretched, relatively separate arcs. A low final
+contact score is not evidence that a color remained stationary, and a high score
+alone is not evidence of a better picture. The native film reveals that difference.
+
+The larger cohort motivated native GPU movie capture. A complete 4096 × 3072
+BC53 replay retained the exact physical-state hash and native final poster.
+The accelerated frame differed from the CPU reference by at most 1.19e-7 in linear
+RGB and produced identical encoded 8-bit pixels in that comparison. Capture with
+2× antialiasing measured about 0.105 seconds per frame, replacing a multi-second
+full-material CPU round trip. This measurement excludes simulation advancement,
+PNG encoding, and movie encoding. It reduces runtime without reducing the
+material grid or frame sampling.

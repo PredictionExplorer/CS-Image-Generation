@@ -147,6 +147,18 @@ class FakeSurface:
 
 
 class RecipeAndTimelineTests(unittest.TestCase):
+    def test_native_gpu_capture_requires_the_material_grid(self):
+        raw = small_recipe()
+        raw["simulation"]["resolution"] = [256, 192]
+        raw["render"].update(capture_pipeline="native-gpu", capture_resolution=[128, 96])
+        with self.assertRaisesRegex(ValueError, "full simulation grid"):
+            runner.validate_recipe(raw)
+        raw["render"]["capture_resolution"] = [256, 192]
+        self.assertEqual(runner.validate_recipe(raw)["render"]["capture_pipeline"], "native-gpu")
+        raw["render"]["capture_pipeline"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "capture pipeline"):
+            runner.validate_recipe(raw)
+
     def test_design_round_trip_accepts_numpy_floats_but_preserves_schema_types(self):
         self.assertTrue(runner.equivalent_design({"scale": np.float64(1.25)}, {"scale": 1.25}))
         self.assertFalse(runner.equivalent_design({"step": True}, {"step": 1}))
@@ -864,10 +876,49 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "legacy capture"):
             runner.verify_run(self.args.output)
         del request["recipe"]["render"]["frame_supersampling"]
+        del request["recipe"]["render"]["capture_pipeline"]
         write(self.args.output / "recipe.json", request["recipe"])
         self.rewrite_artifact_hash("recipe.json")
         self.rewrite_request(request)
         runner.verify_run(self.args.output)
+
+    def test_native_gpu_film_keeps_material_resident_until_the_final_archive(self):
+        class GPUFixture(FakeEngine):
+            def gpu_frame(self):
+                return SimpleNamespace(
+                    fields=material_fields(
+                        *self.config["resolution"], len(self.palette["pigments_srgb"]), self.step
+                    ),
+                    step=self.step,
+                )
+
+        class GPUSurfaceFixture(FakeSurface):
+            def __init__(self, config, palette, *, gpu_frame, spectral=None):
+                super().__init__(config, palette, spectral=spectral)
+                self.frame_factors = []
+                self.initial_gpu_step = gpu_frame.step
+
+            def render_gpu(self, frame, *, size, supersampling, **camera):
+                self.frame_factors.append(supersampling)
+                return super().render(None if frame is None else frame.fields, size=size, **camera)
+
+        raw = self.scatter_recipe()
+        raw["render"].update(capture_pipeline="native-gpu", frame_supersampling=2)
+        write(self.recipe, raw)
+        self.args.still_only = False
+        with (
+            patch("tools.estuary_confluence.engine.Engine", GPUFixture),
+            patch("tools.estuary_confluence.surface.Surface", GPUSurfaceFixture),
+        ):
+            runner.run(self.args)
+        request, receipt = runner.verify_run(self.args.output)
+        self.assertEqual(request["capture"]["capture_pipeline"], "native-gpu")
+        self.assertEqual(FakeEngine.instances[-1].snapshots, [(10, (128, 96), True)])
+        self.assertTrue(all(value == 2 for value in FakeSurface.instances[-1].frame_factors))
+        self.assertEqual(
+            receipt["artifacts"]["layered/initial.png"],
+            receipt["artifacts"]["layered/frames/000000.png"],
+        )
 
     def test_rehashed_layout_cannot_change_bound_positions(self):
         self.scatter_recipe()

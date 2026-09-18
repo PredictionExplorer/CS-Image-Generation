@@ -129,8 +129,13 @@ def assess(pigment, chromatic_count, domain_scale, *, mass_threshold=0.008, shar
     }
 
 
-def image_balance(linear_rgb):
-    """Perceived image balance using darkness against the intended white ground."""
+def image_balance(linear_rgb, ground_linear=None):
+    """Image balance weighted by luminance contrast against the selected ground.
+
+    The default preserves the original white-ground calculation exactly. An
+    explicit nonwhite ground uses absolute contrast, allowing both lighter and
+    darker paint to contribute. Equal-luminance hue differences are not measured.
+    """
     rgb = np.asarray(linear_rgb)
     if (
         rgb.ndim != 3
@@ -140,7 +145,26 @@ def image_balance(linear_rgb):
     ):
         raise ValueError("Image balance requires bounded finite linear RGB")
     h, w = rgb.shape[:2]
-    weight = 1 - np.einsum("...i,i->...", rgb, [0.2126, 0.7152, 0.0722])
+    luminance = np.einsum("...i,i->...", rgb, [0.2126, 0.7152, 0.0722])
+    if ground_linear is None:
+        weight = 1 - luminance
+    else:
+        ground = np.asarray(ground_linear, dtype="f8")
+        if (
+            ground.shape != (3,)
+            or not np.isfinite(ground).all()
+            or np.any((ground < 0) | (ground > 1))
+        ):
+            raise ValueError("Image balance ground requires three bounded finite linear RGB values")
+        if np.array_equal(ground, [1.0, 1.0, 1.0]):
+            weight = 1 - luminance
+        else:
+            # Framebuffers store float32 values. Round the reference to the same
+            # storage precision so a blank dark ground has exactly zero weight.
+            if rgb.dtype.kind == "f":
+                ground = ground.astype(rgb.dtype).astype("f8")
+            ground_luminance = np.einsum("i,i->", ground, [0.2126, 0.7152, 0.0722])
+            weight = np.abs(luminance - ground_luminance)
     mass = weight.sum(dtype="f8")
     if mass <= h * w * 1e-10:
         return None
