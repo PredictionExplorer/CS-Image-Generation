@@ -25,9 +25,9 @@ select:disabled{color:#73796e;opacity:1}#seedChoice{min-width:135px}
 .groundChip{width:13px;height:13px;border:1px solid #0002;border-radius:50%;display:inline-block}
 .stage{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
 .stage.comparing{grid-template-columns:repeat(2,minmax(0,1fr))}
-figure{margin:0;min-width:0}.art{background:var(--ground,#fff)}
+figure{margin:0;min-width:0}.art{background:var(--ground,#fff);aspect-ratio:4/3;max-width:96svh;max-height:72svh;margin-inline:auto}
 img,video{display:block;width:100%;height:auto;object-fit:contain}
-.art>img,.art>video,.reference img{max-height:max(260px,calc(100svh - 285px))}
+.art>img,.art>video{width:100%;height:100%}.reference img{max-height:72svh}
 figcaption{font-size:11px;color:#71796e;line-height:1.5;margin-top:8px}
 .caption{display:flex;justify-content:space-between;gap:14px;align-items:center;margin:13px 0 0;flex-wrap:wrap}
 #caption{font-size:12px;line-height:1.4;color:#4e594f}
@@ -98,15 +98,15 @@ function refreshGrid(){
 $('grid').replaceChildren();for(const seed of seeds){const variants=parentsBySeed.get(seed);
 const p=variants.find(v=>v.chromatic_count===activeCount)||variants.find(v=>v.chromatic_count===5)||variants[0];
 const look=lookFor(p,activeLook);const card=document.createElement('button');card.className='card';
-card.setAttribute('aria-pressed',String(seed===activeSeed));card.setAttribute('aria-label','Seed '+shortSeed(seed)+', '+p.chromatic_count+' colors');
+card.setAttribute('aria-pressed',String(seed===activeSeed));card.setAttribute('aria-label','Seed '+shortSeed(seed)+', '+p.chromatic_count+' starting colors');
 const image=document.createElement('img');image.src=look.preview;image.alt=look.name+' · seed '+shortSeed(seed);image.loading='lazy';image.style.setProperty('--ground',ground(look.ground_srgb));
 const label=document.createElement('span');label.className='cardLabel';const name=document.createElement('span');name.textContent=shortSeed(seed);
-const count=document.createElement('small');count.textContent=p.chromatic_count+' colors';label.append(name,count);card.append(image,label);
+const count=document.createElement('small');count.textContent=p.chromatic_count+' starting colors';label.append(name,count);card.append(image,label);
 card.onclick=()=>{selectParent(seed,p.chromatic_count);$('stage').scrollIntoView({behavior:'smooth',block:'center'});};$('grid').append(card);}
 $('collectionNote').textContent=seeds.length+' seeds · '+(currentPainting().looks.find(v=>v.id===activeLook)?.name||'Selected presentation');}
 function selectPresentation(id){pauseFilm();const p=currentPainting(),look=lookFor(p,id);activeLook=look.id;
 $('hero').src=look.image;$('hero').alt=look.name+' · '+p.chromatic_count+' colors · seed '+shortSeed(p.seed);
-$('art').style.setProperty('--ground',ground(look.ground_srgb));$('caption').textContent=shortSeed(p.seed)+' · '+p.chromatic_count+' colors · '+look.name;
+$('art').style.setProperty('--ground',ground(look.ground_srgb));$('caption').textContent=shortSeed(p.seed)+' · '+p.chromatic_count+' starting colors · '+look.name;
 $('fullSize').href=look.image;$('downloadImage').href=look.image;$('studyRecord').href=p.records.request;$('parentRecord').href=p.records.parent_request;
 $('backgroundRecord').href=look.background_record;$('receiptRecord').href=p.records.receipt;
 $('playFilm').hidden=!look.film;$('downloadFilm').hidden=!look.film;
@@ -116,15 +116,15 @@ const chip=document.createElement('span');chip.className='groundChip';chip.style
 const label=document.createElement('span');label.textContent=option.name;button.append(chip,label);button.onclick=()=>selectPresentation(option.id);$('presentations').append(button);}
 updateComparison();refreshGrid();}
 function selectParent(seed,count){activeSeed=seed;const variants=parentsBySeed.get(seed);activeCount=variants.some(p=>p.chromatic_count===count)?count:(variants.find(p=>p.chromatic_count===5)||variants[0]).chromatic_count;
-$('seedChoice').value=seed;$('countChoice').replaceChildren();for(const p of [...variants].sort((a,b)=>a.chromatic_count-b.chromatic_count)){const option=document.createElement('option');option.value=String(p.chromatic_count);option.textContent=p.chromatic_count+' colors';$('countChoice').append(option);}
+$('seedChoice').value=seed;$('countChoice').replaceChildren();for(const p of [...variants].sort((a,b)=>a.chromatic_count-b.chromatic_count)){const option=document.createElement('option');option.value=String(p.chromatic_count);option.textContent=p.chromatic_count+' starting colors';$('countChoice').append(option);}
 $('countChoice').value=String(activeCount);$('countChoice').disabled=variants.length===1;selectPresentation(activeLook);}
 $('seedChoice').onchange=()=>selectParent($('seedChoice').value,activeCount);
 $('countChoice').onchange=()=>selectParent(activeSeed,Number($('countChoice').value));
-$('compare').onclick=()=>{pauseFilm();comparing=!comparing;updateComparison();};
+$('compare').onclick=()=>{pauseFilm();comparing=!comparing;updateComparison();$('stage').scrollIntoView({behavior:'smooth',block:'center'});};
 $('showStill').onclick=()=>selectPresentation(activeLook);
 $('playFilm').onclick=()=>{const look=lookFor(currentPainting(),activeLook);if(!look.film)return;comparing=false;updateComparison();
 $('hero').hidden=true;$('film').hidden=false;$('film').poster=look.preview;$('film').src=look.film.src;$('showStill').hidden=false;
-$('filmCaption').textContent=look.film.caption;$('filmCaption').hidden=false;$('film').play().catch(()=>{});};
+$('filmCaption').textContent=look.film.caption;$('filmCaption').hidden=false;$('film').play().catch(()=>{});$('stage').scrollIntoView({behavior:'smooth',block:'center'});};
 fetch('collection.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error('The collection is unavailable.');return response.json();}).then(data=>{
 collection=data;parentsBySeed=new Map();for(const p of data.parents){if(!parentsBySeed.has(p.seed))parentsBySeed.set(p.seed,[]);parentsBySeed.get(p.seed).push(p);}
 seeds=[...parentsBySeed.keys()];if(!seeds.length)throw Error('No completed paintings are available.');
