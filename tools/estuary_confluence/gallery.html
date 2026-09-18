@@ -165,9 +165,8 @@ gap:18px}.caption{display:block}.caption nav{margin-top:10px}}
 const $=id=>document.getElementById(id);
 let collection=null,comparing=false,referenceAvailable=false;
 const families={layered:'Layered',homogeneous:'Blended'};
-const palettes={curated:'Curated',harmonic:'Seeded harmony',random:'Independent colors'};
 const seedLabel=seed=>seed?String(seed).replace(/^0x/i,'').slice(0,4).toUpperCase():'';
-const studyDetails=study=>[study.initial?palettes[study.palette_mode]:families[study.group],seedLabel(study.seed)].join(' · ');
+const studyDetails=study=>study.initial?seedLabel(study.seed):[families[study.group],seedLabel(study.seed)].join(' · ');
 
 function updateComparison(){
 $('artRow').classList.toggle('comparing',comparing);

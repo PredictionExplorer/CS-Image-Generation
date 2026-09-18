@@ -62,7 +62,11 @@ def _film_metadata(request, receipt, look):
 
 
 def _name(palette):
-    return f"{palette['family'].replace('-', ' ').title()} · {palette['chromatic_count']} colors"
+    label = {
+        "harmonic": "Color harmony",
+        "random": "Independent colors",
+    }.get(palette.get("mode"), palette["family"].replace("-", " ").title())
+    return f"{label} · {palette['chromatic_count']} colors"
 
 
 def _swatches(palette, *, include_chalk=True):
