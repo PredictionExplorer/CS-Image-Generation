@@ -46,6 +46,11 @@ jobs:
           ESTUARY_TEST_GPU: "0"
           OPENBLAS_NUM_THREADS: "4"
         run: python -W error -m unittest discover -s tools/estuary_depth -p 'test_*.py' -v
+      - name: Estuary Studio CPU contracts
+        env:
+          ESTUARY_TEST_GPU: "0"
+          OPENBLAS_NUM_THREADS: "4"
+        run: python -W error -m unittest discover -s tools/estuary_studio -p 'test_*.py' -v
 
   fmt:
     name: Formatting

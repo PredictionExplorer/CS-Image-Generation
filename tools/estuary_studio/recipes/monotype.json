@@ -1,0 +1,91 @@
+{
+  "family": "monotype",
+  "name": "Three-Body Monotype",
+  "render": {
+    "azimuth_end": 35,
+    "azimuth_start": -35,
+    "formation_frames": 361,
+    "fps": 24,
+    "hold_frames": 24,
+    "orbit_frames": 193,
+    "orbit_tilt_degrees": 18,
+    "resolution": [
+      1280,
+      960
+    ],
+    "still_resolution": [
+      3840,
+      2880
+    ],
+    "still_tilt_degrees": 8
+  },
+  "schema_version": 1,
+  "simulation": {
+    "bristle_strength": 0.55,
+    "brush_width": 0.1,
+    "contact_depth": 0.38,
+    "depletion_rate": 0.6,
+    "deposit_rate": 1.25,
+    "domain_scale": 1.6,
+    "drag_strength": 1.4,
+    "dry_rate": 3.2,
+    "height_mm": 0.22,
+    "initial_load": 0.0,
+    "kind": "monotype",
+    "lift_rate": 0.9,
+    "load_capacity": 1.0,
+    "reload_rate": 2.0,
+    "resolution": [
+      4096,
+      3072
+    ],
+    "speed_response": 0.006,
+    "steps": 3600
+  },
+  "surface": {
+    "ambient": 0.48,
+    "anisotropy": 0.42,
+    "canvas_width_m": 0.4,
+    "domain_scale": 1.6,
+    "exposure": 1.12,
+    "family": "monotype",
+    "fill_strength": 0.2,
+    "grain_scale_um": 350.0,
+    "grain_um": 0.6,
+    "height_scale": 1.0,
+    "key_azimuth_degrees": -45.0,
+    "key_elevation_degrees": 40.0,
+    "key_strength": 1.7,
+    "layer_scale": 12.0,
+    "occlusion_strength": 0.2,
+    "pigments_srgb": [
+      [
+        0.025,
+        0.04,
+        0.1
+      ],
+      [
+        0.9,
+        0.87,
+        0.8
+      ],
+      [
+        0.3,
+        0.18,
+        0.11
+      ]
+    ],
+    "scattering": [
+      0.7,
+      2.0,
+      1.0
+    ],
+    "shadow_strength": 0.6,
+    "substrate_srgb": [
+      0.96,
+      0.93,
+      0.87
+    ],
+    "tone_map": "reinhard"
+  }
+}

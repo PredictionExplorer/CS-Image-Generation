@@ -1,0 +1,81 @@
+{
+  "family": "fresco",
+  "name": "Tidal Fresco",
+  "render": {
+    "azimuth_end": 35,
+    "azimuth_start": -35,
+    "formation_frames": 361,
+    "fps": 24,
+    "hold_frames": 24,
+    "orbit_frames": 193,
+    "orbit_tilt_degrees": 12,
+    "resolution": [
+      1280,
+      960
+    ],
+    "still_resolution": [
+      3840,
+      2880
+    ],
+    "still_tilt_degrees": 8
+  },
+  "schema_version": 1,
+  "simulation": {
+    "bank_strength": 1.2,
+    "brush_radius": 0.035,
+    "carrier_velocity": [
+      2.0,
+      0.2
+    ],
+    "deposition": 0.025,
+    "domain_scale": 1.6,
+    "drying": 2.0,
+    "fade": 4.0,
+    "flow_strength": 1.1,
+    "granulation": 0.55,
+    "height_scale_mm": 1.6,
+    "initial_load": 0.18,
+    "initial_pattern": "pools",
+    "load_radius": 0.28,
+    "pair_swirl": 0.9,
+    "pigment_weights": [
+      0.7,
+      1.0,
+      0.08
+    ],
+    "remobilization": [
+      0.6,
+      0.24,
+      0.08
+    ],
+    "resolution": [
+      4096,
+      3072
+    ],
+    "seed": 17,
+    "settling": [
+      0.06,
+      3.5,
+      5.5
+    ],
+    "steps": 3600,
+    "stir_radius": 0.22,
+    "substrate_um": 18.0,
+    "wetting": 0.8
+  },
+  "surface": {
+    "exposure": 1.1,
+    "family": "fresco",
+    "layer_scale": 7,
+    "scattering": [
+      0.4,
+      8,
+      0.9
+    ],
+    "substrate_srgb": [
+      0.92,
+      0.9,
+      0.84
+    ]
+  }
+}
