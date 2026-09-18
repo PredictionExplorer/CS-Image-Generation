@@ -10,10 +10,30 @@ import numpy as np
 from tools.estuary.source import Source
 from tools.estuary.test_source import orbit_points, write_orbit
 
-from .monotype import PlaneContact, contact_pressure, local_transfer, update_load, validate_config
+from .monotype import (
+    PlaneContact,
+    contact_pressure,
+    contact_texture,
+    local_transfer,
+    update_load,
+    validate_config,
+)
 
 
 class MaterialTests(unittest.TestCase):
+    def test_loaded_tool_bridges_tooth_and_dry_tool_breakup_remains_bounded(self):
+        tooth = np.linspace(0, 1, 257)
+        loaded = contact_texture(tooth, 0.5, 1.0, 0.65, 0.35)
+        dry = contact_texture(tooth, 0.5, 0.0, 0.65, 0.35)
+        self.assertLess(float(np.ptp(loaded)), 1e-14)
+        self.assertGreater(float(loaded.min()), 0.97)
+        self.assertGreater(float(np.var(dry)), 0.001)
+        self.assertTrue(((dry >= 0) & (dry <= 1)).all())
+        np.testing.assert_array_equal(contact_texture(tooth, 0.5, 0, 0.65, 0), np.ones(257))
+        for load in (0, 0.25, 0.5, 0.75, 1):
+            value = contact_texture(tooth, tooth[::-1], load, 0.65, 1)
+            self.assertTrue(((value >= 0) & (value <= 1)).all())
+
     def test_local_transfer_accounts_for_deposit_and_pickup_without_negative_amounts(self):
         paint = np.array([0.3, 0.8, 0.12])
         deposit = np.array([0.2, 0, 0.01])
@@ -106,6 +126,34 @@ class MonotypeGpuTests(ContactTests):
         engine = Monotype(self.source, {"resolution": [128, 96], "steps": 120, **overrides})
         self.addCleanup(engine.close)
         return engine
+
+    def test_native_loaded_contact_bridges_tooth_while_depleted_contact_varies(self):
+        def contact_row(load):
+            engine = self.engine(resolution=[256, 192], initial_load=0, bristle_strength=0.35)
+            with engine.ctx:
+                engine.shader["u_segments"].write(np.zeros((3, 4), dtype="f4").tobytes())
+                tools = np.zeros((3, 4), dtype="f4")
+                tools[0] = [1, load, 0.01, 0]
+                engine.shader["u_tools"].write(tools.tobytes())
+                engine.shader["u_directions"].write(
+                    np.tile(np.array([1, 0], dtype="f4"), (3, 1)).tobytes()
+                )
+                engine.shader["u_dt"].value = 0
+                engine.paint[0].use(0)
+                engine.surface[0].use(1)
+                engine.paint[1].bind_to_image(0, read=False, write=True)
+                engine.surface[1].bind_to_image(1, read=False, write=True)
+                engine.shader.run(*engine.groups)
+                engine.ctx.memory_barrier()
+                engine.index = 1
+            # Same bristle, well inside the footprint, crossing support tooth.
+            return engine.snapshot()["pigment"][96, 124:132, 0]
+
+        loaded, depleted = contact_row(1.0), contact_row(0.2)
+        self.assertGreater(float(loaded.mean()), 0)
+        self.assertLess(float(np.ptp(loaded)), 1e-8)
+        self.assertGreater(float(np.ptp(depleted)), 1e-6)
+        self.assertTrue((depleted >= 0).all())
 
     def test_state_bounds_full_source_and_material_response(self):
         from .common import check_fields

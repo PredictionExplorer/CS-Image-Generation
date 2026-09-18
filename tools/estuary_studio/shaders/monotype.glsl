@@ -56,9 +56,19 @@ void main() {
         float bristle=0.7*noise(vec2(fibre*260.0,float(i)*17.0))
                      +0.3*noise(vec2(fibre*73.0,13.0+float(i)*7.0));
         float grooves=mix(1.0,0.24+0.76*bristle,u_bristles);
-        // Dry loading breaks against fixed substrate tooth; a full tool bridges it.
+        // Preserve Nocturne's established surface response exactly.
         float broken=smoothstep(0.25,0.70,tooth+load*0.12+pressure*0.05);
         float contact=edge*pressure*mix(1.0,grooves*broken,u_nocturne==1?0.22:1.0);
+        if(u_nocturne==0) {
+            // Loaded paint bridges the support. Substrate breakup emerges as
+            // the finite loading fraction falls, rather than perforating every
+            // fresh stroke and accumulating a pelt-like pattern through drag.
+            float dryness=pow(1.0-clamp(load,0.0,1.0),2.0);
+            float groove_strength=u_bristles*(0.15+0.85*dryness);
+            grooves=mix(1.0,0.24+0.76*bristle,groove_strength);
+            broken=mix(1.0,broken,u_bristles*dryness);
+            contact=edge*pressure*grooves*broken;
+        }
         // The trace already contains the step displacement. Multiplying its
         // blend by travel would incorrectly make drag vanish as dt gets small.
         float shear=clamp(contact*(0.25+0.75*paint.a),0.0,1.0);

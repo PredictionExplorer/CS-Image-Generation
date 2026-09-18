@@ -21,7 +21,7 @@
   },
   "schema_version": 1,
   "simulation": {
-    "bristle_strength": 0.55,
+    "bristle_strength": 0.35,
     "brush_width": 0.1,
     "contact_depth": 0.38,
     "depletion_rate": 0.6,
@@ -52,7 +52,7 @@
     "fill_strength": 0.2,
     "grain_scale_um": 350.0,
     "grain_um": 0.6,
-    "height_scale": 1.0,
+    "height_scale": 0.4,
     "key_azimuth_degrees": -45.0,
     "key_elevation_degrees": 40.0,
     "key_strength": 1.7,
@@ -60,9 +60,9 @@
     "occlusion_strength": 0.2,
     "pigments_srgb": [
       [
-        0.025,
-        0.04,
-        0.1
+        0.05,
+        0.06,
+        0.08
       ],
       [
         0.9,
@@ -70,11 +70,13 @@
         0.8
       ],
       [
-        0.3,
-        0.18,
-        0.11
+        0.22,
+        0.15,
+        0.1
       ]
     ],
+    "roughness_bias": 0.02,
+    "roughness_scale": 1.1,
     "scattering": [
       0.7,
       2.0,

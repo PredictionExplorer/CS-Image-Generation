@@ -130,6 +130,29 @@ def local_transfer(pigment, deposit, pickup):
     return pigment - lifted + deposit, lifted
 
 
+def contact_texture(tooth, bristle, load, pressure, strength):
+    """Monotype contact multiplier: full loading bridges stationary support tooth.
+
+    This float64 reference covers the shader's material response, independent of
+    its footprint. A small bristle signature remains when loaded; substrate
+    breakup and stronger bristle separation appear as loading is exhausted.
+    """
+    tooth, bristle, load, pressure, strength = (
+        np.asarray(value, dtype=np.float64) for value in (tooth, bristle, load, pressure, strength)
+    )
+    for value in (tooth, bristle, pressure, strength):
+        if not np.isfinite(value).all() or np.any((value < 0) | (value > 1)):
+            raise ValueError("Contact texture fractions must be finite and in [0,1]")
+    if not np.isfinite(load).all() or np.any(load < 0):
+        raise ValueError("Loading must be finite and nonnegative")
+    dryness = (1 - np.clip(load, 0, 1)) ** 2
+    grooves = 1 + (0.24 + 0.76 * bristle - 1) * strength * (0.15 + 0.85 * dryness)
+    ramp = np.clip((tooth + load * 0.12 + pressure * 0.05 - 0.25) / 0.45, 0, 1)
+    tooth_contact = ramp * ramp * (3 - 2 * ramp)
+    broken = 1 + (tooth_contact - 1) * strength * dryness
+    return grooves * broken
+
+
 class PlaneContact:
     """Third coordinate from the source's immutable full-recording PCA frame."""
 
