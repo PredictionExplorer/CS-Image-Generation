@@ -17,9 +17,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
+
 from tools.estuary_studio.common import digest, encoded, read, require, write
 
 from .blend_study import PRESETS as APPEARANCES
+from .mass_budget import RELATIVE_TOLERANCE
 from .run import ROOT, runtime_identity, validate_recipe, verify_run
 
 COUNTS = (1, 2, 3, 5)
@@ -113,6 +116,24 @@ def make_plan(seeds, variants, *, width=1024, film=False, source_root=None, appe
     return plan
 
 
+def verify_reference_mass(report, expected):
+    """Check matched initial pigment amounts against an independently pinned release."""
+    require(
+        type(expected) is list and expected and all(type(v) in (int, float) for v in expected),
+        "Reference pigment amounts must be a numeric vector",
+    )
+    reference = np.asarray(expected, dtype="f8")
+    actual = np.asarray(report["initial_mass"], dtype="f8")
+    require(
+        reference.shape == actual.shape
+        and np.isfinite(reference).all()
+        and np.all(reference >= 0)
+        and np.allclose(actual, reference, rtol=RELATIVE_TOLERANCE, atol=1e-12)
+        and np.all(actual[reference == 0] == 0),
+        "Composition changed the matched reference pigment amounts",
+    )
+
+
 def execute_plan(output, plan, *, workers=2):
     """Run at most two independent GPU jobs, keeping failed archives inspectable."""
     require(type(workers) is int and 1 <= workers <= 2, "Use one or two GPU workers")
@@ -188,6 +209,10 @@ def execute_plan(output, plan, *, workers=2):
             require(
                 receipt["physical_state_sha256"] == case["accepted_physical_state_sha256"],
                 "Diagnostic experiment changed the accepted complete material history",
+            )
+        if case.get("reference_initial_mass") is not None:
+            verify_reference_mass(
+                read(destination / "mass-budget.json"), case["reference_initial_mass"]
             )
         require(request["source"]["sha256"] == case["source_sha256"], "Rendered recording differs")
         require(

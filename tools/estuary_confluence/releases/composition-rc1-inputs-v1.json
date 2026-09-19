@@ -1,0 +1,260 @@
+{
+  "cases": [
+    {
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252978,
+        "sha256": "3a9cf831a941e50b20b3b45332d3c94615b2c84ef9d4648806f856f257913a0d"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "rc1_case_id": "0xb7f327f9f722-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "53331fe61a82a99e8d4285e6a45f1357666f2c01e369c767e3f911b5c1b0d3a8",
+      "reference_radii": [
+        0.1090473639856251,
+        0.13159351129802574,
+        0.11720084862494075
+      ],
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "mass_budget_artifact": {
+        "bytes": 251987,
+        "sha256": "2e97555622703c70717ff035fbedf67b1463a86f116f29727214d15da3d70479"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "rc1_case_id": "0xceddf97909f39cc2-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "e75f0e6af42f23242793b2692212037f2c68863cf5f2b5ab660da5f70a3caec1",
+      "reference_radii": [
+        0.1890249603942131,
+        0.179208183700363,
+        0.1932303326004247
+      ],
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "mass_budget_artifact": {
+        "bytes": 251984,
+        "sha256": "b6c0c067867f3a7d25ec66d85c756d34f8a2aee7308771600f83b126e4fea429"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "rc1_case_id": "0x808861c25b6c-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "ee7cd0b12f5377c3cf93b96cbe191535fca445d3f3d1a5d6aa7b57fddf97a056",
+      "reference_radii": [
+        0.18179333381496912,
+        0.1885174093123922,
+        0.17711812017076622
+      ],
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252036,
+        "sha256": "f62873cb369f69aea734b2219f2660dbc69ad2c796923d6fa70f15165a43fde0"
+      },
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "rc1_case_id": "0x5b26dc8faef2-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "4e7887117a4f30bd663df3bfd27d1d1ec878f806dfdc1f84c167dfbb610508a7",
+      "reference_radii": [
+        0.17359967650529723,
+        0.18181370450958353,
+        0.19285479870958713
+      ],
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252006,
+        "sha256": "9d9e9bca5587ec9d47e8d4b49fcccba445ed5022246358b2129f04e9324c4e7d"
+      },
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "rc1_case_id": "0x6210d183445b5dd5-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "64e640992e83548ead02305e6dcccf4198340e2a842b4c4b9196013e94a910d9",
+      "reference_radii": [
+        0.17942028189800815,
+        0.19510314219716152,
+        0.19111299326796338
+      ],
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252047,
+        "sha256": "9b5c9f8041ce1a57d55ad7f6235d87c3bd5b7230c9c32014a0019e73a73d780e"
+      },
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "rc1_case_id": "0xb08c219a243f-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "406ff083b5dac54007d4bedfd7f0ba1a76ad9221173c5ca509f16df686b2e39e",
+      "reference_radii": [
+        0.16808129971979277,
+        0.19689761666304997,
+        0.20286098496053423
+      ],
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252013,
+        "sha256": "000c1183d6982a655ec73319fc8deaafc9fbf4b936152d4e371c9ef743aa177d"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "rc1_case_id": "0xa0c78ebadfb75018-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "0cbee1d70ef8510a3e2aa258a9b432309c8d8c7504b4e1372c99d754db9d2975",
+      "reference_radii": [
+        0.19013432954028622,
+        0.19106864856733655,
+        0.20648269277881995
+      ],
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252027,
+        "sha256": "8c443afbf762488ae566239e5788d8d186f60f2bd8d80b60f5e9d2bdd87c655c"
+      },
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "rc1_case_id": "0x2d01093da35729b3-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "dc9e0801b2e0f73f96960f2f4dd9ba223381533a92392cbffe987735f015a760",
+      "reference_radii": [
+        0.19034079839602283,
+        0.18644669622310542,
+        0.20037875083450443
+      ],
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "mass_budget_artifact": {
+        "bytes": 251983,
+        "sha256": "6cf0f9dc17398687a8e7bcb1802362893e347ff565997f3ef806fe19682b568c"
+      },
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "rc1_case_id": "0xbc53af1cd380-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "a83180f351acd3faa129c9a808017e9bcfcb240865061baed72b60b3209bc6ab",
+      "reference_radii": [
+        0.1964555321025338,
+        0.19737376082017377,
+        0.18133606018104767
+      ],
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175
+      ]
+    },
+    {
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "mass_budget_artifact": {
+        "bytes": 252053,
+        "sha256": "2822c6e9ea7513c1906ee80eb42bc65851f76f02f53908d57b974467879e9be7"
+      },
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "rc1_case_id": "0x5584badfb5d82790-3-encounter-impasto-detailed",
+      "rc1_recipe_sha256": "bc6115df31e7bf53bce4d062dd826d1bafc4036eab26efe28f4dc6965a1487e9",
+      "reference_radii": [
+        0.20210733280844806,
+        0.1872451798132027,
+        0.17426086769187024
+      ],
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945
+      ]
+    }
+  ],
+  "mass_convention": "World-area integral of each chromatic pigment concentration on the RC1 native2048 grid; includes its original load weights; chalkzero. Shaped recipes mustnot apply load weights again.",
+  "radius_convention": "Seeded RC1 pool radii used only to scale new geometry. New placement does not use RC1 pool centers or future trajectory scoring.",
+  "reference_release_sha256": "320b48e55c8196f2d7f466caefe00e436a30c5384c0eed4622fe9b0c9c12dd86",
+  "reference_tag": "RC1",
+  "schema_version": 1,
+  "version": "composition-rc1-inputs-v1"
+}

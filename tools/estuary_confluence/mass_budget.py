@@ -84,6 +84,48 @@ def initial_pool_mass(layout, resolution, domain_scale, *, weights=None):
     return result * (2 * domain_scale / height) ** 2
 
 
+def initial_material_mass(layout, simulation):
+    """Independently integrate the declared initial condition in world-area units.
+
+    Shaped inputs already contain the RC1 weighted amounts. Normalization to
+    float32 pixels and later layer splitting are certified within the existing
+    tolerance, not described as bit-identical mass sums across different shapes.
+    """
+    if simulation.get("initial_pattern") != "shaped":
+        return initial_pool_mass(
+            layout,
+            simulation["resolution"],
+            simulation["domain_scale"],
+            weights=simulation.get("initial_pigment_weights"),
+        )
+    from .initial_composition import rasterize, validate_config
+
+    require(
+        simulation.get("initial_pigment_weights") is None,
+        "Shaped target masses must not be weighted again",
+    )
+    require(
+        simulation.get("material_model") == "laminate",
+        "Shaped pigment budgets require laminate material",
+    )
+    controls = validate_config(simulation.get("initial_composition"))
+    require(controls is not None, "Shaped pigment budgets need initial_composition")
+    width, height = simulation["resolution"]
+    raster = rasterize(layout, simulation["resolution"], simulation["domain_scale"])
+    require(
+        isinstance(raster, np.ndarray)
+        and raster.dtype == np.float32
+        and raster.shape == (height, width, 3),
+        "Invalid initial-composition raster",
+    )
+    actual = pigment_mass(raster, simulation["domain_scale"])
+    require(
+        np.allclose(actual, controls["target_mass"], rtol=RELATIVE_TOLERANCE, atol=1e-12),
+        "Regenerated initial composition differs from declared pigment targets",
+    )
+    return np.concatenate((actual, np.zeros(1, dtype="f8")))
+
+
 def validate_report(report, recipe, fields, *, layout):
     """Validate the recorded corrections and independently integrate final paint."""
     simulation = recipe["simulation"]
@@ -92,12 +134,12 @@ def validate_report(report, recipe, fields, *, layout):
         require(report is None, "Disabled mass restoration cannot advertise a report")
         return
     require(
-        simulation.get("initial_pattern") in ("scattered", "engaged")
+        simulation.get("initial_pattern") in ("scattered", "engaged", "shaped")
         and all(
             type(simulation.get(key)) in (int, float) and simulation[key] == 0
             for key in ("deposition", "settling_scale", "underpaint_strength")
         ),
-        "Mass budgets require source-free separated pools",
+        "Mass budgets require source-free initial paint",
     )
     require(
         type(report) is dict
@@ -108,6 +150,8 @@ def validate_report(report, recipe, fields, *, layout):
         "Invalid mass-budget report schema",
     )
     count = recipe["chromatic_count"] + 1
+    if simulation.get("initial_pattern") == "shaped":
+        require(count == 4, "Shaped pigment budgets require three chromatic pigments")
 
     def vector(value, name):
         require(
@@ -124,18 +168,15 @@ def validate_report(report, recipe, fields, *, layout):
         return values
 
     target = vector(report["initial_mass"], "initial mass")
-    require(type(layout) is dict, "Mass restoration needs archived starting pools")
-    initial = initial_pool_mass(
-        layout,
-        simulation["resolution"],
-        simulation["domain_scale"],
-        weights=simulation.get("initial_pigment_weights"),
-    )
+    require(type(layout) is dict, "Mass restoration needs archived initial geometry")
+    initial = initial_material_mass(layout, simulation)
     empty = initial == 0
     require(
         np.allclose(initial, target, rtol=RELATIVE_TOLERANCE, atol=1e-12)
         and np.all(target[empty] == 0),
-        "Pigment budgets differ from the regenerated starting pools",
+        "Pigment budgets differ from the regenerated initial composition"
+        if simulation.get("initial_pattern") == "shaped"
+        else "Pigment budgets differ from the regenerated starting pools",
     )
     rows = report["corrections"]
     expected_steps = correction_steps(simulation["steps"], interval)

@@ -141,6 +141,10 @@ def validate_recipe(raw):
     encounters = raw.get("encounters", 3)
     require(type(encounters) is int and 0 <= encounters <= 3, "Use at most three encounter blooms")
     simulation = simulation_config(raw.get("simulation", {}))
+    require(
+        simulation["initial_pattern"] != "shaped" or count == 3,
+        "Shaped initial compositions require exactly three chromatic pigments",
+    )
     weights = simulation.get("initial_pigment_weights")
     require(
         weights is None or len(weights) == count, "Initial load weights differ from color count"
@@ -439,6 +443,28 @@ def resolved_layout(recipe, seed, source=None):
     from tools.estuary_confluence.layout import plan_layout
 
     settings = recipe["simulation"]
+    if settings["initial_pattern"] == "shaped":
+        from tools.estuary_confluence.engine import validate_config as simulation_config
+        from tools.estuary_confluence.initial_composition import plan_layout as composition_layout
+
+        require(recipe["chromatic_count"] == 3, "Shaped layouts require three chromatic pigments")
+        require(
+            settings == simulation_config(settings), "Shaped simulation settings must be normalized"
+        )
+        controls = settings["initial_composition"]
+        body_wedges = controls["setup"] == "body-wedges"
+        require(
+            not body_wedges or source is not None,
+            "Body-wedge composition requires the initial source positions",
+        )
+        width, height = settings["resolution"]
+        return composition_layout(
+            seed,
+            recipe["chromatic_count"],
+            width / height,
+            controls,
+            source=source if body_wedges else None,
+        )
     if settings["initial_pattern"] == "engaged":
         from tools.estuary_confluence.participation_layout import plan_engaged_layout
 
@@ -885,7 +911,12 @@ def verify_run(folder):
         "Archived design inputs differ",
     )
     bound_source = None
-    if request["recipe"]["simulation"]["initial_pattern"] == "engaged" or markers is not None:
+    simulation = request["recipe"]["simulation"]
+    body_wedges = (
+        simulation["initial_pattern"] == "shaped"
+        and simulation["initial_composition"]["setup"] == "body-wedges"
+    )
+    if simulation["initial_pattern"] == "engaged" or body_wedges or markers is not None:
         w, h = request["recipe"]["simulation"]["resolution"]
         bound_source = Source.read(
             folder / "inputs/source.orbit", aspect=w / h, **request["recipe"]["projection"]

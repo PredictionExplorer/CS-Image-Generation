@@ -74,7 +74,9 @@ DEFAULTS = {
 
 def validate_config(value):
     """Resolve a bounded, flat configuration before allocating GPU resources."""
-    if type(value) is not dict or set(value) - (set(DEFAULTS) | {"interaction"}):
+    if type(value) is not dict or set(value) - (
+        set(DEFAULTS) | {"interaction", "initial_composition"}
+    ):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
@@ -148,8 +150,21 @@ def validate_config(value):
     if type(flow_domain) not in (int, float) or not 1 <= flow_domain <= result["domain_scale"]:
         raise ValueError("flow_domain_scale must be within [1, domain_scale]")
     result["flow_domain_scale"] = float(flow_domain)
-    if result["initial_pattern"] not in ("strata", "pools", "scattered", "engaged"):
-        raise ValueError("initial_pattern must be strata, pools, scattered or engaged")
+    if result["initial_pattern"] not in ("strata", "pools", "scattered", "engaged", "shaped"):
+        raise ValueError("initial_pattern must be strata, pools, scattered, engaged or shaped")
+    composition = result.pop("initial_composition", None)
+    if result["initial_pattern"] == "shaped":
+        from .initial_composition import validate_config as composition_config
+
+        if composition is None:
+            raise ValueError("Shaped initialization requires initial_composition")
+        if result["material_model"] != "laminate":
+            raise ValueError("Shaped initialization requires source-free laminate paint")
+        if result["initial_pigment_weights"] is not None:
+            raise ValueError("Shaped target masses already include pigment weights")
+        result["initial_composition"] = composition_config(composition)
+    elif composition is not None:
+        raise ValueError("initial_composition is only valid with initial_pattern=shaped")
     if result["initial_pattern"] in ("scattered", "engaged"):
         from .layout import MAX_LOAD_RADIUS
 
@@ -158,14 +173,14 @@ def validate_config(value):
         if result["load_radius"] > MAX_LOAD_RADIUS:
             raise ValueError(f"Scattered load_radius must not exceed {MAX_LOAD_RADIUS}")
     if interval and (
-        result["initial_pattern"] not in ("scattered", "engaged")
+        result["initial_pattern"] not in ("scattered", "engaged", "shaped")
         or result["deposition"] != 0
         or result["settling_scale"] != 0
         or result["underpaint_strength"] != 0
     ):
-        raise ValueError("Mass budgets require source-free scattered or engaged pools")
+        raise ValueError("Mass budgets require source-free scattered, engaged or shaped paint")
     if result["material_model"] == "laminate" and (
-        result["initial_pattern"] not in ("scattered", "engaged")
+        result["initial_pattern"] not in ("scattered", "engaged", "shaped")
         or any(
             result[key] != 0
             for key in (
@@ -177,7 +192,7 @@ def validate_config(value):
             )
         )
     ):
-        raise ValueError("Laminate requires source-free separated pools and disabled legacy phases")
+        raise ValueError("Laminate requires source-free initial paint and disabled legacy phases")
     interaction = result.pop("interaction", None)
     if interaction is not None:
         from .interaction import validate_config as interaction_config
@@ -424,6 +439,31 @@ def mass_budget_factors(initial_mass, current_mass):
     return factors
 
 
+def _shaped_initial_state(layout, settings):
+    """Use already-budgeted chromatic rasters, adding only the empty chalk channel."""
+    from .initial_composition import rasterize
+
+    width, height = settings["resolution"]
+    chromatic = rasterize(layout, settings["resolution"], settings["domain_scale"])
+    if (
+        not isinstance(chromatic, np.ndarray)
+        or chromatic.dtype != np.float32
+        or chromatic.shape != (height, width, 3)
+        or not np.isfinite(chromatic).all()
+        or np.any(chromatic < 0)
+        or np.any(chromatic > 1e6)
+    ):
+        raise ValueError("Initial composition must produce bounded native float32 pigment fields")
+    actual = chromatic.sum(axis=(0, 1), dtype="f8") * (2 * settings["domain_scale"] / height) ** 2
+    if not np.allclose(
+        actual, settings["initial_composition"]["target_mass"], rtol=MASS_BUDGET_RTOL, atol=1e-12
+    ):
+        raise FloatingPointError("Initial composition does not meet its declared pigment targets")
+    state = np.zeros((height, width, 4), dtype="f4")
+    state[..., :3] = chromatic
+    return state
+
+
 class Engine:
     """Four/six-channel material simulation on a dedicated OpenGL context."""
 
@@ -438,6 +478,11 @@ class Engine:
         self.palette = copy.deepcopy(palette)
         self.events = events = validate_events(events)
         count, arrays = _palette_arrays(palette)
+        shaped = settings["initial_pattern"] == "shaped"
+        if shaped and (count != 4 or palette["chalk_index"] != 3):
+            raise ValueError(
+                "Shaped initialization requires exactly three pigments followed by chalk"
+            )
         initial_weights = validate_initial_weights(settings["initial_pigment_weights"], count - 1)
         laminate = settings["material_model"] == "laminate"
         if laminate:
@@ -445,7 +490,18 @@ class Engine:
 
             arrays["layer_fractions"] = layer_fractions(palette, count)
         self.layout = layout = None
-        if settings["initial_pattern"] in ("scattered", "engaged"):
+        if shaped:
+            from .initial_composition import plan_layout
+
+            composition = settings["initial_composition"]
+            self.layout = layout = plan_layout(
+                palette["seed"],
+                count - 1,
+                settings["resolution"][0] / settings["resolution"][1],
+                composition,
+                source=source if composition["setup"] == "body-wedges" else None,
+            )
+        elif settings["initial_pattern"] in ("scattered", "engaged"):
             from .layout import plan_layout
 
             if palette["chalk_index"] != count - 1:
@@ -648,68 +704,73 @@ class Engine:
                 return super()._flow(fraction)
 
             def _initialize_paint(gpu):
-                x = (
-                    (np.arange(gpu.width, dtype=np.float32) + 0.5) / gpu.width * 2 * gpu.aspect
-                    - gpu.aspect
-                ) * gpu.domain
-                y = (
-                    (np.arange(gpu.height, dtype=np.float32) + 0.5) / gpu.height * 2 - 1
-                ) * gpu.domain
-                initial = source.frame(0).positions
-                edge = initial[1] - initial[0]
-                direction = edge / max(float(np.linalg.norm(edge)), 1e-10)
-                if np.linalg.norm(direction) < 0.5:
-                    direction = np.array([1.0, 0.0])
-                center = initial.mean(axis=0)
-                distance = (x[None, :] - center[0]) * -direction[1] + (
-                    y[:, None] - center[1]
-                ) * direction[0]
-                radius = settings["load_radius"]
-
-                def band(offset, width):
-                    ramp = np.clip((np.abs(distance - offset) - width * 0.9) / (width * 0.1), 0, 1)
-                    return (1 - ramp * ramp * (3 - 2 * ramp)).astype("f4")
-
-                state = np.zeros((gpu.height, gpu.width, count), dtype="f4")
-                mixtures = arrays["body_mixtures"]
-                if settings["initial_pattern"] == "strata":
-                    white = np.maximum.reduce(
-                        [
-                            band(0, radius * 0.75),
-                            band(-radius * 1.65, radius * 0.075),
-                            band(radius * 2.15, radius * 0.045),
-                        ]
-                    )
-                    counter = band(-radius * 0.98, radius * 0.24) * (1 - white)
-                    accent = band(radius * 1.45, radius * 0.09) * (1 - white - counter)
-                    for channel in range(count):
-                        state[..., channel] = (
-                            mixtures[0, channel] * (1 - white - counter - accent)
-                            + mixtures[1, channel] * (counter + white * 0.12)
-                            + mixtures[2, channel] * accent
-                        )
-                    state[..., palette["chalk_index"]] += white * 0.88
-                elif settings["initial_pattern"] == "pools":
-                    for body, p in enumerate(initial):
-                        r2 = (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
-                        load = gpu._compact_brush(r2 / radius**2)
-                        state += load[..., None] * mixtures[body] * arrays["body_weights"][body]
+                if shaped:
+                    state = _shaped_initial_state(layout, settings)
                 else:
-                    from .layout import pool_profile
+                    x = (
+                        (np.arange(gpu.width, dtype=np.float32) + 0.5) / gpu.width * 2 * gpu.aspect
+                        - gpu.aspect
+                    ) * gpu.domain
+                    y = (
+                        (np.arange(gpu.height, dtype=np.float32) + 0.5) / gpu.height * 2 - 1
+                    ) * gpu.domain
+                    initial = source.frame(0).positions
+                    edge = initial[1] - initial[0]
+                    direction = edge / max(float(np.linalg.norm(edge)), 1e-10)
+                    if np.linalg.norm(direction) < 0.5:
+                        direction = np.array([1.0, 0.0])
+                    center = initial.mean(axis=0)
+                    distance = (x[None, :] - center[0]) * -direction[1] + (
+                        y[:, None] - center[1]
+                    ) * direction[0]
+                    radius = settings["load_radius"]
 
-                    for pool in layout["pools"]:
-                        load = pool["load"]
-                        if initial_weights is not None:
-                            load *= initial_weights[pool["pigment_index"]]
-                        p = pool["position"]
-                        distance_to_pool = np.sqrt(
-                            (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
+                    def band(offset, width):
+                        ramp = np.clip(
+                            (np.abs(distance - offset) - width * 0.9) / (width * 0.1), 0, 1
                         )
-                        state[..., pool["pigment_index"]] = load * pool_profile(
-                            distance_to_pool, pool["radius"], pool["edge_width"]
+                        return (1 - ramp * ramp * (3 - 2 * ramp)).astype("f4")
+
+                    state = np.zeros((gpu.height, gpu.width, count), dtype="f4")
+                    mixtures = arrays["body_mixtures"]
+                    if settings["initial_pattern"] == "strata":
+                        white = np.maximum.reduce(
+                            [
+                                band(0, radius * 0.75),
+                                band(-radius * 1.65, radius * 0.075),
+                                band(radius * 2.15, radius * 0.045),
+                            ]
                         )
-                if settings["initial_pattern"] not in ("scattered", "engaged"):
-                    state *= settings["initial_load"]
+                        counter = band(-radius * 0.98, radius * 0.24) * (1 - white)
+                        accent = band(radius * 1.45, radius * 0.09) * (1 - white - counter)
+                        for channel in range(count):
+                            state[..., channel] = (
+                                mixtures[0, channel] * (1 - white - counter - accent)
+                                + mixtures[1, channel] * (counter + white * 0.12)
+                                + mixtures[2, channel] * accent
+                            )
+                        state[..., palette["chalk_index"]] += white * 0.88
+                    elif settings["initial_pattern"] == "pools":
+                        for body, p in enumerate(initial):
+                            r2 = (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
+                            load = gpu._compact_brush(r2 / radius**2)
+                            state += load[..., None] * mixtures[body] * arrays["body_weights"][body]
+                    else:
+                        from .layout import pool_profile
+
+                        for pool in layout["pools"]:
+                            load = pool["load"]
+                            if initial_weights is not None:
+                                load *= initial_weights[pool["pigment_index"]]
+                            p = pool["position"]
+                            distance_to_pool = np.sqrt(
+                                (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
+                            )
+                            state[..., pool["pigment_index"]] = load * pool_profile(
+                                distance_to_pool, pool["radius"], pool["edge_width"]
+                            )
+                    if settings["initial_pattern"] not in ("scattered", "engaged"):
+                        state *= settings["initial_load"]
                 if settings["mass_budget_interval_steps"]:
                     gpu.mass_budget_initial = (
                         state.sum(axis=(0, 1), dtype="f8") * (2 * gpu.domain / gpu.height) ** 2
@@ -717,13 +778,18 @@ class Engine:
                 # The quiet buried accent is spatially tied to the initial
                 # triangle's strata. This is actual pigment, never an overlay.
                 under = np.zeros_like(state)
-                buried = band(radius * 0.12, radius * 0.68)
-                if settings["initial_pattern"] == "pools":
-                    # A buried accent is confined to the loaded paint. A
-                    # canvas-spanning stratum beneath isolated pools would
-                    # remain an unrelated straight stripe in the final image.
-                    buried = np.clip(state.sum(axis=-1) / max(settings["initial_load"], 1e-9), 0, 1)
-                under[..., palette["underpaint_index"]] = buried * settings["underpaint_strength"]
+                if not shaped:
+                    buried = band(radius * 0.12, radius * 0.68)
+                    if settings["initial_pattern"] == "pools":
+                        # A buried accent is confined to the loaded paint. A
+                        # canvas-spanning stratum beneath isolated pools would
+                        # remain an unrelated straight stripe in the final image.
+                        buried = np.clip(
+                            state.sum(axis=-1) / max(settings["initial_load"], 1e-9), 0, 1
+                        )
+                    under[..., palette["underpaint_index"]] = (
+                        buried * settings["underpaint_strength"]
+                    )
                 if laminate:
                     # Split the same starting amount, with no new pigment source.
                     # The palette stores upper shares; subtraction retains the
@@ -1178,6 +1244,16 @@ class Engine:
             }
         if layout is not None:
             self.metadata["initial_layout"] = copy.deepcopy(layout)
+        if shaped:
+            self.metadata["initial_composition"] = {
+                "config": copy.deepcopy(settings["initial_composition"]),
+                "mass_units": "world-area integral of concentration per chromatic pigment",
+                "normalization": (
+                    "native float32 raster; no initial_load or pigment-weight multiplier"
+                ),
+                "partition": "unchanged upper/lower float32 split; chalk starts at exactly zero",
+                "mass_relative_tolerance": MASS_BUDGET_RTOL,
+            }
         if initial_weights is not None:
             self.metadata["initial_pigment_weights"] = {
                 "multipliers": initial_weights,
