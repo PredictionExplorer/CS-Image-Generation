@@ -45,8 +45,12 @@ recipes, palette algorithms, and physical archives remain supported.
   `background.json` from the generated palette and seed. Verification checks its
   derivation, exact saved colors, and agreement with the rendered surface.
 
-The film review layout opens with native video controls, gives every seed an
-explicit Watch film action and a continuous-play option, and pairs current/earlier images only when the source
+The film review layout starts with the complete seed collection. Each card has
+separate Film and Image actions that open a focused, keyboard-accessible viewer.
+Closing the viewer stops playback and restores focus to the selected card.
+Completed or failed playback restores the finished painting instead of leaving
+an empty video surface. A continuous-play option retains native video controls.
+The gallery pairs current/earlier images only when the source
 recording, projection, aspect, color count, and optical view match. This comparison
 intentionally changes colors and material; it does not claim identical physical
 states. Small previews are derived from the published posters in linear light,

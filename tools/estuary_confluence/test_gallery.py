@@ -44,52 +44,88 @@ class GalleryTests(unittest.TestCase):
         script = re.findall(
             r"<script>([\s\S]*?)</script>", gallery.document("Films", layout="films")
         )[0]
+        document = gallery.document("Films", layout="films")
+        ids = re.findall(r'\bid="([^"]+)"', document)
+        self.assertEqual(len(ids), len(set(ids)))
         harness = """
 const vm=require('node:vm'),assert=require('node:assert/strict');
 const elements=new Map();
-function element(){return {attributes:{},style:{},children:[],value:'',
- classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+let focused=null;
+function element(){return {attributes:{},style:{},children:[],value:'',open:false,
+ listeners:{},classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+ set id(v){this._id=v;elements.set(v,this)},get id(){return this._id},
  getAttribute(k){return this[k]},removeAttribute(k){delete this[k]},
  replaceChildren(){this.children=[]},append(...items){this.children.push(...items)},
  pause(){this.pauses=(this.pauses||0)+1},load(){},play(){return Promise.resolve()},
+ focus(){focused=this.id},addEventListener(k,fn){this.listeners[k]=fn},
+ showModal(){this.open=true},close(){this.open=false;this.listeners.close?.()},
  scrollIntoView(){}}}
-const document={getElementById(id){if(!elements.has(id))elements.set(id,element());
- return elements.get(id)},createElement:element,addEventListener(){}};
+for(const id of IDS){const item=element();item.id=id;}
+const document={getElementById(id){return elements.get(id)||null},
+ createElement:element,addEventListener(){},documentElement:{style:{overflow:''}}};
 vm.runInNewContext(SCRIPT,{document,fetch:async()=>({ok:true,json:async()=>DATA})});
 const get=id=>elements.get(id);
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
 get('next').onclick();get('modeFilm').onclick(); // Safe during loading.
-setImmediate(()=>{
+setImmediate(async()=>{
  const current=DATA.studies.filter(s=>s.palette_mode==='composed');
  const earlier=DATA.studies.find(s=>s.palette_mode==='harmonic');
- assert.equal(get('film').src,current[0].film);
- get('playAll').onclick();get('film').onended();
- assert.equal(get('film').src,current[2].film); // The still-only seed was skipped.
+ assert.equal(get('viewer').open,false);
+ assert.equal(get('film').src,undefined); // No hidden initial movie download.
+ assert.equal(get('grid').children.length,3);
+ get('film-'+current[0].seed).onclick();
+ assert.equal(get('viewer').open,true);assert.equal(get('film').src,current[0].film);
+ get('film').onended(); // Ordinary playback restores a visible finished image.
+ assert.equal(get('film').hidden,true);assert.equal(get('film').src,undefined);
+ assert.equal(get('hero').hidden,false);assert.equal(get('hero').src,current[0].image);
+ get('playAllViewer').onclick();get('film').onended();
+ assert.equal(get('film').src,current[2].film); // Skip the still-only seed.
  get('film').onended();assert.match(get('status').textContent,/All 2 films/);
- get('seedChoice').value=current[1].seed;get('seedChoice').onchange();
- assert.equal(get('film').hidden,true);
- assert.equal(get('modeStill').attributes['aria-pressed'],'true');
- assert.match(get('playAll').textContent,/Play all 2 films/);
+ assert.equal(get('film').hidden,true);assert.equal(get('hero').src,current[2].image);
+ get('closeViewer').onclick();assert.equal(get('viewer').open,false);
+ assert.equal(document.documentElement.style.overflow,'');
+ assert.equal(focused,'film-'+current[0].seed);
+ get('image-'+current[1].seed).onclick();
+ assert.equal(get('hero').src,current[1].image);assert.equal(get('modeFilm').disabled,true);
+ get('closeViewer').onclick();
  get('playAll').onclick();assert.equal(get('film').src,current[0].film);
  get('modeCompare').onclick();assert.equal(get('reference').src,earlier.image);
- assert.equal(get('film').src,undefined);
- assert.equal(get('film').hidden,true);assert.ok(get('film').pauses>1);
+ assert.equal(get('film').src,undefined);assert.equal(get('film').hidden,true);
  get('modeFilm').onclick();get('versionChoice').value=earlier.id;
  get('versionChoice').onchange();assert.equal(get('film').src,earlier.film);
- assert.equal(get('downloadFilm').href,earlier.film);
+ assert.equal(get('downloadFilm').href,earlier.film);assert.equal(get('openFilm').href,earlier.film);
+ get('film').onerror();assert.equal(get('hero').hidden,false);
+ assert.equal(get('film').src,undefined);assert.equal(get('error').hidden,false);
+ get('film').play=()=>Promise.reject(Object.assign(new Error('blocked'),{name:'NotAllowedError'}));
+ get('playAllViewer').onclick();await tick();
+ assert.equal(get('film').hidden,true);assert.equal(get('hero').hidden,false);
+ assert.match(get('playAll').textContent,/Play all/); // Failed autoplay cancels the queue.
+ const rejects=[];get('film').play=()=>new Promise((resolve,reject)=>rejects.push(reject));
+ get('modeFilm').onclick();get('modeFilm').onclick();
+ rejects[0](Object.assign(new Error('old attempt'),{name:'NotAllowedError'}));await tick();
+ assert.equal(get('film').hidden,false);assert.equal(get('film').src,earlier.film);
+ get('closeViewer').onclick();
+ rejects[1](Object.assign(new Error('closed'),{name:'NotAllowedError'}));await tick();
+ assert.equal(get('film').src,undefined);assert.equal(get('viewer').open,false);
+ assert.equal(focused,'playAll');assert.ok(get('film').pauses>1);
 });
 """
+
         path = self.root / "film-controls.js"
         path.write_text(
-            "const DATA="
+            "const IDS="
+            + json.dumps(ids)
+            + ";\nconst DATA="
             + json.dumps(data)
             + ";\nconst SCRIPT="
             + json.dumps(script)
             + ";\n"
             + harness
         )
-        subprocess.run(
-            [shutil.which("node"), str(path)], check=True, capture_output=True, timeout=10
+        result = subprocess.run(
+            [shutil.which("node"), str(path)], capture_output=True, text=True, timeout=10
         )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_film_review_compares_new_material_with_the_same_earlier_trajectory(self):
         baseline = self.case(count=5, looks=["layered"], palette_mode="harmonic")
