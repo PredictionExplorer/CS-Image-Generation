@@ -1,0 +1,683 @@
+{
+  "accepted_release_sha256": "86566613d975231462eff7d3be2ee6b9cec9b232ba4c2f90547dae8d216ba9d0",
+  "cases": [
+    {
+      "base_material_sha256": "98253b597e042899b2e3672023393e19d6444ffc392b5b3ebbf195e33ab32a3b",
+      "chromatic_count": 3,
+      "id": "0xb7f327f9f722-3-encounter-impasto-detailed",
+      "physical_state_sha256": "f8c819de1880aeaf60128c869072ca71406e5015bc741319dd572b8ee324ac8a",
+      "recipe_sha256": "53331fe61a82a99e8d4285e6a45f1357666f2c01e369c767e3f911b5c1b0d3a8",
+      "request_identity_sha256": "cab1dd96a9773cc9e967d3a302cd5a730ba4ec6fed117d65cf181adc45bec75b",
+      "seed": "0xb7f327f9f722",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "views": [
+        {
+          "image": {
+            "bytes": 2480709,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "6a42d7b85bb5e7ed0a729a6d25011323766ced42378a7a28df17cb7c924285a8"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3779633,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "dd490cc16f66264356affcadc10b883d1087cc5a2ff7b82f0c437f578f016361"
+          }
+        },
+        {
+          "image": {
+            "bytes": 2503001,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e19028a90f4771c25ca159f8a30704b617db95ac31161e2aed5a0738502b9e39"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 3771790,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "623a4e65a63b9112356f7a5fce963da103e2d15cdf94d36f5a3022a2573370d9"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "1d5ee70392f7867e303228a3228377051d7238e934af0111d9fd5db97360a574",
+      "chromatic_count": 3,
+      "id": "0xceddf97909f39cc2-3-encounter-impasto-detailed",
+      "physical_state_sha256": "786015b088182aa5f8e09544d16c488fed32952e7289b4049980412bb4f5fe62",
+      "recipe_sha256": "e75f0e6af42f23242793b2692212037f2c68863cf5f2b5ab660da5f70a3caec1",
+      "request_identity_sha256": "8748e297e5c6ce398bdde68392a048250c71818f1543f590a5282a49947c3f8a",
+      "seed": "0xceddf97909f39cc2",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "views": [
+        {
+          "image": {
+            "bytes": 3597943,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "f43aab1274c3f10c66a8c79e06186251622c121ae8ec7b6d0b4cafd1a5b175aa"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5117210,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "ade0ca4ed661204fe15d16699cd3df59b7f9b9797e80bea5ff9a55278dddaded"
+          }
+        },
+        {
+          "image": {
+            "bytes": 3578538,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "3c889d32a1a09e89be5d631d8258d88707134440477fcfc8c6537bdc1e86d508"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 5082694,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "803fa11f5a6b1bb50289f2b0cb62c2cc1b71f6fa8a2c0e81e8cd4ee92f219fc8"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "c83fb0f44adb2c52a25da016c771e72938bbf4bf7babed5bc2142f0775e93141",
+      "chromatic_count": 3,
+      "id": "0x808861c25b6c-3-encounter-impasto-detailed",
+      "physical_state_sha256": "c2d5d313af5cfcbe709969466149325ba5bac84c451c35f02c3f25ca292f2ef0",
+      "recipe_sha256": "ee7cd0b12f5377c3cf93b96cbe191535fca445d3f3d1a5d6aa7b57fddf97a056",
+      "request_identity_sha256": "80495adb558101bdd3e84c2daf67c3e839ed9594346f8f1df8aa86c88ec6016d",
+      "seed": "0x808861c25b6c",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "views": [
+        {
+          "image": {
+            "bytes": 3385598,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "21d49395140f829db61eb94571badf0842cc406170bee8b4efb2502a26550c07"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4605840,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "a353850bd2c45f0afe1b6574927e143fa85070869e8a964bbe69873de7fe7ac0"
+          }
+        },
+        {
+          "image": {
+            "bytes": 3383518,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "c607f04e766a6f3a7fbcd700dbdda98eac49cfcc55726be8028edf58cc803295"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 4566901,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "cd8b932669be460d6dfb08a2ad19bc01efb02bbffb87946386394016c28b9ee9"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "a59e53492c72fe4020d30bedd4d75c8fcbf6055ea39a5f4fe93c6f1ea603a23f",
+      "chromatic_count": 3,
+      "id": "0x5b26dc8faef2-3-encounter-impasto-detailed",
+      "physical_state_sha256": "179b68ff5b6235a8e7bcdb9f55dd5ebe9f48b8c9097d7a2cd72b3642c24c1550",
+      "recipe_sha256": "4e7887117a4f30bd663df3bfd27d1d1ec878f806dfdc1f84c167dfbb610508a7",
+      "request_identity_sha256": "cedf679e94564841935f2fc1385cfa47864aa527bae2474cdab36c282220f288",
+      "seed": "0x5b26dc8faef2",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "views": [
+        {
+          "image": {
+            "bytes": 2742776,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "d33d0c4308457e69fe01486119e127e84c7dab1d322b1ca0b52bee0fc6480452"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3822781,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "b19c8cdc307fc3c6785c460fb819fd9617c19315add64b8a9a537ca5cd9a45cf"
+          }
+        },
+        {
+          "image": {
+            "bytes": 2709670,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "390b7a887707c7608098088f828188508c6c1bddaa2809f118b510f91e24b09a"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 3741114,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "96de0ff9c74314771dbde7efebc671cb2fd58966103cc0665d8c8a2b530d6385"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "07b4edbc34bf2a687c508979ad63deec9e28dcad99a675d104322e9e2c120e2f",
+      "chromatic_count": 3,
+      "id": "0x6210d183445b5dd5-3-encounter-impasto-detailed",
+      "physical_state_sha256": "c03f3704d336d7bc69b2b202e069e8d060d4a2de8a3b339e206559287b24ecd0",
+      "recipe_sha256": "64e640992e83548ead02305e6dcccf4198340e2a842b4c4b9196013e94a910d9",
+      "request_identity_sha256": "8b8e169960eb5d471d0a14c2b9901f0729d71615676420b95e9fe988ac0a08da",
+      "seed": "0x6210d183445b5dd5",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "views": [
+        {
+          "image": {
+            "bytes": 3269245,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "9155ea3bb443a0ec55f46d04ba993b4187e23c459880468ad9dcedb0b660ee94"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4183292,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "9eff881630087b7ca0bd79f48e56b20a59c3a5748d11238575b57113c54c5a45"
+          }
+        },
+        {
+          "image": {
+            "bytes": 3253704,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "dccba0034e1060b9896c9ce31236c926fdde97a59acb7ed3766216b2456b4912"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 4114195,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fcc26656db921edb4602e026168fd9f11d39e69e0588912afd32403e27447135"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "6478b8fc7b338b03462608f6f8285f85bde12f986937f644702271c41dbccd58",
+      "chromatic_count": 3,
+      "id": "0xb08c219a243f-3-encounter-impasto-detailed",
+      "physical_state_sha256": "5248473a993cd45f158ba1678156363d17a425eadf53eba3479fce0d4149d422",
+      "recipe_sha256": "406ff083b5dac54007d4bedfd7f0ba1a76ad9221173c5ca509f16df686b2e39e",
+      "request_identity_sha256": "5640a12af32e4408c8afd9bac33c82ed052da45cac5f77c394123ba8b08f06ec",
+      "seed": "0xb08c219a243f",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "views": [
+        {
+          "image": {
+            "bytes": 4212348,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "aeb6d822e14f1305e10dd0b0c71b60e7db563fb6a3a1e1fe3b30fec0850e338b"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5077552,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "d76756016c0b99164a525aa296016aab1e726e19437b092b483b34d60c4eecbe"
+          }
+        },
+        {
+          "image": {
+            "bytes": 4212978,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "3491b7ec40cec58c7cc62a54143fe342c71a6c7d0b82aa64752e4aa83f8dca23"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 5034352,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "89730f1b3415fc33591a7255474c664e55cca855219975a9de1ec413c87c470f"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "d2f8fad4d3ec321ba0c82cc7dff59dbb5f0847b4402f0e82020c79ccb4a94881",
+      "chromatic_count": 3,
+      "id": "0xa0c78ebadfb75018-3-encounter-impasto-detailed",
+      "physical_state_sha256": "0f5266fed6261808bde04c43805811183b7d392abce2028cd116abd56592a2ac",
+      "recipe_sha256": "0cbee1d70ef8510a3e2aa258a9b432309c8d8c7504b4e1372c99d754db9d2975",
+      "request_identity_sha256": "b92ed53f1a5507874bd105c1687c98f601082047e000dc089854a8e98eb25cbd",
+      "seed": "0xa0c78ebadfb75018",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "views": [
+        {
+          "image": {
+            "bytes": 4901941,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "f38d3f06b70f9680857b1d97b5ddd7afc4cedeb8344fba7897c362157c89adb7"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 6288439,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "8106a143f598e7d679ecb049f51364f95327c465a17cc918788254ed0677d447"
+          }
+        },
+        {
+          "image": {
+            "bytes": 4885549,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "43b916475e94950c8823c7acaacd2a53f37033eaafb0c6fccc714bb3f3302c96"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 6189327,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "6aaa4c66fb52bcafd39b0690a4cb0f22a567641a19575a8313d9acb47d3af83d"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "f6d968031b7f2e4956ae1c9e19f50f82a6582d535aefcf83b85e05be91577028",
+      "chromatic_count": 3,
+      "id": "0x2d01093da35729b3-3-encounter-impasto-detailed",
+      "physical_state_sha256": "4d4c4a835efea9791c76319d0c40587f8458593fb96f226df7d8fd81543252bf",
+      "recipe_sha256": "dc9e0801b2e0f73f96960f2f4dd9ba223381533a92392cbffe987735f015a760",
+      "request_identity_sha256": "1b3604c8e6c7cd276f55df83c769c65199655e672110128ed4d8a41e318445f4",
+      "seed": "0x2d01093da35729b3",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "views": [
+        {
+          "image": {
+            "bytes": 2792877,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "d98a98778a9e1b3c0fc0d9aa502bf0a705acadf2a750d92855b933a9411e4412"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4007958,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "dcad81246f8ab212b9ac8c96c1aa8753969c6c848e0d6e00ad92c2ee0c882bfd"
+          }
+        },
+        {
+          "image": {
+            "bytes": 2792985,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "6391edc0a33d9255a44f26735b55049bf789a4ebdcf4ff6bc75dd1d6f3256369"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 4024717,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "e0e11b40cca371fd17043b9d4dcd2ff2c0190d4fba0bceefab80273e830ba7d8"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "372af4dc54d84dece493b4ebe4a84a545f9cdeb5ccbc8054b6f6eefe76137260",
+      "chromatic_count": 3,
+      "id": "0xbc53af1cd380-3-encounter-impasto-detailed",
+      "physical_state_sha256": "a7289186fea65a03b105fc163e3c0f75374ceba7aa1e63960065c0533ecd21eb",
+      "recipe_sha256": "a83180f351acd3faa129c9a808017e9bcfcb240865061baed72b60b3209bc6ab",
+      "request_identity_sha256": "32a49bdb58bc95ffb4f4b3b80bc4ff3d0d1ad29a44c3d4125d372374726f0e69",
+      "seed": "0xbc53af1cd380",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "views": [
+        {
+          "image": {
+            "bytes": 4047903,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "aa5c7b3e89d2724396363aea6809f4cd4a1d8a93dbf348d4750d38d6ca45eea8"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4822085,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fb249164e7519ceb6eeb3b2048ae0dbf60fce62d9ffd3a4785e92223365d7eb7"
+          }
+        },
+        {
+          "image": {
+            "bytes": 4059390,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "d5990d565103d66cf41b465b76bb968bc0592a2947c7d2193e8d9acbc7fe102b"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 4797549,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "0607a0ea91e654e0111347dfc1115baa7d40c116a446425f8c5153cbf2bfa3e3"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "cf4989877b2c9b59c8d13737d0bd7c19b93a20f5de41188fb9011425303330c7",
+      "chromatic_count": 3,
+      "id": "0x5584badfb5d82790-3-encounter-impasto-detailed",
+      "physical_state_sha256": "e1d47f6aeb154e6a18610b1724b2a70179c1fbe2bd64be947f8eb5dda2da6d77",
+      "recipe_sha256": "bc6115df31e7bf53bce4d062dd826d1bafc4036eab26efe28f4dc6965a1487e9",
+      "request_identity_sha256": "33bb2f59204a4a23f1bb6ac68410f936b0bd18dd41e9464d17650b62721b8857",
+      "seed": "0x5584badfb5d82790",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "views": [
+        {
+          "image": {
+            "bytes": 4021304,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e1af22e8af123659c87d69291c4597cbb81e018bf37b8bb799f2de221cd7c397"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5382823,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "e20a65a6de388a46cb3b4a1d1de45549856d13b522257b613b8635b6dbc055ea"
+          }
+        },
+        {
+          "image": {
+            "bytes": 4023683,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "156c66d1385b4f2ceac8bb05d09ffaa1a237c1c669f674e97bfa8f7c1c75cfa9"
+          },
+          "look": "control",
+          "movie": {
+            "bytes": 5372398,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "1c4e070f17fae6b5ab84ad148fe207d37d56d742019293b4a7d0981bcfd06bda"
+          }
+        }
+      ]
+    }
+  ],
+  "gallery": {
+    "cases": 10,
+    "collection_sha256": "eda2379a7d4e9fbb5fda9185d4639a0cdd7d64622ce84f25baf73e8e78887b1d",
+    "curation_sha256": "17efc0e5c7a804052ec3f65bd4740e5625849f322e147028daf93ba9da4ea39e",
+    "page_sha256": "463f83ab4e2717a34f34343dea71d52365a91bbab10b28b411066ad84902c20e",
+    "seeds": 10,
+    "server_archive": "/home/user/estuary-convergence/interaction/review/films",
+    "views": 20
+  },
+  "higher_resolution_study": {
+    "base_material_sha256": "54695c5c683c5f8846fa3e738fa77a58d68f4b7701804581bb3bfce85a752039",
+    "cadence_validation": "The complete14-field state and final PNG exactly match the independently rendered still archive /home/user/estuary-convergence/interaction/hero-4k.",
+    "comparison_scope": "Different native resolution from the ten-seed collection; no claim that its base-material hash equals the accepted2048 release.",
+    "film": {
+      "bytes": 6322213,
+      "fps": 24,
+      "frames": 937,
+      "resolution": [
+        1440,
+        1080
+      ],
+      "sha256": "65cf4af6b8dd56b0d4f9df796e66ea00f6f9e5442d018c469c25ef6be89fb397"
+    },
+    "gallery_curation_sha256": "7e0c6b63e03db791df1a6c658d5691f3b554931675e0ecb2637be4b140af167b",
+    "image": {
+      "bytes": 11223719,
+      "resolution": [
+        3840,
+        2880
+      ],
+      "sha256": "83ceee233ff61d75d4bc7484226e778a83f0bdab28d7fec693c4fae8b6d10e7e"
+    },
+    "material_resolution": [
+      4096,
+      3072
+    ],
+    "physical_state_sha256": "f95e5657b9a4d841caaa318a68923f201530be8183048d73ba027d34812491ca",
+    "seed": "0x808861c25b6c",
+    "server_archive": "/home/user/estuary-convergence/interaction/hero-4k-film/cases/0x808861c25b6c-3-encounter-impasto-detailed",
+    "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3"
+  },
+  "implementation_commit": "1d43e265abfb59ffa0697428bc1bca47f2c5ff76",
+  "name": "The Estuary \u00b7 Paint encounters",
+  "plan_sha256": "5a02a669de33d49d4c66177ed3fd3256f63df23101fcea7135efdfdd78686c8c",
+  "publisher_release": "/home/user/estuary-convergence/releases/interaction-review-final",
+  "renderer_frozen_release": "/home/user/estuary-convergence/releases/interaction-proof-v9",
+  "review_commit": "c0311944211e72ace14ee165e8c34a15998445dc",
+  "runtime_identity_hash_format": "SHA-256 of tools.estuary_studio.common.encoded(plan.runtime): sorted JSON, indent=2, final newline; this is a content identity, not a Git commit claim.",
+  "runtime_identity_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+  "schema_version": 1,
+  "selection": {
+    "appearance": "impasto-detailed",
+    "assessment": "The thicker paint interpretation provides the clearest visible gain. Fine contact texture remains subtle; these controls do not establish museum-quality art.",
+    "chromatic_count": 3,
+    "looks": [
+      "silk-grain",
+      "control"
+    ],
+    "material_resolution": [
+      2048,
+      1536
+    ],
+    "profile": "encounter"
+  },
+  "validation": {
+    "browser_review": "All ten contact thumbnails loaded; contact and control films played; paired full-size images loaded; native-detail film played and HTTP byte-range seeking returned206.",
+    "cpu_suite": {
+      "failures": 0,
+      "run": 466,
+      "skipped": 79
+    },
+    "gallery_tests_after_ui_change": 57,
+    "gpu_suite": {
+      "failures": 0,
+      "run": 466,
+      "skipped": 7
+    }
+  }
+}

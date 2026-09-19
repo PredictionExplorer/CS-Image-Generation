@@ -321,6 +321,33 @@ recomputed.
 
 ## Validation and visual review
 
+### Published comparison
+
+The [contact-textures-v1 release record](releases/contact-textures-v1.json) pins
+ten seeds with three starting pigments, using the `encounter` history profile
+and `impasto-detailed` presentation. Each has a contact finish and a matching
+control: twenty 2048 × 1536 paintings and twenty complete 1440 × 1080 films.
+Each film contains 937 frames at 24 fps: formation, a hold, then camera movement.
+All ten original-material hashes match the preserved Color & Form release.
+
+The separate 8088 detail study uses a 4096 × 3072 material grid and produces a
+3840 × 2880 painting with a 1440 × 1080 film. Its full fourteen-field state and
+final PNG match its independently rendered still exactly. Its finer material
+grid is a different simulation resolution; it is not claimed to have the same
+base-material hash as the accepted 2048 study.
+
+The clearest visible improvement is the thicker interpretation of paint. Fine
+contact texture remains subtle, including under the more pronounced aggregate
+response. Numerical correctness and comparison integrity do not establish
+artistic quality. The saved Color & Form collection is retained for comparison.
+
+Both CPU and GPU suites ran 466 tests without failures, with 79 and seven skips
+respectively. The gallery suite passed after its label refinement. Browser
+review confirmed all ten thumbnails, contact/control playback, paired full-size
+images, and byte-range seeking. The release record includes actual runtime,
+source, recipe, material and media hashes; Git references are recorded separately
+and are not substituted for the archived runtime identity.
+
 ### Experiment record
 
 The study history includes these matched experiments. They retain the accepted
