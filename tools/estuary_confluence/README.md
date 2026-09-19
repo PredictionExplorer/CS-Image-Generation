@@ -436,6 +436,13 @@ Use `python -m tools.estuary_confluence.interaction_studies --help` for matched
 native-grid experiments. The guide explains the numerical model, controls,
 archive contract, limitations, and validation requirements.
 
+## Body-position guides
+
+[Body-position diagnostics](BODY_MARKERS.md) add optional red X1–3 to the images
+and films. They follow the same projected source positions and camera as the
+painting, without entering the paint simulation. The matched ten-seed experiment
+reconstructs the saved RC1 recipes and requires identical complete material states.
+
 ## Validation
 
 ```sh

@@ -1,0 +1,552 @@
+{
+  "browser_review": "Marked video playback and automatic progression through successive seeds verified in the in-app browser.",
+  "cases": [
+    {
+      "base_material_sha256": "98253b597e042899b2e3672023393e19d6444ffc392b5b3ebbf195e33ab32a3b",
+      "body_marker_ledger_artifact": {
+        "bytes": 870347,
+        "sha256": "c9dc4331369247798ae4c340d45519f8577d5c00d55bb857eaf1a7a97dd32158"
+      },
+      "chromatic_count": 3,
+      "id": "0xb7f327f9f722-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "f8c819de1880aeaf60128c869072ca71406e5015bc741319dd572b8ee324ac8a",
+      "rc1_case_id": "0xb7f327f9f722-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "e7fd30a3a3a118de1dececfb607fef1cf293d3bc76fccf36dd3c86b8ecd1e10d",
+      "request_identity_sha256": "ede404bae98413321c544d2f70088ebdd68c82543be5ea29bee2675d637ce338",
+      "seed": "0xb7f327f9f722",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "c123706a168f26e315a0ddcede2d38031781a3b9d8890220507ca43e2bce216a"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 2466778,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "3642b2b85a0411bd421cad0e0501fe65c90dcff718a46f23d707a03640c7fa70"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4880074,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "639a083718fe32d4590198cbff1bc3df8780d7d2a1f110c3f87e3ffb8a9c37d8"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "1d5ee70392f7867e303228a3228377051d7238e934af0111d9fd5db97360a574",
+      "body_marker_ledger_artifact": {
+        "bytes": 870143,
+        "sha256": "ee531cbf07f5a5cef1b1c5755ce0004ddc2bc3e46fa76f76e14a8a2cf25dd1f0"
+      },
+      "chromatic_count": 3,
+      "id": "0xceddf97909f39cc2-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "786015b088182aa5f8e09544d16c488fed32952e7289b4049980412bb4f5fe62",
+      "rc1_case_id": "0xceddf97909f39cc2-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "c8f7c10c664fb523881a46aed3aa922d65cacfc5158640c402549c5940140d4b",
+      "request_identity_sha256": "c03382a37a4acdcf677d2a7af3dbd30a0c1703b8819c0adbd662a23bc6fb3c84",
+      "seed": "0xceddf97909f39cc2",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "3be29035e4a2a07fbc8d9d4cf2e0f00756510f47fda5269539bcf6eb0d49e211"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 3592397,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "2fb4188540367bf43d1a7f0a0a3895eb3c0a867618bb168bee5ba8b6d36f9b7d"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 6389494,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "f3b95433a03f3e44610a929f1f91aec3fc423c3a742ad06f9b21ee09df8cd696"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "c83fb0f44adb2c52a25da016c771e72938bbf4bf7babed5bc2142f0775e93141",
+      "body_marker_ledger_artifact": {
+        "bytes": 870305,
+        "sha256": "ecfaff9a5f1d4240b702b5a87835cf9b05acbe93c06050322fed8c4da9a81107"
+      },
+      "chromatic_count": 3,
+      "id": "0x808861c25b6c-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "c2d5d313af5cfcbe709969466149325ba5bac84c451c35f02c3f25ca292f2ef0",
+      "rc1_case_id": "0x808861c25b6c-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "d543a503eb9e24774cbc3f0f25debc50cefa6991b32daee8434cc0f431e04b58",
+      "request_identity_sha256": "1433d03215ef615f669069d668ae094def3742a2e633011e9633b7dc259434fd",
+      "seed": "0x808861c25b6c",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "33d0343d69256d7809555db19502e573a020a830ce02ddf8f7d5959fd96efa9b"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 3381325,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b4584bdf09e44829bdccddc42fa71f06aa58fcb525b901db8ff04a3dd50da62f"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5868175,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "c79453bed6bc976db45e9efda959748e698149c9eac72476e54d2afd6d9f3a78"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "a59e53492c72fe4020d30bedd4d75c8fcbf6055ea39a5f4fe93c6f1ea603a23f",
+      "body_marker_ledger_artifact": {
+        "bytes": 872198,
+        "sha256": "6479b42ab05c78fae9540b0eabc4c267eb8c2b23449a291c6056904465fa2cf3"
+      },
+      "chromatic_count": 3,
+      "id": "0x5b26dc8faef2-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "179b68ff5b6235a8e7bcdb9f55dd5ebe9f48b8c9097d7a2cd72b3642c24c1550",
+      "rc1_case_id": "0x5b26dc8faef2-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "3300eccc6dda312f1cf5377c60b7b3c2117b09a0d774fce918d6069d9d271c4c",
+      "request_identity_sha256": "4c4ff3c3a48dfd928231aa8a88acfcf5da8264fab5557201c1363cb127e821a4",
+      "seed": "0x5b26dc8faef2",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "59dff3913ce6e04f1d7727eee12edd09b2a9154d3a06c0a008e2355dbce60666"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 2718646,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "7caecd5874c8c9ee4c5768c8e06e7b811a218924d3d6fb235d92482e63bf8dfb"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5069772,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fb89f957a6ef3c38d2d5e791477480331f75042260bd10852b6a649486852adc"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "07b4edbc34bf2a687c508979ad63deec9e28dcad99a675d104322e9e2c120e2f",
+      "body_marker_ledger_artifact": {
+        "bytes": 870987,
+        "sha256": "fd25dd97011339cf4544bf6ff7595a6bd0b3bf7c2ee80934ae67230cf77d88f6"
+      },
+      "chromatic_count": 3,
+      "id": "0x6210d183445b5dd5-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "c03f3704d336d7bc69b2b202e069e8d060d4a2de8a3b339e206559287b24ecd0",
+      "rc1_case_id": "0x6210d183445b5dd5-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "737fd60873c4aaf2b5b3ab2849fe09463bdff169338309afe95630c5997ccf53",
+      "request_identity_sha256": "88ccb8553133878919f012fd5b80a5fee24ff3f16cd4f4981cb3cdcbf0803d6b",
+      "seed": "0x6210d183445b5dd5",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "1339644c83b5617e84b934cd9bc72fd3b54c6ecfefd641509e0a3211b11d2d9f"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 3248453,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "00fd5d349ca430adb6a6deadc0c4f04103ed71c117343c59978eb6732c32a9a5"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5261593,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "202212a9fc590c6843a266b5134afeaf9e4fc532571189b9a982c90b0e3745e4"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "6478b8fc7b338b03462608f6f8285f85bde12f986937f644702271c41dbccd58",
+      "body_marker_ledger_artifact": {
+        "bytes": 866808,
+        "sha256": "b3c27bbd3f2926a641538868485ddd8795221f96b0f19bf9cb2f9fbad7d16cb4"
+      },
+      "chromatic_count": 3,
+      "id": "0xb08c219a243f-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "5248473a993cd45f158ba1678156363d17a425eadf53eba3479fce0d4149d422",
+      "rc1_case_id": "0xb08c219a243f-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "d558d13dc7db4642fee23febe09581d8bc36170597e38af6e2da3d05559cefcb",
+      "request_identity_sha256": "015c195e4f367a01b179916fabee87d2bb66e2ff1b77f3e043bd59edfd6f85d6",
+      "seed": "0xb08c219a243f",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "da789798e363877a133c25f32ad54e8b72d999015933336418e6500860fde481"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 4203218,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "754f57504c6f149465e629b0cbf997b358894c90ba3658bf0be4510535c2a098"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 6197271,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "35c153b2d577fe6f7103ccb7ca21f97fa9fde2a2f283b88b0aff33e8316a2df0"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "d2f8fad4d3ec321ba0c82cc7dff59dbb5f0847b4402f0e82020c79ccb4a94881",
+      "body_marker_ledger_artifact": {
+        "bytes": 871957,
+        "sha256": "511641b5a0a4745a0f28f46b8454b44fe0dbc530d76a431cf079a58b0d4fd520"
+      },
+      "chromatic_count": 3,
+      "id": "0xa0c78ebadfb75018-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "0f5266fed6261808bde04c43805811183b7d392abce2028cd116abd56592a2ac",
+      "rc1_case_id": "0xa0c78ebadfb75018-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "ebcc26056076c97bafb782f10ff037453f9c03da3b462a1e5cd41b7e2d4ef2ce",
+      "request_identity_sha256": "2f8fe9f4d88c199fb5738b18c5b341224fe04ff950aef1e6d9b4bf9f178a5a61",
+      "seed": "0xa0c78ebadfb75018",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "aad8e5c009e56b17ccb74a190b3f39d1b5a18f25bda6d1b398053c1ec767f491"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 4875624,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "2721e2ce8a43694c5a900ae77f9f8e456ab3acbbcbd33cb205dc53540f62cee2"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 7457266,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "3d5037eaeb432e722fc0b951fec61bc18340817c56ff5172d34eddb5264692bc"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "f6d968031b7f2e4956ae1c9e19f50f82a6582d535aefcf83b85e05be91577028",
+      "body_marker_ledger_artifact": {
+        "bytes": 872099,
+        "sha256": "300fae868b67b8af19441bbd7b6a19b5eace44c8dfcb65b28d5a3a77a78bb0ae"
+      },
+      "chromatic_count": 3,
+      "id": "0x2d01093da35729b3-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "4d4c4a835efea9791c76319d0c40587f8458593fb96f226df7d8fd81543252bf",
+      "rc1_case_id": "0x2d01093da35729b3-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "c4d9ed2565c559a8c1170ed8bbed4206db39c96b912ce8c97c7436cb527692db",
+      "request_identity_sha256": "fe0a9bdc4ea086f8b555b72c1e9452ff3584cfb25af56fed2c40b5dca0951f5f",
+      "seed": "0x2d01093da35729b3",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "efd07dd0f301beba1dd62f4e05af70e4b45a313ad82efd75c14eeeb3a99bbc34"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 2778798,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "52e445da7c74b8f30aa012b8f8e3e083c77f1986fb036ac82b19de89b6011369"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 5406996,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "acb4438cbc024b65360f1025ec08c39f3a13aed503347df976ced61c1c85027a"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "372af4dc54d84dece493b4ebe4a84a545f9cdeb5ccbc8054b6f6eefe76137260",
+      "body_marker_ledger_artifact": {
+        "bytes": 870418,
+        "sha256": "e6e9e80b8456e650a5a104066a564ffa912d2c9a56522a71ff1f74ac592d38d6"
+      },
+      "chromatic_count": 3,
+      "id": "0xbc53af1cd380-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "a7289186fea65a03b105fc163e3c0f75374ceba7aa1e63960065c0533ecd21eb",
+      "rc1_case_id": "0xbc53af1cd380-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "8bade6143f23f3dc52affbe3082f89a4f922c5803a7dd16b9617010a76315d22",
+      "request_identity_sha256": "473ef11c67dd96bdbc3f90754d49e07e6692abeb0f2ca68dd1607bd7bfb49f06",
+      "seed": "0xbc53af1cd380",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "d9c0361ae5ff9f0d9888f55adc06395dee4156dfcd271a6b6aff09964d93d2e0"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 4021300,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "d27ec6ac128ae962669016fe757fc9df0c9f1d0350c704cc48346e082259e562"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 6156075,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "33ec63730d871bbdb9b561fac2b88e9fa21fe266864835441036798bdcb60aa9"
+          }
+        }
+      ]
+    },
+    {
+      "base_material_sha256": "cf4989877b2c9b59c8d13737d0bd7c19b93a20f5de41188fb9011425303330c7",
+      "body_marker_ledger_artifact": {
+        "bytes": 871339,
+        "sha256": "0374f3d74752f2402ad06c2ece1aba00e72de9e860aeba442851df31ad772378"
+      },
+      "chromatic_count": 3,
+      "id": "0x5584badfb5d82790-body-markers",
+      "image_balance_matches_rc1": true,
+      "movie_independently_fully_decoded": true,
+      "physical_state_sha256": "e1d47f6aeb154e6a18610b1724b2a70179c1fbe2bd64be947f8eb5dda2da6d77",
+      "rc1_case_id": "0x5584badfb5d82790-3-encounter-impasto-detailed",
+      "rc1_full_material_matches": true,
+      "recipe_sha256": "e074b3e97b9addd08f42f9f40f324d5d671967e2e2a8d575a9785b60c60ee656",
+      "request_identity_sha256": "aea2cb05f2cb1985c403b7686d495c3f03578f785f22b939929414e1c054a4a2",
+      "seed": "0x5584badfb5d82790",
+      "simulation_steps": 7200,
+      "source_fraction": 1.0,
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "unmarked_poster_array_matches_rc1_exactly": true,
+      "unmarked_poster_artifact": {
+        "bytes": 37748864,
+        "sha256": "ca16ada945fb089a02fcc1d44be6284119f491b780e2b46f7afc8c977947c46b"
+      },
+      "views": [
+        {
+          "image": {
+            "bytes": 4012237,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e5cf5f68b435e593d90f61c6c4e661b005b9276bdf0dc9fef0ef44fe4607ef2e"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 6682350,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "f30706a8b3e676c0956b33eb486018eb03a89d5ea5bca1c7aab73625f22fd90b"
+          }
+        }
+      ]
+    }
+  ],
+  "collection_artifact": {
+    "bytes": 105767,
+    "sha256": "8b7f8e4b3ecb92eab8a776db913b391668c31bcc37984ba0dface2eecb7b6fd9"
+  },
+  "curation_artifact": {
+    "bytes": 34212,
+    "sha256": "3108b939d1823a89048681b22c32226a1fb7a37518b2287a03a52d5dcbb66357"
+  },
+  "film_resolution": [
+    1440,
+    1080
+  ],
+  "film_seconds": 39.041666666666664,
+  "films": 10,
+  "gallery": "/home/user/estuary-convergence/body-markers/review",
+  "image_resolution": [
+    2048,
+    1536
+  ],
+  "implementation_commit": "62bf3d0d00088284166385bae737c3ebb231a245",
+  "independently_decoded_frames": 9370,
+  "name": "The Estuary \u00b7 Body positions",
+  "paintings": 10,
+  "plan_artifact": {
+    "bytes": 59943,
+    "sha256": "718fee91c59438a4426fc944b52152282054db2725cd3f6ee947d13ad49fb6a7"
+  },
+  "reference_commit": "dda34ef942425f765795d37e16d45c427428c203",
+  "reference_release_sha256": "320b48e55c8196f2d7f466caefe00e436a30c5384c0eed4622fe9b0c9c12dd86",
+  "reference_tag": "RC1",
+  "renderer_and_publisher_release": "/home/user/estuary-convergence/releases/body-markers-62bf3d0",
+  "runtime_identity_hash_format": "SHA-256 of common.encoded(plan.runtime): sorted JSON, indent=2, final newline.",
+  "runtime_identity_sha256": "49706bc303517341e9a1bbab35936d42dd019df4bf7f3b579c6daa489b9a1907",
+  "schema_version": 1,
+  "seeds": 10,
+  "tests": {
+    "cpu": {
+      "failures": 0,
+      "run": 500,
+      "skipped": 79
+    },
+    "gpu": {
+      "failures": 0,
+      "run": 500,
+      "skipped": 7
+    }
+  }
+}
