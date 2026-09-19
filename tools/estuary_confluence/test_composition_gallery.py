@@ -290,8 +290,13 @@ function element(){return {attributes:{},listeners:{},children:[],value:'',hidde
  play(){this.plays++;return Promise.resolve()},addEventListener(k,f){this.listeners[k]=f}}}
 for(const id of IDS)elements.set(id,element());
 const get=id=>elements.get(id),emit=(id,event)=>get(id).listeners[event]?.();
-const doc={getElementById:get,createElement:element,addEventListener(){},hidden:false};
-vm.runInNewContext(SCRIPT,{document:doc,window:{addEventListener(){}},
+const classes=new Set(),documentEvents={};
+const doc={getElementById:get,createElement:element,hidden:false,
+ body:{classList:{toggle(name,on){if(on)classes.add(name);else classes.delete(name)}}},
+ addEventListener(name,handler){documentEvents[name]=handler}};
+const win={scrollY:137,events:{},scrollTo({top}){this.scrollY=top},
+ addEventListener(name,handler){this.events[name]=handler}};
+vm.runInNewContext(SCRIPT,{document:doc,window:win,
  fetch:async()=>({ok:true,json:async()=>DATA}),
  requestAnimationFrame:f=>{callbacks.set(++sequence,f);return sequence},
  cancelAnimationFrame:id=>callbacks.delete(id)});
@@ -302,6 +307,8 @@ const ready=()=>{for(const side of ['left','right']){
 setImmediate(async()=>{
  const l=get('leftVideo'),r=get('rightVideo');
  assert.equal(l.src,undefined);assert.equal(r.src,undefined);assert.equal(l.plays,0);
+ assert.equal(get('leftSetup').value,'rc1');
+ assert.equal(get('rightSetup').value,'body-wedges');
  assert.equal(get('grid').children.length,7);
  get('modeInitial').onclick();
  assert.equal(get('leftImage').src,DATA.studies.find(e=>e.seed===DATA.seeds[0]&&e.setup==='rc1').initial);
@@ -313,6 +320,18 @@ setImmediate(async()=>{
  r.readyState=4;emit('rightVideo','canplay');await tick();
  assert.equal(l.plays,2);assert.equal(r.plays,2);
  l.currentTime=.1;r.currentTime=.1;
+ const playbackState=()=>[l.src,r.src,l.currentTime,r.currentTime,
+  l.plays,r.plays,l.pauses,r.pauses,get('play').textContent];
+ const beforeFocus=playbackState();
+ get('focus').onclick();assert.equal(classes.has('focusComparison'),true);
+ assert.equal(get('focus').attributes['aria-pressed'],'true');assert.equal(win.scrollY,0);
+ assert.deepEqual(playbackState(),beforeFocus); // Focus only changes layout.
+ documentEvents.keydown({key:'Escape',target:{tagName:'BODY'},preventDefault(){}});
+ assert.equal(classes.has('focusComparison'),false);assert.equal(win.scrollY,137);
+ assert.deepEqual(playbackState(),beforeFocus);
+ get('focus').onclick();get('focus').onclick();
+ assert.equal(get('focus').attributes['aria-pressed'],'false');
+ assert.deepEqual(playbackState(),beforeFocus);
  get('seek').value=.25;get('seek').oninput();
  assert.equal(l.currentTime,.25);assert.equal(r.currentTime,.25);
  get('seek').onchange();await tick();assert.equal(l.plays,3);assert.equal(r.plays,3);
@@ -329,6 +348,12 @@ setImmediate(async()=>{
  assert.equal(l.src,undefined);assert.equal(r.src,undefined);assert.equal(get('leftImage').hidden,false);
  assert.equal(get('error').hidden,false);
  get('modeFilm').onclick();ready();l.play=()=>Promise.resolve();get('play').onclick();await tick();
+ l.currentTime=.125;r.currentTime=.125;win.events.pagehide();
+ assert.equal(l.src,undefined);assert.equal(r.src,undefined);
+ get('play').onclick();ready();await tick(); // Recover after back-cache restoration.
+ assert.ok(l.src);assert.equal(l.currentTime,.125);assert.equal(r.currentTime,.125);
+ win.events.pagehide();get('restart').onclick();ready();await tick();
+ assert.equal(l.currentTime,0);assert.equal(r.currentTime,0);
  emit('leftVideo','ended');assert.equal(l.src,undefined);assert.equal(r.src,undefined);
  assert.match(get('status').textContent,/Films finished/);
 });

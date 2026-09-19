@@ -283,6 +283,69 @@
         white-space: nowrap;
         border: 0;
       }
+      .focusComparison main {
+        max-width: none;
+        height: 100dvh;
+        padding: 12px 20px;
+        display: flex;
+        flex-direction: column;
+      }
+      .focusComparison header,
+      .focusComparison .browse,
+      .focusComparison footer {
+        display: none;
+      }
+      .focusComparison .selection {
+        margin: 0 0 8px;
+      }
+      .focusComparison .toolbar {
+        margin-bottom: 4px;
+      }
+      .focusComparison .timeline {
+        margin: 4px 0;
+      }
+      .focusComparison .status {
+        margin: 4px 0 8px;
+      }
+      .focusComparison .selection,
+      .focusComparison .toolbar,
+      .focusComparison .timeline,
+      .focusComparison .status,
+      .focusComparison .error {
+        flex-shrink: 0;
+      }
+      .focusComparison .pair {
+        flex: 1;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
+      }
+      .focusComparison .panel,
+      .focusComparison figure {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .focusComparison figure,
+      .focusComparison .media {
+        flex: 1;
+      }
+      .focusComparison .panel label {
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .focusComparison .media {
+        min-height: 0;
+        aspect-ratio: auto;
+      }
+      .focusComparison figcaption {
+        margin: 6px 0 4px;
+        flex-shrink: 0;
+      }
+      .focusComparison .downloads {
+        font-size: 11px;
+        line-height: 1.4;
+        flex-shrink: 0;
+      }
       @media (max-width: 650px) {
         main {
           padding: 23px 16px 38px;
@@ -309,6 +372,22 @@
         figcaption {
           flex-wrap: wrap;
           gap: 5px;
+        }
+        .focusComparison main {
+          display: block;
+          height: auto;
+          min-height: 100dvh;
+          padding: 14px 16px 24px;
+        }
+        .focusComparison .pair {
+          grid-template-rows: none;
+        }
+        .focusComparison .panel,
+        .focusComparison figure {
+          display: block;
+        }
+        .focusComparison .media {
+          aspect-ratio: 4/3;
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -341,6 +420,9 @@
         <button id="previous" disabled aria-label="Previous seed">←</button>
         <button id="next" disabled aria-label="Next seed">→</button>
         <span id="seedCount" class="dimensions"></span>
+        <button id="focus" disabled aria-pressed="false">
+          Focus comparison
+        </button>
       </div>
       <div class="toolbar">
         <div class="modes" role="group" aria-label="Comparison view">
@@ -476,6 +558,21 @@
         animation = 0;
       let scrubbing = false,
         resumeAfterScrub = false;
+      let focused = false,
+        previousScroll = 0;
+      function setFocus(value) {
+        if (value === focused) return;
+        if (value) previousScroll = window.scrollY;
+        focused = value;
+        document.body.classList.toggle("focusComparison", focused);
+        $("focus").setAttribute("aria-pressed", String(focused));
+        $("focus").textContent = focused ? "Exit focus" : "Focus comparison";
+        window.scrollTo({
+          top: focused ? 0 : previousScroll,
+          left: 0,
+          behavior: "auto",
+        });
+      }
       const entries = () =>
         sides.map((side) =>
           data.studies.find(
@@ -600,6 +697,15 @@
           video.load();
         });
         status("Films paused · press Play both films");
+      }
+      function ensureFilms() {
+        const pair = entries();
+        if (
+          videos.some(
+            (video, index) => video.getAttribute("src") !== pair[index].film,
+          )
+        )
+          loadFilms();
       }
       function updatePanels() {
         if (!data) return;
@@ -759,6 +865,7 @@
           return;
         }
         changeMode("film");
+        ensureFilms();
         wanted = true;
         generation++;
         for (const video of videos) video.preload = "auto";
@@ -769,6 +876,7 @@
         if (!data) return;
         pause();
         changeMode("film");
+        ensureFilms();
         seekTo(0);
         wanted = true;
         generation++;
@@ -806,12 +914,25 @@
       }
       $("previous").onclick = () => step(-1);
       $("next").onclick = () => step(1);
+      $("focus").onclick = () => {
+        if (data) setFocus(!focused);
+      };
+      document.addEventListener("keydown", (event) => {
+        if (
+          focused &&
+          event.key === "Escape" &&
+          !["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)
+        ) {
+          event.preventDefault();
+          setFocus(false);
+          $("focus").focus();
+        }
+      });
       document.addEventListener("visibilitychange", () => {
         if (document.hidden && data) pause();
       });
       window.addEventListener("pagehide", () => {
-        wanted = false;
-        generation++;
+        if (data) pause();
         release();
       });
       fetch("comparison.json", { cache: "no-store" })
@@ -859,8 +980,9 @@
             }
           $("seed").value = selectedSeed = data.seeds[0];
           $("leftSetup").value = "rc1";
-          $("rightSetup").value = data.setups.find(
-            (setup) => setup.id !== "rc1",
+          $("rightSetup").value = (
+            data.setups.find((setup) => setup.id === "body-wedges") ||
+            data.setups.find((setup) => setup.id !== "rc1")
           ).id;
           for (const id of [
             "seed",
@@ -871,6 +993,7 @@
             "modeFilm",
             "play",
             "restart",
+            "focus",
           ])
             $(id).disabled = false;
           updatePanels();
