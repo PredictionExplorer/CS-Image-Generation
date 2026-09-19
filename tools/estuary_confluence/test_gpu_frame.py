@@ -73,6 +73,7 @@ class ViewContracts(unittest.TestCase):
             {"chalk_index": 4},
             {"specific_volumes": (-1, 0.2, 0.3, 0.9)},
             {"height_scale_mm": float("nan")},
+            {"material_model": "unknown"},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(frame, **changes).validate()

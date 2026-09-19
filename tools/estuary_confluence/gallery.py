@@ -15,6 +15,10 @@ import hashlib
 import html
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
+from tools.estuary.optics import linear_to_srgb, srgb_to_linear
 from tools.estuary_studio.common import artifact, checked, encoded, read, require, write
 from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_artifact
 
@@ -29,10 +33,30 @@ TEMPLATE = Path(__file__).with_suffix(".html")
 TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
 
 
-def document(title):
+def thumbnail_pixels(path):
+    """Derive a bounded review preview from the portable poster in linear light.
+
+    Pillow decodes RGB16 as RGB8 here; this affects only the review preview.
+    Full-resolution RGB16 originals remain unchanged and downloadable.
+    """
+    with Image.open(path) as source:
+        width, height = source.size
+        size = tuple(max(1, round(n * min(1, 960 / max(width, height)))) for n in source.size)
+        linear = srgb_to_linear(np.asarray(source.convert("RGB"), dtype="f4") / 255)
+    channels = [
+        np.asarray(Image.fromarray(linear[..., i].astype("f4")).resize(size, Image.Resampling.BOX))
+        for i in range(3)
+    ]
+    return np.rint(linear_to_srgb(np.stack(channels, axis=-1)) * 255).astype("u1")
+
+
+def document(title, layout="classic"):
     """Fill only the escaped title in Confluence's independent HTML template."""
     require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
-    template = TEMPLATE.read_text(encoding="utf-8")
+    require(layout in ("classic", "films"), "Unknown gallery layout")
+    template = (
+        TEMPLATE if layout == "classic" else TEMPLATE.with_name("film_review.html")
+    ).read_text(encoding="utf-8")
     require(template.count(TITLE_TOKEN) == 2, "Gallery title placeholders differ")
     return template.replace(TITLE_TOKEN, html.escape(title))
 
@@ -67,7 +91,7 @@ def _film_metadata(request, receipt, look):
 def _study_metadata(request, receipt, look):
     recipe = request["recipe"]
     render = recipe["render"]
-    return {
+    metadata = {
         "optics_model": recipe.get("surface", {}).get("optics_model", "rgb"),
         "initial_pattern": recipe["simulation"].get("initial_pattern", "pools"),
         "formation_seconds": (
@@ -76,6 +100,9 @@ def _study_metadata(request, receipt, look):
         "image_balance": receipt["looks"][look].get("image_balance"),
         "solver_diagnostics": receipt.get("solver_diagnostics"),
     }
+    if "material_model" in recipe["simulation"]:
+        metadata["material_model"] = recipe["simulation"]["material_model"]
+    return metadata
 
 
 def _study_key(study):
@@ -126,6 +153,7 @@ def _name(palette):
     label = {
         "harmonic": "Color harmony",
         "random": "Independent colors",
+        "composed": "Composed colors",
     }.get(palette.get("mode"), palette["family"].replace("-", " ").title())
     return f"{label} · {palette['chromatic_count']} colors"
 
@@ -245,7 +273,23 @@ def _comparisons(studies, case_requests):
     for study in studies:
         seed, count, look = study["seed"], study["chromatic_count"], study["group"]
         mode = study.get("palette_mode", "curated")
-        if mode == "random":
+        if mode == "composed" or (
+            mode == "harmonic" and (seed, "composed", count, look) in indexed
+        ):
+            target_mode = "harmonic" if mode == "composed" else "composed"
+            target = indexed.get((seed, target_mode, count, look))
+            caption = "Earlier painting" if mode == "composed" else "New painting"
+            caption += " · same trajectory, different colors and material"
+            if target:
+                a = case_requests[study["case_id"]]["recipe"]
+                b = case_requests[target["case_id"]]["recipe"]
+                require(
+                    a.get("projection") == b.get("projection")
+                    and a["simulation"]["resolution"][0] * b["simulation"]["resolution"][1]
+                    == b["simulation"]["resolution"][0] * a["simulation"]["resolution"][1],
+                    "Material comparison uses a different trajectory projection",
+                )
+        elif mode == "random":
             target = indexed.get((seed, "harmonic", count, look))
             caption = "Seeded harmony · same starting pools and motion"
             if target:
@@ -291,16 +335,31 @@ def _comparisons(studies, case_requests):
 
 
 def build_gallery(
-    output, cases, *, title="Confluence Fresco", allow_stills=False, earlier_gallery=None
+    output,
+    cases,
+    *,
+    title="Confluence Fresco",
+    allow_stills=False,
+    earlier_gallery=None,
+    layout="classic",
 ):
     """Publish all selected complete cases; each seed retains its CLI order."""
     require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
     require(type(allow_stills) is bool, "allow_stills must be boolean")
+    page = document(title, layout)
     cases = [Path(case).resolve(strict=True) for case in cases]
     require(bool(cases), "Choose at least one completed confluence")
     records, identities, prefixes, seeds = [], set(), set(), []
     for case in cases:
         request, receipt = verify_run(case)
+        require(
+            layout != "films"
+            or (
+                request["recipe"]["chromatic_count"] == 5
+                and request["recipe"]["looks"] == ["layered"]
+            ),
+            "Film review requires five-color paintings with the layered optical view",
+        )
         identity = receipt["identity_sha256"]
         require(identity not in identities, "A physical case was selected more than once")
         require(identity[:16] not in prefixes, "Truncated case identity collision")
@@ -362,6 +421,15 @@ def build_gallery(
                 )
                 paths["spectral"] = copy(
                     case / "spectral.json", f"records/{case_id}/spectral.json", expected
+                )
+            if "background" in request["recipe"]:
+                expected = _json_artifact(request["background"])
+                require(
+                    receipt["artifacts"].get("background.json") == expected,
+                    "Seeded background is not bound to its case receipt",
+                )
+                paths["background"] = copy(
+                    case / "background.json", f"records/{case_id}/background.json", expected
                 )
             if "assessment.json" in receipt["artifacts"]:
                 paths["assessment"] = copy(
@@ -428,12 +496,21 @@ def build_gallery(
                         "spectral_record": paths.get("spectral"),
                         "assessment_record": paths.get("assessment"),
                         "mass_budget_record": paths.get("mass_budget"),
+                        "background_record": paths.get("background"),
                         **_study_metadata(request, receipt, look),
                         "swatches": _swatches(palette, include_chalk=initial is None),
                         "resolution": request["recipe"]["render"]["still_resolution"],
                         **film_metadata,
                     }
                 )
+                if layout == "films":
+                    preview = output / ".preview.png"
+                    Image.fromarray(thumbnail_pixels(output / poster)).save(preview)
+                    info = artifact(preview)
+                    studies[-1]["preview"] = copy(
+                        preview, f"assets/{info['sha256']}/preview.png", info
+                    )
+                    preview.unlink()
         rank = {(3, "layered"): 0, (5, "layered"): 1, (3, "homogeneous"): 2, (5, "homogeneous"): 3}
         studies.sort(
             key=lambda study: (
@@ -506,7 +583,7 @@ def build_gallery(
         }
         write(output / "collection.json", collection)
         partial = output / "index.html.partial"
-        partial.write_text(document(title))
+        partial.write_text(page)
         partial.replace(output / "index.html")
         for name in ("collection.json", "index.html"):
             files[name] = artifact(output / name)
@@ -603,6 +680,20 @@ def verify_gallery(output):
                 origin.get("spectral") is None and request.get("spectral") is None,
                 "RGB view cannot advertise spectral material",
             )
+        if "background" in recipe:
+            from .backgrounds import validate_background
+
+            require(origin.get("background") in files, "Published seeded background is missing")
+            background = validate_background(read(output / origin["background"]), palette)
+            require(
+                background == request.get("background")
+                and background["name"] == recipe["background"]
+                and background["ground_srgb"] == recipe["surface"]["ground_srgb"]
+                and files[origin["background"]] == receipt["artifacts"]["background.json"],
+                "Published seeded background differs",
+            )
+        else:
+            require(origin.get("background") is None, "Unbound seeded background")
         if "assessment.json" in receipt["artifacts"]:
             require(
                 origin.get("assessment") in files
@@ -657,6 +748,7 @@ def verify_gallery(output):
                 and study["palette_record"] == origin["palette"]
                 and study.get("palette_mode", "curated") == recipe.get("palette_mode", "curated")
                 and study.get("layout_record") == origin.get("layout")
+                and study.get("background_record") == origin.get("background")
                 and study["swatches"]
                 == _swatches(palette, include_chalk=request.get("layout") is None),
                 "Painting caption or palette association differs",
@@ -689,6 +781,15 @@ def verify_gallery(output):
                 and files[study["image"]] == receipt["artifacts"][f"{look}/poster.png"],
                 "Published painting image differs",
             )
+            if "preview" in study:
+                require(study["preview"] in files, "Unbound review preview")
+                with Image.open(output / study["preview"]) as preview:
+                    require(
+                        np.array_equal(
+                            np.asarray(preview), thumbnail_pixels(output / study["image"])
+                        ),
+                        "Review preview does not depict its bound painting",
+                    )
             if request["mode"] == "film":
                 require(
                     study["film"] in files
@@ -749,6 +850,7 @@ def main():
     parser.add_argument("--title", default="Confluence Fresco")
     parser.add_argument("--allow-stills", action="store_true")
     parser.add_argument("--earlier-gallery", type=Path)
+    parser.add_argument("--layout", choices=("classic", "films"), default="classic")
     args = parser.parse_args()
     print(
         build_gallery(
@@ -757,6 +859,7 @@ def main():
             title=args.title,
             allow_stills=args.allow_stills,
             earlier_gallery=args.earlier_gallery,
+            layout=args.layout,
         )
     )
 

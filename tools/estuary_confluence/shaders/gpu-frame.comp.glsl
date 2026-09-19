@@ -6,7 +6,7 @@ uniform sampler2D u_phase[3*GROUPS]; // underpaint, deposit, mobile
 uniform sampler2D u_carrier,u_tooth;
 uniform float u_specific_volumes[PIGMENT_COUNT];
 uniform float u_height_scale_mm,u_substrate_height_m;
-uniform int u_chalk_index;
+uniform int u_chalk_index,u_material_model;
 layout(rgba32f,binding=0) writeonly uniform image2DArray phase_output;
 layout(rgba32f,binding=1) writeonly uniform image2D geometry_output;
 layout(rg32f,binding=2) writeonly uniform image2D direction_output;
@@ -45,9 +45,9 @@ void main(){
             precise float pigment=(mobile+deposit)+under;
             if(!finite(pigment)||pigment>1e6)invalid=1u;
             total+=pigment;
-            dry_mass+=deposit+under;
+            dry_mass+=u_material_model==1?deposit:deposit+under;
             if(i==u_chalk_index)chalk=pigment;
-            precise float weighted=(deposit+under)+mobile*.22;
+            precise float weighted=u_material_model==1?(mobile+under)*.22:(deposit+under)+mobile*.22;
             mass_height+=weighted*u_specific_volumes[i];
         }
         vec4 carrier=texelFetch(u_carrier,p,0),tooth=texelFetch(u_tooth,p,0);

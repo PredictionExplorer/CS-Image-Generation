@@ -8,7 +8,8 @@ uniform vec3 u_ratios[PIGMENT_COUNT];
 uniform float u_scattering[PIGMENT_COUNT];
 uniform vec3 u_substrate;
 uniform float u_layer_scale, u_mix_control, u_mass_reference;
-uniform int u_layered, u_crisp;
+uniform int u_layered, u_crisp, u_glazed;
+uniform float u_glaze_min_mass_ratio, u_glaze_max_mass_ratio;
 const int GROUPS = (PIGMENT_COUNT + 3) / 4;
 
 float one_minus_exp_negative(float x) {
@@ -81,6 +82,9 @@ void main() {
         }
     }
     float density_scale=u_crisp==1 ? u_mass_reference/total_mass : 1.0;
+    if (u_glazed==1) density_scale=clamp(total_mass,
+        u_mass_reference*u_glaze_min_mass_ratio,
+        u_mass_reference*u_glaze_max_mass_ratio)/total_mass;
     vec3 color=u_substrate;
     if (u_layered==1) {
         for (int layer=0;layer<3;++layer) {

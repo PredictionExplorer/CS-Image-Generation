@@ -29,6 +29,7 @@ class GPUFrame:
     substrate_um: float
     chalk_index: int
     _owner: weakref.ReferenceType
+    material_model: str = "legacy"
 
     @classmethod
     def capture(
@@ -48,6 +49,7 @@ class GPUFrame:
         height_scale_mm,
         substrate_um,
         chalk_index=None,
+        material_model="legacy",
     ):
         frame = cls(
             context,
@@ -64,6 +66,7 @@ class GPUFrame:
             float(substrate_um),
             pigment_count - 1 if chalk_index is None else chalk_index,
             weakref.ref(owner),
+            material_model,
         )
         frame.validate()
         return frame
@@ -111,7 +114,8 @@ class GPUFrame:
             ):
                 raise ValueError("Native material views require matching RGBA32F textures")
         if (
-            type(self.chalk_index) is not int
+            self.material_model not in ("legacy", "laminate")
+            or type(self.chalk_index) is not int
             or not 0 <= self.chalk_index < self.pigment_count
             or len(self.specific_volumes) != self.pigment_count
             or any(not math.isfinite(value) or value < 0 for value in self.specific_volumes)

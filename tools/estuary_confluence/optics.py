@@ -69,6 +69,29 @@ def _mixedness(value, shape):
         raise ValueError("mixedness must broadcast to the material field") from exc
 
 
+def glazed_density_scale(
+    total_mass, *, mass_reference=0.15, min_mass_ratio=0.35, max_mass_ratio=2.5
+):
+    """Bound actual optical thickness while preserving pigment/layer fractions.
+
+    A glaze uses actual mass between two explicit bounds. The lower bound keeps
+    a colored material edge; the upper bound limits opaque saturation. This is
+    an authored optical interpretation, never a change to stored pigment mass.
+    """
+    for value, name, low, high in (
+        (mass_reference, "mass_reference", 1e-4, 10),
+        (min_mass_ratio, "min_mass_ratio", 0.01, 1),
+        (max_mass_ratio, "max_mass_ratio", 1, 8),
+    ):
+        if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
+            raise ValueError(f"{name} must be finite and in [{low}, {high}]")
+    mass = np.asarray(total_mass, dtype="f8")
+    if not np.isfinite(mass).all() or np.any(mass < 0) or np.any(mass > 6e6):
+        raise ValueError("total_mass must be finite and in [0, 6000000]")
+    target = np.clip(mass, mass_reference * min_mass_ratio, mass_reference * max_mass_ratio)
+    return np.divide(target, mass, out=np.zeros_like(mass), where=mass > 1e-20)
+
+
 def finite_layer_rt(ratio, thickness):
     """Return symmetric layer reflection and transmission in linear RGB.
 

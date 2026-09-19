@@ -7,7 +7,13 @@ import numpy as np
 
 from tools.estuary.optics import srgb_to_linear
 
-from .optics import finite_layer_rt, layer_rt, layered_reflectance, reflectance
+from .optics import (
+    finite_layer_rt,
+    glazed_density_scale,
+    layer_rt,
+    layered_reflectance,
+    reflectance,
+)
 
 
 def palette(count=4):
@@ -23,6 +29,31 @@ def palette(count=4):
 
 
 class OpticalContracts(unittest.TestCase):
+    def test_glazed_mass_preserves_interior_amount_and_bounds_only_extremes(self):
+        mass = np.array([0, 0.001, 0.06, 0.15, 0.3, 100.0])
+        scale = glazed_density_scale(mass)
+        np.testing.assert_allclose(mass * scale, [0, 0.0525, 0.06, 0.15, 0.3, 0.375])
+        self.assertTrue(np.isfinite(scale).all())
+        self.assertEqual(scale[0], 0)
+        for bad in (-1, np.nan, np.inf):
+            with self.assertRaises(ValueError):
+                glazed_density_scale(bad)
+        for config in ({"mass_reference": True}, {"min_mass_ratio": 0}, {"max_mass_ratio": 9}):
+            with self.assertRaises(ValueError):
+                glazed_density_scale(0.1, **config)
+
+    def test_glazed_common_scale_preserves_real_layers_and_visible_order(self):
+        lower = np.array([0.09, 0, 0, 0])
+        upper = np.array([0, 0.04, 0.012, 0])
+        scale = glazed_density_scale((lower + upper).sum())
+        p, empty = palette(), np.zeros(4)
+        ordered = layered_reflectance(lower * scale, empty, upper * scale, p, layer_scale=12)
+        swapped = layered_reflectance(upper * scale, empty, lower * scale, p, layer_scale=12)
+        self.assertGreater(float(np.max(np.abs(ordered - swapped))), 0.015)
+        np.testing.assert_allclose(
+            lower * scale / (lower + upper).sum(), lower / (lower + upper).sum()
+        )
+
     def test_empty_stack_and_zero_optical_scale_return_substrate(self):
         p = palette()
         empty = np.zeros((5, 4))

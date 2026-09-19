@@ -25,6 +25,121 @@ from .palette import generate_palette, normalize_seed
 
 
 class GalleryTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js to exercise film review")
+    def test_film_review_playlist_skips_stills_and_switches_stop_old_playback(self):
+        cases = [
+            self.case(
+                seed=seed,
+                count=5,
+                looks=["layered"],
+                palette_mode="composed",
+                simulation_updates={"material_model": "laminate"},
+                film=film,
+            )
+            for seed, film in (("0xb7", True), ("0xbc", False), ("0x80", True))
+        ]
+        cases.append(self.case(seed="0xb7", count=5, looks=["layered"], palette_mode="harmonic"))
+        gallery.build_gallery(self.output, cases, layout="films", allow_stills=True)
+        data = read(self.output / "collection.json")
+        script = re.findall(
+            r"<script>([\s\S]*?)</script>", gallery.document("Films", layout="films")
+        )[0]
+        harness = """
+const vm=require('node:vm'),assert=require('node:assert/strict');
+const elements=new Map();
+function element(){return {attributes:{},style:{},children:[],value:'',
+ classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+ getAttribute(k){return this[k]},removeAttribute(k){delete this[k]},
+ replaceChildren(){this.children=[]},append(...items){this.children.push(...items)},
+ pause(){this.pauses=(this.pauses||0)+1},load(){},play(){return Promise.resolve()},
+ scrollIntoView(){}}}
+const document={getElementById(id){if(!elements.has(id))elements.set(id,element());
+ return elements.get(id)},createElement:element,addEventListener(){}};
+vm.runInNewContext(SCRIPT,{document,fetch:async()=>({ok:true,json:async()=>DATA})});
+const get=id=>elements.get(id);
+get('next').onclick();get('modeFilm').onclick(); // Safe during loading.
+setImmediate(()=>{
+ const current=DATA.studies.filter(s=>s.palette_mode==='composed');
+ const earlier=DATA.studies.find(s=>s.palette_mode==='harmonic');
+ assert.equal(get('film').src,current[0].film);
+ get('playAll').onclick();get('film').onended();
+ assert.equal(get('film').src,current[2].film); // The still-only seed was skipped.
+ get('film').onended();assert.match(get('status').textContent,/All 2 films/);
+ get('seedChoice').value=current[1].seed;get('seedChoice').onchange();
+ assert.equal(get('film').hidden,true);
+ assert.equal(get('modeStill').attributes['aria-pressed'],'true');
+ assert.match(get('playAll').textContent,/Play all 2 films/);
+ get('playAll').onclick();assert.equal(get('film').src,current[0].film);
+ get('modeCompare').onclick();assert.equal(get('reference').src,earlier.image);
+ assert.equal(get('film').src,undefined);
+ assert.equal(get('film').hidden,true);assert.ok(get('film').pauses>1);
+ get('modeFilm').onclick();get('versionChoice').value=earlier.id;
+ get('versionChoice').onchange();assert.equal(get('film').src,earlier.film);
+ assert.equal(get('downloadFilm').href,earlier.film);
+});
+"""
+        path = self.root / "film-controls.js"
+        path.write_text(
+            "const DATA="
+            + json.dumps(data)
+            + ";\nconst SCRIPT="
+            + json.dumps(script)
+            + ";\n"
+            + harness
+        )
+        subprocess.run(
+            [shutil.which("node"), str(path)], check=True, capture_output=True, timeout=10
+        )
+
+    def test_film_review_compares_new_material_with_the_same_earlier_trajectory(self):
+        baseline = self.case(count=5, looks=["layered"], palette_mode="harmonic")
+        layered = self.case(
+            count=5,
+            looks=["layered"],
+            palette_mode="composed",
+            physical="e" * 64,
+            simulation_updates={"material_model": "laminate"},
+        )
+        gallery.build_gallery(self.output, [layered, baseline], layout="films")
+        collection, _ = gallery.verify_gallery(self.output)
+        first, second = collection["studies"]
+        self.assertEqual(first["material_model"], "laminate")
+        self.assertEqual(first["comparison_id"], second["id"])
+        self.assertEqual(second["comparison_id"], first["id"])
+        self.assertNotEqual(first["physical_state_sha256"], second["physical_state_sha256"])
+        first["material_model"] = "legacy"
+        self.rehash_collection(collection)
+        with self.assertRaisesRegex(ValueError, "metadata differs"):
+            gallery.verify_gallery(self.output)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for script validation")
+    def test_film_review_script_parses_and_escapes_its_title(self):
+        document = gallery.document('<script>alert("title")</script>', layout="films")
+        self.assertNotIn('<script>alert("title")</script>', document)
+        scripts = re.findall(r"<script>([\s\S]*?)</script>", document)
+        self.assertEqual(len(scripts), 1)
+        path = self.root / "review.js"
+        path.write_text(scripts[0])
+        subprocess.run(
+            [shutil.which("node"), "--check", str(path)], check=True, capture_output=True
+        )
+
+    def test_rehashed_review_preview_cannot_depict_a_different_painting(self):
+        from PIL import Image
+
+        case = self.case(count=5, looks=["layered"])
+        gallery.build_gallery(self.output, [case], layout="films")
+        collection, curation = gallery.verify_gallery(self.output)
+        name = collection["studies"][0]["preview"]
+        with Image.open(self.output / name) as source:
+            pixels = np.array(source)
+        pixels[0, 0] = [255, 0, 0]
+        Image.fromarray(pixels).save(self.output / name)
+        curation["artifacts"][name] = artifact(self.output / name)
+        write(self.output / "curation.json", curation)
+        with self.assertRaisesRegex(ValueError, "does not depict"):
+            gallery.verify_gallery(self.output)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

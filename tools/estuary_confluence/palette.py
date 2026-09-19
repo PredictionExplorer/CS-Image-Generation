@@ -10,6 +10,7 @@ default retains its exact v1 contract; procedural full-hue alternatives live in
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -354,11 +355,41 @@ def generate_palette(seed: str | int, chromatic_count: int = 3, *, mode: str = "
     ``harmonic`` derives related hues from a seed-selected angle across the full
     color circle. ``random`` independently selects chromatic hues for comparison.
     Both procedural modes share physical coefficients and use a white ground.
+    ``composed`` adds distinct lightness/chroma/material roles and opt-in layer
+    allocation; all existing modes retain their exact released results.
     """
-    if type(mode) is not str or mode not in ("curated", "harmonic", "random"):
-        raise ValueError("Palette mode must be curated, harmonic, or random")
+    if type(mode) is not str or mode not in ("curated", "harmonic", "random", "composed"):
+        raise ValueError("Palette mode must be curated, harmonic, random, or composed")
     if mode == "curated":
         return _curated_palette(seed, chromatic_count)
+    if mode == "composed":
+        from .composed_palette import build_palette as build_composed
+
+        return build_composed(seed, chromatic_count)
     from .procedural_palette import build_palette
 
     return build_palette(seed, chromatic_count, mode)
+
+
+def validate_palette(record: dict) -> dict:
+    """Regenerate every field from its seed and mode, preserving strict versions.
+
+    A valid self-hash alone does not prove seed derivation. Exact regeneration
+    rejects altered coefficients, roles, allocation, metadata, or algorithm
+    versions even if a modified archive has been given a new self-hash.
+    """
+    if type(record) is not dict:
+        raise ValueError("Palette record must be a dictionary")
+    expected = generate_palette(
+        record.get("seed"),
+        record.get("chromatic_count"),
+        mode=record.get("mode", "curated"),
+    )
+    try:
+        archived = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Palette record must contain finite JSON values") from exc
+    derived = json.dumps(expected, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    if archived != derived:
+        raise ValueError("Palette is not derived from its seed and algorithm")
+    return copy.deepcopy(record)

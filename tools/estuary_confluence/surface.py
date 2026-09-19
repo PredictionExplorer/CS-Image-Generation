@@ -11,6 +11,11 @@ sets a hard silhouette, and a single optical mass reference gives filled colors
 without a dilute fringe. Geometry and illumination stay inside that silhouette;
 the outside is an unlit constant ground. Antialiasing spans one output pixel,
 not a physical feather or animated threshold. The archived state is untouched.
+
+The opt-in glazed finish retains that silhouette with bounded actual interior
+optical thickness. Higher-mass banks carry most relief; wet upper-layer coverage
+and pigment scattering control restrained sheen. These are authored material
+interpretations, not a three-dimensional fluid.
 """
 
 from __future__ import annotations
@@ -56,20 +61,28 @@ DEFAULTS = {
     "tone_map": "reinhard",
     "layer_scale": 5.0,
 }
+GLAZE_DEFAULTS = {
+    "glaze_min_mass_ratio": 0.35,
+    "glaze_max_mass_ratio": 2.5,
+    "glaze_relief_strength": 0.8,
+}
 
 
 def validate_config(value=None):
     value = {} if value is None else value
-    if type(value) is not dict or set(value) - set(DEFAULTS):
+    if type(value) is not dict or set(value) - (set(DEFAULTS) | set(GLAZE_DEFAULTS)):
         raise ValueError("Surface config must contain only known controls")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
+    # Do not add controls to old archived surface dictionaries.
+    if result["finish"] == "glazed":
+        result = {**GLAZE_DEFAULTS, **result}
     if result["mode"] not in ("homogeneous", "layered"):
         raise ValueError("mode must be homogeneous or layered")
     if result["optics_model"] not in ("rgb", "spectral"):
         raise ValueError("optics_model must be rgb or spectral")
-    if result["finish"] not in ("fresco", "crisp"):
-        raise ValueError("finish must be fresco or crisp")
+    if result["finish"] not in ("fresco", "crisp", "glazed"):
+        raise ValueError("finish must be fresco, crisp or glazed")
     ground = result["ground_srgb"]
     if type(ground) not in (list, tuple) or len(ground) != 3:
         raise ValueError("ground_srgb needs three display-sRGB values")
@@ -100,6 +113,13 @@ def validate_config(value=None):
     }
     for name, bounds in limits.items():
         result[name] = _number(result[name], name, *bounds)
+    for name, bounds in {
+        "glaze_min_mass_ratio": (0.01, 1),
+        "glaze_max_mass_ratio": (1, 8),
+        "glaze_relief_strength": (0, 1),
+    }.items():
+        if name in result:
+            result[name] = _number(result[name], name, *bounds)
     return result
 
 
@@ -303,9 +323,22 @@ class Surface:
                         "independent pigment-column reflection composed over the lower layer; "
                         "no resolved microscopic strands or measured mixing calibration"
                     )
+                if self.config["finish"] == "glazed":
+                    self.metadata["finish"] = (
+                        "glazed: the crisp real-mass silhouette and flat exterior ground; "
+                        "actual interior optical mass clamped to explicit reference ratios, "
+                        "preserving pigment and phase fractions; concentration-selected relief "
+                        "and wet upper-layer sheen; no change to archived material fields"
+                    )
                 self._program = self.ctx.program(
                     vertex_shader=(ROOT / "shaders/surface.vert.glsl").read_text(),
-                    fragment_shader=(ROOT / "shaders/surface.frag.glsl").read_text(),
+                    fragment_shader=(ROOT / "shaders/surface.frag.glsl")
+                    .read_text()
+                    .replace(
+                        "#version 430 core",
+                        f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
+                        1,
+                    ),
                 )
                 self._quad = self.ctx.buffer(
                     np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes()
@@ -332,8 +365,16 @@ class Surface:
     def _bind_config(self):
         c, p = self.config, self._program
         p["u_substrate"].value = tuple(self._substrate)
-        crisp = int(c["finish"] == "crisp")
+        crisp = int(c["finish"] in ("crisp", "glazed"))
+        glazed = int(c["finish"] == "glazed")
         p["u_crisp"].value = crisp
+        p["u_glazed"].value = glazed
+        p["u_phases"].value = 3
+        p["u_scattering"].write(self._scattering.astype("f4").tobytes())
+        p["u_mass_reference"].value = c["paint_mass_reference"]
+        p["u_glaze_relief_strength"].value = c.get(
+            "glaze_relief_strength", GLAZE_DEFAULTS["glaze_relief_strength"]
+        )
         p["u_mass_threshold"].value = c["paint_mass_threshold"]
         p["u_ground"].value = tuple(srgb_to_linear(c["ground_srgb"]))
         optics = self._optics_program
@@ -362,6 +403,9 @@ class Surface:
         optics["u_mix_control"].value = c["mix_control"]
         optics["u_layered"].value = int(c["mode"] == "layered")
         optics["u_crisp"].value = crisp
+        optics["u_glazed"].value = glazed
+        for name in ("glaze_min_mass_ratio", "glaze_max_mass_ratio"):
+            optics["u_" + name].value = c.get(name, GLAZE_DEFAULTS[name])
         optics["u_mass_reference"].value = c["paint_mass_reference"]
         for name in (
             "height_scale",
@@ -454,6 +498,8 @@ class Surface:
             self._scaled_max_height = scaled_max
         for unit, texture in enumerate(self._textures):
             texture.use(unit)
+        if self.config["finish"] == "glazed":
+            self._phase_texture.use(3)
         if self._target_size != tuple(size):
             if self._framebuffer is not None:
                 self._framebuffer.release()
@@ -505,6 +551,8 @@ class Surface:
         self._phase_texture = self.ctx.texture_array(
             (grid_width, grid_height, groups * 3), 4, dtype="f4"
         )
+        self._phase_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._phase_texture.repeat_x = self._phase_texture.repeat_y = False
         self._mix_texture = self.ctx.texture((grid_width, grid_height), 1, dtype="f4")
         self._grid_size = (grid_width, grid_height)
 
@@ -543,6 +591,7 @@ class Surface:
         program["u_height_scale_mm"].value = frame.height_scale_mm
         program["u_substrate_height_m"].value = frame.substrate_um * 1e-6
         program["u_chalk_index"].value = frame.chalk_index
+        program["u_material_model"].value = int(frame.material_model == "laminate")
         self._phase_texture.bind_to_image(0, read=False, write=True)
         self._textures[1].bind_to_image(1, read=False, write=True)
         self._textures[2].bind_to_image(2, read=False, write=True)

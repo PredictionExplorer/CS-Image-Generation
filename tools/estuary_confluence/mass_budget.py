@@ -16,6 +16,23 @@ VERSION = "global-pigment-budget-v1"
 RELATIVE_TOLERANCE = 5e-6
 
 
+def validate_initial_weights(value, count=None):
+    """Resolve explicit chromatic load multipliers; chalk is never included."""
+    if value is None:
+        return None
+    if (
+        type(value) is not list
+        or len(value) not in (3, 5)
+        or (count is not None and len(value) != count)
+        or any(type(v) not in (int, float) or not 0.05 <= v <= 5 for v in value)
+    ):
+        raise ValueError(
+            "initial_pigment_weights needs one finite multiplier in [0.05, 5] "
+            "per chromatic pigment (three or five, without chalk)"
+        )
+    return list(map(float, value))
+
+
 def correction_steps(steps, interval):
     """Canonical correction schedule, including a non-divisible final step."""
     if type(steps) is not int or steps < 1 or type(interval) is not int or interval < 0:
@@ -38,23 +55,27 @@ def pigment_mass(pigment, domain_scale):
     return pigment.sum(axis=(0, 1), dtype="f8") * (2 * domain_scale / pigment.shape[0]) ** 2
 
 
-def initial_pool_mass(layout, resolution, domain_scale):
+def initial_pool_mass(layout, resolution, domain_scale, *, weights=None):
     """Independently integrate the same sampled pure-pool initial condition."""
     from .layout import pool_profile
 
+    weights = validate_initial_weights(weights, layout["count"])
     width, height = resolution
     aspect = width / height
     x = ((np.arange(width, dtype="f4") + 0.5) / width * 2 * aspect - aspect) * domain_scale
     y = ((np.arange(height, dtype="f4") + 0.5) / height * 2 - 1) * domain_scale
     result = np.zeros(layout["count"] + 1, dtype="f8")
     for pool in layout["pools"]:
+        load = pool["load"]
+        if weights is not None:
+            load *= weights[pool["pigment_index"]]
         squared_x = (x - pool["position"][0]) ** 2
         for start in range(0, height, 256):
             distance = np.sqrt(
                 squared_x[None, :] + (y[start : start + 256, None] - pool["position"][1]) ** 2
             )
             sampled = np.asarray(
-                pool["load"] * pool_profile(distance, pool["radius"], pool["edge_width"]),
+                load * pool_profile(distance, pool["radius"], pool["edge_width"]),
                 dtype="f4",
             )
             result[pool["pigment_index"]] += sampled.sum(dtype="f8")
@@ -74,7 +95,7 @@ def validate_report(report, recipe, fields, *, layout):
             type(simulation.get(key)) in (int, float) and simulation[key] == 0
             for key in ("deposition", "settling_scale", "underpaint_strength")
         ),
-        "Mass budgets require source-free, mobile-only separated pools",
+        "Mass budgets require source-free separated pools",
     )
     require(
         type(report) is dict
@@ -102,7 +123,12 @@ def validate_report(report, recipe, fields, *, layout):
 
     target = vector(report["initial_mass"], "initial mass")
     require(type(layout) is dict, "Mass restoration needs archived starting pools")
-    initial = initial_pool_mass(layout, simulation["resolution"], simulation["domain_scale"])
+    initial = initial_pool_mass(
+        layout,
+        simulation["resolution"],
+        simulation["domain_scale"],
+        weights=simulation.get("initial_pigment_weights"),
+    )
     empty = initial == 0
     require(
         np.allclose(initial, target, rtol=RELATIVE_TOLERANCE, atol=1e-12)
@@ -145,7 +171,30 @@ def validate_report(report, recipe, fields, *, layout):
         and np.all(actual[empty] == 0),
         "Native final paint differs from the certified pigment budgets",
     )
-    require(
-        not np.any(fields["deposit"]) and not np.any(fields["underpaint"]),
-        "Source-free mass restoration requires empty stationary pigment phases",
-    )
+    laminate = simulation.get("material_model", "legacy") == "laminate"
+    if laminate:
+        require(
+            all(simulation.get(key) == 0 for key in ("underpaint_release", "burial_rate")),
+            "Laminate mass budgets require disabled legacy pigment phases",
+        )
+        require(
+            not np.any(fields["deposit"])
+            and all(
+                fields[key].shape == fields["pigment"].shape
+                and np.isfinite(fields[key]).all()
+                and np.all(fields[key] >= 0)
+                for key in ("mobile", "underpaint")
+            )
+            and np.allclose(
+                fields["pigment"],
+                fields["mobile"] + fields["underpaint"],
+                rtol=RELATIVE_TOLERANCE,
+                atol=0,
+            ),
+            "Laminate pigment budgets must include both moving layers and no deposits",
+        )
+    else:
+        require(
+            not np.any(fields["deposit"]) and not np.any(fields["underpaint"]),
+            "Source-free mass restoration requires empty stationary pigment phases",
+        )

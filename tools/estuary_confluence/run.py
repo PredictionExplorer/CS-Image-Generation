@@ -97,6 +97,7 @@ def validate_recipe(raw):
             "projection",
             "render",
             "assessment",
+            "background",
         },
         "Unknown confluence recipe keys",
     )
@@ -108,8 +109,8 @@ def validate_recipe(raw):
     require(type(count) is int and count in (3, 5), "Use three or five chromatic pigments")
     palette_mode = raw.get("palette_mode", "curated")
     require(
-        type(palette_mode) is str and palette_mode in ("curated", "harmonic", "random"),
-        "Choose a curated, harmonic, or random palette",
+        type(palette_mode) is str and palette_mode in ("curated", "harmonic", "random", "composed"),
+        "Choose a curated, harmonic, random, or composed palette",
     )
     name = raw.get("name", "Confluence Fresco")
     require(isinstance(name, str) and 0 < len(name) <= 100, "Painting needs a short name")
@@ -124,6 +125,10 @@ def validate_recipe(raw):
     encounters = raw.get("encounters", 3)
     require(type(encounters) is int and 0 <= encounters <= 3, "Use at most three encounter blooms")
     simulation = simulation_config(raw.get("simulation", {}))
+    weights = simulation.get("initial_pigment_weights")
+    require(
+        weights is None or len(weights) == count, "Initial load weights differ from color count"
+    )
     surface = copy.deepcopy(raw.get("surface", {}))
     require(type(surface) is dict, "Surface controls must be an object")
     require(
@@ -203,7 +208,7 @@ def validate_recipe(raw):
             assessment["resolution"] = size
         dimensions(assessment["resolution"])
         reduction_factor((sw, sh), tuple(assessment["resolution"]))
-    return {
+    result = {
         "schema_version": 1,
         "name": name,
         "chromatic_count": count,
@@ -216,6 +221,15 @@ def validate_recipe(raw):
         "render": render,
         "assessment": assessment,
     }
+    if "background" in raw:
+        from tools.estuary_confluence.backgrounds import NAMES
+
+        require(
+            type(raw["background"]) is str and raw["background"] in NAMES,
+            "Unknown seeded background",
+        )
+        result["background"] = raw["background"]
+    return result
 
 
 def frame_raster_resolution(render):
@@ -453,6 +467,17 @@ def verify_run(folder):
             "mass-budget.json" not in receipt["artifacts"],
             "Disabled mass restoration cannot advertise a budget report",
         )
+    if "background" in request["recipe"]:
+        from tools.estuary_confluence.backgrounds import validate_background
+
+        required.add("background.json")
+        background = validate_background(request.get("background"), request["palette"])
+        require(
+            background["name"] == request["recipe"]["background"]
+            and background["ground_srgb"] == request["recipe"]["surface"]["ground_srgb"]
+            and read(folder / "background.json") == background,
+            "Seeded background differs from its painting",
+        )
     require(required <= receipt["artifacts"].keys(), "Required confluence artifacts are missing")
     for name, record in receipt["artifacts"].items():
         checked(folder, name, record)
@@ -498,11 +523,13 @@ def verify_run(folder):
         "Palette algorithm differs from its recipe",
     )
     require(
-        request["palette"]
-        == generate_palette(
-            request["source"]["seed"],
-            request["recipe"]["chromatic_count"],
-            mode=request["recipe"].get("palette_mode", "curated"),
+        encoded(request["palette"])
+        == encoded(
+            generate_palette(
+                request["source"]["seed"],
+                request["recipe"]["chromatic_count"],
+                mode=request["recipe"].get("palette_mode", "curated"),
+            )
         ),
         "Palette is not derived from its seed and algorithm",
     )
@@ -642,6 +669,12 @@ def run(args):
     sw, sh = recipe["simulation"]["resolution"]
     source = Source.read(args.source, aspect=sw / sh, **recipe["projection"])
     palette = generate_palette(source.seed, recipe["chromatic_count"], mode=recipe["palette_mode"])
+    background = None
+    if "background" in recipe:
+        from tools.estuary_confluence.backgrounds import generate_background
+
+        background = generate_background(recipe["background"], palette)
+        recipe["surface"]["ground_srgb"] = background["ground_srgb"]
     layout = resolved_layout(recipe, source.seed, source)
     spectral = None
     if recipe["surface"]["optics_model"] == "spectral":
@@ -693,6 +726,8 @@ def run(args):
                 },
                 "capture": capture_metadata(recipe),
             }
+            if background is not None:
+                request["background"] = background
             identity = hashlib.sha256(encoded(request)).hexdigest()
             if (output / "request.json").exists():
                 require(
@@ -710,6 +745,8 @@ def run(args):
                 write(output / "layout.json", layout)
             if spectral is not None:
                 write(output / "spectral.json", spectral)
+            if background is not None:
+                write(output / "background.json", background)
             (output / "inputs").mkdir()
             shutil.copyfile(args.source, output / "inputs/source.orbit")
             require(
@@ -733,6 +770,8 @@ def run(args):
                 artifacts["layout.json"] = artifact(output / "layout.json")
             if spectral is not None:
                 artifacts["spectral.json"] = artifact(output / "spectral.json")
+            if background is not None:
+                artifacts["background.json"] = artifact(output / "background.json")
             measurements = []
             pending = iter(assessment_steps(recipe))
             next_checkpoint = next(pending, None)

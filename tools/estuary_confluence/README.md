@@ -4,6 +4,72 @@ Seeded pigment, selective deposition, and revealed underpainting driven by the
 complete recorded three-body trajectory. This experiment extends Tidal Fresco
 without changing the earlier Estuary, depth, or studio packages.
 
+## Layered paintings
+
+`recipes/layered-five.json` opts into the new material study. All earlier
+recipes, palette algorithms, and physical archives remain supported.
+
+- `palette_mode="composed"` generates five color roles from the full seed:
+  dominant, support, accent, deep anchor, and quiet bridge. Tonal, analogous,
+  complementary, and split-accent relationships use different lightness/chroma
+  ranges and authored scattering strengths. All five candidates are resolved
+  before selecting a three-color prefix. Exact upper-layer mass fractions and
+  spectral mixture checks travel with the palette. The spectra remain synthetic,
+  not measured artist pigments.
+- `simulation.initial_pigment_weights` optionally scales each starting pool's
+  base load before layer splitting. The selected five-color recipe uses
+  `[2.2, 0.9, 0.5, 0.6, 0.4]` in the palette's role order. The archived layout
+  retains its base geometry/load, while the recipe records the exact multiplier.
+  There is no count-dependent renormalization. Independent budget regeneration
+  applies the same weights. `null` preserves the original initialization exactly.
+- `simulation.material_model="laminate"` divides the existing initial paint into
+  two moving layers. `mobile` stores the upper layer, `underpaint` the moving lower
+  layer, and `deposit` remains empty. `pigment` is still their total. The lower
+  layer follows the same trajectory-driven velocity at a bounded speed ratio;
+  the upper layer follows the original velocity. This is an authored two-layer
+  transport model, not a full three-dimensional fluid or a pressure solver.
+- `interlayer_exchange_rate` controls positive, species-conserving exchange at
+  occupied wet contacts. It preserves the local amount in each layer. Each layer
+  also receives the existing within-layer interdiffusion. Both layers share the
+  original transported wetness/mixedness field. The global mass correction now
+  measures and scales both layers together. It does not make their limited
+  MacCormack transport locally conservative; no flow-map solver is claimed.
+- `surface.finish="glazed"` preserves the crisp real-mass silhouette and constant
+  exterior ground. Inside it, actual optical mass is bounded by
+  `glaze_min_mass_ratio` and `glaze_max_mass_ratio`, relative to
+  `paint_mass_reference`. The actual ordered layer fractions are preserved.
+  Concentrated paint banks carry most relief; wet upper-layer coverage and
+  scattering vary surface sheen. These display controls never modify material
+  arrays, and camera frames retain the completed material unchanged.
+- An optional recipe-level `background="palette-night"` resolves and archives
+  `background.json` from the generated palette and seed. Verification checks its
+  derivation, exact saved colors, and agreement with the rendered surface.
+
+The film review layout opens with native video controls, gives every seed an
+explicit Watch film action and a continuous-play option, and pairs current/earlier images only when the source
+recording, projection, aspect, color count, and optical view match. This comparison
+intentionally changes colors and material; it does not claim identical physical
+states. Small previews are derived from the published posters in linear light,
+verified again after copying, and used for the grid and video posters. Full RGB16
+posters and films remain downloadable. The five-color layered-view review is
+explicitly selected with `--layout films`:
+
+```sh
+python -m tools.estuary_confluence.run \
+  --source /path/to/seed.orbit \
+  --recipe tools/estuary_confluence/recipes/layered-five.json \
+  --output /path/to/new-complete-film
+
+python -m tools.estuary_confluence.gallery \
+  --layout films --title "The Estuary, in layers" \
+  --cases /path/to/new-film /path/to/earlier-film \
+  --output /path/to/new-review
+```
+
+Model checks cover local exchange conservation and positivity, real differential
+layer motion, total pigment accounting, output-cadence independence, ordered-layer
+optics, native GPU/CPU capture agreement, archive tampering, and old-render parity.
+
 ## Convergence studies
 
 See [EXPERIMENTS.md](EXPERIMENTS.md) for the parameter sweeps, visual judgments,

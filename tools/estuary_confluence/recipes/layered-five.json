@@ -1,0 +1,104 @@
+{
+  "assessment": {
+    "interval_steps": 120,
+    "resolution": null,
+    "share_threshold": 0.1
+  },
+  "background": "palette-night",
+  "chromatic_count": 5,
+  "encounters": 3,
+  "looks": [
+    "layered"
+  ],
+  "name": "The Estuary, in layers",
+  "palette_mode": "composed",
+  "render": {
+    "azimuth_end": 35,
+    "azimuth_start": -35,
+    "capture_pipeline": "native-gpu",
+    "capture_resolution": [
+      4096,
+      3072
+    ],
+    "formation_frames": 1801,
+    "fps": 24,
+    "frame_supersampling": 2,
+    "hold_frames": 120,
+    "orbit_frames": 241,
+    "orbit_tilt_degrees": 16,
+    "resolution": [
+      1920,
+      1440
+    ],
+    "still_resolution": [
+      3840,
+      2880
+    ],
+    "still_tilt_degrees": 8
+  },
+  "schema_version": 1,
+  "simulation": {
+    "burial_rate": 0,
+    "carrier_velocity": [
+      0,
+      0
+    ],
+    "deposition": 0,
+    "diffusion_coefficient": 2e-05,
+    "diffusion_min_concentration": 0.001,
+    "drying": 4.5,
+    "flow_domain_scale": 1.0,
+    "flow_strength": 1.1,
+    "granulation": 0,
+    "initial_edge_width": 0.02,
+    "initial_load": 0.18,
+    "initial_pattern": "engaged",
+    "initial_pigment_weights": [
+      2.2,
+      0.9,
+      0.5,
+      0.6,
+      0.4
+    ],
+    "interlayer_exchange_rate": 0.55,
+    "interlayer_min_concentration": 0.001,
+    "load_radius": 0.28,
+    "lower_transport_scale": 0.82,
+    "mass_budget_interval_steps": 12,
+    "material_model": "laminate",
+    "mixing_rate": 0.55,
+    "pair_swirl": 0.9,
+    "resolution": [
+      4096,
+      3072
+    ],
+    "settling_scale": 0,
+    "steps": 7200,
+    "stir_radius": 0.22,
+    "substrate_um": 0,
+    "underpaint_release": 0,
+    "underpaint_strength": 0
+  },
+  "surface": {
+    "ambient": 0.2,
+    "exposure": 0.95,
+    "fill_strength": 0.13,
+    "finish": "glazed",
+    "glaze_max_mass_ratio": 2.5,
+    "glaze_min_mass_ratio": 0.35,
+    "glaze_relief_strength": 0.8,
+    "grain_um": 0,
+    "ground_srgb": [
+      1,
+      1,
+      1
+    ],
+    "height_scale": 1.4,
+    "key_elevation_degrees": 23,
+    "key_strength": 3.35,
+    "layer_scale": 24,
+    "optics_model": "spectral",
+    "paint_mass_reference": 0.18,
+    "paint_mass_threshold": 0.008
+  }
+}

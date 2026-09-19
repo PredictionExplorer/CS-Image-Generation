@@ -312,6 +312,26 @@ class RecipeAndTimelineTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_composed_palette_and_seeded_ground_are_bound_to_the_archive(self):
+        from .backgrounds import generate_background
+
+        raw = small_recipe()
+        raw.update(palette_mode="composed", background="palette-night")
+        write(self.recipe, raw)
+        runner.run(self.args)
+        request, receipt = runner.verify_run(self.args.output)
+        expected = generate_background("palette-night", request["palette"])
+        self.assertEqual(request["background"], expected)
+        self.assertEqual(request["recipe"]["surface"]["ground_srgb"], expected["ground_srgb"])
+        self.assertIn("background.json", receipt["artifacts"])
+        replacement = generate_background("charcoal", request["palette"])
+        request["background"] = replacement
+        write(self.args.output / "background.json", replacement)
+        self.rewrite_artifact_hash("background.json")
+        self.rewrite_request(request)
+        with self.assertRaisesRegex(ValueError, "background differs"):
+            runner.verify_run(self.args.output)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

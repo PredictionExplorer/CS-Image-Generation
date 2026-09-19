@@ -4,6 +4,8 @@
 in vec2 screen_position;
 out vec4 frag_color;
 uniform sampler2D u_paint, u_geometry, u_finish;
+uniform sampler2DArray u_phases;
+uniform float u_scattering[PIGMENT_COUNT];
 uniform vec3 u_substrate, u_ground;
 uniform vec2 u_visible_size, u_full_size, u_grid_size, u_output_size;
 uniform vec3 u_camera_right, u_camera_up, u_camera_view, u_key_direction;
@@ -11,9 +13,10 @@ uniform float u_height_scale, u_max_height;
 uniform float u_ambient, u_key_strength, u_fill_strength, u_anisotropy;
 uniform float u_roughness_scale, u_roughness_bias;
 uniform float u_grain_height, u_grain_scale, u_shadow_strength, u_occlusion_strength, u_exposure;
-uniform int u_tone_map, u_crisp;
-uniform float u_mass_threshold;
+uniform int u_tone_map, u_crisp, u_glazed;
+uniform float u_mass_threshold, u_mass_reference, u_glaze_relief_strength;
 const float PI = 3.141592653589793;
+const int GROUPS = (PIGMENT_COUNT + 3) / 4;
 
 vec2 field_uv(vec2 p) { return p / u_full_size + 0.5; }
 bool inside(vec2 uv) { return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))); }
@@ -21,7 +24,32 @@ float surface_height(vec2 p) {
     vec2 uv = field_uv(p);
     if (!inside(uv)) return 0.0;
     if (u_crisp==1 && textureLod(u_paint,uv,0.0).a<u_mass_threshold) return 0.0;
+    if (u_glazed==1) {
+        float ratio=textureLod(u_paint,uv,0.0).a/u_mass_reference;
+        // Only physically denser paint banks keep the full authored relief.
+        // This is a bounded appearance transform; the archived height is intact.
+        float bank=smoothstep(0.6,2.2,ratio);
+        float scale=mix(1.0,bank,u_glaze_relief_strength);
+        return textureLod(u_geometry,uv,0.0).r*u_height_scale*scale;
+    }
     return textureLod(u_geometry, uv, 0.0).r * u_height_scale;
+}
+
+void upper_material(vec2 uv, float total_mass, out float share, out float porosity) {
+    float upper_mass=0.0,scatter=0.0;
+    for (int group=0;group<GROUPS;++group) {
+        vec4 amount=textureLod(u_phases,vec3(uv,2*GROUPS+group),0.0);
+        for (int j=0;j<4;++j) {
+            int i=4*group+j;
+            if (i<PIGMENT_COUNT) {
+                upper_mass+=amount[j];
+                scatter+=amount[j]*u_scattering[i];
+            }
+        }
+    }
+    share=clamp(upper_mass/max(total_mass,1e-20),0.0,1.0);
+    float strength=scatter/max(upper_mass,1e-20);
+    porosity=strength/(1.0+strength);
 }
 
 vec3 hit_surface(vec3 origin, vec3 view) {
@@ -124,6 +152,7 @@ vec3 light_brdf(vec3 n, vec3 t, vec3 b, vec3 v, vec3 l, vec3 color, float roughn
     float geometry = 1.0 / (1.0 + lambda_ggx(v,n,t,b,a) + lambda_ggx(l,n,t,b,a));
     // Porous fresco has a modest effective dielectric interface reflection.
     float f0 = 0.025;
+    if (u_glazed==1) f0=mix(0.012,0.028,paint_presence);
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
     float specular = distribution * geometry * fresnel / max(4.0 * nv * nl, 1e-5);
     // Lambertian paint reflectance plus energy-reduced dielectric interface.
@@ -162,7 +191,20 @@ void main() {
     vec3 color = paint_color(uv);
     // Wet paint is slightly darker; the independent roughness change carries
     // most of the visible drying response without a synthetic animated overlay.
-    color *= mix(1.0, 0.91, material.g);
+    if (u_glazed==1) {
+        float mass=textureLod(u_paint,uv,0.0).a;
+        float upper_share,porosity;
+        upper_material(uv,mass,upper_share,porosity);
+        // A wet upper layer can carry a satin interface; exposed lower paint
+        // and stronger-scattering pigments remain more matte. No screen noise.
+        float coating=material.g*upper_share*smoothstep(0.25,1.0,mass/u_mass_reference);
+        float dry_roughness=clamp(0.6+0.25*material.b+0.09*porosity,0.55,0.92);
+        float wet_roughness=0.25+0.15*porosity;
+        roughness=clamp(mix(dry_roughness,wet_roughness,coating)*u_roughness_scale
+                        +u_roughness_bias,0.18,0.96);
+        paint_presence=coating;
+        color*=mix(1.0,0.96,material.g*upper_share);
+    } else color *= mix(1.0, 0.91, material.g);
     float ao = occlusion(point);
     vec3 radiance = color * u_ambient * ao * (0.65 + 0.35 * max(n.z, 0.0));
     vec3 key_t = normalize(cross(vec3(0, 0, 1), u_key_direction + vec3(1e-6, 0, 0)));

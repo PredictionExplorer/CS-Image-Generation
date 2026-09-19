@@ -25,13 +25,17 @@ from tools.estuary_studio.fresco import substrate_field
 
 from .mass_budget import RELATIVE_TOLERANCE as MASS_BUDGET_RTOL
 from .mass_budget import VERSION as MASS_BUDGET_VERSION
-from .mass_budget import correction_steps
+from .mass_budget import correction_steps, validate_initial_weights
 
 ROOT = Path(__file__).parent
 DIFFUSION_CFL = 0.24
 MAX_DIFFUSION_SUBSTEPS = 256
 MAX_DIFFUSION_STEPS = 500_000
 DEFAULTS = {
+    "material_model": "legacy",
+    "lower_transport_scale": 0.78,
+    "interlayer_exchange_rate": 0.18,
+    "interlayer_min_concentration": 0.001,
     "resolution": [1024, 768],
     "steps": 3600,
     "domain_scale": 1.6,
@@ -43,6 +47,7 @@ DEFAULTS = {
     "brush_radius": 0.035,
     "deposition": 0.025,
     "initial_load": 0.18,
+    "initial_pigment_weights": None,
     "initial_pattern": "pools",
     "initial_edge_width": 0.02,
     "load_radius": 0.28,
@@ -71,6 +76,8 @@ def validate_config(value):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
+    if result["material_model"] not in ("legacy", "laminate"):
+        raise ValueError("material_model must be legacy or laminate")
     resolution = result["resolution"]
     if (
         type(resolution) not in (list, tuple)
@@ -87,6 +94,9 @@ def validate_config(value):
     if type(interval) is not int or not 0 <= interval <= 40000:
         raise ValueError("mass_budget_interval_steps must be an integer in [0, 40000]")
     bounds = {
+        "lower_transport_scale": (0.25, 1),
+        "interlayer_exchange_rate": (0, 10),
+        "interlayer_min_concentration": (1e-8, 1),
         "domain_scale": (1, 2.5),
         "flow_strength": (0, 8),
         "stir_radius": (0.02, 2),
@@ -150,7 +160,26 @@ def validate_config(value):
         or result["settling_scale"] != 0
         or result["underpaint_strength"] != 0
     ):
-        raise ValueError("Mass budgets require source-free, mobile-only scattered or engaged pools")
+        raise ValueError("Mass budgets require source-free scattered or engaged pools")
+    if result["material_model"] == "laminate" and (
+        result["initial_pattern"] not in ("scattered", "engaged")
+        or any(
+            result[key] != 0
+            for key in (
+                "deposition",
+                "settling_scale",
+                "underpaint_strength",
+                "underpaint_release",
+                "burial_rate",
+            )
+        )
+    ):
+        raise ValueError("Laminate requires source-free separated pools and disabled legacy phases")
+    result["initial_pigment_weights"] = validate_initial_weights(result["initial_pigment_weights"])
+    if result["initial_pigment_weights"] is not None and (
+        result["initial_pattern"] not in ("scattered", "engaged") or result["deposition"] != 0
+    ):
+        raise ValueError("Initial pigment weights require source-free scattered or engaged pools")
     return result
 
 
@@ -399,6 +428,12 @@ class Engine:
         self.palette = copy.deepcopy(palette)
         self.events = events = validate_events(events)
         count, arrays = _palette_arrays(palette)
+        initial_weights = validate_initial_weights(settings["initial_pigment_weights"], count - 1)
+        laminate = settings["material_model"] == "laminate"
+        if laminate:
+            from .laminate import layer_fractions
+
+            arrays["layer_fractions"] = layer_fractions(palette, count)
         self.layout = layout = None
         if settings["initial_pattern"] in ("scattered", "engaged"):
             from .layout import plan_layout
@@ -479,6 +514,16 @@ class Engine:
                             (ROOT / "shaders/reduce.glsl").read_text()
                         )
                         gpu.diffusion = None
+                        gpu.laminate_exchange = None
+                        if laminate and settings["interlayer_exchange_rate"]:
+                            gpu.laminate_exchange = gpu.ctx.compute_shader(
+                                (ROOT / "shaders/laminate-exchange.glsl").read_text()
+                            )
+                            gpu.laminate_exchange["u_size"].value = (gpu.width, gpu.height)
+                            gpu.laminate_exchange["u_has_other"].value = count > 4
+                            gpu.laminate_exchange["u_minimum"].value = settings[
+                                "interlayer_min_concentration"
+                            ]
                         gpu.diffusion_steps = 0
                         gpu.maximum_diffusion_number = 0.0
                         gpu.mass_budget_records = []
@@ -532,7 +577,10 @@ class Engine:
                         if count > 4:
                             gpu.blocks.append([gpu._texture(4) for _ in range(4)])
                         gpu.deposits = [[gpu._texture(4) for _ in range(2)] for _ in gpu.blocks]
-                        gpu.underpaints = [[gpu._texture(4) for _ in range(2)] for _ in gpu.blocks]
+                        gpu.underpaints = [
+                            [gpu._texture(4) for _ in range(4 if laminate else 2)]
+                            for _ in gpu.blocks
+                        ]
                         gpu.carrier = [gpu._texture(4) for _ in range(4)]
                         gpu.tooth = gpu._texture(4)
                         gpu.tooth.write(
@@ -604,11 +652,14 @@ class Engine:
                     from .layout import pool_profile
 
                     for pool in layout["pools"]:
+                        load = pool["load"]
+                        if initial_weights is not None:
+                            load *= initial_weights[pool["pigment_index"]]
                         p = pool["position"]
                         distance_to_pool = np.sqrt(
                             (x[None, :] - p[0]) ** 2 + (y[:, None] - p[1]) ** 2
                         )
-                        state[..., pool["pigment_index"]] = pool["load"] * pool_profile(
+                        state[..., pool["pigment_index"]] = load * pool_profile(
                             distance_to_pool, pool["radius"], pool["edge_width"]
                         )
                 if settings["initial_pattern"] not in ("scattered", "engaged"):
@@ -627,6 +678,13 @@ class Engine:
                     # remain an unrelated straight stripe in the final image.
                     buried = np.clip(state.sum(axis=-1) / max(settings["initial_load"], 1e-9), 0, 1)
                 under[..., palette["underpaint_index"]] = buried * settings["underpaint_strength"]
+                if laminate:
+                    # Split the same starting amount, with no new pigment source.
+                    # The palette stores upper shares; subtraction retains the
+                    # total to float32 precision even for nearly pure layers.
+                    upper = state * arrays["layer_fractions"]
+                    under = state - upper
+                    state = upper
                 zeros = np.zeros((gpu.height, gpu.width, 4), dtype="f4")
                 for index, (block, deposits, underpaints) in enumerate(
                     zip(gpu.blocks, gpu.deposits, gpu.underpaints, strict=True)
@@ -693,6 +751,14 @@ class Engine:
                     channels = min(4, count - index * 4)
                     packed[:, :channels] = doses[:, index * 4 : index * 4 + channels]
                     gpu.blocks[index] = gpu._advect_block(block, dt, segments, packed)
+                if laminate:
+                    for index, block in enumerate(gpu.underpaints):
+                        gpu.underpaints[index] = gpu._advect_block(
+                            block,
+                            dt * settings["lower_transport_scale"],
+                            segments,
+                            np.zeros((3, 4), dtype="f4"),
+                        )
                 gpu.carrier = gpu._advect_block(
                     gpu.carrier, dt, segments, np.zeros((3, 4), dtype="f4"), True
                 )
@@ -720,6 +786,8 @@ class Engine:
                     gpu._exchange_phases(dt)
                 if gpu.diffusion is not None:
                     gpu._interdiffuse(dt)
+                if gpu.laminate_exchange is not None:
+                    gpu._exchange_layers(dt)
                 gpu.paint = gpu.blocks[0]
                 gpu.internal_steps += 1
                 if gpu.internal_steps > MAX_INTERNAL_STEPS:
@@ -778,35 +846,67 @@ class Engine:
                 number = coefficient * (dt / pieces) / pixel_size**2
                 gpu.maximum_diffusion_number = max(gpu.maximum_diffusion_number, number)
                 gpu.diffusion["u_lambda"].value = number
+                layers = (gpu.blocks, gpu.underpaints) if laminate else (gpu.blocks,)
                 for _ in range(pieces):
                     # Both packed groups read the same old material state. Only
                     # after all writes finish may either group become current.
-                    for index, block in enumerate(gpu.blocks):
-                        other = gpu.blocks[(index + 1) % len(gpu.blocks)][0]
-                        for unit, (name, texture) in enumerate(
-                            (
-                                ("u_input", block[0]),
-                                ("u_other", other),
-                                ("u_carrier", gpu.carrier[0]),
-                            )
-                        ):
-                            texture.use(unit)
-                            gpu.diffusion[name].value = unit
-                        block[3].bind_to_image(0, read=False, write=True)
-                        gpu._dispatch(gpu.diffusion)
-                    for block in gpu.blocks:
-                        block[0], block[3] = block[3], block[0]
+                    for layer in layers:
+                        for index, block in enumerate(layer):
+                            other = layer[(index + 1) % len(layer)][0]
+                            for unit, (name, texture) in enumerate(
+                                (
+                                    ("u_input", block[0]),
+                                    ("u_other", other),
+                                    ("u_carrier", gpu.carrier[0]),
+                                )
+                            ):
+                                texture.use(unit)
+                                gpu.diffusion[name].value = unit
+                            block[3].bind_to_image(0, read=False, write=True)
+                            gpu._dispatch(gpu.diffusion)
+                        for block in layer:
+                            block[0], block[3] = block[3], block[0]
                 gpu.diffusion_steps += pieces
+
+            def _exchange_layers(gpu, dt):
+                shader = gpu.laminate_exchange
+                shader["u_exposure"].value = settings["interlayer_exchange_rate"] * dt
+                for index, (upper, lower) in enumerate(
+                    zip(gpu.blocks, gpu.underpaints, strict=True)
+                ):
+                    other = (index + 1) % len(gpu.blocks)
+                    for unit, (name, texture) in enumerate(
+                        (
+                            ("u_upper", upper[0]),
+                            ("u_lower", lower[0]),
+                            ("u_upper_other", gpu.blocks[other][0]),
+                            ("u_lower_other", gpu.underpaints[other][0]),
+                            ("u_carrier", gpu.carrier[0]),
+                        )
+                    ):
+                        texture.use(unit)
+                        shader[name].value = unit
+                    upper[3].bind_to_image(0, read=False, write=True)
+                    lower[3].bind_to_image(1, read=False, write=True)
+                    gpu._dispatch(shader)
+                # Both channel packs read the same two layers before swapping.
+                for layer in (gpu.blocks, gpu.underpaints):
+                    for block in layer:
+                        block[0], block[3] = block[3], block[0]
 
             def _mass_amounts(gpu):
                 """Pairwise GPU block sums, then float64 accumulation on the CPU."""
                 sums = []
-                for block in gpu.blocks:
-                    block[0].use(0)
-                    gpu.mass_partials.bind_to_storage_buffer(0)
-                    gpu._dispatch(gpu.mass_reduce)
-                    partial = np.frombuffer(gpu.mass_partials.read(), dtype="f4").reshape(-1, 4)
-                    sums.append(partial.sum(axis=0, dtype="f8"))
+                for index, block in enumerate(gpu.blocks):
+                    total = np.zeros(4, dtype="f8")
+                    layers = (block, gpu.underpaints[index]) if laminate else (block,)
+                    for layer in layers:
+                        layer[0].use(0)
+                        gpu.mass_partials.bind_to_storage_buffer(0)
+                        gpu._dispatch(gpu.mass_reduce)
+                        partial = np.frombuffer(gpu.mass_partials.read(), dtype="f4").reshape(-1, 4)
+                        total += partial.sum(axis=0, dtype="f8")
+                    sums.append(total)
                 return np.concatenate(sums)[:count] * (2 * gpu.domain / gpu.height) ** 2
 
             def _restore_mass_budget(gpu):
@@ -817,10 +917,12 @@ class Engine:
                     channels = min(4, count - index * 4)
                     packed[:channels] = factors[index * 4 : index * 4 + channels]
                     gpu.mass_scale["u_factors"].value = tuple(packed)
-                    block[0].use(0)
-                    block[3].bind_to_image(0, read=False, write=True)
-                    gpu._dispatch(gpu.mass_scale)
-                    block[0], block[3] = block[3], block[0]
+                    layers = (block, gpu.underpaints[index]) if laminate else (block,)
+                    for layer in layers:
+                        layer[0].use(0)
+                        layer[3].bind_to_image(0, read=False, write=True)
+                        gpu._dispatch(gpu.mass_scale)
+                        layer[0], layer[3] = layer[3], layer[0]
                 gpu.paint = gpu.blocks[0]
                 after = gpu._mass_amounts()
                 if not np.allclose(after, gpu.mass_budget_initial, rtol=MASS_BUDGET_RTOL, atol=0):
@@ -897,8 +999,9 @@ class Engine:
                 norms = np.linalg.norm(direction, axis=-1)
                 direction /= np.maximum(norms[..., None], 1e-9)
                 direction[norms < 1e-9] = (1, 0)
+                dry_material = deposit if laminate else deposit + underpaint
                 dry_share = np.divide(
-                    (deposit + underpaint).sum(axis=-1),
+                    dry_material.sum(axis=-1),
                     total,
                     out=np.zeros_like(total),
                     where=total > 1e-9,
@@ -910,7 +1013,11 @@ class Engine:
                     where=total > 1e-9,
                 )
                 mass_height = np.einsum(
-                    "...i,i->...", deposit + underpaint + mobile * 0.22, arrays["specific_volumes"]
+                    "...i,i->...",
+                    (mobile + underpaint) * 0.22
+                    if laminate
+                    else deposit + underpaint + mobile * 0.22,
+                    arrays["specific_volumes"],
                 )
                 height = mass_height * settings["height_scale_mm"] * 0.001
                 height += settings["substrate_um"] * 1e-6 * tooth[..., 3]
@@ -968,6 +1075,14 @@ class Engine:
         }
         if layout is not None:
             self.metadata["initial_layout"] = copy.deepcopy(layout)
+        if initial_weights is not None:
+            self.metadata["initial_pigment_weights"] = {
+                "multipliers": initial_weights,
+                "application": "base chromatic pool loads multiplied before any layer partition",
+                "normalization": (
+                    "none; initial and restored mass budgets include actual weighted loads"
+                ),
+            }
         if settings["deposition"] == 0:
             self.metadata["mass_limitations"] = (
                 "interpolated transport may drift; no trajectory pigment source; "
@@ -978,6 +1093,26 @@ class Engine:
                 "stationary phases remain identically zero; exact exchange dispatch is skipped "
                 "because settling_scale and initial underpaint are both zero"
             )
+        if laminate:
+            self.metadata["model"] = "Confluence Laminate / two transported wet pigment layers"
+            self.metadata["phase_exchange"] = (
+                "upper and lower wet layers; positive local species-conservative contact exchange; "
+                "each layer retains its local total; no stationary deposits"
+            )
+            self.metadata["laminate"] = {
+                "version": "co-moving-laminate-v1",
+                "upper_snapshot_field": "mobile",
+                "lower_snapshot_field": "underpaint",
+                "upper_transport_scale": 1.0,
+                "lower_transport_scale": settings["lower_transport_scale"],
+                "initial_upper_fractions": arrays["layer_fractions"].tolist(),
+                "interlayer_exchange_rate": settings["interlayer_exchange_rate"],
+                "interlayer_min_concentration": settings["interlayer_min_concentration"],
+                "carrier": "shared transported wetness, mixedness and material direction",
+                "calibration": (
+                    "authored thin-layer model; not measured fluid or pigment properties"
+                ),
+            }
         if settings["flow_domain_scale"] != settings["domain_scale"]:
             extent = settings["flow_domain_scale"]
             aspect = self._gpu.aspect
@@ -1080,6 +1215,7 @@ class Engine:
             specific_volumes=tuple(self.palette["specific_volumes"]),
             height_scale_mm=self.config["height_scale_mm"],
             substrate_um=self.config["substrate_um"],
+            material_model=self.config["material_model"],
         )
 
     def close(self):

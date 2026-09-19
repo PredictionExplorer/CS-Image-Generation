@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>__CONFLUENCE_TITLE_HTML__</title>
+    <style>
+      :root {
+        color: #292a27;
+        background: #f1efe9;
+        font-family: Arial, sans-serif;
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+      }
+      button,
+      select,
+      a {
+        font: inherit;
+        color: inherit;
+        touch-action: manipulation;
+      }
+      button {
+        cursor: pointer;
+      }
+      a {
+        text-underline-offset: 4px;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      select:focus-visible {
+        outline: 2px solid #4b7067;
+        outline-offset: 4px;
+      }
+      main {
+        max-width: 1600px;
+        margin: auto;
+        padding: 32px 4vw 64px;
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-size: 10px;
+        color: #72786e;
+      }
+      h1,
+      h2 {
+        font-family: Georgia, serif;
+        font-weight: 400;
+        letter-spacing: -0.035em;
+      }
+      h1 {
+        font-size: clamp(32px, 4vw, 58px);
+        line-height: 1.05;
+        margin: 10px 0;
+      }
+      h2 {
+        font-size: 29px;
+        margin: 0;
+      }
+      .intro {
+        max-width: 620px;
+        line-height: 1.7;
+        font-size: 13px;
+        color: #73766d;
+        margin: 0;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 28px;
+        margin-bottom: 26px;
+      }
+      .selectors {
+        display: flex;
+        gap: 14px;
+      }
+      .selectors label {
+        display: grid;
+        gap: 7px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      select {
+        background: transparent;
+        border: 1px solid #b9beb2;
+        min-height: 40px;
+        max-width: 220px;
+        padding: 9px;
+        font-size: 12px;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 15px;
+      }
+      .modes {
+        display: flex;
+        gap: 5px;
+      }
+      .modes button,
+      .step {
+        border: 1px solid #c0c5b9;
+        padding: 10px 18px;
+        background: transparent;
+        border-radius: 3px;
+        font-size: 12px;
+      }
+      .modes button[aria-pressed="true"] {
+        background: #304c43;
+        color: white;
+        border-color: #304c43;
+      }
+      .modes button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .steps {
+        display: flex;
+        gap: 6px;
+      }
+      .step {
+        padding: 10px 14px;
+      }
+      .status {
+        font-size: 12px;
+        color: #626c60;
+        line-height: 1.6;
+      }
+      .stage {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 22px;
+        align-items: start;
+      }
+      .stage.comparing {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      figure {
+        margin: 0;
+        min-width: 0;
+      }
+      .art {
+        aspect-ratio: 4/3;
+        max-width: 100svh;
+        margin: auto;
+        background: #151718;
+      }
+      .art img,
+      .art video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .comparison img {
+        width: 100%;
+        aspect-ratio: 4/3;
+        object-fit: contain;
+        display: block;
+      }
+      .figureLabel {
+        font-size: 11px;
+        color: #70766c;
+        text-align: center;
+        margin-top: 9px;
+      }
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .actions nav {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .error {
+        color: #963f32;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .swatches {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 20px 0;
+      }
+      .swatch {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 1px solid #0002;
+      }
+      .paletteNote {
+        font-size: 11px;
+        color: #777c70;
+        margin-left: 8px;
+      }
+      .collection {
+        margin-top: 44px;
+      }
+      .collectionHead {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 18px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 25px 18px;
+        margin-top: 20px;
+      }
+      .card {
+        min-width: 0;
+      }
+      .card.selected .thumb {
+        outline: 2px solid #657c6a;
+        outline-offset: 4px;
+      }
+      .thumb {
+        display: block;
+        border: 0;
+        padding: 0;
+        width: 100%;
+        background: #151718;
+      }
+      .thumb img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4/3;
+        object-fit: contain;
+      }
+      .cardHeading {
+        font-size: 12px;
+        margin: 11px 0 8px;
+        font-weight: 400;
+        display: flex;
+        justify-content: space-between;
+        gap: 5px;
+      }
+      .duration {
+        font-size: 10px;
+        color: #737a6d;
+      }
+      .cardActions {
+        display: flex;
+        gap: 12px;
+      }
+      .cardActions button {
+        font-size: 11px;
+        background: none;
+        border: 0;
+        padding: 0 0 3px;
+        border-bottom: 1px solid #adb6a6;
+      }
+      .records {
+        margin-top: 35px;
+        font-size: 11px;
+        color: #6a7463;
+      }
+      .records summary {
+        cursor: pointer;
+      }
+      .records nav {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+      }
+      footer {
+        border-top: 1px solid #d0d3c8;
+        margin-top: 32px;
+        padding-top: 18px;
+        font-size: 11px;
+        line-height: 1.7;
+        color: #788070;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      @media (max-width: 1000px) {
+        .grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        header {
+          align-items: start;
+          flex-direction: column;
+        }
+        .selectors {
+          width: 100%;
+        }
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 22px 18px 40px;
+        }
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 24px 14px;
+        }
+        .stage.comparing {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .modes button {
+          padding: 10px 13px;
+        }
+        .selectors {
+          flex-wrap: wrap;
+        }
+        .collectionHead {
+          display: block;
+        }
+        .collectionHead .status {
+          margin-top: 8px;
+        }
+        .paletteNote {
+          max-width: 140px;
+        }
+        footer {
+          display: block;
+        }
+        footer a {
+          display: inline-block;
+          margin-top: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Three bodies / Moving pigment</p>
+          <h1>__CONFLUENCE_TITLE_HTML__</h1>
+          <p class="intro">
+            A painting made by a three-body dance. Watch it form, explore the
+            finished surface, and compare the same trajectory with the earlier
+            version.
+          </p>
+        </div>
+        <div class="selectors">
+          <label
+            >Painting<select
+              id="seedChoice"
+              disabled
+              aria-label="Choose a seed"
+            ></select></label
+          ><label
+            >Version<select
+              id="versionChoice"
+              disabled
+              aria-label="Choose a version"
+            ></select
+          ></label>
+        </div>
+      </header>
+      <div class="toolbar">
+        <div class="modes" role="group" aria-label="Review mode">
+          <button id="modeFilm" disabled aria-pressed="true">▶ Film</button
+          ><button id="modeStill" disabled aria-pressed="false">
+            Still image</button
+          ><button id="modeCompare" disabled aria-pressed="false">
+            Compare
+          </button>
+        </div>
+        <div class="steps">
+          <button class="step" id="playAll" disabled>Play all films</button
+          ><button
+            class="step"
+            id="previous"
+            disabled
+            aria-label="Previous seed"
+          >
+            ←</button
+          ><button class="step" id="next" disabled aria-label="Next seed">
+            →
+          </button>
+        </div>
+      </div>
+      <section class="stage" id="stage" aria-label="Selected artwork">
+        <figure>
+          <div class="art">
+            <video id="film" controls playsinline preload="metadata"></video
+            ><img id="hero" alt="The finished painting" hidden />
+          </div>
+          <figcaption id="primaryLabel" class="figureLabel"></figcaption>
+        </figure>
+        <figure class="comparison" id="comparison" hidden>
+          <img
+            id="reference"
+            alt="The earlier painting from the same trajectory"
+          />
+          <figcaption id="referenceLabel" class="figureLabel"></figcaption>
+        </figure>
+      </section>
+      <div class="actions">
+        <span id="status" class="status" role="status"
+          >Loading the collection…</span
+        >
+        <nav aria-label="Downloads">
+          <a id="fullSize" target="_blank" rel="noopener"
+            >Open full-size image</a
+          ><a id="downloadImage" download>Download image</a
+          ><a id="downloadFilm" download>Download film</a>
+        </nav>
+      </div>
+      <p id="error" class="error" role="alert" hidden></p>
+      <div id="swatches" class="swatches" aria-label="Starting pigments"></div>
+      <section class="collection">
+        <div class="collectionHead">
+          <h2>All paintings</h2>
+          <p id="collectionNote" class="status"></p>
+        </div>
+        <div class="grid" id="grid"></div>
+      </section>
+      <details class="records">
+        <summary>Painting records</summary>
+        <nav>
+          <a id="paletteRecord" target="_blank" rel="noopener"
+            >Seed and pigments</a
+          ><a id="spectralRecord" target="_blank" rel="noopener"
+            >Pigment optics</a
+          ><a id="assessmentRecord" target="_blank" rel="noopener"
+            >Pigment movement</a
+          ><a id="backgroundRecord" target="_blank" rel="noopener"
+            >Ground color</a
+          ><a id="massRecord" target="_blank" rel="noopener"
+            >Material accounting</a
+          ><a href="curation.json" target="_blank" rel="noopener"
+            >Collection verification</a
+          >
+        </nav>
+      </details>
+      <footer>
+        <span
+          >Every film spans the complete recorded trajectory. The finished
+          painting remains fixed during the final camera movement.</span
+        ><a href="http://127.0.0.1:8789/">Previous collection</a>
+      </footer>
+    </main>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id);
+      let studies = [],
+        seeds = [],
+        active = null,
+        mode = "film",
+        playlist = false,
+        playlistQueue = [];
+      const shortSeed = (seed) =>
+        seed.replace(/^0x/i, "").slice(0, 8).toUpperCase();
+      const version = (study) =>
+        study.material_model === "laminate"
+          ? "Layered painting"
+          : study.palette_mode === "composed"
+            ? "Composed colors"
+            : "Earlier painting";
+      const duration = (seconds) => {
+        const n = Math.round(seconds || 0);
+        return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+      };
+      function stopPlaylist() {
+        playlist = false;
+        playlistQueue = [];
+        $("playAll").textContent =
+          "Play all " + availableFilms().length + " films";
+      }
+      function availableFilms() {
+        return active
+          ? studies.filter((s) => version(s) === version(active) && s.film)
+          : [];
+      }
+      function showError(message) {
+        $("error").textContent = message;
+        $("error").hidden = !message;
+      }
+      function stopFilm() {
+        const film = $("film");
+        film.pause();
+        film.removeAttribute("src");
+        film.load();
+      }
+      function link(id, path) {
+        $(id).hidden = !path;
+        if (path) $(id).href = path;
+        else $(id).removeAttribute("href");
+      }
+      function currentVariants(seed) {
+        return studies.filter((s) => s.seed === seed);
+      }
+      function selectSeed(seed, preferred, play = false) {
+        const variants = currentVariants(seed);
+        selectStudy(
+          variants.find((s) => version(s) === preferred) ||
+            variants.find((s) => s.material_model === "laminate") ||
+            variants[0],
+          play,
+        );
+      }
+      function showMode(requested, play = false) {
+        if (!active) return;
+        stopFilm();
+        showError("");
+        mode = requested;
+        const reference =
+          studies.find((s) => s.id === active.comparison_id) ||
+          (active.earlier_image
+            ? { image: active.earlier_image, caption: active.earlier_caption }
+            : null);
+        if (mode === "film" && !active.film) mode = "still";
+        if (mode === "compare" && !reference) mode = "still";
+        if (mode !== "film") stopPlaylist();
+        $("film").hidden = mode !== "film";
+        $("hero").hidden = mode === "film";
+        $("comparison").hidden = mode !== "compare";
+        $("stage").classList.toggle("comparing", mode === "compare");
+        $("hero").src = active.image;
+        $("hero").alt = version(active) + " · seed " + shortSeed(active.seed);
+        $("primaryLabel").textContent = version(active);
+        $("modeFilm").disabled = !active.film;
+        $("modeCompare").disabled = !reference;
+        for (const [name, id] of [
+          ["film", "modeFilm"],
+          ["still", "modeStill"],
+          ["compare", "modeCompare"],
+        ])
+          $(id).setAttribute("aria-pressed", String(mode === name));
+        if (mode === "film") {
+          $("film").poster = active.preview || active.image;
+          $("film").src = active.film;
+          if (play) {
+            const id = active.id;
+            $("film")
+              .play()
+              .catch((error) => {
+                if (
+                  error.name !== "AbortError" &&
+                  active.id === id &&
+                  mode === "film"
+                )
+                  showError(
+                    "Press play in the video controls to start the film.",
+                  );
+              });
+          }
+        }
+        if (mode === "compare") {
+          $("reference").src = reference.image;
+          $("reference").alt =
+            reference.caption || version(reference) + " · same trajectory";
+          $("referenceLabel").textContent =
+            reference.caption || version(reference) + " · same trajectory";
+        }
+        $("status").textContent =
+          shortSeed(active.seed) +
+          " · " +
+          (mode === "film"
+            ? duration(active.film_seconds) +
+              " · Complete formation and camera movement"
+            : active.resolution.join(" × ") +
+              " pixels" +
+              (mode === "compare" ? " · Colors and material differ" : ""));
+      }
+      function selectStudy(study, play = false) {
+        if (!study) return;
+        active = study;
+        for (const id of [
+          "modeStill",
+          "previous",
+          "next",
+          "seedChoice",
+          "versionChoice",
+          "playAll",
+        ])
+          $(id).disabled = false;
+        $("playAll").disabled = availableFilms().length === 0;
+        if (!playlist) stopPlaylist();
+        $("seedChoice").value = study.seed;
+        $("versionChoice").replaceChildren();
+        for (const candidate of currentVariants(study.seed)) {
+          const option = document.createElement("option");
+          option.value = candidate.id;
+          option.textContent = version(candidate);
+          $("versionChoice").append(option);
+        }
+        $("versionChoice").value = study.id;
+        link("fullSize", study.image);
+        link("downloadImage", study.image);
+        link("downloadFilm", study.film);
+        link("paletteRecord", study.palette_record);
+        link("spectralRecord", study.spectral_record);
+        link("assessmentRecord", study.assessment_record);
+        link("massRecord", study.mass_budget_record);
+        link("backgroundRecord", study.background_record);
+        $("swatches").replaceChildren();
+        for (const pigment of study.swatches) {
+          const swatch = document.createElement("span");
+          swatch.className = "swatch";
+          swatch.style.backgroundColor =
+            "rgb(" +
+            pigment.rgba
+              .slice(0, 3)
+              .map((v) => Math.round(v * 255))
+              .join(",") +
+            ")";
+          swatch.title = pigment.name + " · " + pigment.role;
+          swatch.setAttribute("aria-label", swatch.title);
+          $("swatches").append(swatch);
+        }
+        const label = document.createElement("span");
+        label.className = "paletteNote";
+        label.textContent =
+          study.chromatic_count + " seed-derived starting pigments";
+        $("swatches").append(label);
+        showMode(mode, play);
+        refreshGrid();
+      }
+      function refreshGrid() {
+        $("grid").replaceChildren();
+        const preferred = version(active);
+        for (const seed of seeds) {
+          const variants = currentVariants(seed),
+            study =
+              variants.find((s) => version(s) === preferred) || variants[0];
+          const card = document.createElement("article");
+          card.className = "card" + (seed === active.seed ? " selected" : "");
+          const thumb = document.createElement("button");
+          thumb.className = "thumb";
+          thumb.setAttribute("aria-label", "View painting " + shortSeed(seed));
+          const image = document.createElement("img");
+          image.src = study.preview || study.image;
+          image.alt = version(study) + " · " + shortSeed(seed);
+          image.loading = "lazy";
+          thumb.append(image);
+          thumb.onclick = () => openCard(study, "still");
+          const heading = document.createElement("h3");
+          heading.className = "cardHeading";
+          const name = document.createElement("span");
+          name.textContent = shortSeed(seed);
+          const length = document.createElement("span");
+          length.className = "duration";
+          length.textContent = study.film
+            ? duration(study.film_seconds)
+            : "Still study";
+          heading.append(name, length);
+          const actions = document.createElement("div");
+          actions.className = "cardActions";
+          if (study.film) {
+            const watch = document.createElement("button");
+            watch.textContent = "▶ Watch film";
+            watch.setAttribute(
+              "aria-label",
+              "Watch film for " + shortSeed(seed),
+            );
+            watch.onclick = () => openCard(study, "film");
+            actions.append(watch);
+          }
+          const still = document.createElement("button");
+          still.textContent = "View image";
+          still.onclick = () => openCard(study, "still");
+          actions.append(still);
+          card.append(thumb, heading, actions);
+          $("grid").append(card);
+        }
+        $("collectionNote").textContent =
+          seeds.length +
+          " seeds · " +
+          preferred +
+          " · Films and full-resolution images";
+      }
+      function openCard(study, nextMode) {
+        stopPlaylist();
+        mode = nextMode;
+        selectStudy(study, nextMode === "film");
+        $("stage").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      function step(delta) {
+        if (!active) return;
+        stopPlaylist();
+        const index =
+          (seeds.indexOf(active.seed) + delta + seeds.length) % seeds.length;
+        selectSeed(seeds[index], version(active), mode === "film");
+      }
+      $("seedChoice").onchange = () => {
+        stopPlaylist();
+        if (active)
+          selectSeed($("seedChoice").value, version(active), mode === "film");
+      };
+      $("versionChoice").onchange = () => {
+        stopPlaylist();
+        selectStudy(
+          studies.find((s) => s.id === $("versionChoice").value),
+          mode === "film",
+        );
+      };
+      $("modeFilm").onclick = () => showMode("film", true);
+      $("modeStill").onclick = () => showMode("still");
+      $("modeCompare").onclick = () => showMode("compare");
+      $("previous").onclick = () => step(-1);
+      $("next").onclick = () => step(1);
+      $("playAll").onclick = () => {
+        if (!active) return;
+        if (playlist) {
+          stopPlaylist();
+          return;
+        }
+        playlist = true;
+        playlistQueue = availableFilms().map((s) => s.id);
+        if (!playlistQueue.length) {
+          stopPlaylist();
+          return;
+        }
+        $("playAll").textContent = "Stop continuous play";
+        mode = "film";
+        selectStudy(
+          studies.find((s) => s.id === playlistQueue[0]),
+          true,
+        );
+      };
+      $("film").onended = () => {
+        if (!playlist || !active || mode !== "film") return;
+        const index = playlistQueue.indexOf(active.id) + 1;
+        if (index >= playlistQueue.length) {
+          const count = playlistQueue.length;
+          stopPlaylist();
+          $("status").textContent = "All " + count + " films have finished.";
+        } else
+          selectStudy(
+            studies.find((s) => s.id === playlistQueue[index]),
+            true,
+          );
+      };
+      $("film").onerror = () => {
+        if ($("film").getAttribute("src"))
+          showError(
+            "The film could not load. Try Download film or reload this page.",
+          );
+      };
+      document.addEventListener("keydown", (event) => {
+        if (
+          ["INPUT", "SELECT", "TEXTAREA", "VIDEO"].includes(
+            event.target.tagName,
+          )
+        )
+          return;
+        if (event.key === "ArrowRight" && active) step(1);
+        if (event.key === "ArrowLeft" && active) step(-1);
+      });
+      fetch("collection.json", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw Error("The collection is unavailable.");
+          return response.json();
+        })
+        .then((data) => {
+          studies = data.studies.filter(
+            (s) => s.group === "layered" && s.chromatic_count === 5,
+          );
+          seeds = [...new Set(studies.map((s) => s.seed))];
+          if (!seeds.length)
+            throw Error("No completed paintings are available.");
+          for (const seed of seeds) {
+            const option = document.createElement("option");
+            option.value = seed;
+            option.textContent = shortSeed(seed);
+            $("seedChoice").append(option);
+          }
+          stopPlaylist();
+          selectSeed(seeds[0], "Layered painting");
+        })
+        .catch((error) => {
+          $("status").textContent = "Collection unavailable";
+          showError(error.message);
+        });
+    </script>
+  </body>
+</html>
