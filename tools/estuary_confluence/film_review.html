@@ -28,6 +28,7 @@
         touch-action: manipulation;
       }
       button {
+        min-height: 44px;
         cursor: pointer;
       }
       a {
@@ -48,7 +49,7 @@
         text-transform: uppercase;
         letter-spacing: 0.18em;
         font-size: 10px;
-        color: #72786e;
+        color: #626c60;
       }
       h1,
       h2 {
@@ -69,7 +70,7 @@
         max-width: 620px;
         line-height: 1.7;
         font-size: 13px;
-        color: #73766d;
+        color: #626c60;
         margin: 0;
       }
       header {
@@ -92,8 +93,8 @@
       }
       select {
         background: transparent;
-        border: 1px solid #b9beb2;
-        min-height: 40px;
+        border: 1px solid #7b8475;
+        min-height: 44px;
         max-width: 220px;
         padding: 9px;
         font-size: 12px;
@@ -114,7 +115,7 @@
       }
       .modes button,
       .step {
-        border: 1px solid #c0c5b9;
+        border: 1px solid #7b8475;
         padding: 10px 18px;
         background: transparent;
         border-radius: 3px;
@@ -175,7 +176,7 @@
       }
       .figureLabel {
         font-size: 11px;
-        color: #70766c;
+        color: #626c60;
         text-align: center;
         margin-top: 9px;
       }
@@ -212,7 +213,7 @@
       }
       .paletteNote {
         font-size: 11px;
-        color: #777c70;
+        color: #626c60;
         margin-left: 8px;
       }
       .collection {
@@ -260,7 +261,7 @@
       }
       .duration {
         font-size: 10px;
-        color: #737a6d;
+        color: #626c60;
       }
       .cardActions {
         display: flex;
@@ -271,12 +272,12 @@
         background: none;
         border: 0;
         padding: 0 0 3px;
-        border-bottom: 1px solid #adb6a6;
+        border-bottom: 1px solid #7b8475;
       }
       .records {
         margin-top: 35px;
         font-size: 11px;
-        color: #6a7463;
+        color: #626c60;
       }
       .records summary {
         cursor: pointer;
@@ -293,7 +294,7 @@
         padding-top: 18px;
         font-size: 11px;
         line-height: 1.7;
-        color: #788070;
+        color: #626c60;
         display: flex;
         justify-content: space-between;
         gap: 20px;
@@ -479,11 +480,15 @@
         const n = Math.round(seconds || 0);
         return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
       };
+      const quantity = (count, word) =>
+        count + " " + word + (count === 1 ? "" : "s");
       function stopPlaylist() {
         playlist = false;
         playlistQueue = [];
-        $("playAll").textContent =
-          "Play all " + availableFilms().length + " films";
+        const count = availableFilms().length;
+        $("playAll").textContent = count
+          ? "Play all " + quantity(count, "film")
+          : "No films available";
       }
       function availableFilms() {
         return active
@@ -593,6 +598,7 @@
           "playAll",
         ])
           $(id).disabled = false;
+        $("previous").disabled = $("next").disabled = seeds.length < 2;
         $("playAll").disabled = availableFilms().length === 0;
         if (!playlist) stopPlaylist();
         $("seedChoice").value = study.seed;
@@ -624,6 +630,7 @@
               .join(",") +
             ")";
           swatch.title = pigment.name + " · " + pigment.role;
+          swatch.setAttribute("role", "img");
           swatch.setAttribute("aria-label", swatch.title);
           $("swatches").append(swatch);
         }
@@ -683,10 +690,11 @@
           $("grid").append(card);
         }
         $("collectionNote").textContent =
-          seeds.length +
-          " seeds · " +
-          preferred +
-          " · Films and full-resolution images";
+          quantity(seeds.length, "seed") +
+          " · " +
+          quantity(availableFilms().length, "film") +
+          " · " +
+          preferred;
       }
       function openCard(study, nextMode) {
         stopPlaylist();
@@ -713,7 +721,11 @@
           mode === "film",
         );
       };
-      $("modeFilm").onclick = () => showMode("film", true);
+      $("modeFilm").onclick = () => {
+        showMode("film", true);
+        if (active)
+          $("stage").scrollIntoView({ behavior: "smooth", block: "center" });
+      };
       $("modeStill").onclick = () => showMode("still");
       $("modeCompare").onclick = () => showMode("compare");
       $("previous").onclick = () => step(-1);
@@ -736,6 +748,7 @@
           studies.find((s) => s.id === playlistQueue[0]),
           true,
         );
+        $("stage").scrollIntoView({ behavior: "smooth", block: "center" });
       };
       $("film").onended = () => {
         if (!playlist || !active || mode !== "film") return;
@@ -751,6 +764,7 @@
           );
       };
       $("film").onerror = () => {
+        stopPlaylist();
         if ($("film").getAttribute("src"))
           showError(
             "The film could not load. Try Download film or reload this page.",
