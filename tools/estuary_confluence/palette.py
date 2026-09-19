@@ -3,7 +3,7 @@
 These are authored RGB K--M pigments, not measured spectral artist materials.
 The palette is generated once from the complete 256-bit seed. Named hash streams
 keep changes in one choice from perturbing all the others; changing the pigment
-count preserves the principal three colors and chalk. The released curated
+count preserves every retained color and chalk. The released curated
 default retains its exact v1 contract; procedural full-hue alternatives live in
 ``procedural_palette`` and share the unchanged physical parameter streams.
 """
@@ -22,6 +22,7 @@ from tools.estuary.optics import absorption_over_scattering, linear_to_srgb, srg
 
 VERSION = "confluence-palette-v1"
 MAX_ATTEMPTS = 8
+SUPPORTED_CHROMATIC_COUNTS = (1, 2, 3, 5)
 
 # Every row describes a relationship, rather than independent colors selected
 # from a hue wheel. Additional colors remain related and receive less material.
@@ -285,15 +286,17 @@ def _body_mixtures(master: bytes, chromatic_count: int) -> list[list[float]]:
         if chromatic_count == 5:
             row[3] = _range(master, f"body/{body}/extra-3", 0.065, 0.09)
             row[4] = _range(master, f"body/{body}/extra-4", 0.035, 0.055)
-        row[body] = 1 - sum(row)
+        # Fewer pigments still support all three source bodies. Reuse the
+        # selected pigment channels; never assign a body to chalk by accident.
+        row[body % chromatic_count] = 1 - sum(row)
         body_mixtures.append(row)
     return body_mixtures
 
 
 def _curated_palette(seed: str | int, chromatic_count: int = 3) -> dict:
     """Resolve one seed into a complete, JSON-ready, versioned material palette."""
-    if type(chromatic_count) is not int or chromatic_count not in (3, 5):
-        raise ValueError("chromatic_count must be 3 or 5")
+    if type(chromatic_count) is not int or chromatic_count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("chromatic_count must be 1, 2, 3, or 5")
     seed = normalize_seed(seed)
     master = _master(seed)
     family, names, anchors, chalk, ground = FAMILIES[int(_unit(master, "family") * len(FAMILIES))]
@@ -330,7 +333,7 @@ def _curated_palette(seed: str | int, chromatic_count: int = 3) -> dict:
             "pigment_roles": [*roles[:chromatic_count], "chalk"],
             "substrate_srgb": substrate,
             "chalk_index": chromatic_count,
-            "underpaint_index": 2,
+            "underpaint_index": min(2, chromatic_count - 1),
             "body_weights": _body_weights(master),
             # JSON numbers cannot retain 256-bit integers in browser clients.
             # Hex preserves every bit while int(value, 16) recovers the exact

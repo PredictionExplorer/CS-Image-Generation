@@ -112,6 +112,7 @@
       .modes {
         display: flex;
         gap: 5px;
+        flex-wrap: wrap;
       }
       .modes button,
       .step {
@@ -460,7 +461,7 @@
         .modes {
           width: 100%;
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(2, 1fr);
         }
         .modes button {
           padding: 8px 6px;
@@ -482,9 +483,9 @@
         <div>
           <p class="eyebrow">Three bodies / Moving pigment</p>
           <h1>__CONFLUENCE_TITLE_HTML__</h1>
-          <p class="intro">
-            Browse all ten paintings. Choose Film or Image on any seed to open
-            it, or play the complete collection in sequence.
+          <p class="intro" id="intro">
+            Browse the paintings. Choose Film or Image on any seed to open it,
+            or play the complete collection in sequence.
           </p>
         </div>
       </header>
@@ -499,9 +500,7 @@
           Play all films
         </button>
       </div>
-      <p id="loadStatus" class="status" role="status">
-        Loading the ten paintings…
-      </p>
+      <p id="loadStatus" class="status" role="status">Loading the paintings…</p>
       <section class="collection">
         <div class="collectionHead">
           <h2>All paintings</h2>
@@ -541,6 +540,8 @@
             <button id="modeFilm" disabled aria-pressed="true">▶ Film</button
             ><button id="modeStill" disabled aria-pressed="false">
               Still image</button
+            ><button id="modeInitial" disabled aria-pressed="false">
+              Starting colors</button
             ><button id="modeCompare" disabled aria-pressed="false">
               Compare
             </button>
@@ -636,11 +637,13 @@
       const shortSeed = (seed) =>
         seed.replace(/^0x/i, "").slice(0, 8).toUpperCase();
       const version = (study) =>
-        study.material_model === "laminate"
+        study.collection_label ||
+        (study.material_model === "laminate"
           ? "Layered painting"
           : study.palette_mode === "composed"
             ? "Composed colors"
-            : "Earlier painting";
+            : "Earlier painting");
+      const collectionKey = (study) => study.collection_key || version(study);
       const duration = (seconds) => {
         const n = Math.round(seconds || 0);
         return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
@@ -667,9 +670,15 @@
         $("playAllViewer").textContent = $("playAll").textContent;
       }
       function availableFilms() {
+        return collectionStudies().filter((s) => s.film);
+      }
+      function collectionStudies() {
         return active
-          ? studies.filter((s) => version(s) === version(active) && s.film)
+          ? studies.filter((s) => collectionKey(s) === collectionKey(active))
           : [];
+      }
+      function collectionSeeds() {
+        return [...new Set(collectionStudies().map((s) => s.seed))];
       }
       function showError(message) {
         $("error").textContent = message;
@@ -693,7 +702,7 @@
       function selectSeed(seed, preferred, play = false) {
         const variants = currentVariants(seed);
         selectStudy(
-          variants.find((s) => version(s) === preferred) ||
+          variants.find((s) => collectionKey(s) === preferred) ||
             variants.find((s) => s.material_model === "laminate") ||
             variants[0],
           play,
@@ -704,28 +713,41 @@
         stopFilm();
         showError("");
         mode = requested;
+        const paired = studies.find((s) => s.id === active.comparison_id);
         const reference =
-          studies.find((s) => s.id === active.comparison_id) ||
+          (paired ? { ...paired, caption: active.comparison_caption } : null) ||
           (active.earlier_image
             ? { image: active.earlier_image, caption: active.earlier_caption }
             : null);
         if (mode === "film" && !active.film) mode = "still";
+        if (mode === "initial" && !active.initial) mode = "still";
         if (mode === "compare" && !reference) mode = "still";
         if (mode !== "film") stopPlaylist();
         $("film").hidden = mode !== "film";
         $("hero").hidden = mode === "film";
         $("comparison").hidden = mode !== "compare";
         $("stage").classList.toggle("comparing", mode === "compare");
-        $("hero").src = $("viewer").open
-          ? active.image
-          : active.preview || active.image;
-        $("hero").alt = version(active) + " · seed " + shortSeed(active.seed);
-        $("primaryLabel").textContent = version(active);
+        const imagePath = mode === "initial" ? active.initial : active.image;
+        $("hero").src =
+          mode === "initial" || $("viewer").open
+            ? imagePath
+            : active.preview || active.image;
+        $("hero").alt =
+          (mode === "initial" ? "Starting colors · " : "") +
+          version(active) +
+          " · seed " +
+          shortSeed(active.seed);
+        $("primaryLabel").textContent =
+          version(active) + (mode === "initial" ? " · Starting colors" : "");
+        link("fullSize", imagePath);
+        link("downloadImage", imagePath);
         $("modeFilm").disabled = !active.film;
+        $("modeInitial").disabled = !active.initial;
         $("modeCompare").disabled = !reference;
         for (const [name, id] of [
           ["film", "modeFilm"],
           ["still", "modeStill"],
+          ["initial", "modeInitial"],
           ["compare", "modeCompare"],
         ])
           $(id).setAttribute("aria-pressed", String(mode === name));
@@ -765,16 +787,18 @@
           (mode === "film"
             ? duration(active.film_seconds) +
               " · Complete formation and camera movement"
-            : active.resolution.join(" × ") +
-              " pixels" +
-              (mode === "compare" ? " · Colors and material differ" : ""));
+            : mode === "initial"
+              ? quantity(active.chromatic_count, "starting pigment")
+              : active.resolution.join(" × ") +
+                " pixels" +
+                (mode === "compare" ? " · " + reference.caption : ""));
       }
       function selectStudy(study, play = false) {
         if (!study) return;
         active = study;
         $("viewerTitle").textContent =
           shortSeed(study.seed) + " · " + version(study);
-        $("collectionChoice").value = version(study);
+        $("collectionChoice").value = collectionKey(study);
         for (const id of [
           "modeStill",
           "previous",
@@ -786,10 +810,18 @@
           "collectionChoice",
         ])
           $(id).disabled = false;
-        $("previous").disabled = $("next").disabled = seeds.length < 2;
+        const visibleSeeds = collectionSeeds();
+        $("previous").disabled = $("next").disabled = visibleSeeds.length < 2;
         $("playAll").disabled = $("playAllViewer").disabled =
           availableFilms().length === 0;
         if (!playlist) stopPlaylist();
+        $("seedChoice").replaceChildren();
+        for (const seed of visibleSeeds) {
+          const option = document.createElement("option");
+          option.value = seed;
+          option.textContent = shortSeed(seed);
+          $("seedChoice").append(option);
+        }
         $("seedChoice").value = study.seed;
         $("versionChoice").replaceChildren();
         for (const candidate of currentVariants(study.seed)) {
@@ -826,19 +858,19 @@
         }
         const label = document.createElement("span");
         label.className = "paletteNote";
-        label.textContent =
-          study.chromatic_count + " seed-derived starting pigments";
+        label.textContent = quantity(
+          study.chromatic_count,
+          "seed-derived starting pigment",
+        );
         $("swatches").append(label);
         showMode(mode, play);
         refreshGrid();
       }
       function refreshGrid() {
         $("grid").replaceChildren();
-        const preferred = version(active);
-        for (const [index, seed] of seeds.entries()) {
-          const variants = currentVariants(seed),
-            study =
-              variants.find((s) => version(s) === preferred) || variants[0];
+        const selected = collectionStudies();
+        for (const [index, study] of selected.entries()) {
+          const seed = study.seed;
           const card = document.createElement("article");
           card.className = "card" + (seed === active.seed ? " selected" : "");
           const thumb = document.createElement("button");
@@ -886,11 +918,11 @@
           $("grid").append(card);
         }
         $("collectionNote").textContent =
-          quantity(seeds.length, "seed") +
+          quantity(selected.length, "seed") +
           " · " +
           quantity(availableFilms().length, "film") +
           " · " +
-          preferred;
+          version(active);
       }
       function openCard(study, nextMode, openerId) {
         openViewer(openerId);
@@ -901,14 +933,20 @@
       function step(delta) {
         if (!active) return;
         stopPlaylist();
+        const visibleSeeds = collectionSeeds();
         const index =
-          (seeds.indexOf(active.seed) + delta + seeds.length) % seeds.length;
-        selectSeed(seeds[index], version(active), mode === "film");
+          (visibleSeeds.indexOf(active.seed) + delta + visibleSeeds.length) %
+          visibleSeeds.length;
+        selectSeed(visibleSeeds[index], collectionKey(active), mode === "film");
       }
       $("seedChoice").onchange = () => {
         stopPlaylist();
         if (active)
-          selectSeed($("seedChoice").value, version(active), mode === "film");
+          selectSeed(
+            $("seedChoice").value,
+            collectionKey(active),
+            mode === "film",
+          );
       };
       $("versionChoice").onchange = () => {
         stopPlaylist();
@@ -921,6 +959,7 @@
         showMode("film", true);
       };
       $("modeStill").onclick = () => showMode("still");
+      $("modeInitial").onclick = () => showMode("initial");
       $("modeCompare").onclick = () => showMode("compare");
       $("previous").onclick = () => step(-1);
       $("next").onclick = () => step(1);
@@ -978,12 +1017,21 @@
       $("viewer").addEventListener("close", () => {
         showMode("still");
         document.documentElement.style.overflow = previousOverflow;
-        $(returnFocusId)?.focus();
+        const focusTarget = [
+          $(returnFocusId),
+          active ? $("image-" + active.seed) : null,
+          $("collectionChoice"),
+        ].find((element) => element && !element.disabled);
+        focusTarget?.focus();
       });
       $("collectionChoice").onchange = () => {
         stopPlaylist();
         mode = "still";
-        selectSeed(active.seed, $("collectionChoice").value);
+        const key = $("collectionChoice").value;
+        const selected = studies.filter((s) => collectionKey(s) === key);
+        selectStudy(
+          selected.find((s) => s.seed === active.seed) || selected[0],
+        );
       };
       document.addEventListener("keydown", (event) => {
         if (!$("viewer").open) return;
@@ -1002,27 +1050,31 @@
           return response.json();
         })
         .then((data) => {
-          studies = data.studies.filter(
-            (s) => s.group === "layered" && s.chromatic_count === 5,
-          );
+          studies =
+            data.layout === "studies"
+              ? data.studies
+              : data.studies.filter(
+                  (s) => s.group === "layered" && s.chromatic_count === 5,
+                );
           seeds = [...new Set(studies.map((s) => s.seed))];
           if (!seeds.length)
             throw Error("No completed paintings are available.");
-          for (const seed of seeds) {
+          for (const key of new Set(studies.map(collectionKey))) {
             const option = document.createElement("option");
-            option.value = seed;
-            option.textContent = shortSeed(seed);
-            $("seedChoice").append(option);
-          }
-          for (const name of new Set(studies.map(version))) {
-            const option = document.createElement("option");
-            option.value = name;
-            option.textContent = name;
+            option.value = key;
+            option.textContent = version(
+              studies.find((s) => collectionKey(s) === key),
+            );
             $("collectionChoice").append(option);
           }
+          $("intro").textContent =
+            "Browse " +
+            quantity(seeds.length, "seed") +
+            ". Choose a collection to compare experiments, then open any painting or film.";
           $("loadStatus").hidden = true;
           stopPlaylist();
-          selectSeed(seeds[0], "Layered painting");
+          if (data.layout === "studies") selectStudy(studies[0]);
+          else selectSeed(seeds[0], "Layered painting");
         })
         .catch((error) => {
           $("loadStatus").textContent =

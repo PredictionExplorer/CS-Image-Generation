@@ -12,6 +12,8 @@ import numpy as np
 
 from tools.estuary_studio.common import require
 
+from .palette import SUPPORTED_CHROMATIC_COUNTS
+
 VERSION = "global-pigment-budget-v1"
 RELATIVE_TOLERANCE = 5e-6
 
@@ -22,13 +24,13 @@ def validate_initial_weights(value, count=None):
         return None
     if (
         type(value) is not list
-        or len(value) not in (3, 5)
+        or len(value) not in SUPPORTED_CHROMATIC_COUNTS
         or (count is not None and len(value) != count)
         or any(type(v) not in (int, float) or not 0.05 <= v <= 5 for v in value)
     ):
         raise ValueError(
             "initial_pigment_weights needs one finite multiplier in [0.05, 5] "
-            "per chromatic pigment (three or five, without chalk)"
+            "per chromatic pigment (one, two, three, or five, without chalk)"
         )
     return list(map(float, value))
 

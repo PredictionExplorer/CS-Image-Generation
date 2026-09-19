@@ -119,11 +119,12 @@ def _png_size(path):
     return [int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")]
 
 
-def verify_study(folder):
+def _verify_resolved_study(folder, *, version, resolve):
+    """Verify a same-material archive using its versioned presentation resolver."""
     folder = Path(folder)
     request, receipt = read(folder / "request.json"), read(folder / "receipt.json")
     require(
-        request["version"] == VERSION
+        request["version"] == version
         and receipt.get("complete") is True
         and receipt["identity_sha256"] == hashlib.sha256(encoded(request)).hexdigest(),
         "Appearance archive is incomplete or its identity differs",
@@ -152,7 +153,7 @@ def verify_study(folder):
         "Appearance pigment count differs",
     )
     require(request["source_sha256"] == parent["source"]["sha256"], "Appearance source differs")
-    expected = [presentation(parent, name) for name in request["presentations"]]
+    expected = [resolve(parent, name) for name in request["presentations"]]
     require(len(request["looks"]) == len(expected), "Appearance view count differs")
     for archived, planned in zip(request["looks"], expected, strict=True):
         validate_background(archived["background"], parent["palette"])
@@ -192,17 +193,20 @@ def verify_study(folder):
     return request, receipt
 
 
-def render_study(case, output, *, names=None, resolution=None):
+def verify_study(folder):
+    return _verify_resolved_study(folder, version=VERSION, resolve=presentation)
+
+
+def _render_resolved_study(case, output, *, names, resolution, version, resolve, interpretation):
+    """Shared immutable-material capture, locking, provenance and verification."""
     case, output = Path(case).resolve(), Path(output).resolve()
     require(
         output != case and not output.is_relative_to(case), "Keep studies outside physical archives"
     )
     parent, physical = verify_run(case)
-    names = list(PRESETS) if names is None else list(names)
-    require(
-        names and len(names) == len(set(names)) and all(name in PRESETS for name in names),
-        "Use distinct known presentations",
-    )
+    names = list(names)
+    require(names and len(names) == len(set(names)), "Use distinct known presentations")
+    presentations = [resolve(parent, name) for name in names]
     size = dimensions(
         parent["recipe"]["render"]["still_resolution"] if resolution is None else resolution
     )
@@ -210,21 +214,18 @@ def render_study(case, output, *, names=None, resolution=None):
     require(size[0] * h == size[1] * w, "Appearance and material aspects differ")
     code = runtime_identity()
     request = {
-        "version": VERSION,
+        "version": version,
         "parent_identity_sha256": physical["identity_sha256"],
         "physical_state_sha256": physical["physical_state_sha256"],
         "source_sha256": parent["source"]["sha256"],
         "seed": parent["source"]["seed"],
         "chromatic_count": parent["recipe"]["chromatic_count"],
         "presentations": names,
-        "looks": [presentation(parent, name) for name in names],
+        "looks": presentations,
         "resolution": size,
         "code": code,
         "runtime": {"python": platform.python_version(), "numpy": np.__version__},
-        "interpretation": (
-            "unchanged pigment and material state; changed ground, lighting or display relief; "
-            "pigment backing unchanged"
-        ),
+        "interpretation": interpretation,
     }
     identity = hashlib.sha256(encoded(request)).hexdigest()
     output.mkdir(parents=True, exist_ok=True)
@@ -235,7 +236,7 @@ def render_study(case, output, *, names=None, resolution=None):
                 read(output / "request.json") == request,
                 "Existing appearance study has different inputs",
             )
-            verify_study(output)
+            _verify_resolved_study(output, version=version, resolve=resolve)
             return output
         require(
             not any(p.name != ".lock" for p in output.iterdir()), "Appearance output must be empty"
@@ -298,8 +299,23 @@ def render_study(case, output, *, names=None, resolution=None):
                 "parent_archive": str(case),
             },
         )
-        verify_study(output)
+        _verify_resolved_study(output, version=version, resolve=resolve)
     return output
+
+
+def render_study(case, output, *, names=None, resolution=None):
+    return _render_resolved_study(
+        case,
+        output,
+        names=list(PRESETS) if names is None else names,
+        resolution=resolution,
+        version=VERSION,
+        resolve=presentation,
+        interpretation=(
+            "unchanged pigment and material state; changed ground, lighting or display relief; "
+            "pigment backing unchanged"
+        ),
+    )
 
 
 def main():

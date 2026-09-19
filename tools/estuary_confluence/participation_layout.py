@@ -18,7 +18,8 @@ import numpy as np
 from tools.estuary.flow_reference import velocity
 
 from .layout import MAX_LOAD_RADIUS, _number
-from .palette import normalize_seed
+from .pair_strain import pair_strain_uniforms
+from .palette import SUPPORTED_CHROMATIC_COUNTS, normalize_seed
 
 VERSION = "engaged-pigment-layout-v2"
 # Keep placement and material amounts fixed when comparing the v1/v2 pilots.
@@ -49,6 +50,10 @@ def _settings(source, config):
         "domain_scale": _number(flow_domain, "flow_domain_scale", 1, 2.5),
         "carrier_velocity": [_number(v, "carrier_velocity", -8, 8) for v in carrier],
     }
+    strain = _number(config.get("pair_strain", 0.0), "pair_strain", 0, 4)
+    if strain:
+        # Preserve the archived layout and its exact field settings at zero.
+        flow["pair_strain"] = strain
     pools = {
         "load_radius": _number(
             config.get("load_radius", 0.28), "load_radius", 0.001, MAX_LOAD_RADIUS
@@ -101,7 +106,10 @@ def conditioned_uniforms(frame, radius):
 def flow_velocity(source, points, fraction, config):
     """Evaluate the pilot's exact analytic force model for independent diagnostics."""
     flow, _ = _settings(source, config)
-    tools, pairs = conditioned_uniforms(source.frame(fraction), flow["stir_radius"])
+    frame = source.frame(fraction)
+    tools, pairs = conditioned_uniforms(frame, flow["stir_radius"])
+    if flow.get("pair_strain", 0):
+        flow = {**flow, "strains": pair_strain_uniforms(frame, flow["stir_radius"])}
     return velocity(points, tools, pairs, **flow)
 
 
@@ -112,14 +120,17 @@ def _unit(seed, label):
     return (int.from_bytes(digest[:8], "big") >> 11) / 2**53
 
 
-def _candidates(seed, tools, pairs, flow, settings):
+def _candidates(seed, tools, pairs, flow, settings, strains=None):
     aspect, radius = flow["aspect"], flow["stir_radius"]
     short = min(aspect, 1)
     anchors = np.concatenate([tools[..., :2], pairs[..., :2]], axis=1).reshape(-1, 2)
+    pair_weights = np.abs(pairs[..., 2]) * (1.7 * radius) * flow["pair_swirl"]
+    if strains is not None:
+        pair_weights += np.abs(strains[..., 2]) * (1.7 * radius) * flow["pair_strain"]
     weights = np.concatenate(
         [
             np.linalg.norm(tools[..., 2:], axis=-1) * flow["flow_strength"],
-            np.abs(pairs[..., 2]) * (1.7 * radius) * flow["pair_swirl"],
+            pair_weights,
         ],
         axis=1,
     ).reshape(-1)
@@ -220,7 +231,7 @@ def _tracer_proximity(points, radii):
     return result
 
 
-def _pilot(candidates, tools, pairs, flow):
+def _pilot(candidates, tools, pairs, flow, strains=None):
     centers = np.array([[p["position"] for p in layout] for layout in candidates])
     radii = np.array([[p["radius"] for p in layout] for layout in candidates])
     offsets = _particle_offsets()
@@ -233,9 +244,10 @@ def _pilot(candidates, tools, pairs, flow):
     observations = 0
     dt = 1 / len(tools)
     for step, (force, swirl) in enumerate(zip(tools, pairs, strict=True)):
-        first = velocity(points, force, swirl, **flow)
+        step_flow = flow if strains is None else {**flow, "strains": strains[step]}
+        first = velocity(points, force, swirl, **step_flow)
         midpoint = points + first * (dt * 0.5)
-        delta = velocity(midpoint, force, swirl, **flow) * dt
+        delta = velocity(midpoint, force, swirl, **step_flow) * dt
         points += delta
         travel += np.linalg.norm(delta, axis=-1).mean(axis=-1) / radii
         if (step + 1) % OBSERVATION_STRIDE != 0 and step != len(tools) - 1:
@@ -329,9 +341,14 @@ def _pilot(candidates, tools, pairs, flow):
 
 
 def plan_engaged_layout(source, count, config):
-    """Resolve five source-aware pools, then select the identical 3/5 prefix."""
-    if type(count) is not int or count not in (3, 5):
-        raise ValueError("Engaged pigment count must be 3 or 5")
+    """Resolve five source-aware pools, then select the identical count prefix.
+
+    Retaining the released three/five pilot keeps all prefix positions stable.
+    Its labeled contact scores describe those candidate populations, not contact
+    in a one- or two-pigment simulation. Native assessment measures that outcome.
+    """
+    if type(count) is not int or count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("Engaged pigment count must be 1, 2, 3, or 5")
     seed = normalize_seed(source.seed)
     flow, settings = _settings(source, config)
     fractions = (np.arange(PILOT_STEPS, dtype=np.float64) + 0.5) / PILOT_STEPS
@@ -339,10 +356,13 @@ def plan_engaged_layout(source, count, config):
     tools, pairs = conditioned_uniforms(sampled, flow["stir_radius"])
     if tools.shape != (PILOT_STEPS, 3, 4):
         raise ValueError("Source sampling dimensions differ from the pilot clock")
-    candidates, attempts = _candidates(
-        int(seed, 16).to_bytes(32, "big"), tools, pairs, flow, settings
+    strains = (
+        pair_strain_uniforms(sampled, flow["stir_radius"]) if flow.get("pair_strain", 0) else None
     )
-    reports = _pilot(candidates, tools, pairs, flow)
+    candidates, attempts = _candidates(
+        int(seed, 16).to_bytes(32, "big"), tools, pairs, flow, settings, strains
+    )
+    reports = _pilot(candidates, tools, pairs, flow, strains)
     chosen = max(
         range(len(reports)), key=lambda i: (reports[i]["eligible"], reports[i]["score"], -i)
     )

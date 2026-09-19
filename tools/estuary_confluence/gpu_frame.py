@@ -12,6 +12,8 @@ import weakref
 from dataclasses import dataclass
 from typing import Any
 
+from .palette import SUPPORTED_CHROMATIC_COUNTS
+
 
 @dataclass(frozen=True)
 class GPUFrame:
@@ -98,7 +100,7 @@ class GPUFrame:
             or len(self.size) != 2
             or any(type(value) is not int or value < 4 for value in self.size)
             or type(self.pigment_count) is not int
-            or self.pigment_count not in (4, 6)
+            or self.pigment_count - 1 not in SUPPORTED_CHROMATIC_COUNTS
         ):
             raise ValueError("Invalid GPU material dimensions, channels or source token")
         groups = (self.pigment_count + 3) // 4

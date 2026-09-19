@@ -11,6 +11,8 @@ uniform vec3 u_pairs[3];
 uniform float u_radius;
 uniform float u_strength;
 uniform float u_pair_gain;
+uniform float u_pair_strain;
+uniform vec3 u_strains[3]; // pair axis.xy and bounded signed extension rate
 uniform vec2 u_carrier;
 shared float speeds[256];
 
@@ -34,6 +36,17 @@ void main() {
         float spin=u_pair_gain*u_pairs[i].z;
         psi+=spin*ps2*pg;
         v+=spin*pg*vec2(-z.y,z.x);
+        if(u_pair_strain>0.0) {
+            vec2 axis=u_strains[i].xy;
+            vec2 normal=vec2(-axis.y,axis.x);
+            float x=dot(z,axis),y=dot(z,normal);
+            float amplitude=u_pair_strain*u_strains[i].z*pg;
+            // A Gaussian quadrupole pulls along the real pair axis, and folds
+            // across it. Differentiate the scalar rather than clamping velocity.
+            psi+=amplitude*x*y;
+            vec2 gradient=amplitude*(y*axis+x*normal-x*y/ps2*z);
+            v+=vec2(gradient.y,-gradient.x);
+        }
     }
     // The state texture retains its guard domain. The stream function has a
     // separate, compact support so pigment remains on the visible painting.

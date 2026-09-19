@@ -176,6 +176,198 @@ setImmediate(async()=>{
         with self.assertRaisesRegex(ValueError, "does not depict"):
             gallery.verify_gallery(self.output)
 
+    def experiment_cases(self):
+        cases = []
+        for count, label, flow in (
+            (1, "One pigment", 0.9),
+            (2, "Two pigments", 0.9),
+            (2, "Two pigments · Tidal folds", 0.15),
+            (3, "Three pigments", 0.9),
+            (5, "Five pigments", 0.9),
+        ):
+            for seed in ("0xb7", "0xbc"):
+                cases.append(
+                    self.case(
+                        seed,
+                        count,
+                        ["layered"] if count == 1 else ["layered", "homogeneous"],
+                        palette_mode="composed",
+                        recipe_name=label,
+                        simulation_updates={"pair_swirl": flow},
+                        physical=hashlib.sha256(f"{seed}/{count}/{flow}".encode()).hexdigest(),
+                        scattered=True,
+                    )
+                )
+        return cases
+
+    def test_named_experiments_retain_collections_and_only_compare_the_same_case(self):
+        gallery.build_gallery(self.output, self.experiment_cases(), layout="studies")
+        collection, curation = gallery.verify_gallery(self.output)
+        self.assertEqual(collection["layout"], "studies")
+        self.assertEqual(curation["layout"], "studies")
+        studies = {s["id"]: s for s in collection["studies"]}
+        keys = {s["collection_key"] for s in studies.values()}
+        self.assertEqual(len(keys), 9)
+        for key in keys:
+            group = [s for s in studies.values() if s["collection_key"] == key]
+            self.assertEqual(len(group), 2)
+            self.assertEqual({s["seed"] for s in group}, {"0xb7", "0xbc"})
+            self.assertEqual(len({s["collection_label"] for s in group}), 1)
+        for study in studies.values():
+            self.assertIn(study["preview"], curation["artifacts"])
+            self.assertIn(study["initial"], curation["artifacts"])
+            self.assertEqual(
+                study["collection_label"],
+                study["experiment_label"] + " · " + gallery.GROUPS[study["group"]],
+            )
+            if study["chromatic_count"] == 1:
+                self.assertIsNone(study["comparison_id"])
+                self.assertIsNone(study["baseline"])
+                self.assertEqual(study["name"], "Composed colors · 1 color")
+            else:
+                paired = studies[study["comparison_id"]]
+                self.assertEqual(study["case_id"], paired["case_id"])
+                self.assertEqual(study["physical_state_sha256"], paired["physical_state_sha256"])
+                self.assertNotEqual(study["group"], paired["group"])
+                self.assertIn("same material history", study["comparison_caption"])
+
+    def test_experiment_labels_or_cross_flow_comparisons_cannot_be_rehashed_away(self):
+        gallery.build_gallery(self.output, self.experiment_cases(), layout="studies")
+        original, _ = gallery.verify_gallery(self.output)
+        for key, value in (
+            ("experiment_label", "Invented label"),
+            ("collection_label", "A different experiment"),
+            ("collection_key", "f" * 64),
+        ):
+            changed = copy.deepcopy(original)
+            changed["studies"][0][key] = value
+            self.rehash_collection(changed)
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "experiment label"):
+                gallery.verify_gallery(self.output)
+        changed = copy.deepcopy(original)
+        target = next(
+            s for s in changed["studies"] if s["experiment_label"].endswith("Tidal folds")
+        )
+        first = next(s for s in changed["studies"] if s["experiment_label"] == "Two pigments")
+        first["comparison_id"], first["baseline"] = target["id"], target["image"]
+        self.rehash_collection(changed)
+        with self.assertRaisesRegex(ValueError, "material-history association"):
+            gallery.verify_gallery(self.output)
+        self.rehash_collection(original)
+        gallery.verify_gallery(self.output)
+
+    def test_same_seed_and_named_trial_require_one_unambiguous_case(self):
+        cases = [
+            self.case(
+                count=2,
+                looks=["layered"],
+                recipe_name="Two pigments",
+                simulation_updates={"pair_swirl": swirl},
+            )
+            for swirl in (0.1, 0.9)
+        ]
+        with self.assertRaisesRegex(ValueError, "Ambiguous duplicate seed"):
+            gallery.build_gallery(self.output, cases, layout="studies")
+
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js to exercise study navigation")
+    def test_study_controls_show_all_ten_seeds_per_trial_and_actual_starting_colors(self):
+        cases = [
+            self.case(
+                hex(seed),
+                count,
+                ["layered"] if count == 1 else ["layered", "homogeneous"],
+                palette_mode="composed",
+                scattered=True,
+                recipe_name=f"{count} starting pigments",
+            )
+            for count in (1, 2)
+            for seed in range(10)
+        ]
+        # A deliberately partial trial must not borrow another experiment's
+        # images for missing seeds or enqueue films from a different trial.
+        cases.append(
+            self.case("0x0", 3, ["layered"], recipe_name="Partial trial", palette_mode="composed")
+        )
+        gallery.build_gallery(self.output, cases, layout="studies")
+        data = read(self.output / "collection.json")
+        document = gallery.document("Pigment studies", layout="studies")
+        ids = re.findall(r'\bid="([^"]+)"', document)
+        script = re.findall(r"<script>([\s\S]*?)</script>", document)[0]
+        harness = """
+const vm=require('node:vm'),assert=require('node:assert/strict');
+const elements=new Map();
+function element(){return {attributes:{},style:{},children:[],value:'',open:false,
+ listeners:{},classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+ set id(v){this._id=v;elements.set(v,this)},get id(){return this._id},
+ getAttribute(k){return this[k]},removeAttribute(k){delete this[k]},
+ replaceChildren(){this.children=[]},append(...items){this.children.push(...items)},
+ pause(){},load(){},play(){return Promise.resolve()},focus(){},
+ addEventListener(k,fn){this.listeners[k]=fn},showModal(){this.open=true},
+ close(){this.open=false;this.listeners.close?.()}}}
+for(const id of IDS){const item=element();item.id=id;}
+const document={getElementById(id){return elements.get(id)||null},
+ createElement:element,addEventListener(){},documentElement:{style:{overflow:''}}};
+vm.runInNewContext(SCRIPT,{document,fetch:async()=>({ok:true,json:async()=>DATA})});
+setImmediate(()=>{
+ const get=id=>elements.get(id);
+ assert.equal(get('viewer').open,false);
+ assert.equal(get('grid').children.length,10);
+ assert.equal(get('collectionChoice').children.length,4);
+ const keys=[...new Set(DATA.studies.map(s=>s.collection_key))];
+ for(const key of keys.slice(0,3)){
+  const expected=DATA.studies.filter(s=>s.collection_key===key);
+  get('collectionChoice').value=key;get('collectionChoice').onchange();
+  assert.equal(get('grid').children.length,10);
+  assert.equal(get('seedChoice').children.length,10);
+  assert.match(get('playAll').textContent,/10 films/);
+  for(const study of expected){
+   get('image-'+study.seed).onclick();
+   assert.equal(get('hero').src,study.image);
+   get('modeInitial').onclick();assert.equal(get('hero').src,study.initial);
+   assert.equal(get('fullSize').href,study.initial);
+   assert.equal(get('downloadImage').href,study.initial);
+   assert.equal(get('modeInitial').attributes['aria-pressed'],'true');
+   get('modeFilm').onclick();assert.equal(get('film').src,study.film);
+   get('modeInitial').onclick();assert.equal(get('film').src,undefined);
+   if(study.comparison_id){
+    get('modeCompare').onclick();
+    assert.equal(get('reference').src,study.baseline);
+    assert.equal(get('referenceLabel').textContent,study.comparison_caption);
+   } else assert.equal(get('modeCompare').disabled,true);
+   get('closeViewer').onclick();
+  }
+  get('playAll').onclick();
+  for(const study of expected){
+   assert.equal(get('film').src,study.film);get('film').onended();
+  }
+  assert.equal(get('hero').src,expected.at(-1).image);
+  assert.equal(get('film').hidden,true);get('closeViewer').onclick();
+ }
+ const partial=DATA.studies.at(-1);
+ get('collectionChoice').value=partial.collection_key;get('collectionChoice').onchange();
+ assert.equal(get('grid').children.length,1);assert.equal(get('seedChoice').children.length,1);
+ get('image-'+partial.seed).onclick();assert.equal(get('hero').src,partial.image);
+ assert.equal(get('modeInitial').disabled,true);
+ assert.equal(get('previous').disabled,true);assert.equal(get('next').disabled,true);
+ assert.match(get('playAll').textContent,/1 film$/);
+});
+"""
+        path = self.root / "study-controls.js"
+        path.write_text(
+            "const IDS="
+            + json.dumps(ids)
+            + ";\nconst DATA="
+            + json.dumps(data)
+            + ";\nconst SCRIPT="
+            + json.dumps(script)
+            + ";\n"
+            + harness
+        )
+        result = subprocess.run(
+            [shutil.which("node"), str(path)], capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -184,6 +376,77 @@ setImmediate(async()=>{
         self.verifier = patch.object(gallery, "verify_run", side_effect=self.verified_case)
         self.verifier.start()
         self.addCleanup(self.verifier.stop)
+
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js to exercise focus restoration")
+    def test_film_to_still_trial_close_restores_present_enabled_focus(self):
+        cases = [
+            self.case(
+                "0x0",
+                2,
+                ["layered"],
+                palette_mode="composed",
+                scattered=True,
+                recipe_name=name,
+                film=film,
+            )
+            for name, film in (("Film trial", True), ("Still trial", False))
+        ]
+        gallery.build_gallery(self.output, cases, layout="studies", allow_stills=True)
+        data = read(self.output / "collection.json")
+        document = gallery.document("Focus review", layout="studies")
+        ids = re.findall(r'\bid="([^"]+)"', document)
+        script = re.findall(r"<script>([\s\S]*?)</script>", document)[0]
+        harness = """
+const vm=require('node:vm'),assert=require('node:assert/strict');
+const elements=new Map();let focused=null;
+function element(){return {attributes:{},style:{},children:[],value:'',open:false,
+ listeners:{},classList:{toggle(){}},setAttribute(k,v){this.attributes[k]=v},
+ set id(v){this._id=v;elements.set(v,this)},get id(){return this._id},
+ getAttribute(k){return this[k]},removeAttribute(k){delete this[k]},
+ detach(){if(this.id&&elements.get(this.id)===this)elements.delete(this.id);
+  for(const child of this.children)child.detach()},
+ replaceChildren(){for(const child of this.children)child.detach();this.children=[]},
+ append(...items){this.children.push(...items)},pause(){},load(){},
+ play(){return Promise.resolve()},focus(){if(!this.disabled)focused=this.id},
+ addEventListener(k,fn){this.listeners[k]=fn},showModal(){this.open=true},
+ close(){this.open=false;this.listeners.close?.()}}}
+for(const id of IDS){const item=element();item.id=id;}
+const document={getElementById(id){return elements.get(id)||null},
+ createElement:element,addEventListener(){},documentElement:{style:{overflow:''}}};
+vm.runInNewContext(SCRIPT,{document,fetch:async()=>({ok:true,json:async()=>DATA})});
+setImmediate(()=>{
+ const get=id=>elements.get(id),[film,still]=DATA.studies;
+ get('film-'+film.seed).onclick();
+ get('versionChoice').value=still.id;get('versionChoice').onchange();
+ assert.equal(get('film-'+film.seed),undefined); // The old card really left the DOM.
+ assert.equal(get('modeFilm').disabled,true);
+ get('modeInitial').onclick();assert.equal(get('hero').src,still.initial);
+ get('closeViewer').onclick();assert.equal(focused,'image-'+still.seed);
+ assert.equal(get('viewer').open,false);assert.equal(get('film').src,undefined);
+ assert.equal(document.documentElement.style.overflow,'');
+ // A retained but disabled Play all opener is also not a focus destination.
+ get('collectionChoice').value=film.collection_key;get('collectionChoice').onchange();
+ get('playAll').onclick();
+ get('versionChoice').value=still.id;get('versionChoice').onchange();
+ assert.equal(get('playAll').disabled,true);
+ focused=null;get('closeViewer').onclick();assert.equal(focused,'image-'+still.seed);
+});
+"""
+        path = self.root / "focus-controls.js"
+        path.write_text(
+            "const IDS="
+            + json.dumps(ids)
+            + ";\nconst DATA="
+            + json.dumps(data)
+            + ";\nconst SCRIPT="
+            + json.dumps(script)
+            + ";\n"
+            + harness
+        )
+        result = subprocess.run(
+            [shutil.which("node"), str(path)], capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     @staticmethod
     def verified_case(case):
@@ -211,6 +474,7 @@ setImmediate(async()=>{
         spectral=False,
         assessed=False,
         formation_frames=6,
+        recipe_name="Fixture",
     ):
         looks = ["layered", "homogeneous"] if looks is None else looks
         path = self.root / f"case-{len(list(self.root.glob('case-*')))}"
@@ -231,7 +495,7 @@ setImmediate(async()=>{
             "palette": palette,
             "events": [{"fraction": 0.3, "position": [0.1, -0.1], "strength": 0.7}],
             "recipe": {
-                "name": "Fixture",
+                "name": recipe_name,
                 "chromatic_count": count,
                 "looks": looks,
                 "simulation": {

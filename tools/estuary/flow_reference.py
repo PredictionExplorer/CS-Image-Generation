@@ -14,6 +14,10 @@ pointwise clamp of its resulting velocity would destroy incompressibility.
 does not rescale the source positions, velocities, or stirring radii.
 ``carrier_velocity`` is an optional authored background current, independent of
 the recording, included in the same boundary-conditioned streamfunction.
+Optional ``pair_strain`` adds pair-aligned Gaussian quadrupoles using bounded
+``(axis.x, axis.y, rate)`` descriptors from the source adapter. Its analytic
+gradient participates in the same boundary product rule, preserving zero
+divergence and the no-through-flow boundary.
 """
 
 from __future__ import annotations
@@ -50,6 +54,8 @@ def _evaluate(
     pair_swirl: float,
     domain_scale: float = 1.0,
     carrier_velocity: tuple[float, float] = (0.0, 0.0),
+    pair_strain: float = 0.0,
+    strains: ArrayLike | None = None,
 ) -> _Evaluation:
     points = np.asarray(points, dtype=np.float64)
     if points.ndim == 0 or points.shape[-1] != 2 or not np.all(np.isfinite(points)):
@@ -65,6 +71,8 @@ def _evaluate(
         raise ValueError("stir_radius must be finite and positive")
     if not np.isfinite(flow_strength) or not np.isfinite(pair_swirl):
         raise ValueError("flow_strength and pair_swirl must be finite")
+    if not np.isfinite(pair_strain) or not 0 <= pair_strain <= 4:
+        raise ValueError("pair_strain must be finite and in [0, 4]")
 
     potential = carrier[0] * points[..., 1] - carrier[1] * points[..., 0]
     gradient = np.broadcast_to(np.array([-carrier[1], carrier[0]]), points.shape).copy()
@@ -84,6 +92,26 @@ def _evaluate(
         gaussian = np.exp(-np.sum(delta**2, axis=-1) / (2 * pair_radius_squared))
         potential += pair_swirl * spin * pair_radius_squared * gaussian
         gradient -= pair_swirl * spin * gaussian[..., None] * delta
+
+    if pair_strain:
+        descriptors = _array(strains, (3, 3), "strains")
+        lengths = np.linalg.norm(descriptors[:, :2], axis=-1)
+        if np.any(np.abs(descriptors[:, 2]) > 20) or np.any(
+            (np.abs(lengths - 1) > 2e-6) & ~((lengths == 0) & (descriptors[:, 2] == 0))
+        ):
+            raise ValueError("Strains require unit axes and bounded rates, or zero rows")
+        for (cx, cy, _), (ax, ay, rate) in zip(pairs, descriptors, strict=True):
+            delta = points - np.array([cx, cy])
+            axis, normal = np.array([ax, ay]), np.array([-ay, ax])
+            x, y = np.sum(delta * axis, axis=-1), np.sum(delta * normal, axis=-1)
+            gaussian = np.exp(-np.sum(delta**2, axis=-1) / (2 * pair_radius_squared))
+            amplitude = pair_strain * rate * gaussian
+            potential += amplitude * x * y
+            gradient += amplitude[..., None] * (
+                y[..., None] * axis
+                + x[..., None] * normal
+                - (x * y / pair_radius_squared)[..., None] * delta
+            )
 
     # Extend the compact domain by zero. Squaring makes both the envelope and
     # its first derivative vanish on every edge, including corner points.
@@ -111,6 +139,8 @@ def streamfunction(
     pair_swirl: float,
     domain_scale: float = 1.0,
     carrier_velocity: tuple[float, float] = (0.0, 0.0),
+    pair_strain: float = 0.0,
+    strains: ArrayLike | None = None,
 ) -> NDArray[np.float64]:
     """Evaluate the complete boundary-conditioned streamfunction."""
     return _evaluate(
@@ -123,6 +153,8 @@ def streamfunction(
         pair_swirl=pair_swirl,
         domain_scale=domain_scale,
         carrier_velocity=carrier_velocity,
+        pair_strain=pair_strain,
+        strains=strains,
     ).potential
 
 
@@ -137,6 +169,8 @@ def velocity(
     pair_swirl: float,
     domain_scale: float = 1.0,
     carrier_velocity: tuple[float, float] = (0.0, 0.0),
+    pair_strain: float = 0.0,
+    strains: ArrayLike | None = None,
 ) -> NDArray[np.float64]:
     """Evaluate ``(d(streamfunction)/dy, -d(streamfunction)/dx)`` analytically."""
     gradient = _evaluate(
@@ -149,5 +183,7 @@ def velocity(
         pair_swirl=pair_swirl,
         domain_scale=domain_scale,
         carrier_velocity=carrier_velocity,
+        pair_strain=pair_strain,
+        strains=strains,
     ).gradient
     return np.stack((gradient[..., 1], -gradient[..., 0]), axis=-1)

@@ -32,6 +32,7 @@ from tools.estuary_studio.surface import _number, camera_basis
 
 from .gpu_frame import GPUFrame
 from .optics import palette_coefficients
+from .palette import SUPPORTED_CHROMATIC_COUNTS
 
 ROOT = Path(__file__).parent
 DEFAULTS = {
@@ -139,8 +140,14 @@ def validate_fields(fields, pigment_count=None):
     if type(fields) is not dict or set(fields) != names:
         raise ValueError(f"Surface fields must contain exactly {sorted(names)}")
     pigment = fields["pigment"]
-    if not isinstance(pigment, np.ndarray) or pigment.ndim != 3 or pigment.shape[-1] not in (4, 6):
-        raise ValueError("pigment must be an H by W by N array; N=4 or 6")
+    if (
+        not isinstance(pigment, np.ndarray)
+        or pigment.ndim != 3
+        or pigment.shape[-1] - 1 not in SUPPORTED_CHROMATIC_COUNTS
+    ):
+        raise ValueError(
+            "pigment must be an H by W by N array; N is a supported color count plus chalk"
+        )
     h, w, count = pigment.shape
     if pigment_count is not None and count != pigment_count:
         raise ValueError("Material pigment count must match the archived palette")

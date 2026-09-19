@@ -11,6 +11,8 @@ import math
 
 import numpy as np
 
+from .palette import SUPPORTED_CHROMATIC_COUNTS
+
 VERSION = "pigment-participation-v2"
 
 
@@ -31,7 +33,7 @@ def assess(pigment, chromatic_count, domain_scale, *, mass_threshold=0.008, shar
         p.ndim != 3
         or p.dtype.kind not in "fiu"
         or type(chromatic_count) is not int
-        or chromatic_count not in (3, 5)
+        or chromatic_count not in SUPPORTED_CHROMATIC_COUNTS
         or p.shape[2] != chromatic_count + 1
         or min(p.shape[:2]) < 1
         or not np.isfinite(p).all()

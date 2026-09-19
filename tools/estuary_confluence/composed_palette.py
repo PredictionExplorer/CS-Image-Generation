@@ -6,9 +6,11 @@ swatches are not the objective. Acceptance measures actual finite spectral paint
 and its mixtures, using the same synthetic optical model as the renderer. It is
 a numerical guardrail, not a score for artistic quality or measured paint data.
 
-Five colors are always resolved together. A three-color painting retains the
-same dominant, light support, and accent, with the same material coefficients
-and layer allocations. The dark anchor and quiet bridge extend that composition.
+Five colors are always resolved together. Smaller paintings retain the same
+prefix, with unchanged material coefficients and layer allocations: one dominant
+pigment, then light support, then accent. The dark anchor and quiet bridge extend
+that composition to five. One pigment varies through thickness and lighting,
+without introducing additional chromatic materials.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import numpy as np
 from tools.estuary.optics import srgb_to_linear
 
 from .palette import (
+    SUPPORTED_CHROMATIC_COUNTS,
     _body_mixtures,
     _body_weights,
     _digest,
@@ -128,8 +131,8 @@ def quality(palette):
 
 def build_palette(seed, chromatic_count):
     """Resolve a complete composition with stable, independently named streams."""
-    if type(chromatic_count) is not int or chromatic_count not in (3, 5):
-        raise ValueError("chromatic_count must be 3 or 5")
+    if type(chromatic_count) is not int or chromatic_count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("chromatic_count must be 1, 2, 3, or 5")
     seed = normalize_seed(seed)
     master = hashlib.sha256(VERSION.encode() + b"\0" + int(seed, 16).to_bytes(32, "big")).digest()
     physical_master = _master(seed)
@@ -184,7 +187,7 @@ def build_palette(seed, chromatic_count):
             "chromatic_count": chromatic_count,
             "pigment_ids": [*(f"chromatic-{i}" for i in range(chromatic_count)), "chalk"],
             "chalk_index": chromatic_count,
-            "underpaint_index": 2,
+            "underpaint_index": min(2, chromatic_count - 1),
             "body_weights": _body_weights(physical_master),
             "body_mixtures": _body_mixtures(physical_master, chromatic_count),
             "substrate_seed": "0x" + _digest(physical_master, "substrate").hex(),

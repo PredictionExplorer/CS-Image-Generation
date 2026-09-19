@@ -4,6 +4,14 @@ Seeded pigment, selective deposition, and revealed underpainting driven by the
 complete recorded three-body trajectory. This experiment extends Tidal Fresco
 without changing the earlier Estuary, depth, or studio packages.
 
+## Color and shape experiments
+
+See [COLOR_SHAPE_STUDIES.md](COLOR_SHAPE_STUDIES.md) for one-, two-, three-, and
+five-pigment compositions, optional source-driven pulling and folding, matched
+spectral blend views, and reproducible experiment batches. Existing presets
+retain their earlier defaults. [BLEND_STUDIES.md](BLEND_STUDIES.md) documents
+same-material optical proofs.
+
 ## Layered paintings
 
 `recipes/layered-five.json` opts into the new material study. All earlier

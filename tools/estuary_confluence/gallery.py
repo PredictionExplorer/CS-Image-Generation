@@ -22,7 +22,7 @@ from tools.estuary.optics import linear_to_srgb, srgb_to_linear
 from tools.estuary_studio.common import artifact, checked, encoded, read, require, write
 from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_artifact
 
-from .palette import normalize_seed
+from .palette import SUPPORTED_CHROMATIC_COUNTS, normalize_seed
 from .run import verify_run
 
 EARLIER_CAPTION = "Earlier version · same trajectory"
@@ -53,7 +53,7 @@ def thumbnail_pixels(path):
 def document(title, layout="classic"):
     """Fill only the escaped title in Confluence's independent HTML template."""
     require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
-    require(layout in ("classic", "films"), "Unknown gallery layout")
+    require(layout in ("classic", "films", "studies"), "Unknown gallery layout")
     template = (
         TEMPLATE if layout == "classic" else TEMPLATE.with_name("film_review.html")
     ).read_text(encoding="utf-8")
@@ -114,6 +114,60 @@ def _study_key(study):
     )
 
 
+def _experiment_metadata(request, look):
+    """Bind a named experiment collection to its archived recipe and optical view."""
+    recipe = request["recipe"]
+    name = recipe["name"]
+    require(type(name) is str and 0 < len(name) <= 100, "Experiment needs a short recipe name")
+    key = {
+        "name": name,
+        "chromatic_count": recipe["chromatic_count"],
+        "palette_mode": recipe.get("palette_mode", "curated"),
+        "look": look,
+    }
+    return {
+        "experiment_label": name,
+        "collection_label": f"{name} · {GROUPS[look]}",
+        "collection_key": hashlib.sha256(encoded(key)).hexdigest(),
+    }
+
+
+def _experiment_comparisons(studies):
+    """Pair only optical interpretations of the very same physical experiment.
+
+    Changed flow, count, or loading is a separate experiment. Matching a seed
+    never justifies calling those cases the same material history.
+    """
+    views, collections, sources = {}, set(), {}
+    for study in studies:
+        key = (study["seed"], study["collection_key"])
+        require(key not in collections, "Ambiguous duplicate seed within an experiment collection")
+        collections.add(key)
+        view_key = (study["case_id"], study["group"])
+        require(view_key not in views, "Duplicate optical experiment view")
+        views[view_key] = study
+        sources.setdefault(study["seed"], study["source_sha256"])
+        require(
+            sources[study["seed"]] == study["source_sha256"],
+            "Experiment seed refers to different source trajectories",
+        )
+    result = {}
+    for study in studies:
+        other = "homogeneous" if study["group"] == "layered" else "layered"
+        target = views.get((study["case_id"], other))
+        if target is not None:
+            require(
+                target["physical_state_sha256"] == study["physical_state_sha256"],
+                "Optical experiment views use different physical states",
+            )
+        result[study["id"]] = (
+            (target["id"], target["image"], f"{GROUPS[other]} · same material history")
+            if target is not None
+            else (None, None, None)
+        )
+    return result
+
+
 def _verify_earlier(output, files, record):
     """Validate a portable earlier image against its immutable case records."""
     require(
@@ -155,7 +209,8 @@ def _name(palette):
         "random": "Independent colors",
         "composed": "Composed colors",
     }.get(palette.get("mode"), palette["family"].replace("-", " ").title())
-    return f"{label} · {palette['chromatic_count']} colors"
+    count = palette["chromatic_count"]
+    return f"{label} · {count} color{'s' if count != 1 else ''}"
 
 
 def _swatches(palette, *, include_chalk=True):
@@ -346,6 +401,10 @@ def build_gallery(
     """Publish all selected complete cases; each seed retains its CLI order."""
     require(type(title) is str and 0 < len(title) <= 120, "Gallery title must be short text")
     require(type(allow_stills) is bool, "allow_stills must be boolean")
+    require(
+        layout != "studies" or earlier_gallery is None,
+        "Named experiments use their own optical comparisons, without an earlier gallery",
+    )
     page = document(title, layout)
     cases = [Path(case).resolve(strict=True) for case in cases]
     require(bool(cases), "Choose at least one completed confluence")
@@ -503,7 +562,9 @@ def build_gallery(
                         **film_metadata,
                     }
                 )
-                if layout == "films":
+                if layout == "studies":
+                    studies[-1].update(_experiment_metadata(request, look))
+                if layout in ("films", "studies"):
                     preview = output / ".preview.png"
                     Image.fromarray(thumbnail_pixels(output / poster)).save(preview)
                     info = artifact(preview)
@@ -511,18 +572,30 @@ def build_gallery(
                         preview, f"assets/{info['sha256']}/preview.png", info
                     )
                     preview.unlink()
-        rank = {(3, "layered"): 0, (5, "layered"): 1, (3, "homogeneous"): 2, (5, "homogeneous"): 3}
-        studies.sort(
-            key=lambda study: (
-                seeds.index(study["seed"]),
-                study["palette_mode"] == "random",
-                rank[(study["chromatic_count"], study["group"])],
+        if layout != "studies":
+            rank = {
+                (count, look): index
+                for index, (count, look) in enumerate(
+                    (count, look)
+                    for look in ("layered", "homogeneous")
+                    for count in SUPPORTED_CHROMATIC_COUNTS
+                )
+            }
+            studies.sort(
+                key=lambda study: (
+                    seeds.index(study["seed"]),
+                    study["palette_mode"] == "random",
+                    rank[(study["chromatic_count"], study["group"])],
+                )
             )
-        )
         case_requests = {
             receipt["identity_sha256"][:16]: request for _, request, receipt in records
         }
-        comparisons = _comparisons(studies, case_requests)
+        comparisons = (
+            _experiment_comparisons(studies)
+            if layout == "studies"
+            else _comparisons(studies, case_requests)
+        )
         for study in studies:
             study["comparison_id"], study["baseline"], study["comparison_caption"] = comparisons[
                 study["id"]
@@ -581,6 +654,8 @@ def build_gallery(
             "studies": studies,
             "history": "Complete trajectories; finished material stays fixed during camera motion",
         }
+        if layout == "studies":
+            collection["layout"] = "studies"
         write(output / "collection.json", collection)
         partial = output / "index.html.partial"
         partial.write_text(page)
@@ -596,6 +671,7 @@ def build_gallery(
                 "sources": origins,
                 "earlier_sources": earlier_sources,
                 "artifacts": files,
+                **({"layout": "studies"} if layout == "studies" else {}),
             },
         )
         verify_gallery(output)
@@ -622,6 +698,14 @@ def verify_gallery(output):
     require(
         collection.get("publication_version", 1) in (1, PUBLICATION_VERSION),
         "Unsupported gallery publication",
+    )
+    layout = collection.get("layout")
+    require(
+        layout in (None, "studies") and layout == curation.get("layout"),
+        "Gallery experiment layout differs from its curation",
+    )
+    require(
+        layout != "studies" or not curation.get("earlier_sources"), "Unbound earlier experiment"
     )
     origins = {record["id"]: record for record in curation["sources"]}
     studies = {study["id"]: study for study in collection["studies"]}
@@ -754,6 +838,17 @@ def verify_gallery(output):
                 "Painting caption or palette association differs",
             )
             metadata = _study_metadata(request, receipt, look)
+            experiment_metadata = _experiment_metadata(request, look) if layout == "studies" else {}
+            if layout == "studies":
+                require(
+                    all(study.get(key) == value for key, value in experiment_metadata.items()),
+                    "Published experiment label or collection differs from its recipe",
+                )
+            else:
+                require(
+                    not {"experiment_label", "collection_label", "collection_key"} & study.keys(),
+                    "Unbound experiment collection metadata",
+                )
             if collection.get("publication_version", 1) >= 2 or any(
                 key in study for key in metadata
             ):
@@ -808,7 +903,11 @@ def verify_gallery(output):
                     "A still view cannot advertise a film",
                 )
     require(expected_ids == set(studies), "Gallery contains unbound optical views")
-    comparisons = _comparisons(collection["studies"], case_requests)
+    comparisons = (
+        _experiment_comparisons(collection["studies"])
+        if layout == "studies"
+        else _comparisons(collection["studies"], case_requests)
+    )
     for study in collection["studies"]:
         require(
             (study["comparison_id"], study["baseline"], study["comparison_caption"])
@@ -850,7 +949,7 @@ def main():
     parser.add_argument("--title", default="Confluence Fresco")
     parser.add_argument("--allow-stills", action="store_true")
     parser.add_argument("--earlier-gallery", type=Path)
-    parser.add_argument("--layout", choices=("classic", "films"), default="classic")
+    parser.add_argument("--layout", choices=("classic", "films", "studies"), default="classic")
     args = parser.parse_args()
     print(
         build_gallery(

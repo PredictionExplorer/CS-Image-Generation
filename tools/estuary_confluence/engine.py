@@ -1,6 +1,6 @@
 """Confluence Fresco: transported pigment over independently retained strata.
 
-Four or six pigment channels share the prescribed Estuary stirring field. This
+Two, three, four, or six pigment channels share the prescribed Estuary stirring field. This
 is an authored thin-paint model, not a Navier--Stokes or free-surface solver.
 Mobile/deposit exchange and release from underpaint conserve each pigment
 locally. Limited MacCormack advection is not globally mass conservative. Added
@@ -26,6 +26,7 @@ from tools.estuary_studio.fresco import substrate_field
 from .mass_budget import RELATIVE_TOLERANCE as MASS_BUDGET_RTOL
 from .mass_budget import VERSION as MASS_BUDGET_VERSION
 from .mass_budget import correction_steps, validate_initial_weights
+from .palette import SUPPORTED_CHROMATIC_COUNTS
 
 ROOT = Path(__file__).parent
 DIFFUSION_CFL = 0.24
@@ -44,6 +45,7 @@ DEFAULTS = {
     "carrier_velocity": [2.0, 0.2],
     "stir_radius": 0.22,
     "pair_swirl": 0.9,
+    "pair_strain": 0.0,
     "brush_radius": 0.035,
     "deposition": 0.025,
     "initial_load": 0.18,
@@ -101,6 +103,7 @@ def validate_config(value):
         "flow_strength": (0, 8),
         "stir_radius": (0.02, 2),
         "pair_swirl": (0, 8),
+        "pair_strain": (0, 4),
         "brush_radius": (0.002, 1),
         "deposition": (0, 100),
         "initial_load": (0, 10),
@@ -186,8 +189,8 @@ def validate_config(value):
 def _palette_arrays(palette):
     """Validate numerical engine inputs without relying on a generator version."""
     count = len(palette["pigments_srgb"])
-    if count not in (4, 6):
-        raise ValueError("Confluence requires three or five colors plus chalk")
+    if count - 1 not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("Confluence requires one, two, three, or five colors plus chalk")
     arrays = {}
     for key in ("settling", "release", "specific_volumes", "granulation"):
         values = np.asarray(palette[key], dtype="f4")
@@ -484,7 +487,7 @@ class Engine:
                 try:
                     super().__init__(source, recipe, backend)
                     with gpu.ctx:
-                        if settings["flow_domain_scale"] != gpu.domain:
+                        if settings["flow_domain_scale"] != gpu.domain or settings["pair_strain"]:
                             gpu.flow.release()
                             gpu.flow = gpu.ctx.compute_shader(
                                 (ROOT / "shaders/flow.glsl").read_text()
@@ -497,6 +500,7 @@ class Engine:
                                 "u_radius": settings["stir_radius"],
                                 "u_strength": settings["flow_strength"],
                                 "u_pair_gain": settings["pair_swirl"],
+                                "u_pair_strain": settings["pair_strain"],
                                 "u_carrier": tuple(settings["carrier_velocity"]),
                             }.items():
                                 gpu.flow[key].value = value
@@ -600,6 +604,17 @@ class Engine:
                     if getattr(gpu, "ctx", None) is not None:
                         gpu.close()
                     raise
+
+            def _flow(gpu, fraction):
+                # The base transport retains its exact old shader and arithmetic
+                # when strain is disabled. Descriptors follow the source clock,
+                # including adaptive substeps, never the movie frame cadence.
+                if settings["pair_strain"]:
+                    from .pair_strain import pair_strain_uniforms
+
+                    strains = pair_strain_uniforms(source.frame(fraction), settings["stir_radius"])
+                    gpu.flow["u_strains"].write(strains.tobytes())
+                return super()._flow(fraction)
 
             def _initialize_paint(gpu):
                 x = (
@@ -1073,6 +1088,16 @@ class Engine:
                 "GPU exact integer area integration of phase concentrations before appearance"
             ),
         }
+        if settings["pair_strain"]:
+            from .pair_strain import VERSION as STRAIN_VERSION
+
+            self.metadata["pair_strain"] = {
+                "version": STRAIN_VERSION,
+                "gain": settings["pair_strain"],
+                "model": "analytic curl of pair-aligned Gaussian quadrupoles",
+                "source": "signed conditioned pair extension over real three-dimensional distance",
+                "limits": "prescribed incompressible flow; not a fluid pressure solver",
+            }
         if layout is not None:
             self.metadata["initial_layout"] = copy.deepcopy(layout)
         if initial_weights is not None:

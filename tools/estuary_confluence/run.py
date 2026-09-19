@@ -29,6 +29,7 @@ if __package__ in (None, ""):
 from tools.estuary.optics import srgb_to_linear
 from tools.estuary.run import encode_movie, write_array, write_png
 from tools.estuary.source import Source
+from tools.estuary_confluence.palette import SUPPORTED_CHROMATIC_COUNTS
 from tools.estuary_studio.common import artifact, checked, digest, encoded, read, require, write
 from tools.estuary_studio.run import dimensions, frame_plan, number, record_array
 
@@ -106,7 +107,10 @@ def validate_recipe(raw):
         "Unsupported recipe schema",
     )
     count = raw.get("chromatic_count", 3)
-    require(type(count) is int and count in (3, 5), "Use three or five chromatic pigments")
+    require(
+        type(count) is int and count in SUPPORTED_CHROMATIC_COUNTS,
+        "Use one, two, three, or five chromatic pigments",
+    )
     palette_mode = raw.get("palette_mode", "curated")
     require(
         type(palette_mode) is str and palette_mode in ("curated", "harmonic", "random", "composed"),

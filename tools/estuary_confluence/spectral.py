@@ -35,6 +35,7 @@ import numpy as np
 from tools.estuary.optics import srgb_to_linear
 
 from .optics import _density, _mixedness, _scale, add_layer, finite_layer_rt, palette_coefficients
+from .palette import SUPPORTED_CHROMATIC_COUNTS
 from .spectral_data import (
     BASE_SPECTRA,
     D65_CIE_XYZ,
@@ -199,8 +200,10 @@ def validate_spectral_material(record, palette=None):
     if _identity(payload) != record["identity_sha256"]:
         raise ValueError("Spectral material identity differs")
     reflection = np.asarray(record["pigment_reflectance"], dtype="f8")
-    if reflection.shape not in ((4, 38), (6, 38)):
-        raise ValueError("Spectral material needs four or six 38-band pigment spectra")
+    if reflection.shape not in tuple((n + 1, 38) for n in SUPPORTED_CHROMATIC_COUNTS):
+        raise ValueError(
+            "Spectral material needs supported chromatic pigments plus chalk, each with 38 bands"
+        )
     arrays = {}
     for key, shape, low, high in (
         ("pigment_reflectance", reflection.shape, REFLECTANCE_FLOOR, 1),

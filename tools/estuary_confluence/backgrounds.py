@@ -17,7 +17,7 @@ import numpy as np
 
 from tools.estuary.optics import srgb_to_linear
 
-from .palette import _linear_to_oklab, normalize_seed
+from .palette import SUPPORTED_CHROMATIC_COUNTS, _linear_to_oklab, normalize_seed
 from .procedural_palette import _gamut_map
 
 VERSION = "confluence-background-v1"
@@ -56,8 +56,8 @@ def generate_background(name: str, palette: dict) -> dict:
         raise ValueError("Background selection requires a resolved pigment palette")
     seed = normalize_seed(palette.get("seed"))
     count = palette.get("chromatic_count")
-    if type(count) is not int or count not in (3, 5):
-        raise ValueError("Background palette needs three or five chromatic pigments")
+    if type(count) is not int or count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("Background palette needs one, two, three, or five chromatic pigments")
     colors = np.asarray(palette.get("pigments_srgb"), dtype="f8")
     if colors.shape != (count + 1, 3):
         raise ValueError("Background palette dimensions differ from its pigment count")
@@ -66,7 +66,7 @@ def generate_background(name: str, palette: dict) -> dict:
         ground = list(NAMED_SRGB[name])
         method = {"kind": "fixed-display-srgb", "name": name}
     else:
-        lab = _linear_to_oklab(linear[:3])
+        lab = _linear_to_oklab(linear[: min(3, count)])
         chroma = np.linalg.norm(lab[:, 1:], axis=1)
         anchor = 0 if chroma[0] > 1e-6 else int(np.argmax(chroma))
         neutral = chroma[anchor] <= 1e-6

@@ -121,7 +121,6 @@ class MassBudgetTests(unittest.TestCase):
         self.assertIsNone(validate_config({})["initial_pigment_weights"])
         for invalid in (
             [],
-            [1, 1],
             [1] * 4,
             [1] * 6,
             [1, 0, 1],
@@ -147,6 +146,10 @@ class MassBudgetTests(unittest.TestCase):
         checked = validate_initial_weights(values, 3)
         checked[0] = 4
         self.assertEqual(values[0], 2.2)
+        for count in (1, 2):
+            self.assertEqual(validate_initial_weights([1] * count, count), [1.0] * count)
+            with self.assertRaisesRegex(ValueError, "per chromatic pigment"):
+                validate_initial_weights([1] * count, 3)
 
     def test_wrong_steps_factors_or_corrected_amounts_are_rejected(self):
         for key, value in (("step", 11), ("factors", [0.6] * 4), ("mass_after", [1] * 4)):

@@ -17,14 +17,18 @@ import numpy as np
 
 from tools.estuary.optics import absorption_over_scattering, srgb_to_linear
 
+from .palette import SUPPORTED_CHROMATIC_COUNTS
+
 
 def palette_coefficients(palette):
     """Validate the optical subset of an archived palette without changing it."""
     if not isinstance(palette, dict):
         raise ValueError("palette must be a dictionary")
     colors = np.asarray(palette.get("pigments_srgb"), dtype=np.float64)
-    if colors.ndim != 2 or colors.shape not in ((4, 3), (6, 3)):
-        raise ValueError("palette needs four or six RGB pigments, including chalk")
+    if colors.ndim != 2 or colors.shape not in tuple(
+        (n + 1, 3) for n in SUPPORTED_CHROMATIC_COUNTS
+    ):
+        raise ValueError("palette needs one, two, three, or five colors plus chalk")
     colors = srgb_to_linear(colors)
     substrate = srgb_to_linear(palette.get("substrate_srgb"))
     if substrate.shape != (3,):

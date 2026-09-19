@@ -2,7 +2,7 @@
 
 Harmony is expressed as angular relationships, never a list of fixed RGB
 anchors. The five candidates are always generated and tested together, so a
-three-color study retains the identical first three colors of its five-color
+smaller study retains the identical color prefix of its five-color
 counterpart. All five pigments receive the same chroma range and must remain
 distinct as actual finite K--M paint layers, rather than only as RGB swatches.
 """
@@ -19,9 +19,7 @@ import numpy as np
 from tools.estuary.optics import linear_to_srgb
 
 from .palette import (
-    VERSION as PHYSICAL_VERSION,
-)
-from .palette import (
+    SUPPORTED_CHROMATIC_COUNTS,
     _body_mixtures,
     _body_weights,
     _digest,
@@ -33,6 +31,9 @@ from .palette import (
     _unit,
     mixture_reflectance,
     normalize_seed,
+)
+from .palette import (
+    VERSION as PHYSICAL_VERSION,
 )
 
 VERSION = "scatter-palette-v1"
@@ -124,8 +125,8 @@ def quality(palette):
 
 def build_palette(seed, chromatic_count, mode):
     """Keep phase behavior fixed while changing only the chromatic experiment."""
-    if type(chromatic_count) is not int or chromatic_count not in (3, 5):
-        raise ValueError("chromatic_count must be 3 or 5")
+    if type(chromatic_count) is not int or chromatic_count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("chromatic_count must be 1, 2, 3, or 5")
     if mode not in ("harmonic", "random"):
         raise ValueError("Procedural mode must be harmonic or random")
     seed = normalize_seed(seed)
@@ -178,7 +179,7 @@ def build_palette(seed, chromatic_count, mode):
             "chromatic_count": chromatic_count,
             "pigment_ids": [*(f"chromatic-{i}" for i in range(chromatic_count)), "chalk"],
             "chalk_index": chromatic_count,
-            "underpaint_index": 2,
+            "underpaint_index": min(2, chromatic_count - 1),
             "body_weights": _body_weights(physical_master),
             "body_mixtures": _body_mixtures(physical_master, chromatic_count),
             "substrate_seed": "0x" + _digest(physical_master, "substrate").hex(),

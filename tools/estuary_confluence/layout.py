@@ -20,7 +20,7 @@ import math
 
 import numpy as np
 
-from .palette import normalize_seed
+from .palette import SUPPORTED_CHROMATIC_COUNTS, normalize_seed
 
 VERSION = "scattered-pigment-layout-v1"
 MAX_LOAD_RADIUS = 0.34
@@ -54,8 +54,8 @@ def plan_layout(seed, count, aspect, *, load_radius=0.28, initial_load=0.18, edg
     falls from its full value to zero. It is not an output-pixel blur.
     """
     seed = normalize_seed(seed)
-    if type(count) is not int or count not in (3, 5):
-        raise ValueError("Scattered pigment count must be 3 or 5")
+    if type(count) is not int or count not in SUPPORTED_CHROMATIC_COUNTS:
+        raise ValueError("Scattered pigment count must be 1, 2, 3, or 5")
     aspect = _number(aspect, "aspect", 0.2, 5)
     radius_scale = _number(load_radius, "load_radius", 0.001, MAX_LOAD_RADIUS)
     load_scale = _number(initial_load, "initial_load", 0, 10)
