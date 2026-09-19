@@ -43,6 +43,10 @@ LABELS = {
     "silk-grain": "Silk and mineral grain",
 }
 INTERACTION_LOOKS = frozenset({"control", "silk", "silk-grain"})
+# Source PCA can differ in the last float64 bits across CPUs. These absolute
+# tolerances are far below a visible pixel; all clocks/configuration stay exact.
+BODY_MARKER_POSITION_ATOL = 1e-11
+BODY_MARKER_PIXEL_ATOL = 1e-7
 DEFAULT_RENDER = {
     "resolution": [1920, 1440],
     "still_resolution": [3840, 2880],
@@ -167,8 +171,16 @@ def validate_recipe(raw):
     number(projection["rotation_degrees"], "rotation", -360, 360)
     render = copy.deepcopy(DEFAULT_RENDER)
     supplied = raw.get("render", {})
-    require(type(supplied) is dict and not supplied.keys() - render.keys(), "Invalid render keys")
+    require(
+        type(supplied) is dict and not supplied.keys() - (render.keys() | {"body_markers"}),
+        "Invalid render keys",
+    )
     render.update(supplied)
+    from tools.estuary_confluence.body_markers import validate_config as marker_config
+
+    markers = marker_config(render.pop("body_markers", None))
+    if markers is not None:
+        render["body_markers"] = markers
     sw, sh = simulation["resolution"]
     if render["capture_resolution"] is None:
         capture = [sw, sh]
@@ -608,6 +620,194 @@ def base_material_digest(fields):
     return field_digest({key: fields[key] for key in BASE_FIELDS})
 
 
+def body_marker_metadata(recipe, source_metadata):
+    """Describe the optional display annotation without changing legacy requests."""
+    from tools.estuary_confluence.body_markers import VERSION, validate_config
+
+    supplied = recipe["render"].get("body_markers")
+    settings = validate_config(supplied)
+    if settings is None:
+        return None
+    require(encoded(supplied) == encoded(settings), "Body-marker settings must be normalized")
+    return {
+        "version": VERSION,
+        "config": settings,
+        "source": copy.deepcopy(source_metadata),
+        "projection": copy.deepcopy(recipe["projection"]),
+        "anchor": "projected canvas plane z=0",
+        "occlusion": "none; annotation after shading, tone mapping and frame filtering",
+        "body_order": "source body index order",
+        "pixel_coordinates": "top-left pixel-edge coordinates; pixel centers at half-integers",
+        "verification_tolerance": {
+            "source_position_absolute": BODY_MARKER_POSITION_ATOL,
+            "pixel_center_absolute": BODY_MARKER_PIXEL_ATOL,
+            "timing_and_configuration": "exact",
+        },
+    }
+
+
+def _body_marker_record(positions, size, fraction, tilt, azimuth):
+    from tools.estuary_confluence.body_markers import project_positions
+
+    positions = np.asarray(positions)
+    centers = project_positions(positions, tuple(size), tilt_degrees=tilt, azimuth_degrees=azimuth)
+    return {
+        "source_fraction": float(fraction),
+        "resolution": list(size),
+        "tilt_degrees": float(tilt),
+        "azimuth_degrees": float(azimuth),
+        "positions": positions.astype("f8").tolist(),
+        "pixel_centers": centers.tolist(),
+    }
+
+
+def make_body_marker_ledger(recipe, source, frames, *, has_initial):
+    """Sample actual source time, independently of simulation and output cadence."""
+    metadata = body_marker_metadata(recipe, source.metadata)
+    if metadata is None:
+        return None
+    render = recipe["render"]
+
+    def record(fraction, size, tilt, azimuth):
+        return _body_marker_record(source.frame(fraction).positions, size, fraction, tilt, azimuth)
+
+    return {
+        "metadata": metadata,
+        "initial": record(0.0, render["resolution"], 0.0, render["azimuth_start"])
+        if has_initial
+        else None,
+        "poster": record(
+            1.0, render["still_resolution"], render["still_tilt_degrees"], render["azimuth_end"]
+        ),
+        "frames": [
+            {
+                "frame": index,
+                "timing": frame,
+                **record(
+                    frame["source_fraction"],
+                    render["resolution"],
+                    frame["tilt_degrees"],
+                    frame["azimuth_degrees"],
+                ),
+            }
+            for index, frame in enumerate(frames)
+        ],
+    }
+
+
+def validate_body_marker_records(request, receipt, ledger):
+    """Verify portable source/config/timing/projection associations.
+
+    This does not recover orbit samples from a gallery. Full archive verification
+    separately regenerates every position from the archived recording.
+    """
+    expected = body_marker_metadata(request["recipe"], request["source"])
+    if expected is None:
+        require(
+            "body_markers" not in request and "body_markers" not in receipt and ledger is None,
+            "Disabled body markers cannot advertise annotation records",
+        )
+        return
+    require(
+        encoded(request.get("body_markers")) == encoded(expected)
+        and encoded(receipt.get("body_markers")) == encoded(expected),
+        "Body-marker source, version or settings differ",
+    )
+    require(
+        type(ledger) is dict
+        and set(ledger) == {"metadata", "initial", "poster", "frames"}
+        and encoded(ledger["metadata"]) == encoded(expected),
+        "Body-marker ledger metadata differs",
+    )
+    recipe, render = request["recipe"], request["recipe"]["render"]
+    expected_frames = frame_plan(recipe) if request["mode"] == "film" else []
+    require(
+        encoded(request["frames"]) == encoded(expected_frames),
+        "Body-marker canonical timeline differs",
+    )
+
+    def check(record, fraction, size, tilt, azimuth, extra=None):
+        require(type(record) is dict and "positions" in record, "Missing body-marker positions")
+        projected = _body_marker_record(record["positions"], size, fraction, tilt, azimuth)
+        projected.update(extra or {})
+        require(
+            set(record) == set(projected)
+            and encoded(
+                {
+                    key: value
+                    for key, value in record.items()
+                    if key not in ("positions", "pixel_centers")
+                }
+            )
+            == encoded(
+                {
+                    key: value
+                    for key, value in projected.items()
+                    if key not in ("positions", "pixel_centers")
+                }
+            ),
+            "Body-marker timing or camera differs",
+        )
+        require(
+            _marker_coordinates_equal(
+                record["pixel_centers"], projected["pixel_centers"], BODY_MARKER_PIXEL_ATOL
+            ),
+            "Body-marker pixel projection differs",
+        )
+
+    if request.get("layout") is None:
+        require(ledger["initial"] is None, "Unbound initial body-marker record")
+    else:
+        check(ledger["initial"], 0.0, render["resolution"], 0.0, render["azimuth_start"])
+    check(
+        ledger["poster"],
+        1.0,
+        render["still_resolution"],
+        render["still_tilt_degrees"],
+        render["azimuth_end"],
+    )
+    require(
+        type(ledger["frames"]) is list and len(ledger["frames"]) == len(expected_frames),
+        "Body-marker frame count differs",
+    )
+    for index, (record, frame) in enumerate(zip(ledger["frames"], expected_frames, strict=True)):
+        check(
+            record,
+            frame["source_fraction"],
+            render["resolution"],
+            frame["tilt_degrees"],
+            frame["azimuth_degrees"],
+            {"frame": index, "timing": frame},
+        )
+
+
+def _marker_coordinates_equal(actual, expected, tolerance):
+    actual = np.asarray(actual)
+    return (
+        actual.shape == (3, 2)
+        and actual.dtype.kind in "fiu"
+        and np.isfinite(actual).all()
+        and np.allclose(actual, expected, rtol=0, atol=tolerance)
+    )
+
+
+def _marker_records(ledger):
+    initial = [] if ledger["initial"] is None else [ledger["initial"]]
+    return [*initial, ledger["poster"], *ledger["frames"]]
+
+
+def _annotate_body_markers(pixels, record, metadata):
+    from tools.estuary_confluence.body_markers import annotate
+
+    return annotate(
+        pixels,
+        record["positions"],
+        tilt_degrees=record["tilt_degrees"],
+        azimuth_degrees=record["azimuth_degrees"],
+        config=metadata["config"],
+    )
+
+
 def verify_run(folder):
     from tools.estuary_confluence.palette import generate_palette, normalize_seed
 
@@ -626,6 +826,21 @@ def verify_run(folder):
         "final.npz",
         "frame-ledger.json",
     }
+    markers = body_marker_metadata(request["recipe"], request["source"])
+    if markers is not None:
+        required.add("body-markers.json")
+        required.update(f"{look}/poster-unmarked-linear.npy" for look in request["recipe"]["looks"])
+    else:
+        validate_body_marker_records(request, receipt, None)
+        require(
+            "body-markers.json" not in receipt["artifacts"]
+            and not (folder / "body-markers.json").exists()
+            and all(
+                f"{look}/poster-unmarked-linear.npy" not in receipt["artifacts"]
+                for look in request["recipe"]["looks"]
+            ),
+            "Disabled body markers cannot contain annotation artifacts",
+        )
     for look in request["recipe"]["looks"]:
         required |= {f"{look}/poster.png", f"{look}/poster-linear.npy"}
         if request.get("layout") is not None:
@@ -670,7 +885,7 @@ def verify_run(folder):
         "Archived design inputs differ",
     )
     bound_source = None
-    if request["recipe"]["simulation"]["initial_pattern"] == "engaged":
+    if request["recipe"]["simulation"]["initial_pattern"] == "engaged" or markers is not None:
         w, h = request["recipe"]["simulation"]["resolution"]
         bound_source = Source.read(
             folder / "inputs/source.orbit", aspect=w / h, **request["recipe"]["projection"]
@@ -684,6 +899,28 @@ def verify_run(folder):
     )
     if expected_layout is not None:
         require(read(folder / "layout.json") == request["layout"], "Archived starting pools differ")
+    marker_ledger = None
+    if markers is not None:
+        marker_ledger = read(folder / "body-markers.json")
+        validate_body_marker_records(request, receipt, marker_ledger)
+        expected_markers = make_body_marker_ledger(
+            request["recipe"],
+            bound_source,
+            request["frames"],
+            has_initial=expected_layout is not None,
+        )
+        for actual, expected in zip(
+            _marker_records(marker_ledger), _marker_records(expected_markers), strict=True
+        ):
+            require(
+                _marker_coordinates_equal(
+                    actual["positions"], expected["positions"], BODY_MARKER_POSITION_ATOL
+                )
+                and _marker_coordinates_equal(
+                    actual["pixel_centers"], expected["pixel_centers"], BODY_MARKER_PIXEL_ATOL
+                ),
+                "Body-marker positions differ from the archived trajectory",
+            )
     if request["recipe"]["surface"].get("optics_model", "rgb") == "spectral":
         from tools.estuary_confluence.spectral import validate_spectral_material
 
@@ -813,10 +1050,32 @@ def verify_run(folder):
         require(
             result["poster"] == receipt["artifacts"][f"{look}/poster.png"], "View poster differs"
         )
+        if markers is not None:
+            plain = np.load(folder / look / "poster-unmarked-linear.npy", allow_pickle=False)
+            annotated = np.load(folder / look / "poster-linear.npy", allow_pickle=False)
+            width, height = request["recipe"]["render"]["still_resolution"]
+            require(
+                plain.shape == annotated.shape == (height, width, 3)
+                and plain.dtype == annotated.dtype == np.float32,
+                "Body-marker poster raster shape or dtype differs",
+            )
+            require(
+                np.allclose(
+                    annotated,
+                    _annotate_body_markers(plain, marker_ledger["poster"], markers),
+                    rtol=0,
+                    atol=2e-6,
+                ),
+                "Body-marker poster differs from its unmarked painting and recorded positions",
+            )
         if request["recipe"].get("assessment") is not None:
             from tools.estuary_confluence.assessment import image_balance
 
-            pixels = np.load(folder / look / "poster-linear.npy", allow_pickle=False)
+            pixels = (
+                plain
+                if markers is not None
+                else np.load(folder / look / "poster-linear.npy", allow_pickle=False)
+            )
             require(
                 result.get("image_balance")
                 == image_balance(
@@ -878,6 +1137,8 @@ def run(args):
         spectral = build_spectral_material(palette)
     events = plan_events(source, recipe["encounters"])
     frames = [] if args.still_only else frame_plan(recipe)
+    marker_ledger = make_body_marker_ledger(recipe, source, frames, has_initial=layout is not None)
+    markers = None if marker_ledger is None else marker_ledger["metadata"]
     binaries = {}
     if frames:
         for name in ("ffmpeg", "ffprobe"):
@@ -925,6 +1186,8 @@ def run(args):
                 request["background"] = background
             if interaction is not None:
                 request["interaction"] = interaction
+            if markers is not None:
+                request["body_markers"] = markers
             identity = hashlib.sha256(encoded(request)).hexdigest()
             if (output / "request.json").exists():
                 require(
@@ -944,6 +1207,8 @@ def run(args):
                 write(output / "spectral.json", spectral)
             if background is not None:
                 write(output / "background.json", background)
+            if marker_ledger is not None:
+                write(output / "body-markers.json", marker_ledger)
             (output / "inputs").mkdir()
             shutil.copyfile(args.source, output / "inputs/source.orbit")
             require(
@@ -969,6 +1234,8 @@ def run(args):
                 artifacts["spectral.json"] = artifact(output / "spectral.json")
             if background is not None:
                 artifacts["background.json"] = artifact(output / "background.json")
+            if marker_ledger is not None:
+                artifacts["body-markers.json"] = artifact(output / "body-markers.json")
             measurements = []
             pending = iter(assessment_steps(recipe))
             next_checkpoint = next(pending, None)
@@ -1006,6 +1273,8 @@ def run(args):
                         tilt_degrees=0.0,
                         azimuth_degrees=render["azimuth_start"],
                     )
+                    if markers is not None:
+                        pixels = _annotate_body_markers(pixels, marker_ledger["initial"], markers)
                     path = output / look / "initial.png"
                     write_png(path, pixels, depth=8)
                     artifacts[f"{look}/initial.png"] = artifact(path)
@@ -1029,6 +1298,10 @@ def run(args):
                             tilt_degrees=frame["tilt_degrees"],
                             azimuth_degrees=frame["azimuth_degrees"],
                         )
+                        if markers is not None:
+                            pixels = _annotate_body_markers(
+                                pixels, marker_ledger["frames"][i], markers
+                            )
                         write_png(path, pixels, depth=8)
                     images[look] = artifacts[name] = artifact(path)
                     if i == 0 and layout is not None:
@@ -1080,6 +1353,12 @@ def run(args):
                     tilt_degrees=render["still_tilt_degrees"],
                     azimuth_degrees=render["azimuth_end"],
                 )
+                unmarked = pixels
+                if markers is not None:
+                    name = f"{look}/poster-unmarked-linear.npy"
+                    write_array(output / name, unmarked)
+                    artifacts[name] = artifact(output / name)
+                    pixels = _annotate_body_markers(pixels, marker_ledger["poster"], markers)
                 write_png(output / look / "poster.png", pixels)
                 write_array(output / look / "poster-linear.npy", pixels)
                 for name in (f"{look}/poster.png", f"{look}/poster-linear.npy"):
@@ -1093,7 +1372,7 @@ def run(args):
                     from tools.estuary_confluence.assessment import image_balance
 
                     results[look]["image_balance"] = image_balance(
-                        pixels, srgb_to_linear(recipe["surface"]["ground_srgb"])
+                        unmarked, srgb_to_linear(recipe["surface"]["ground_srgb"])
                     )
             write(output / "frame-ledger.json", ledger)
             for name in ("final.npz", "frame-ledger.json"):
@@ -1133,6 +1412,7 @@ def run(args):
                     "final_step": engine.step,
                     "solver_diagnostics": getattr(engine, "diagnostics", None),
                     "physical_state_sha256": final_identity,
+                    **({"body_markers": markers} if markers is not None else {}),
                     **(
                         {
                             "interaction": interaction,

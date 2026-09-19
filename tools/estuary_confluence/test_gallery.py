@@ -344,6 +344,138 @@ setImmediate(async()=>{
         with self.assertRaisesRegex(ValueError, "Unbound or missing published interaction"):
             gallery.verify_gallery(self.output)
 
+    def body_marker_case(self, seed="0xb7", *, film=True):
+        """Use real marker metadata/projection with a lightweight media archive."""
+        from tools.estuary.test_engine import SourceFixture
+        from tools.estuary_studio.run import frame_plan
+
+        from .body_markers import validate_config as marker_config
+        from .run import DEFAULT_RENDER, body_marker_metadata, make_body_marker_ledger
+
+        case = self.case(
+            seed=seed,
+            looks=["layered"],
+            scattered=True,
+            film=film,
+            simulation_updates={"underpaint_strength": 0},
+            recipe_name="Body-position study",
+        )
+        request, receipt = self.verified_case(case)
+        request["recipe"]["render"] = {
+            **DEFAULT_RENDER,
+            **request["recipe"]["render"],
+            "body_markers": marker_config(True),
+        }
+        request["recipe"]["projection"] = {"fill": 0.78, "rotation_degrees": 0.0}
+        request["frames"] = frame_plan(request["recipe"]) if film else []
+        request["body_markers"] = body_marker_metadata(request["recipe"], request["source"])
+        source = SourceFixture()
+        source.metadata = request["source"]
+        source.seed = request["source"]["seed"]
+        ledger = make_body_marker_ledger(
+            request["recipe"], source, request["frames"], has_initial=True
+        )
+        write(case / "body-markers.json", ledger)
+        receipt["body_markers"] = copy.deepcopy(request["body_markers"])
+        receipt["artifacts"]["body-markers.json"] = artifact(case / "body-markers.json")
+        receipt["identity_sha256"] = hashlib.sha256(encoded(request)).hexdigest()
+        write(case / "request.json", request)
+        write(case / "receipt.json", receipt)
+        return case
+
+    def test_body_marker_records_are_bound_and_remain_portable(self):
+        case = self.body_marker_case()
+        gallery.build_gallery(self.output, [case], layout="studies")
+        collection, curation = gallery.verify_gallery(self.output)
+        request, receipt = self.verified_case(case)
+        study = collection["studies"][0]
+        record = curation["sources"][0]["body_markers"]
+        self.assertEqual(study["body_markers"], request["body_markers"])
+        self.assertEqual(study["body_marker_record"], record)
+        self.assertEqual(curation["artifacts"][record], receipt["artifacts"]["body-markers.json"])
+        self.assertEqual(read(self.output / record), read(case / "body-markers.json"))
+        shutil.rmtree(case)
+        gallery.verify_gallery(self.output)
+
+    def test_body_marker_still_uses_bound_positions_without_inventing_a_film(self):
+        case = self.body_marker_case(film=False)
+        gallery.build_gallery(self.output, [case], layout="studies", allow_stills=True)
+        collection, _ = gallery.verify_gallery(self.output)
+        study = collection["studies"][0]
+        ledger = read(self.output / study["body_marker_record"])
+        self.assertIsNone(study["film"])
+        self.assertEqual(ledger["frames"], [])
+        self.assertEqual(ledger["poster"]["source_fraction"], 1)
+
+    def test_body_marker_claims_cannot_be_changed_or_dropped_by_rehashing_collection(self):
+        gallery.build_gallery(self.output, [self.body_marker_case()], layout="studies")
+        original = read(self.output / "collection.json")
+        for field in gallery.BODY_MARKER_PUBLIC_FIELDS:
+            with self.subTest(field=field, missing=True):
+                changed = copy.deepcopy(original)
+                changed["studies"][0].pop(field)
+                self.rehash_collection(changed)
+                with self.assertRaisesRegex(ValueError, "missing published body-marker"):
+                    gallery.verify_gallery(self.output)
+        changed = copy.deepcopy(original)
+        changed["studies"][0]["body_markers"]["version"] = "invented-marker-version"
+        self.rehash_collection(changed)
+        with self.assertRaisesRegex(ValueError, "body-marker records belong"):
+            gallery.verify_gallery(self.output)
+
+    def test_body_marker_records_cannot_be_reassigned_to_another_seed(self):
+        gallery.build_gallery(
+            self.output,
+            [self.body_marker_case("0xb7"), self.body_marker_case("0xbc")],
+            layout="studies",
+        )
+        collection = read(self.output / "collection.json")
+        collection["studies"][0]["body_marker_record"] = collection["studies"][1][
+            "body_marker_record"
+        ]
+        self.rehash_collection(collection)
+        with self.assertRaisesRegex(ValueError, "body-marker records belong"):
+            gallery.verify_gallery(self.output)
+
+    def test_rehashed_body_marker_ledger_cannot_change_recorded_projection(self):
+        gallery.build_gallery(self.output, [self.body_marker_case()], layout="studies")
+        curation = read(self.output / "curation.json")
+        origin = curation["sources"][0]
+        record = origin["body_markers"]
+        ledger = read(self.output / record)
+        ledger["poster"]["pixel_centers"][0][0] += 2
+        write(self.output / record, ledger)
+        curation["artifacts"][record] = artifact(self.output / record)
+        # Keep the portable receipt/file binding valid, so the independent
+        # projection/timing validator must reject the changed coordinate.
+        receipt = read(self.output / origin["receipt"])
+        receipt["artifacts"]["body-markers.json"] = curation["artifacts"][record]
+        write(self.output / origin["receipt"], receipt)
+        curation["artifacts"][origin["receipt"]] = artifact(self.output / origin["receipt"])
+        write(self.output / "curation.json", curation)
+        with self.assertRaises(ValueError):
+            gallery.verify_gallery(self.output)
+
+    def test_unannotated_publication_has_no_marker_claims_or_position_records(self):
+        gallery.build_gallery(self.output, [self.case()], layout="studies")
+        collection, curation = gallery.verify_gallery(self.output)
+        self.assertTrue(
+            all(
+                not gallery.BODY_MARKER_PUBLIC_FIELDS.intersection(s) for s in collection["studies"]
+            )
+        )
+        self.assertTrue(all("body_markers" not in origin for origin in curation["sources"]))
+        self.assertFalse(any("body-markers.json" in path for path in curation["artifacts"]))
+        collection["studies"][0]["body_markers"] = {"version": "invented"}
+        self.rehash_collection(collection)
+        with self.assertRaisesRegex(ValueError, "Unbound or missing published body-marker"):
+            gallery.verify_gallery(self.output)
+
+    def test_body_marker_gallery_requires_a_template_that_explains_the_guides(self):
+        with self.assertRaisesRegex(ValueError, "Body-position guides require"):
+            gallery.build_gallery(self.output, [self.body_marker_case()], layout="classic")
+        self.assertFalse(self.output.exists())
+
     def test_named_experiments_retain_collections_and_only_compare_the_same_case(self):
         gallery.build_gallery(self.output, self.experiment_cases(), layout="studies")
         collection, curation = gallery.verify_gallery(self.output)

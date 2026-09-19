@@ -36,6 +36,7 @@ GROUPS = {
     "silk-grain": "Satin + grain",
 }
 INTERACTION_PUBLIC_FIELDS = frozenset({"interaction_version", "base_material_sha256"})
+BODY_MARKER_PUBLIC_FIELDS = frozenset({"body_markers", "body_marker_record"})
 TEMPLATE = Path(__file__).with_suffix(".html")
 TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
 
@@ -110,6 +111,7 @@ def _study_metadata(request, receipt, look):
     if "material_model" in recipe["simulation"]:
         metadata["material_model"] = recipe["simulation"]["material_model"]
     metadata.update(_interaction_metadata(request, receipt))
+    metadata.update(_body_marker_metadata(request, receipt))
     return metadata
 
 
@@ -148,7 +150,35 @@ def _interaction_metadata(request, receipt):
     return {"interaction_version": expected["version"], "base_material_sha256": base_hash}
 
 
+def _body_marker_metadata(request, receipt):
+    """Publish position-guide claims only when both immutable records bind them."""
+    from .run import body_marker_metadata
+
+    expected = body_marker_metadata(request["recipe"], request["source"])
+    if expected is None:
+        require(
+            "body_markers" not in request
+            and "body_markers" not in receipt
+            and "body-markers.json" not in receipt["artifacts"],
+            "Unannotated material cannot publish body-marker metadata",
+        )
+        return {}
+    require(
+        request.get("body_markers") == expected and receipt.get("body_markers") == expected,
+        "Published body-marker metadata differs from its case",
+    )
+    require(
+        "body-markers.json" in receipt["artifacts"],
+        "Annotated material requires its bound body-position record",
+    )
+    return {"body_markers": expected}
+
+
 def _require_view_layout(recipe, layout):
+    require(
+        not recipe.get("render", {}).get("body_markers") or layout in ("films", "studies"),
+        "Body-position guides require a film review or studies gallery layout",
+    )
     require(
         layout == "studies" or not INTERACTION_LOOKS.intersection(recipe["looks"]),
         "Interaction comparison views require the studies gallery layout",
@@ -567,6 +597,17 @@ def build_gallery(
                     f"records/{case_id}/mass-budget.json",
                     receipt["artifacts"]["mass-budget.json"],
                 )
+            marker_metadata = _body_marker_metadata(request, receipt)
+            if marker_metadata:
+                from .run import validate_body_marker_records
+
+                marker_records = read(case / "body-markers.json")
+                validate_body_marker_records(request, receipt, marker_records)
+                paths["body_markers"] = copy(
+                    case / "body-markers.json",
+                    f"records/{case_id}/body-markers.json",
+                    receipt["artifacts"]["body-markers.json"],
+                )
             origins.append(
                 {
                     "id": case_id,
@@ -619,6 +660,9 @@ def build_gallery(
                         "background_record": paths.get("background"),
                         **_study_metadata(request, receipt, look),
                         "swatches": _swatches(palette, include_chalk=initial is None),
+                        **(
+                            {"body_marker_record": paths["body_markers"]} if marker_metadata else {}
+                        ),
                         "resolution": request["recipe"]["render"]["still_resolution"],
                         **film_metadata,
                     }
@@ -862,6 +906,18 @@ def verify_gallery(output):
             )
         else:
             require(origin.get("mass_budget") is None, "Unbound mass-budget report")
+        marker_metadata = _body_marker_metadata(request, receipt)
+        if marker_metadata:
+            from .run import validate_body_marker_records
+
+            require(
+                origin.get("body_markers") in files
+                and files[origin["body_markers"]] == receipt["artifacts"]["body-markers.json"],
+                "Published body-position record differs from its case",
+            )
+            validate_body_marker_records(request, receipt, read(output / origin["body_markers"]))
+        else:
+            require("body_markers" not in origin, "Unbound body-position record")
         require(
             receipt["source"] == source
             and origin["source_sha256"] == source["sha256"]
@@ -900,6 +956,17 @@ def verify_gallery(output):
                 "Painting caption or palette association differs",
             )
             metadata = _study_metadata(request, receipt, look)
+            expected_marker_fields = BODY_MARKER_PUBLIC_FIELDS if marker_metadata else set()
+            require(
+                BODY_MARKER_PUBLIC_FIELDS.intersection(study) == expected_marker_fields,
+                "Unbound or missing published body-marker metadata",
+            )
+            if marker_metadata:
+                require(
+                    study["body_marker_record"] == origin["body_markers"]
+                    and study["body_markers"] == marker_metadata["body_markers"],
+                    "Published body-marker records belong to another case",
+                )
             require(
                 INTERACTION_PUBLIC_FIELDS.intersection(study)
                 == INTERACTION_PUBLIC_FIELDS.intersection(metadata),

@@ -73,6 +73,9 @@
         color: #626c60;
         margin: 0;
       }
+      #bodyMarkerNote {
+        margin-top: 12px;
+      }
       header {
         display: flex;
         justify-content: space-between;
@@ -487,6 +490,12 @@
             Browse the paintings. Choose Film or Image on any seed to open it,
             or play the complete collection in sequence.
           </p>
+          <p class="intro" id="bodyMarkerNote" hidden>
+            Red X1–3 mark the body positions. All three bodies stir all colors,
+            creating currents around and between them. The Xs are guides only
+            and may lie outside painted areas. Their positions stay fixed during
+            the final camera movement.
+          </p>
         </div>
       </header>
       <div class="galleryControls">
@@ -609,6 +618,8 @@
               >Ground color</a
             ><a id="massRecord" target="_blank" rel="noopener"
               >Material accounting</a
+            ><a id="bodyMarkerRecord" target="_blank" rel="noopener" hidden
+              >Body positions</a
             ><a href="curation.json" target="_blank" rel="noopener"
               >Collection verification</a
             >
@@ -619,7 +630,9 @@
         <span
           >Every film spans the complete recorded trajectory. The finished
           painting remains fixed during the final camera movement.</span
-        ><a href="http://127.0.0.1:8796/films/">Saved Color &amp; Form collection</a>
+        ><a id="savedCollection" href="http://127.0.0.1:8796/films/"
+          >Saved Color &amp; Form collection</a
+        >
       </footer>
     </main>
     <script>
@@ -848,6 +861,15 @@
         link("assessmentRecord", study.assessment_record);
         link("massRecord", study.mass_budget_record);
         link("backgroundRecord", study.background_record);
+        link("bodyMarkerRecord", study.body_marker_record);
+        $("bodyMarkerNote").hidden = !study.body_markers;
+        if (study.body_markers) {
+          const markerNames =
+            study.body_markers.config?.labels === false ? "Red Xs" : "Red X1–3";
+          $("bodyMarkerNote").textContent =
+            markerNames +
+            " mark the body positions. All three bodies stir all colors, creating currents around and between them. The Xs are guides only and may lie outside painted areas. Their positions stay fixed during the final camera movement.";
+        }
         $("swatches").replaceChildren();
         for (const pigment of study.swatches) {
           const swatch = document.createElement("span");
@@ -1065,6 +1087,10 @@
                   (s) => s.group === "layered" && s.chromatic_count === 5,
                 );
           seeds = [...new Set(studies.map((s) => s.seed))];
+          if (studies.some((study) => study.body_markers)) {
+            $("savedCollection").href = "http://127.0.0.1:8797/";
+            $("savedCollection").textContent = "Saved RC1 collection";
+          }
           if (!seeds.length)
             throw Error("No completed paintings are available.");
           for (const key of new Set(studies.map(collectionKey))) {
