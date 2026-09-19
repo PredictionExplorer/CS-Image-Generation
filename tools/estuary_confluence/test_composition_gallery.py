@@ -162,6 +162,10 @@ class CompositionGalleryTests(unittest.TestCase):
 
     def test_complete_matrix_uses_only_contact_finish_reference_and_remains_portable(self):
         self.build()
+        page = (self.output / "index.html").read_text()
+        self.assertIn('href="reference/"', page)
+        self.assertNotIn("http://127.0.0.1:8797/", page)
+        self.assertTrue((self.output / "reference/index.html").is_file())
         manifest, _ = comparison.verify_comparison(self.output)
         self.assertEqual(len(manifest["studies"]), 14)
         self.assertEqual({row["setup"] for row in manifest["studies"]}, {*comparison.SETUPS, "rc1"})
