@@ -443,6 +443,15 @@ and films. They follow the same projected source positions and camera as the
 painting, without entering the paint simulation. The matched ten-seed experiment
 reconstructs the saved RC1 recipes and requires identical complete material states.
 
+## Starting shape and placement
+
+[Six starting-paint compositions](INITIAL_COMPOSITIONS.md) compare random circles,
+tapered ribbons, open crescents, facing shores, scattered commas, and body-centered
+wedges across the ten RC1 seeds. Each preserves the original per-pigment amounts,
+palette, source recording, flow, surface finish, and complete film timeline.
+The comparison page pairs any two setups with shared playback and seeking, and
+includes the saved RC1 artwork as a reference.
+
 ## Validation
 
 ```sh
