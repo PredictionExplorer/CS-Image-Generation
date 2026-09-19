@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__COMPOSITION_TITLE__</title>
+    <style>
+      :root {
+        font-family: Arial, sans-serif;
+        color: #252c29;
+        background: #f1efe9;
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1700px;
+        margin: auto;
+        padding: 34px 4vw 60px;
+      }
+      h1,
+      h2 {
+        font-family: Georgia, serif;
+        font-weight: 400;
+        letter-spacing: -0.035em;
+      }
+      h1 {
+        font-size: clamp(31px, 4vw, 56px);
+        margin: 9px 0 15px;
+      }
+      h2 {
+        font-size: 26px;
+        margin: 0;
+      }
+      p {
+        line-height: 1.65;
+      }
+      button,
+      select,
+      input,
+      a {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      select {
+        min-height: 44px;
+        border: 1px solid #78867b;
+        border-radius: 3px;
+        background: transparent;
+        padding: 10px 13px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled,
+      input:disabled,
+      select:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      button[aria-pressed="true"],
+      .primary {
+        background: #304b42;
+        color: white;
+        border-color: #304b42;
+      }
+      :focus-visible {
+        outline: 3px solid #5b8272;
+        outline-offset: 3px;
+      }
+      a {
+        text-underline-offset: 4px;
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.17em;
+        font-size: 10px;
+        color: #657367;
+        margin: 0;
+      }
+      .intro {
+        max-width: 780px;
+        font-size: 14px;
+        color: #56665c;
+        margin: 0 0 22px;
+      }
+      .selection,
+      .toolbar,
+      .playback,
+      .modes {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        flex-wrap: wrap;
+      }
+      .selection {
+        margin: 24px 0 18px;
+      }
+      .selection label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+      }
+      .selection select {
+        min-width: 190px;
+      }
+      .toolbar {
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 10px;
+      }
+      .modes button,
+      .playback button {
+        font-size: 13px;
+      }
+      .timeline {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        margin: 14px 0 8px;
+      }
+      .timeline input {
+        flex: 1;
+        min-width: 80px;
+        accent-color: #304b42;
+      }
+      .timeline output {
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        min-width: 80px;
+        text-align: right;
+      }
+      .status {
+        min-height: 21px;
+        font-size: 12px;
+        color: #5c6b62;
+        margin: 5px 0 16px;
+      }
+      .error {
+        border: 1px solid #a24730;
+        color: #8a3928;
+        padding: 12px;
+        font-size: 13px;
+      }
+      .pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .panel {
+        min-width: 0;
+      }
+      .panel label {
+        display: grid;
+        gap: 8px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 12px;
+      }
+      .panel select {
+        width: 100%;
+        text-transform: none;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+      figure {
+        margin: 0;
+      }
+      .media {
+        aspect-ratio: 4/3;
+        position: relative;
+        background: #18211e;
+      }
+      .media img,
+      .media video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        inset: 0;
+        object-fit: contain;
+      }
+      figcaption {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: start;
+        margin: 11px 0 7px;
+      }
+      figcaption strong {
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .dimensions {
+        font-size: 11px;
+        color: #647168;
+        white-space: nowrap;
+      }
+      .guide {
+        font-size: 11px;
+        color: #8b493c;
+        margin: 0 0 10px;
+      }
+      .downloads {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        font-size: 12px;
+        line-height: 1.8;
+      }
+      .browse {
+        border-top: 1px solid #ccd1c8;
+        margin-top: 35px;
+        padding-top: 25px;
+      }
+      .browse > p {
+        font-size: 13px;
+        color: #647168;
+        margin: 8px 0 18px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+        gap: 14px;
+      }
+      .card {
+        min-width: 0;
+        border: 1px solid #cbd1c6;
+        padding: 8px;
+        border-radius: 3px;
+      }
+      .card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4/3;
+        object-fit: contain;
+        background: #18211e;
+      }
+      .card h3 {
+        font-weight: 500;
+        font-size: 12px;
+        margin: 10px 1px;
+        min-height: 29px;
+      }
+      .card div {
+        display: flex;
+        gap: 6px;
+      }
+      .card button {
+        flex: 1;
+        padding: 7px 4px;
+        font-size: 11px;
+      }
+      footer {
+        border-top: 1px solid #ccd1c8;
+        padding-top: 19px;
+        margin-top: 32px;
+        display: flex;
+        gap: 17px;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        font-size: 12px;
+        color: #58675e;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 23px 16px 38px;
+        }
+        .pair {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 26px;
+        }
+        .toolbar {
+          align-items: start;
+        }
+        .modes {
+          gap: 5px;
+        }
+        .modes button {
+          padding: 9px 10px;
+        }
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .selection select {
+          min-width: 135px;
+        }
+        figcaption {
+          flex-wrap: wrap;
+          gap: 5px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">One dance / Different beginnings</p>
+        <h1>__COMPOSITION_TITLE__</h1>
+        <p class="intro">
+          Compare the same seed side by side. The trajectory, colors, paint
+          amounts, camera and lighting are matched. Different starting
+          arrangements develop into different paintings.
+        </p>
+      </header>
+      <div class="selection">
+        <label for="seed"
+          >Seed
+          <select
+            id="seed"
+            disabled
+            aria-label="Choose the seed for both paintings"
+          ></select
+        ></label>
+        <button id="previous" disabled aria-label="Previous seed">←</button>
+        <button id="next" disabled aria-label="Next seed">→</button>
+        <span id="seedCount" class="dimensions"></span>
+      </div>
+      <div class="toolbar">
+        <div class="modes" role="group" aria-label="Comparison view">
+          <button id="modeStill" aria-pressed="true" disabled>
+            Final paintings
+          </button>
+          <button id="modeInitial" aria-pressed="false" disabled>
+            Starting paint
+          </button>
+          <button id="modeFilm" aria-pressed="false" disabled>Films</button>
+        </div>
+        <div class="playback">
+          <button id="play" class="primary" disabled>Play both films</button>
+          <button id="restart" disabled>Restart both</button>
+        </div>
+      </div>
+      <div class="timeline">
+        <label for="seek" class="sr-only">Seek both films</label>
+        <input
+          id="seek"
+          type="range"
+          min="0"
+          max="1"
+          value="0"
+          step="0.01"
+          disabled
+        />
+        <output id="clock" for="seek">0:00 / 0:00</output>
+      </div>
+      <p id="status" class="status" role="status">Loading the comparison…</p>
+      <p id="error" class="error" role="alert" hidden></p>
+      <section class="pair" aria-label="Same-seed comparison">
+        <article class="panel">
+          <label for="leftSetup"
+            >Left composition
+            <select id="leftSetup" disabled></select
+          ></label>
+          <figure>
+            <div class="media">
+              <img id="leftImage" alt="Left painting" /><video
+                id="leftVideo"
+                playsinline
+                muted
+                preload="none"
+                hidden
+                aria-label="Left film"
+              ></video>
+            </div>
+            <figcaption>
+              <strong id="leftLabel"></strong
+              ><span id="leftDimensions" class="dimensions"></span>
+            </figcaption>
+          </figure>
+          <p id="leftGuide" class="guide" hidden>
+            Red Xs show body positions; they are guides only.
+          </p>
+          <nav class="downloads" aria-label="Left painting files">
+            <a id="leftFull" target="_blank" rel="noopener">Open image</a
+            ><a id="leftDownload" download>Download image</a
+            ><a id="leftFilm" target="_blank" rel="noopener">Open film</a
+            ><a id="leftFilmDownload" download>Download film</a
+            ><a id="leftRecord" target="_blank" rel="noopener">Paint amounts</a>
+          </nav>
+        </article>
+        <article class="panel">
+          <label for="rightSetup"
+            >Right composition
+            <select id="rightSetup" disabled></select
+          ></label>
+          <figure>
+            <div class="media">
+              <img id="rightImage" alt="Right painting" /><video
+                id="rightVideo"
+                playsinline
+                muted
+                preload="none"
+                hidden
+                aria-label="Right film"
+              ></video>
+            </div>
+            <figcaption>
+              <strong id="rightLabel"></strong
+              ><span id="rightDimensions" class="dimensions"></span>
+            </figcaption>
+          </figure>
+          <p id="rightGuide" class="guide" hidden>
+            Red Xs show body positions; they are guides only.
+          </p>
+          <nav class="downloads" aria-label="Right painting files">
+            <a id="rightFull" target="_blank" rel="noopener">Open image</a
+            ><a id="rightDownload" download>Download image</a
+            ><a id="rightFilm" target="_blank" rel="noopener">Open film</a
+            ><a id="rightFilmDownload" download>Download film</a
+            ><a id="rightRecord" target="_blank" rel="noopener"
+              >Paint amounts</a
+            >
+          </nav>
+        </article>
+      </section>
+      <section class="browse" aria-labelledby="browseTitle">
+        <h2 id="browseTitle">All compositions for this seed</h2>
+        <p>
+          Choose which two to compare. Switching a composition pauses both films
+          at the same point.
+        </p>
+        <div id="grid" class="grid"></div>
+      </section>
+      <footer>
+        <span
+          >Every film spans the complete recorded motion. The final camera move
+          reveals the finished painting.</span
+        >
+        <nav>
+          <a href="http://127.0.0.1:8797/">Saved RC1 collection</a> ·
+          <a href="comparison-verification.json" target="_blank" rel="noopener"
+            >Comparison records</a
+          >
+        </nav>
+      </footer>
+    </main>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id);
+      const sides = ["left", "right"];
+      const videos = sides.map((side) => $(side + "Video"));
+      let data = null,
+        selectedSeed = null,
+        mode = "still",
+        time = 0;
+      let wanted = false,
+        playing = false,
+        generation = 0,
+        animation = 0;
+      let scrubbing = false,
+        resumeAfterScrub = false;
+      const entries = () =>
+        sides.map((side) =>
+          data.studies.find(
+            (item) =>
+              item.seed === selectedSeed &&
+              item.setup === $(side + "Setup").value,
+          ),
+        );
+      const duration = () => (data ? entries()[0].film_seconds : 0);
+      const fps = () => (data ? entries()[0].film_fps : 24);
+      const shortSeed = (seed) =>
+        seed.replace(/^0x/i, "").slice(0, 8).toUpperCase();
+      const stamp = (value) =>
+        Math.floor(value / 60) +
+        ":" +
+        String(Math.floor(value % 60)).padStart(2, "0");
+      function status(text) {
+        $("status").textContent = text;
+      }
+      function clock() {
+        $("seek").value = time;
+        $("seek").setAttribute(
+          "aria-valuetext",
+          stamp(time) + " of " + stamp(duration()),
+        );
+        $("clock").textContent = stamp(time) + " / " + stamp(duration());
+      }
+      function halt() {
+        generation++;
+        playing = false;
+        cancelAnimationFrame(animation);
+        animation = 0;
+        for (const video of videos) video.pause();
+      }
+      function pause() {
+        wanted = false;
+        generation++;
+        if (mode === "film" && videos[0].readyState >= 1)
+          time = Math.min(duration(), videos[0].currentTime);
+        halt();
+        $("play").textContent = "Play both films";
+        clock();
+      }
+      function release() {
+        halt();
+        for (const video of videos) {
+          video.removeAttribute("src");
+          video.preload = "none";
+          video.load();
+        }
+      }
+      function fail(message) {
+        pause();
+        release();
+        mode = "still";
+        updatePanels();
+        $("error").textContent =
+          message + " You can also use the Open film links.";
+        $("error").hidden = false;
+        status("The final paintings are shown. Select Films to try again.");
+      }
+      function mediaCurrent(video, index) {
+        return (
+          data &&
+          mode === "film" &&
+          video.getAttribute("src") === entries()[index].film &&
+          (!video.currentSrc || video.currentSrc === video.src)
+        );
+      }
+      function seekTo(value) {
+        time = Math.max(
+          0,
+          Math.min(duration(), Math.round(value * fps()) / fps()),
+        );
+        for (const video of videos) {
+          if (
+            video.readyState >= 1 &&
+            Math.abs(video.currentTime - time) > 0.002
+          )
+            video.currentTime = time;
+        }
+        clock();
+      }
+      function tick() {
+        if (!playing || mode !== "film") return;
+        time = Math.min(duration(), videos[0].currentTime);
+        clock();
+        if (Math.abs(videos[1].currentTime - time) > 1 / fps()) {
+          halt();
+          seekTo(time);
+          tryStart();
+          return;
+        }
+        animation = requestAnimationFrame(tick);
+      }
+      function tryStart() {
+        if (!wanted || playing || mode !== "film") return;
+        if (videos.some((video) => video.readyState < 3 || video.seeking)) {
+          status("Loading both films…");
+          return;
+        }
+        const token = generation;
+        playing = true;
+        Promise.all(videos.map((video) => video.play()))
+          .then(() => {
+            if (token !== generation || !wanted || mode !== "film") return;
+            $("play").textContent = "Pause both films";
+            status("Playing together · " + shortSeed(selectedSeed));
+            animation = requestAnimationFrame(tick);
+          })
+          .catch(() => {
+            if (token === generation)
+              fail("The browser could not start both films.");
+          });
+      }
+      function loadFilms() {
+        const pair = entries();
+        videos.forEach((video, index) => {
+          video.preload = "metadata";
+          video.poster = pair[index].image;
+          video.src = pair[index].film;
+          video.load();
+        });
+        status("Films paused · press Play both films");
+      }
+      function updatePanels() {
+        if (!data) return;
+        entries().forEach((entry, index) => {
+          const side = sides[index],
+            initial = mode === "initial";
+          const image = initial ? entry.initial : entry.image;
+          $(side + "Image").src = image;
+          $(side + "Image").alt =
+            entry.label +
+            ", seed " +
+            shortSeed(selectedSeed) +
+            (initial ? ", starting paint" : ", finished painting");
+          $(side + "Image").hidden = mode === "film";
+          $(side + "Video").hidden = mode !== "film";
+          $(side + "Label").textContent = entry.label;
+          const dimensions =
+            mode === "film"
+              ? entry.film_resolution
+              : initial
+                ? entry.initial_resolution
+                : entry.image_resolution;
+          $(side + "Dimensions").textContent =
+            dimensions.join(" × ") +
+            (mode === "film" ? " · " + entry.film_fps + " fps" : " pixels");
+          $(side + "Guide").hidden = !entry.body_markers;
+          $(side + "Full").href = $(side + "Download").href = image;
+          $(side + "Film").href = $(side + "FilmDownload").href = entry.film;
+          $(side + "Record").href = entry.mass_budget_record;
+        });
+        for (const [id, value] of [
+          ["modeStill", "still"],
+          ["modeInitial", "initial"],
+          ["modeFilm", "film"],
+        ])
+          $(id).setAttribute("aria-pressed", String(mode === value));
+        $("seek").disabled = mode !== "film";
+        $("seek").max = duration();
+        $("seek").step = 1 / fps();
+        $("play").textContent = wanted ? "Pause both films" : "Play both films";
+        const index = data.seeds.indexOf(selectedSeed);
+        $("previous").disabled = index === 0;
+        $("next").disabled = index === data.seeds.length - 1;
+        $("seedCount").textContent = index + 1 + " / " + data.seeds.length;
+        clock();
+        renderGrid();
+      }
+      function changeMode(next) {
+        if (!data || mode === next) return;
+        pause();
+        release();
+        mode = next;
+        $("error").hidden = true;
+        if (mode === "film" && time >= duration()) time = 0;
+        updatePanels();
+        if (mode === "film") loadFilms();
+        else
+          status(
+            mode === "initial"
+              ? "Starting paint · same amount of each pigment"
+              : "Final paintings · same trajectory, different beginnings",
+          );
+      }
+      function selectPair() {
+        if (!data) return;
+        pause();
+        release();
+        selectedSeed = $("seed").value;
+        time = Math.min(time, duration());
+        $("error").hidden = true;
+        updatePanels();
+        if (mode === "film") loadFilms();
+        else
+          status(
+            mode === "initial"
+              ? "Starting paint · same amount of each pigment"
+              : "Final paintings · same trajectory, different beginnings",
+          );
+      }
+      function renderGrid() {
+        $("grid").replaceChildren();
+        for (const setup of data.setups) {
+          const entry = data.studies.find(
+            (item) => item.seed === selectedSeed && item.setup === setup.id,
+          );
+          const card = document.createElement("article");
+          card.className = "card";
+          const image = document.createElement("img");
+          image.loading = "lazy";
+          image.src = mode === "initial" ? entry.initial : entry.preview;
+          image.alt =
+            entry.label +
+            (mode === "initial" ? " starting paint" : " final painting");
+          const title = document.createElement("h3");
+          title.textContent = entry.label;
+          const actions = document.createElement("div");
+          for (const side of sides) {
+            const button = document.createElement("button");
+            button.textContent = "Use " + side;
+            button.setAttribute(
+              "aria-label",
+              "Compare " + entry.label + " on the " + side,
+            );
+            button.setAttribute(
+              "aria-pressed",
+              String($(side + "Setup").value === setup.id),
+            );
+            button.onclick = () => {
+              $(side + "Setup").value = setup.id;
+              selectPair();
+              $(side + "Setup").focus();
+            };
+            actions.append(button);
+          }
+          card.append(image, title, actions);
+          $("grid").append(card);
+        }
+      }
+      videos.forEach((video, index) => {
+        video.addEventListener("loadedmetadata", () => {
+          if (!mediaCurrent(video, index)) return;
+          if (Math.abs(video.currentTime - time) > 0.002)
+            video.currentTime = time;
+          tryStart();
+        });
+        for (const event of ["canplay", "seeked"])
+          video.addEventListener(event, tryStart);
+        video.addEventListener("waiting", () => {
+          if (!wanted || mode !== "film") return;
+          time = videos[0].readyState >= 1 ? videos[0].currentTime : time;
+          halt();
+          seekTo(time);
+          status("Waiting for both films…");
+        });
+        video.addEventListener("ended", () => {
+          if (!mediaCurrent(video, index)) return;
+          pause();
+          time = duration();
+          release();
+          mode = "still";
+          updatePanels();
+          status("Films finished · final paintings");
+        });
+        video.addEventListener("error", () => {
+          if (mediaCurrent(video, index))
+            fail("One of the films could not be loaded.");
+        });
+      });
+      $("modeStill").onclick = () => changeMode("still");
+      $("modeInitial").onclick = () => changeMode("initial");
+      $("modeFilm").onclick = () => changeMode("film");
+      $("play").onclick = () => {
+        if (!data) return;
+        if (wanted) {
+          pause();
+          status("Films paused together");
+          return;
+        }
+        changeMode("film");
+        wanted = true;
+        generation++;
+        for (const video of videos) video.preload = "auto";
+        $("play").textContent = "Pause both films";
+        tryStart();
+      };
+      $("restart").onclick = () => {
+        if (!data) return;
+        pause();
+        changeMode("film");
+        seekTo(0);
+        wanted = true;
+        generation++;
+        for (const video of videos) video.preload = "auto";
+        $("play").textContent = "Pause both films";
+        tryStart();
+      };
+      $("seek").oninput = () => {
+        const requestedTime = Number($("seek").value);
+        if (!scrubbing) {
+          resumeAfterScrub = wanted;
+          pause();
+          scrubbing = true;
+        }
+        seekTo(requestedTime);
+        status("Films paused at the selected point");
+      };
+      $("seek").onchange = () => {
+        scrubbing = false;
+        if (resumeAfterScrub) {
+          wanted = true;
+          generation++;
+          tryStart();
+        }
+        resumeAfterScrub = false;
+      };
+      $("seed").onchange = selectPair;
+      for (const side of sides) $(side + "Setup").onchange = selectPair;
+      function step(direction) {
+        if (!data) return;
+        const index = data.seeds.indexOf(selectedSeed) + direction;
+        if (index < 0 || index >= data.seeds.length) return;
+        $("seed").value = data.seeds[index];
+        selectPair();
+      }
+      $("previous").onclick = () => step(-1);
+      $("next").onclick = () => step(1);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden && data) pause();
+      });
+      window.addEventListener("pagehide", () => {
+        wanted = false;
+        generation++;
+        release();
+      });
+      fetch("comparison.json", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw Error("Comparison records are unavailable.");
+          return response.json();
+        })
+        .then((value) => {
+          if (
+            value.version !== "composition-comparison-v1" ||
+            !Array.isArray(value.seeds) ||
+            !value.seeds.length ||
+            !Array.isArray(value.setups) ||
+            value.setups.length < 2 ||
+            !Array.isArray(value.studies)
+          )
+            throw Error("Comparison records are incomplete.");
+          for (const seed of value.seeds)
+            for (const setup of value.setups) {
+              const matches = value.studies.filter(
+                (entry) => entry.seed === seed && entry.setup === setup.id,
+              );
+              if (
+                matches.length !== 1 ||
+                !matches[0].film ||
+                !matches[0].image ||
+                !matches[0].initial ||
+                !(matches[0].film_seconds > 0)
+              )
+                throw Error("A comparison painting or film is missing.");
+            }
+          data = value;
+          for (const seed of data.seeds) {
+            const option = document.createElement("option");
+            option.value = seed;
+            option.textContent = shortSeed(seed);
+            $("seed").append(option);
+          }
+          for (const side of sides)
+            for (const setup of data.setups) {
+              const option = document.createElement("option");
+              option.value = setup.id;
+              option.textContent = setup.label;
+              $(side + "Setup").append(option);
+            }
+          $("seed").value = selectedSeed = data.seeds[0];
+          $("leftSetup").value = "rc1";
+          $("rightSetup").value = data.setups.find(
+            (setup) => setup.id !== "rc1",
+          ).id;
+          for (const id of [
+            "seed",
+            "leftSetup",
+            "rightSetup",
+            "modeStill",
+            "modeInitial",
+            "modeFilm",
+            "play",
+            "restart",
+          ])
+            $(id).disabled = false;
+          updatePanels();
+          status("Final paintings · choose two compositions to compare");
+        })
+        .catch((error) => {
+          $("error").hidden = false;
+          $("error").textContent = error.message + " Please reload this page.";
+          status("The comparison could not load.");
+        });
+    </script>
+  </body>
+</html>
