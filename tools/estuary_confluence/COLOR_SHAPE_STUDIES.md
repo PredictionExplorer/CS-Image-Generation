@@ -79,3 +79,47 @@ mass accounting, single-pigment contact diagnostics, CPU/GPU optical parity,
 source-derived strain, analytic curl and numerical divergence, closed boundaries,
 zero-gain legacy equality, archive association, and review controls. Full rendered
 case verification complements the small numerical fixtures.
+
+## Visual screening and film selection
+
+The first frozen screen contains 40 physical cases: all ten cohort seeds at each
+of 1/2/3/5 starting pigments. Multicolor cases render both optical interpretations,
+for 70 images. A second screen tests quiet, folding, and broader strain-driven
+currents on five seeds. Five additional calligraphic cases reduce initial pool
+radius to 0.18, increase initial load to 0.28, and use radius 0.16, translation
+strength 1.4, swirl 0.12, and strain 0.55. These are intentionally different
+composition recipes, with their exact controls retained in the plans.
+
+No global flow replacement won visually. The film study therefore uses explicit,
+fixed selections rather than claiming that the new flow is always better:
+
+| Seed | Selected flow | Visual reason |
+| --- | --- | --- |
+| `0xb7f327f9f722` | Calligraphic | More open, separated strokes |
+| `0x808861c25b6c` | Quiet | Broader separated gestures and retained accent |
+| `0xa0c78ebadfb75018` | Open-current study | Two linked lobes replace the compact disc |
+| `0x2d01093da35729b3` | Quiet | More tapered form; calligraphic variant became a filled patch |
+| Remaining six | Original | Stronger existing compositions or no comparative evidence for replacement |
+
+Each seed keeps its selected flow, shared palette prefix and retained initial
+pools across 1/2/3-pigment films. These are curated study selections, not an
+automatic aesthetic ranking or a new default for arbitrary seeds. The separate
+matched color-count gallery retains original currents for every seed.
+
+The film plan uses a native 2048 × 1536 material grid and RGB16 final paintings,
+1440 × 1080 movies with 2× linear-light frame filtering, and 937 frames at 24 fps.
+Formation spans the entire recording in 30 seconds, followed by a three-second
+hold and six-second camera study. The approximately 39-second duration is a
+presentation choice, not a shorter source recording. Changing output cadence
+leaves the canonical physical evolution unchanged.
+
+Twelve five-pigment optical proofs and six monochrome proofs supplement the
+material studies. Intimate mixing changes green/teal intersections more than it
+changes near-analogous palettes. Thinner optical density gives the monochrome
+6210 seed a pale jade appearance; it washes out B7 too much to be a lead choice.
+Raised relief alone contributed little at the retained camera angle. These are
+visual judgments, not objective museum-quality scores.
+
+The original B7, 8088, and CEDD weighted five-pigment screening states were
+regenerated with this implementation. Their complete material hashes match the
+released states exactly, with zero strain and identical physical controls.
