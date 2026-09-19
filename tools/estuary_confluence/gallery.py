@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish complete Confluence films, paintings, palettes, and fair comparisons.
 
-One physical archive can supply two optical views. Published media are content
+One physical archive can supply several optical views. Published media are content
 addressed; copied request/receipt/palette/event records retain their association
 after the original experiment directories move. Comparison relationships are
 derived from the archived source, pigment count, and physical-state identity.
@@ -23,12 +23,19 @@ from tools.estuary_studio.common import artifact, checked, encoded, read, requir
 from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_artifact
 
 from .palette import SUPPORTED_CHROMATIC_COUNTS, normalize_seed
-from .run import verify_run
+from .run import INTERACTION_LOOKS, interaction_metadata, surface_configs, verify_run
 
 EARLIER_CAPTION = "Earlier version · same trajectory"
 PUBLICATION_VERSION = 2
 
-GROUPS = {"layered": "Layered", "homogeneous": "Blended"}
+GROUPS = {
+    "layered": "Layered",
+    "homogeneous": "Blended",
+    "control": "Control",
+    "silk": "Satin seams",
+    "silk-grain": "Satin + grain",
+}
+INTERACTION_PUBLIC_FIELDS = frozenset({"interaction_version", "base_material_sha256"})
 TEMPLATE = Path(__file__).with_suffix(".html")
 TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
 
@@ -102,7 +109,54 @@ def _study_metadata(request, receipt, look):
     }
     if "material_model" in recipe["simulation"]:
         metadata["material_model"] = recipe["simulation"]["material_model"]
+    metadata.update(_interaction_metadata(request, receipt))
     return metadata
+
+
+def _interaction_metadata(request, receipt):
+    """Bind portable interaction claims to their verified source provenance.
+
+    Publishing verifies the complete physical archive first. Portable review
+    retains its request/receipt association, without claiming to recompute the
+    raw material hash from image files.
+    """
+    recipe = request["recipe"]
+    if recipe["simulation"].get("interaction") is None:
+        require(
+            "interaction" not in request
+            and "interaction" not in receipt
+            and "base_material_sha256" not in receipt,
+            "Disabled interaction cannot publish microstructure metadata",
+        )
+        return {}
+    expected = interaction_metadata(recipe, request["source"]["seed"])
+    require(
+        request.get("interaction") == expected and receipt.get("interaction") == expected,
+        "Published interaction version, seed or settings differ from its material",
+    )
+    require(
+        request.get("surface_configs") == surface_configs(recipe),
+        "Published interaction optical views differ from their recipe",
+    )
+    base_hash = receipt.get("base_material_sha256")
+    require(
+        type(base_hash) is str
+        and len(base_hash) == 64
+        and all(character in "0123456789abcdef" for character in base_hash),
+        "Published interaction needs its original-material identity",
+    )
+    return {"interaction_version": expected["version"], "base_material_sha256": base_hash}
+
+
+def _require_view_layout(recipe, layout):
+    require(
+        layout == "studies" or not INTERACTION_LOOKS.intersection(recipe["looks"]),
+        "Interaction comparison views require the studies gallery layout",
+    )
+    require(all(look in GROUPS for look in recipe["looks"]), "Unknown optical view")
+    if INTERACTION_LOOKS.intersection(recipe["looks"]):
+        # Do not infer named comparison controls from a label or a color count.
+        surface_configs(recipe)
 
 
 def _study_key(study):
@@ -153,7 +207,13 @@ def _experiment_comparisons(studies):
         )
     result = {}
     for study in studies:
-        other = "homogeneous" if study["group"] == "layered" else "layered"
+        look = study["group"]
+        if look == "control":
+            other = "silk-grain" if (study["case_id"], "silk-grain") in views else "silk"
+        elif look in ("silk", "silk-grain"):
+            other = "control"
+        else:
+            other = "homogeneous" if look == "layered" else "layered"
         target = views.get((study["case_id"], other))
         if target is not None:
             require(
@@ -411,6 +471,7 @@ def build_gallery(
     records, identities, prefixes, seeds = [], set(), set(), []
     for case in cases:
         request, receipt = verify_run(case)
+        _require_view_layout(request["recipe"], layout)
         require(
             layout != "films"
             or (
@@ -729,6 +790,7 @@ def verify_gallery(output):
             "Source case identity differs",
         )
         palette, recipe, source = request["palette"], request["recipe"], request["source"]
+        _require_view_layout(recipe, layout)
         require(
             read(output / origin["palette"]) == palette
             and read(output / origin["events"]) == request["events"],
@@ -838,6 +900,11 @@ def verify_gallery(output):
                 "Painting caption or palette association differs",
             )
             metadata = _study_metadata(request, receipt, look)
+            require(
+                INTERACTION_PUBLIC_FIELDS.intersection(study)
+                == INTERACTION_PUBLIC_FIELDS.intersection(metadata),
+                "Unbound or missing published interaction metadata",
+            )
             experiment_metadata = _experiment_metadata(request, look) if layout == "studies" else {}
             if layout == "studies":
                 require(

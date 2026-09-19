@@ -74,7 +74,7 @@ DEFAULTS = {
 
 def validate_config(value):
     """Resolve a bounded, flat configuration before allocating GPU resources."""
-    if type(value) is not dict or set(value) - set(DEFAULTS):
+    if type(value) is not dict or set(value) - (set(DEFAULTS) | {"interaction"}):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
@@ -178,6 +178,13 @@ def validate_config(value):
         )
     ):
         raise ValueError("Laminate requires source-free separated pools and disabled legacy phases")
+    interaction = result.pop("interaction", None)
+    if interaction is not None:
+        from .interaction import validate_config as interaction_config
+
+        if result["material_model"] != "laminate":
+            raise ValueError("Interaction history requires source-free laminate paint")
+        result["interaction"] = interaction_config(interaction)
     result["initial_pigment_weights"] = validate_initial_weights(result["initial_pigment_weights"])
     if result["initial_pigment_weights"] is not None and (
         result["initial_pattern"] not in ("scattered", "engaged") or result["deposition"] != 0
@@ -484,6 +491,7 @@ class Engine:
                 pass
 
             def __init__(gpu):
+                gpu.interaction = None
                 try:
                     super().__init__(source, recipe, backend)
                     with gpu.ctx:
@@ -600,10 +608,33 @@ class Engine:
                         )
                         gpu._snapshot_texture = None
                         gpu._initialize_paint()
+                        if settings.get("interaction") is not None:
+                            from .interaction import GPUInteraction
+
+                            gpu.interaction = GPUInteraction(
+                                gpu.ctx,
+                                (gpu.width, gpu.height),
+                                gpu.aspect,
+                                gpu.domain,
+                                palette["seed"],
+                                settings["interaction"],
+                                settings["lower_transport_scale"],
+                            )
+                            gpu.interaction.initialize(
+                                tuple(block[0] for block in gpu.blocks),
+                                tuple(block[0] for block in gpu.underpaints),
+                            )
                 except Exception:
                     if getattr(gpu, "ctx", None) is not None:
                         gpu.close()
                     raise
+
+            def close(gpu):
+                if getattr(gpu, "ctx", None) is not None and gpu.interaction is not None:
+                    with gpu.ctx:
+                        gpu.interaction.close()
+                    gpu.interaction = None
+                super().close()
 
             def _flow(gpu, fraction):
                 # The base transport retains its exact old shader and arithmetic
@@ -749,6 +780,15 @@ class Engine:
 
             def _transport(gpu, t0, t1):
                 dt = t1 - t0
+                if gpu.interaction is not None:
+                    # Transport history with OLD layer amounts, before any paint
+                    # ping-pong buffers or local exchanges replace those inputs.
+                    gpu.interaction.transport(
+                        tuple(block[0] for block in gpu.blocks),
+                        tuple(block[0] for block in gpu.underpaints),
+                        gpu.velocity,
+                        dt,
+                    )
                 a, b = source.frame(t0), source.frame(t1)
                 segments = np.concatenate([a.positions, b.positions], axis=1).astype("f4")
                 travel = np.maximum(0, b.arc_lengths - a.arc_lengths)
@@ -803,6 +843,14 @@ class Engine:
                     gpu._interdiffuse(dt)
                 if gpu.laminate_exchange is not None:
                     gpu._exchange_layers(dt)
+                if gpu.interaction is not None:
+                    gpu.interaction.update(
+                        tuple(block[0] for block in gpu.blocks),
+                        tuple(block[0] for block in gpu.underpaints),
+                        gpu.carrier[0],
+                        gpu.velocity,
+                        dt,
+                    )
                 gpu.paint = gpu.blocks[0]
                 gpu.internal_steps += 1
                 if gpu.internal_steps > MAX_INTERNAL_STEPS:
@@ -1057,6 +1105,8 @@ class Engine:
                     "roughness": roughness,
                     "coverage": -np.expm1(-total * 3),
                 }
+                if gpu.interaction is not None:
+                    result.update(gpu.interaction.snapshot(lambda t: gpu._read(t, factor)))
                 if any(not np.isfinite(v).all() for v in result.values()):
                     raise FloatingPointError("Nonfinite Confluence material state")
                 return {
@@ -1097,6 +1147,34 @@ class Engine:
                 "model": "analytic curl of pair-aligned Gaussian quadrupoles",
                 "source": "signed conditioned pair extension over real three-dimensional distance",
                 "limits": "prescribed incompressible flow; not a fluid pressure solver",
+            }
+        if settings.get("interaction") is not None:
+            from .interaction import VERSION as INTERACTION_VERSION
+
+            self.metadata["interaction"] = {
+                "version": INTERACTION_VERSION,
+                "seed": palette["seed"],
+                "config": copy.deepcopy(settings["interaction"]),
+                "state": (
+                    "per-layer transported material origin, contact dose, "
+                    "axial fabric and aggregate fraction"
+                ),
+                "transport": (
+                    "limited mass-weighted MacCormack attribute reconstruction; "
+                    "no feedback on baseline pigment transport"
+                    if settings["interaction"].get("advection") == "maccormack"
+                    else "positive mass-weighted characteristic interpolation; "
+                    "no feedback on baseline pigment transport"
+                ),
+                "aggregation": (
+                    "authored unresolved dispersed/aggregate partition of existing pigment; "
+                    "not discrete particles"
+                ),
+                "geometry": "original pigment amounts, height and outer silhouette retained",
+                "diagnostic_reduction": (
+                    "area averages of intensive history descriptors; "
+                    "qualified rendering uses native fields"
+                ),
             }
         if layout is not None:
             self.metadata["initial_layout"] = copy.deepcopy(layout)
@@ -1225,6 +1303,17 @@ class Engine:
             raise RuntimeError("The Estuary context has been closed")
         from .gpu_frame import GPUFrame
 
+        interaction = self._gpu.interaction
+        history = (
+            {}
+            if interaction is None
+            else {
+                "origin_upper": interaction.origins[0],
+                "origin_lower": interaction.origins[1],
+                "interaction_upper": interaction.states[0],
+                "interaction_lower": interaction.states[1],
+            }
+        )
         return GPUFrame.capture(
             owner=self,
             context=self._gpu.ctx,
@@ -1241,6 +1330,7 @@ class Engine:
             height_scale_mm=self.config["height_scale_mm"],
             substrate_um=self.config["substrate_um"],
             material_model=self.config["material_model"],
+            **history,
         )
 
     def close(self):

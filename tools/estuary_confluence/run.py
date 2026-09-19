@@ -35,7 +35,14 @@ from tools.estuary_studio.run import dimensions, frame_plan, number, record_arra
 
 ROOT = Path(__file__).resolve().parent
 PACKAGES = ("estuary", "estuary_depth", "estuary_studio", "estuary_confluence")
-LABELS = {"layered": "Layered confluence", "homogeneous": "Blended comparison"}
+LABELS = {
+    "layered": "Layered confluence",
+    "homogeneous": "Blended comparison",
+    "control": "Original surface",
+    "silk": "Silk at the seams",
+    "silk-grain": "Silk and mineral grain",
+}
+INTERACTION_LOOKS = frozenset({"control", "silk", "silk-grain"})
 DEFAULT_RENDER = {
     "resolution": [1920, 1440],
     "still_resolution": [3840, 2880],
@@ -81,6 +88,7 @@ def verify_code(folder, code):
 def validate_recipe(raw):
     from tools.estuary_confluence.engine import reduction_factor
     from tools.estuary_confluence.engine import validate_config as simulation_config
+    from tools.estuary_confluence.surface import interaction_enabled
     from tools.estuary_confluence.surface import validate_config as surface_config
 
     require(
@@ -121,7 +129,7 @@ def validate_recipe(raw):
     looks = raw.get("looks", ["layered"])
     require(
         type(looks) is list
-        and 1 <= len(looks) <= 2
+        and 1 <= len(looks) <= len(LABELS)
         and all(type(x) is str and x in LABELS for x in looks)
         and len(set(looks)) == len(looks),
         "Choose distinct known optical views",
@@ -141,6 +149,12 @@ def validate_recipe(raw):
     )
     surface["domain_scale"] = simulation["domain_scale"]
     surface = surface_config(surface)
+    require_interaction_looks(looks, simulation, surface)
+    require_interaction_geometry(simulation, surface)
+    require(
+        not interaction_enabled(surface) or simulation.get("interaction") is not None,
+        "Interaction optics require transported interaction material",
+    )
     require(surface["tone_map"] == "reinhard", "Display output needs bounded tone mapping")
     projection = {"fill": 0.78, "rotation_degrees": 0.0}
     supplied = raw.get("projection", {})
@@ -158,13 +172,21 @@ def validate_recipe(raw):
     sw, sh = simulation["resolution"]
     if render["capture_resolution"] is None:
         capture = [sw, sh]
-        while capture[0] > 2048 and all(n % 2 == 0 for n in capture):
+        while (
+            simulation.get("interaction") is None
+            and capture[0] > 2048
+            and all(n % 2 == 0 for n in capture)
+        ):
             capture = [n // 2 for n in capture]
         render["capture_resolution"] = capture
     for key in ("resolution", "still_resolution", "capture_resolution"):
         w, h = dimensions(render[key])
         require(w * sh == h * sw, "Image and material aspects must match")
     reduction_factor((sw, sh), tuple(render["capture_resolution"]))
+    require(
+        simulation.get("interaction") is None or render["capture_resolution"] == [sw, sh],
+        "Interaction capture requires the full native material grid",
+    )
     require(render["capture_pipeline"] in ("cpu", "native-gpu"), "Unknown capture pipeline")
     require(
         render["capture_pipeline"] != "native-gpu" or render["capture_resolution"] == [sw, sh],
@@ -283,6 +305,10 @@ def capture_metadata(recipe):
         pipeline != "native-gpu" or capture == native,
         "Native GPU capture requires the full simulation grid",
     )
+    require(
+        recipe["simulation"].get("interaction") is None or capture == native,
+        "Interaction capture requires the full native material grid",
+    )
     factor = render.get("frame_supersampling", 1)
     result = {
         "schema_version": 1,
@@ -308,6 +334,19 @@ def capture_metadata(recipe):
     }
     if "capture_pipeline" in render:
         result["capture_pipeline"] = pipeline
+    if recipe["simulation"].get("interaction") is not None:
+        from tools.estuary_confluence.interaction import FIELD_NAMES, VERSION
+
+        result["interaction_material"] = {
+            "version": VERSION,
+            "fields": sorted(FIELD_NAMES),
+            "capture": (
+                "borrowed native textures from the same canonical material step"
+                if pipeline == "native-gpu"
+                else "read-only snapshots from the same canonical material step"
+            ),
+            "camera": "reuse the final material; no interaction update during hold or orbit",
+        }
     return result
 
 
@@ -318,15 +357,69 @@ def capture_frame(engine, render):
     return engine.snapshot(resolution=tuple(render["capture_resolution"]))
 
 
-def surface_configs(recipe):
-    return {
-        look: dict(
-            recipe["surface"],
-            mode=look,
-            mix_control=0.0 if look == "homogeneous" else recipe["surface"]["mix_control"],
+def require_interaction_looks(looks, simulation, surface):
+    """Named material comparisons need an explicit, reproducible optical recipe."""
+    if INTERACTION_LOOKS.intersection(looks):
+        require(
+            simulation.get("interaction") is not None,
+            "Interaction views require transported interaction material",
         )
-        for look in recipe["looks"]
-    }
+        require(
+            surface.get("interaction") is not None,
+            "Interaction views require explicit surface.interaction strengths",
+        )
+
+
+def require_interaction_geometry(simulation, surface):
+    """Packing redistributes paint height, never the independent substrate."""
+    controls = surface.get("interaction") or {}
+    require(
+        controls.get("packing_strength", 0) == 0 or simulation["substrate_um"] == 0,
+        "Packing relief requires zero simulation.substrate_um",
+    )
+    if controls.get("packing_strength", 0) > 0:
+        from tools.estuary_confluence.packing import packing_plan
+
+        # Validate the coupled scale/grid limit before an expensive simulation,
+        # rather than discovering an unsupported plan during its final still.
+        packing_plan(
+            tuple(simulation["resolution"]),
+            surface["canvas_width_m"] * surface["domain_scale"],
+            controls["packing_length_um"],
+        )
+
+
+def surface_configs(recipe):
+    """Resolve optical views while sharing one unchanged physical history.
+
+    The three interaction comparisons vary only material appearance strengths.
+    Their layered pigment optics use the same mixing control. Legacy view
+    dictionaries retain their earlier resolution exactly.
+    """
+    require_interaction_looks(recipe["looks"], recipe["simulation"], recipe["surface"])
+    configs = {}
+    for look in recipe["looks"]:
+        if look in INTERACTION_LOOKS:
+            controls = copy.deepcopy(recipe["surface"]["interaction"])
+            if look == "control":
+                controls["silk_strength"] = 0.0
+            if look != "silk-grain":
+                controls["grain_strength"] = 0.0
+                if "packing_strength" in controls:
+                    controls["packing_strength"] = 0.0
+            configs[look] = {
+                **recipe["surface"],
+                "mode": "layered",
+                "mix_control": 1.0,
+                "interaction": controls,
+            }
+        else:
+            configs[look] = dict(
+                recipe["surface"],
+                mode=look,
+                mix_control=0.0 if look == "homogeneous" else recipe["surface"]["mix_control"],
+            )
+    return configs
 
 
 def resolved_layout(recipe, seed, source=None):
@@ -435,9 +528,88 @@ def field_digest(fields):
     return sha.hexdigest()
 
 
+def interaction_metadata(recipe, seed):
+    """Bind an opt-in material extension without changing legacy request identity."""
+    from tools.estuary_confluence.interaction import BASE_FIELDS, VERSION, validate_config
+    from tools.estuary_confluence.palette import normalize_seed
+
+    supplied = recipe["simulation"].get("interaction")
+    settings = validate_config(supplied)
+    if settings is None:
+        from tools.estuary_confluence.surface import interaction_enabled
+
+        require(
+            not interaction_enabled(recipe["surface"]),
+            "Interaction optics require transported interaction material",
+        )
+        return None
+    require(supplied == settings, "Interaction settings must be normalized")
+    from tools.estuary_confluence.engine import validate_config as simulation_config
+    from tools.estuary_confluence.surface import validate_config as surface_config
+
+    require(
+        recipe["simulation"] == simulation_config(recipe["simulation"]),
+        "Interaction simulation settings must be normalized",
+    )
+    require(
+        recipe["surface"] == surface_config(recipe["surface"]),
+        "Interaction surface settings must be normalized",
+    )
+    require_interaction_geometry(recipe["simulation"], recipe["surface"])
+    return {
+        "version": VERSION,
+        "seed": normalize_seed(seed),
+        "settings": settings,
+        "resolution": list(recipe["simulation"]["resolution"]),
+        "dtype": "float32",
+        "initialization": {
+            "origins": "initial simulation world coordinates",
+            "contact_fabric_aggregate": "zero",
+        },
+        "fields": {
+            "origin_upper": ["origin_x", "origin_y"],
+            "origin_lower": ["origin_x", "origin_y"],
+            "interaction_upper": ["contact", "fabric_x", "fabric_y", "aggregate"],
+            "interaction_lower": ["contact", "fabric_x", "fabric_y", "aggregate"],
+        },
+        "base_material_fields": sorted(BASE_FIELDS),
+    }
+
+
+def validate_archived_material(fields, recipe):
+    """Require the declared native material, including optional transported history.
+
+    Optical validation checks array values without rewriting them. The archive
+    binds the raw state returned by the engine, rather than a display projection.
+    """
+    from tools.estuary_confluence.interaction import BASE_FIELDS, FIELD_NAMES
+    from tools.estuary_confluence.surface import validate_fields
+
+    enabled = recipe["simulation"].get("interaction") is not None
+    expected = set(BASE_FIELDS) | (set(FIELD_NAMES) if enabled else set())
+    require(set(fields) == expected, "Archived material fields differ from interaction settings")
+    validate_fields(fields, recipe["chromatic_count"] + 1)
+    if enabled:
+        width, height = recipe["simulation"]["resolution"]
+        require(
+            fields["height"].shape == (height, width),
+            "Interaction archive requires the full native material grid",
+        )
+
+
+def base_material_digest(fields):
+    """Identity of the original ten fields, excluding new material history.
+
+    Equal base hashes demonstrate unchanged pigment and geometry inputs. They
+    do not establish equality of the complete microstructured material.
+    """
+    from tools.estuary_confluence.interaction import BASE_FIELDS
+
+    return field_digest({key: fields[key] for key in BASE_FIELDS})
+
+
 def verify_run(folder):
     from tools.estuary_confluence.palette import generate_palette, normalize_seed
-    from tools.estuary_confluence.surface import validate_fields
 
     folder = Path(folder)
     request, receipt = read(folder / "request.json"), read(folder / "receipt.json")
@@ -566,6 +738,19 @@ def verify_run(folder):
         request["surface_configs"] == surface_configs(request["recipe"]),
         "Optical views differ from their recipe",
     )
+    interaction = interaction_metadata(request["recipe"], request["source"]["seed"])
+    if interaction is None:
+        require(
+            "interaction" not in request
+            and "interaction" not in receipt
+            and "base_material_sha256" not in receipt,
+            "Disabled interaction cannot advertise microstructured material",
+        )
+    else:
+        require(
+            request.get("interaction") == interaction and receipt.get("interaction") == interaction,
+            "Interaction version, seed, settings or field contract differs",
+        )
     require(set(receipt["looks"]) == set(request["recipe"]["looks"]), "View selection differs")
     ledger = read(folder / "frame-ledger.json")
     require(len(ledger) == len(request["frames"]), "Frame ledger length differs")
@@ -588,9 +773,14 @@ def verify_run(folder):
                 )
     with np.load(folder / "final.npz", allow_pickle=False) as archive:
         final = {key: archive[key] for key in archive.files}
-    validate_fields(final, request["recipe"]["chromatic_count"] + 1)
+    validate_archived_material(final, request["recipe"])
     actual_state = field_digest(final)
     require(actual_state == receipt["physical_state_sha256"], "Physical state identity differs")
+    if interaction is not None:
+        require(
+            receipt.get("base_material_sha256") == base_material_digest(final),
+            "Base material identity differs",
+        )
     if request["recipe"]["simulation"].get("mass_budget_interval_steps", 0):
         from tools.estuary_confluence.mass_budget import validate_report
 
@@ -655,7 +845,7 @@ def run(args):
     from tools.estuary_confluence.engine import Engine
     from tools.estuary_confluence.events import plan_events
     from tools.estuary_confluence.palette import generate_palette
-    from tools.estuary_confluence.surface import Surface, validate_fields
+    from tools.estuary_confluence.surface import Surface
 
     recipe = read(args.recipe)
     for arg, key in (
@@ -672,6 +862,7 @@ def run(args):
     code = runtime_identity()
     sw, sh = recipe["simulation"]["resolution"]
     source = Source.read(args.source, aspect=sw / sh, **recipe["projection"])
+    interaction = interaction_metadata(recipe, source.seed)
     palette = generate_palette(source.seed, recipe["chromatic_count"], mode=recipe["palette_mode"])
     background = None
     if "background" in recipe:
@@ -732,6 +923,8 @@ def run(args):
             }
             if background is not None:
                 request["background"] = background
+            if interaction is not None:
+                request["interaction"] = interaction
             identity = hashlib.sha256(encoded(request)).hexdigest()
             if (output / "request.json").exists():
                 require(
@@ -856,7 +1049,7 @@ def run(args):
             if not frames:
                 advance(recipe["simulation"]["steps"])
             final = engine.snapshot()
-            validate_fields(final, recipe["chromatic_count"] + 1)
+            validate_archived_material(final, recipe)
             if recipe["simulation"].get("mass_budget_interval_steps", 0):
                 from tools.estuary_confluence.mass_budget import validate_report
 
@@ -940,6 +1133,14 @@ def run(args):
                     "final_step": engine.step,
                     "solver_diagnostics": getattr(engine, "diagnostics", None),
                     "physical_state_sha256": final_identity,
+                    **(
+                        {
+                            "interaction": interaction,
+                            "base_material_sha256": base_material_digest(final),
+                        }
+                        if interaction is not None
+                        else {}
+                    ),
                     "looks": results,
                     "seconds": time.monotonic() - started,
                     "artifacts": artifacts,

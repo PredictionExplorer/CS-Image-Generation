@@ -179,6 +179,11 @@ def execute_plan(output, plan, *, workers=2):
             request["recipe"] == expected_recipe, "Rendered recipe differs from the frozen plan"
         )
         require(request["mode"] == case["mode"], "Rendered output mode differs")
+        if case.get("accepted_base_material_sha256") is not None:
+            require(
+                receipt.get("base_material_sha256") == case["accepted_base_material_sha256"],
+                "Interaction experiment changed the accepted base painting",
+            )
         require(request["source"]["sha256"] == case["source_sha256"], "Rendered recording differs")
         require(
             receipt["source_fraction"] == 1 and receipt["complete"], "Incomplete source traversal"

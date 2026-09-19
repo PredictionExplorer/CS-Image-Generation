@@ -7,6 +7,10 @@ uniform sampler2D u_carrier,u_tooth;
 uniform float u_specific_volumes[PIGMENT_COUNT];
 uniform float u_height_scale_mm,u_substrate_height_m;
 uniform int u_chalk_index,u_material_model;
+#ifdef INTERACTION_CAPTURE
+uniform sampler2D u_origin_upper,u_origin_lower,u_interaction_upper,u_interaction_lower;
+layout(rgba32f,binding=4) writeonly uniform image2DArray interaction_output;
+#endif
 layout(rgba32f,binding=0) writeonly uniform image2DArray phase_output;
 layout(rgba32f,binding=1) writeonly uniform image2D geometry_output;
 layout(rg32f,binding=2) writeonly uniform image2D direction_output;
@@ -19,11 +23,30 @@ float coverage(float x){
     if(x<.01)return x*(1.+x*(-.5+x*(1./6.+x*(-1./24.+x/120.))));
     return 1.-exp(-x);
 }
+#ifdef INTERACTION_CAPTURE
+bool valid_origin(vec4 value){
+    return !any(isnan(value))&&!any(isinf(value))
+        &&all(lessThanEqual(abs(value.xy),vec2(1e6)))&&all(equal(value.zw,vec2(0)));
+}
+bool valid_interaction(vec4 value){
+    return !any(isnan(value))&&!any(isinf(value))
+        &&value.x>=0.&&value.x<=1.&&value.w>=0.&&value.w<=1.
+        &&length(value.yz)<=value.x+1e-5;
+}
+#endif
 void main(){
     ivec2 p=ivec2(gl_GlobalInvocationID.xy),size=imageSize(geometry_output);
     uint local=gl_LocalInvocationIndex;
     uint invalid=0u,encoded_height=0u;
     if(all(lessThan(p,size))){
+#ifdef INTERACTION_CAPTURE
+        vec4 origin_upper=texelFetch(u_origin_upper,p,0),origin_lower=texelFetch(u_origin_lower,p,0);
+        vec4 history_upper=texelFetch(u_interaction_upper,p,0),history_lower=texelFetch(u_interaction_lower,p,0);
+        if(!valid_origin(origin_upper)||!valid_origin(origin_lower)
+          ||!valid_interaction(history_upper)||!valid_interaction(history_lower))invalid=1u;
+        imageStore(interaction_output,ivec3(p,0),history_upper);
+        imageStore(interaction_output,ivec3(p,1),history_lower);
+#endif
         float density[3*PIGMENT_COUNT];
         for(int phase=0;phase<3;++phase){
             for(int group=0;group<GROUPS;++group){

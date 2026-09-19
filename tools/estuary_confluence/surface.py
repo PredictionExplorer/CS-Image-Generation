@@ -16,6 +16,11 @@ The opt-in glazed finish retains that silhouette with bounded actual interior
 optical thickness. Higher-mass banks carry most relief; wet upper-layer coverage
 and pigment scattering control restrained sheen. These are authored material
 interpretations, not a three-dimensional fluid.
+
+Height scaling is an explicit appearance interpretation (0..100), not additional
+simulated paint. The actual scaled extent still must fit within 15% of the
+visible canvas width and the guarded camera volume. Optional packing conserves
+this displayed native-grid volume, rather than the unchanged archived geometry.
 """
 
 from __future__ import annotations
@@ -31,7 +36,11 @@ from tools.estuary.optics import srgb_to_linear
 from tools.estuary_studio.surface import _number, camera_basis
 
 from .gpu_frame import GPUFrame
+from .interaction import BASE_FIELDS, FIELD_NAMES
+from .interaction import VERSION as INTERACTION_VERSION
 from .optics import palette_coefficients
+from .packing import DEFAULT_LENGTH_UM, FILM_FRACTION, LENGTH_BOUNDS_UM, PackingRelief
+from .packing import VERSION as PACKING_VERSION
 from .palette import SUPPORTED_CHROMATIC_COUNTS
 
 ROOT = Path(__file__).parent
@@ -67,14 +76,55 @@ GLAZE_DEFAULTS = {
     "glaze_max_mass_ratio": 2.5,
     "glaze_relief_strength": 0.8,
 }
+INTERACTION_DEFAULTS = {"silk_strength": 0.65, "grain_strength": 0.45}
+PACKING_DEFAULTS = {"packing_strength": 0.0, "packing_length_um": DEFAULT_LENGTH_UM}
+
+
+def interaction_enabled(config):
+    """Zero appearance strengths compile the original rendering path unchanged."""
+    controls = config.get("interaction")
+    return controls is not None and any(
+        controls.get(name, 0) for name in ("silk_strength", "grain_strength", "packing_strength")
+    )
 
 
 def validate_config(value=None):
     value = {} if value is None else value
-    if type(value) is not dict or set(value) - (set(DEFAULTS) | set(GLAZE_DEFAULTS)):
+    if type(value) is not dict or set(value) - (
+        set(DEFAULTS) | set(GLAZE_DEFAULTS) | {"interaction"}
+    ):
         raise ValueError("Surface config must contain only known controls")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
+    if result.get("interaction") is not None:
+        controls = result["interaction"]
+        if type(controls) is not dict or set(controls) - (
+            set(INTERACTION_DEFAULTS) | set(PACKING_DEFAULTS) | {"grain_contrast"}
+        ):
+            raise ValueError(
+                "Surface interaction must contain only silk, grain and packing controls"
+            )
+        result["interaction"] = {
+            name: _number(controls.get(name, default), f"interaction.{name}", 0, 1)
+            for name, default in INTERACTION_DEFAULTS.items()
+        }
+        if "grain_contrast" in controls:
+            result["interaction"]["grain_contrast"] = _number(
+                controls["grain_contrast"], "interaction.grain_contrast", 1, 8
+            )
+        if set(controls) & set(PACKING_DEFAULTS):
+            result["interaction"].update(
+                {
+                    "packing_strength": _number(
+                        controls.get("packing_strength", 0), "interaction.packing_strength", 0, 1
+                    ),
+                    "packing_length_um": _number(
+                        controls.get("packing_length_um", DEFAULT_LENGTH_UM),
+                        "interaction.packing_length_um",
+                        *LENGTH_BOUNDS_UM,
+                    ),
+                }
+            )
     # Do not add controls to old archived surface dictionaries.
     if result["finish"] == "glazed":
         result = {**GLAZE_DEFAULTS, **result}
@@ -96,7 +146,7 @@ def validate_config(value=None):
         "mix_control": (0, 1),
         "canvas_width_m": (0.05, 4),
         "domain_scale": (1.25, 3),
-        "height_scale": (0, 10),
+        "height_scale": (0, 100),
         "exposure": (0.01, 16),
         "ambient": (0, 4),
         "key_strength": (0, 8),
@@ -125,20 +175,12 @@ def validate_config(value=None):
 
 
 def validate_fields(fields, pigment_count=None):
-    names = {
-        "pigment",
-        "mobile",
-        "deposit",
-        "underpaint",
-        "height",
-        "wetness",
-        "mixing",
-        "direction",
-        "roughness",
-        "coverage",
-    }
-    if type(fields) is not dict or set(fields) != names:
-        raise ValueError(f"Surface fields must contain exactly {sorted(names)}")
+    names = set(BASE_FIELDS)
+    if type(fields) is not dict or set(fields) not in (names, names | set(FIELD_NAMES)):
+        raise ValueError(
+            "Surface fields require the base material and either all or no interaction fields"
+        )
+    has_interaction = set(FIELD_NAMES).issubset(fields)
     pigment = fields["pigment"]
     if (
         not isinstance(pigment, np.ndarray)
@@ -191,6 +233,31 @@ def validate_fields(fields, pigment_count=None):
         atol=1e-7,
     ):
         raise ValueError("pigment must equal the sum of the three real phases")
+    if has_interaction:
+        for name in FIELD_NAMES:
+            array = fields[name]
+            shape = (h, w, 2 if name.startswith("origin_") else 4)
+            if (
+                not isinstance(array, np.ndarray)
+                or array.dtype != np.float32
+                or array.shape != shape
+            ):
+                raise ValueError(f"{name} must be float32 with shape {shape}")
+            if not np.isfinite(array).all():
+                raise ValueError(f"{name} must be finite")
+            if name.startswith("origin_"):
+                if np.any(np.abs(array) > 1e6):
+                    raise ValueError(f"{name} exceeds the supported coordinate bounds")
+            elif (
+                np.any(array[..., (0, 3)] < 0)
+                or np.any(array[..., (0, 3)] > 1)
+                or np.any(np.abs(array[..., 1:3]) > 1.00001)
+                or np.any(np.linalg.norm(array[..., 1:3], axis=-1) > array[..., 0] + 1e-5)
+            ):
+                raise ValueError(
+                    f"{name} must have bounded contact, fabric and aggregate fractions"
+                )
+            arrays[name] = np.ascontiguousarray(array)
     return arrays
 
 
@@ -214,6 +281,9 @@ class Surface:
         import moderngl
 
         self.config = validate_config(config)
+        self._interaction_enabled = interaction_enabled(self.config)
+        self._packing_strength = (self.config.get("interaction") or {}).get("packing_strength", 0)
+        self._grain_contrast = (self.config.get("interaction") or {}).get("grain_contrast", 1)
         self.palette = copy.deepcopy(palette)
         self._ratios, self._scattering, self._substrate = palette_coefficients(self.palette)
         self._pigment_count = len(self._scattering)
@@ -246,6 +316,9 @@ class Surface:
         self._phase_texture = self._mix_texture = self._optics_program = None
         self._target = self._framebuffer = self._vao = self._quad = self._program = None
         self._grid_size = self._target_size = None
+        self._interaction_texture = None
+        self._packing_relief = None
+        self._gpu_pack_interaction = None
         self._scaled_max_height = None
         try:
             with self.ctx:
@@ -267,7 +340,12 @@ class Surface:
                         "read-only live phase textures copied to Surface-owned staging; "
                         "GPU geometry and "
                         "existing pigment optics; optional GPU 2x2 linear display-RGB filtering; "
-                        "only an 8-byte validation summary and final image return to CPU"
+                        + (
+                            "only 12 bytes of validation/height-bound summaries and final image "
+                            "return to CPU"
+                            if self._packing_strength > 0
+                            else "only an 8-byte validation summary and final image return to CPU"
+                        )
                     )
                     if not self._owns_context
                     else None,
@@ -337,13 +415,67 @@ class Surface:
                         "preserving pigment and phase fractions; concentration-selected relief "
                         "and wet upper-layer sheen; no change to archived material fields"
                     )
+                if self._interaction_enabled:
+                    self.metadata["interaction"] = {
+                        "version": INTERACTION_VERSION,
+                        "silk": "bounded GGX anisotropy and roughness from frozen material fabric",
+                        "grain": (
+                            "aggregate-fraction microfacet roughness and white-albedo EON "
+                            "rough-diffuse angular redistribution; unresolved optical granulation"
+                        ),
+                        "limits": (
+                            "no added pigment or procedural marks; optional packing "
+                            "redistributes displayed height without adding native-grid volume; "
+                            "no measured-particle claim"
+                        ),
+                        "capture": (
+                            "Surface-owned copy; camera movement does not evolve material history"
+                        ),
+                    }
+                if self._packing_strength > 0:
+                    self.metadata["packing"] = {
+                        "version": PACKING_VERSION,
+                        "film_fraction": FILM_FRACTION,
+                        "volume": "redistributed displayed paint thickness; zero substrate only",
+                        "solver": (
+                            "28 bounded multiscale pair relaxations plus preparation/finalization"
+                        ),
+                        "limits": (
+                            "finite packing equilibrium; no solvent clock or pigment transport"
+                        ),
+                        "memory_bytes_per_native_pixel": 12,
+                        "maximum_coupling_cells": 16,
+                        "source_material_unchanged": True,
+                    }
+                if self._interaction_enabled and self._grain_contrast > 1:
+                    self.metadata["interaction"]["grain_response"] = {
+                        "formula": "g^c / (g^c + (1-g)^c)",
+                        "contrast": self._grain_contrast,
+                        "scope": (
+                            "authored percolation-inspired optics; no particle-connectivity model"
+                        ),
+                        "raw_aggregate_and_packing_unchanged": True,
+                    }
                 self._program = self.ctx.program(
                     vertex_shader=(ROOT / "shaders/surface.vert.glsl").read_text(),
                     fragment_shader=(ROOT / "shaders/surface.frag.glsl")
                     .read_text()
                     .replace(
+                        "// INTERACTION_SCATTERING",
+                        (ROOT / "shaders/scattering.glsl").read_text()
+                        if self._interaction_enabled
+                        else "",
+                    )
+                    .replace(
                         "#version 430 core",
-                        f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
+                        f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}"
+                        + ("\n#define INTERACTION_SURFACE" if self._interaction_enabled else "")
+                        + (
+                            "\n#define GRAIN_CONTRAST"
+                            if self._interaction_enabled and self._grain_contrast > 1
+                            else ""
+                        )
+                        + ("\n#define PACKING_SURFACE" if self._packing_strength > 0 else ""),
                         1,
                     ),
                 )
@@ -371,6 +503,14 @@ class Surface:
 
     def _bind_config(self):
         c, p = self.config, self._program
+        if self._interaction_enabled:
+            p["u_interaction"].value = 5
+            p["u_silk_strength"].value = c["interaction"]["silk_strength"]
+            p["u_grain_strength"].value = c["interaction"]["grain_strength"]
+        if self._packing_strength > 0:
+            p["u_packing"].value = 6
+        if self._interaction_enabled and self._grain_contrast > 1:
+            p["u_grain_contrast"].value = self._grain_contrast
         p["u_substrate"].value = tuple(self._substrate)
         crisp = int(c["finish"] in ("crisp", "glazed"))
         glazed = int(c["finish"] == "glazed")
@@ -462,6 +602,8 @@ class Surface:
             scaled_max = self._scaled_max_height
         else:
             arrays = validate_fields(fields, self._pigment_count)
+            if self._interaction_enabled and "interaction_upper" not in arrays:
+                raise ValueError("Interaction appearance requires archived material history")
             grid_height, grid_width = arrays["height"].shape
             scaled_max = float(arrays["height"].max()) * self.config["height_scale"]
         if (
@@ -478,23 +620,12 @@ class Surface:
         basis = camera_basis(tilt_degrees, azimuth_degrees)
         if max(width, height, grid_width, grid_height) > self.ctx.info["GL_MAX_TEXTURE_SIZE"]:
             raise ValueError("Texture dimensions exceed GPU limits")
-        if scaled_max > self.config["canvas_width_m"] * 0.15:
-            raise ValueError("Scaled relief must remain below 15% of visible canvas width")
         visible_width = self.config["canvas_width_m"]
         visible_size = (visible_width, visible_width * height / width)
         full_size = np.asarray(visible_size) * self.config["domain_scale"]
-        # The picture must fill the view at every legal height. Reject a camera
-        # that could expose a guard-band boundary instead of inventing a border.
-        for x in (-visible_size[0] / 2, visible_size[0] / 2):
-            for y in (-visible_size[1] / 2, visible_size[1] / 2):
-                origin = basis[:, 0] * x + basis[:, 1] * y
-                for z in (0, scaled_max):
-                    point = origin + basis[:, 2] * ((z - origin[2]) / basis[2, 2])
-                    if np.any(np.abs(point[:2]) > full_size / 2):
-                        raise ValueError(
-                            "Camera leaves the guarded painting; reduce tilt or relief"
-                        )
+        self._validate_extent(scaled_max, basis, visible_size, full_size)
         if arrays is not None:
+            self._scaled_max_height = None
             self._ensure_grid(grid_width, grid_height)
             geometry = np.empty((grid_height, grid_width, 4), dtype="f4")
             geometry[..., 0], geometry[..., 1] = arrays["height"], arrays["wetness"]
@@ -502,11 +633,25 @@ class Surface:
             self._textures[1].write(geometry)
             self._textures[2].write(arrays["direction"])
             self._upload_optics(arrays, grid_width, grid_height)
+            if self._interaction_enabled:
+                self._ensure_interaction_grid()
+                self._interaction_texture.write(
+                    np.stack((arrays["interaction_upper"], arrays["interaction_lower"]))
+                )
+            self._prepare_packing()
+            if self._packing_strength > 0:
+                scaled_max = float(arrays["height"].max()) * self.config["height_scale"]
+                scaled_max *= 1 + self._packing_relief.maximum_relative_height
+                self._validate_extent(scaled_max, basis, visible_size, full_size)
             self._scaled_max_height = scaled_max
         for unit, texture in enumerate(self._textures):
             texture.use(unit)
-        if self.config["finish"] == "glazed":
+        if self.config["finish"] == "glazed" or self._interaction_enabled:
             self._phase_texture.use(3)
+        if self._interaction_enabled:
+            self._interaction_texture.use(5)
+        if self._packing_strength > 0:
+            self._packing_relief.relative_height.use(6)
         if self._target_size != tuple(size):
             if self._framebuffer is not None:
                 self._framebuffer.release()
@@ -538,6 +683,21 @@ class Surface:
             raise FloatingPointError("Surface rendering produced nonfinite or negative radiance")
         return result
 
+    def _validate_extent(self, scaled_max, basis, visible_size, full_size):
+        if scaled_max > self.config["canvas_width_m"] * 0.15:
+            raise ValueError("Scaled relief must remain below 15% of visible canvas width")
+        # The picture must fill the view at every legal height. Reject a camera
+        # that could expose a guard-band boundary instead of inventing a border.
+        for x in (-visible_size[0] / 2, visible_size[0] / 2):
+            for y in (-visible_size[1] / 2, visible_size[1] / 2):
+                origin = basis[:, 0] * x + basis[:, 1] * y
+                for z in (0, scaled_max):
+                    point = origin + basis[:, 2] * ((z - origin[2]) / basis[2, 2])
+                    if np.any(np.abs(point[:2]) > full_size / 2):
+                        raise ValueError(
+                            "Camera leaves the guarded painting; reduce tilt or relief"
+                        )
+
     def _ensure_grid(self, grid_width, grid_height):
         import moderngl
 
@@ -545,6 +705,9 @@ class Surface:
             return
         for texture in self._textures:
             texture.release()
+        if self._interaction_texture is not None:
+            self._interaction_texture.release()
+            self._interaction_texture = None
         self._textures = [
             self.ctx.texture((grid_width, grid_height), n, dtype="f4") for n in (4, 4, 2)
         ]
@@ -563,26 +726,57 @@ class Surface:
         self._mix_texture = self.ctx.texture((grid_width, grid_height), 1, dtype="f4")
         self._grid_size = (grid_width, grid_height)
 
+    def _ensure_interaction_grid(self):
+        import moderngl
+
+        if self._interaction_texture is None:
+            self._interaction_texture = self.ctx.texture_array((*self._grid_size, 2), 4, dtype="f4")
+            self._interaction_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self._interaction_texture.repeat_x = self._interaction_texture.repeat_y = False
+
+    def _prepare_packing(self):
+        if self._packing_strength <= 0:
+            return
+        if self._packing_relief is None:
+            self._packing_relief = PackingRelief(self.ctx, self._pigment_count)
+        self._packing_relief.prepare(
+            self._textures[1],
+            self._textures[0],
+            self._phase_texture,
+            self._interaction_texture,
+            self.config,
+        )
+
     def _prepare_gpu_frame(self, frame):
         frame.validate()
         if frame.context is not self.ctx or frame._owner() is not self._borrowed_frame._owner():
             raise ValueError("GPU frame belongs to a different borrowed simulation context")
         if frame.pigment_count != self._pigment_count:
             raise ValueError("GPU frame and palette have different pigment counts")
+        if self._interaction_enabled and not frame.has_interaction:
+            raise ValueError("Interaction appearance requires native material history")
+        if self._packing_strength > 0 and frame.substrate_um != 0:
+            raise ValueError("Packing relief requires a zero-height substrate")
+        self._scaled_max_height = None
         width, height = frame.size
         self._ensure_grid(width, height)
-        if self._gpu_pack is None:
+        if self._gpu_pack is None or self._gpu_pack_interaction != frame.has_interaction:
+            if self._gpu_pack is not None:
+                self._gpu_pack.release()
             source = (
                 (ROOT / "shaders/gpu-frame.comp.glsl")
                 .read_text()
                 .replace(
                     "#version 430 core",
-                    f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}",
+                    f"#version 430 core\n#define PIGMENT_COUNT {self._pigment_count}"
+                    + ("\n#define INTERACTION_CAPTURE" if frame.has_interaction else ""),
                     1,
                 )
             )
             self._gpu_pack = self.ctx.compute_shader(source)
-            self._gpu_summary = self.ctx.buffer(reserve=8)
+            self._gpu_pack_interaction = frame.has_interaction
+            if self._gpu_summary is None:
+                self._gpu_summary = self.ctx.buffer(reserve=8)
         phases = (*frame.underpaint, *frame.deposit, *frame.mobile)
         for unit, texture in enumerate(phases):
             texture.use(unit)
@@ -592,6 +786,13 @@ class Surface:
         frame.tooth.use(len(phases) + 1)
         program["u_carrier"].value = len(phases)
         program["u_tooth"].value = len(phases) + 1
+        if frame.has_interaction:
+            self._ensure_interaction_grid()
+            for offset, name in enumerate(FIELD_NAMES, start=2):
+                unit = len(phases) + offset
+                getattr(frame, name).use(unit)
+                program["u_" + name].value = unit
+            self._interaction_texture.bind_to_image(4, read=False, write=True)
         program["u_specific_volumes"].write(
             np.asarray(frame.specific_volumes, dtype="f4").tobytes()
         )
@@ -613,13 +814,17 @@ class Surface:
             raise FloatingPointError(
                 "Native GPU material fields are nonfinite or outside supported bounds"
             )
-        self._scaled_max_height = float(summary[:1].view("f4")[0]) * self.config["height_scale"]
+        scaled_max = float(summary[:1].view("f4")[0]) * self.config["height_scale"]
         self._phase_texture.use(3)
         self._mix_texture.use(4)
         self._textures[0].bind_to_image(0, read=False, write=True)
         self._optics_program.run((width + 15) // 16, (height + 15) // 16)
         self.ctx.memory_barrier()
+        self._prepare_packing()
+        if self._packing_strength > 0:
+            scaled_max *= 1 + self._packing_relief.maximum_relative_height
         frame.validate()
+        self._scaled_max_height = scaled_max
 
     @_current
     def render_gpu(
@@ -719,6 +924,7 @@ class Surface:
             self._program,
             self._phase_texture,
             self._mix_texture,
+            self._interaction_texture,
             self._optics_program,
             self._gpu_pack,
             self._gpu_summary,
@@ -733,12 +939,16 @@ class Surface:
                 for resource in resources:
                     if resource is not None:
                         resource.release()
+                if self._packing_relief is not None:
+                    self._packing_relief.close()
         if self._owns_context:
             self.ctx.release()
         self.ctx = None
         self._textures = []
         self._framebuffer = self._target = self._vao = self._quad = self._program = None
         self._phase_texture = self._mix_texture = self._optics_program = None
+        self._interaction_texture = None
+        self._packing_relief = None
         self._gpu_pack = self._gpu_summary = self._gpu_reduce = self._gpu_reduced = None
 
     def __enter__(self):

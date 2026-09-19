@@ -200,6 +200,150 @@ setImmediate(async()=>{
                 )
         return cases
 
+    def interaction_case(self, looks=None):
+        """Complete interaction provenance over the lightweight publication fixture."""
+        from .engine import validate_config as simulation_config
+        from .run import interaction_metadata, surface_configs
+        from .surface import validate_config as optical_config
+
+        case = self.case(
+            looks=["control", "silk", "silk-grain"] if looks is None else looks,
+            recipe_name="Contact texture comparison",
+            scattered=True,
+        )
+        request, receipt = self.verified_case(case)
+        recipe = request["recipe"]
+        recipe["simulation"] = simulation_config(
+            {
+                **recipe["simulation"],
+                "material_model": "laminate",
+                "settling_scale": 0,
+                "underpaint_strength": 0,
+                "underpaint_release": 0,
+                "burial_rate": 0,
+                "interaction": {},
+            }
+        )
+        recipe["surface"] = optical_config({"interaction": {}})
+        request["surface_configs"] = surface_configs(recipe)
+        request["interaction"] = interaction_metadata(recipe, request["source"]["seed"])
+        receipt["interaction"] = copy.deepcopy(request["interaction"])
+        receipt["base_material_sha256"] = hashlib.sha256(b"unchanged base material").hexdigest()
+        receipt["identity_sha256"] = hashlib.sha256(encoded(request)).hexdigest()
+        write(case / "request.json", request)
+        write(case / "receipt.json", receipt)
+        return case
+
+    def test_interaction_triplet_publishes_matched_views_and_portable_material_identities(self):
+        case = self.interaction_case()
+        gallery.build_gallery(self.output, [case], layout="studies")
+        collection, _ = gallery.verify_gallery(self.output)
+        by_group = {study["group"]: study for study in collection["studies"]}
+        self.assertEqual(set(by_group), {"control", "silk", "silk-grain"})
+        request, receipt = self.verified_case(case)
+        for group, target in (
+            ("control", "silk-grain"),
+            ("silk", "control"),
+            ("silk-grain", "control"),
+        ):
+            study, reference = by_group[group], by_group[target]
+            self.assertEqual(study["comparison_id"], reference["id"])
+            self.assertEqual(study["baseline"], reference["image"])
+            self.assertEqual(study["case_id"], reference["case_id"])
+            self.assertEqual(study["physical_state_sha256"], reference["physical_state_sha256"])
+            self.assertEqual(study["base_material_sha256"], receipt["base_material_sha256"])
+            self.assertEqual(study["interaction_version"], request["interaction"]["version"])
+            self.assertEqual(
+                study["comparison_caption"], f"{gallery.GROUPS[target]} · same material history"
+            )
+        shutil.rmtree(case)
+        # Neither raw simulation arrays nor the original case directory are
+        # required to retain the published provenance association.
+        gallery.verify_gallery(self.output)
+
+    def test_interaction_control_falls_back_to_silk_without_inventing_missing_comparisons(self):
+        case = self.interaction_case(["control", "silk"])
+        gallery.build_gallery(self.output, [case], layout="studies")
+        collection, _ = gallery.verify_gallery(self.output)
+        control, silk = collection["studies"]
+        self.assertEqual(control["comparison_id"], silk["id"])
+        self.assertEqual(silk["comparison_id"], control["id"])
+        isolated = copy.deepcopy(silk)
+        self.assertEqual(
+            gallery._experiment_comparisons([isolated])[isolated["id"]], (None, None, None)
+        )
+        changed = copy.deepcopy(silk)
+        changed["physical_state_sha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "different physical states"):
+            gallery._experiment_comparisons([control, changed])
+
+    def test_interaction_looks_require_studies_layout_for_publication(self):
+        case = self.interaction_case()
+        for layout in ("classic", "films"):
+            with self.subTest(layout=layout), self.assertRaisesRegex(ValueError, "studies gallery"):
+                gallery.build_gallery(self.output, [case], layout=layout)
+        self.assertFalse(self.output.exists())
+
+    def test_portable_interaction_collection_cannot_drop_its_required_layout(self):
+        gallery.build_gallery(self.output, [self.interaction_case()], layout="studies")
+        collection = read(self.output / "collection.json")
+        collection.pop("layout")
+        self.rehash_collection(collection)
+        curation = read(self.output / "curation.json")
+        curation.pop("layout")
+        write(self.output / "curation.json", curation)
+        with self.assertRaisesRegex(ValueError, "studies gallery"):
+            gallery.verify_gallery(self.output)
+
+    def test_rehashed_published_interaction_claims_remain_bound_to_portable_receipt(self):
+        gallery.build_gallery(self.output, [self.interaction_case()], layout="studies")
+        original = read(self.output / "collection.json")
+        for key, value in (
+            ("interaction_version", "invented-v1"),
+            ("base_material_sha256", "f" * 64),
+        ):
+            with self.subTest(field=key, changed=True):
+                changed = copy.deepcopy(original)
+                changed["studies"][0][key] = value
+                self.rehash_collection(changed)
+                with self.assertRaisesRegex(ValueError, "metadata differs"):
+                    gallery.verify_gallery(self.output)
+            with self.subTest(field=key, missing=True):
+                changed = copy.deepcopy(original)
+                changed["studies"][0].pop(key)
+                self.rehash_collection(changed)
+                with self.assertRaisesRegex(ValueError, "missing published interaction"):
+                    gallery.verify_gallery(self.output)
+
+    def test_rehashed_portable_receipt_cannot_change_interaction_seed_or_version(self):
+        gallery.build_gallery(self.output, [self.interaction_case()], layout="studies")
+        curation = read(self.output / "curation.json")
+        record = curation["sources"][0]["receipt"]
+        original = read(self.output / record)
+        for key, value in (("seed", "0x1"), ("version", "invented-v1")):
+            with self.subTest(key=key):
+                changed = copy.deepcopy(original)
+                changed["interaction"][key] = value
+                write(self.output / record, changed)
+                curation["artifacts"][record] = artifact(self.output / record)
+                write(self.output / "curation.json", curation)
+                with self.assertRaisesRegex(ValueError, "Published interaction version, seed"):
+                    gallery.verify_gallery(self.output)
+
+    def test_disabled_publication_cannot_advertise_interaction_material(self):
+        gallery.build_gallery(self.output, [self.case()], layout="studies")
+        collection = read(self.output / "collection.json")
+        self.assertTrue(
+            all(
+                not gallery.INTERACTION_PUBLIC_FIELDS.intersection(study)
+                for study in collection["studies"]
+            )
+        )
+        collection["studies"][0]["interaction_version"] = "contact-microstructure-v1"
+        self.rehash_collection(collection)
+        with self.assertRaisesRegex(ValueError, "Unbound or missing published interaction"):
+            gallery.verify_gallery(self.output)
+
     def test_named_experiments_retain_collections_and_only_compare_the_same_case(self):
         gallery.build_gallery(self.output, self.experiment_cases(), layout="studies")
         collection, curation = gallery.verify_gallery(self.output)

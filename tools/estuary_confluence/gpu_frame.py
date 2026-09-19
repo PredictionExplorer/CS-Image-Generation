@@ -32,6 +32,10 @@ class GPUFrame:
     chalk_index: int
     _owner: weakref.ReferenceType
     material_model: str = "legacy"
+    origin_upper: Any = None
+    origin_lower: Any = None
+    interaction_upper: Any = None
+    interaction_lower: Any = None
 
     @classmethod
     def capture(
@@ -52,6 +56,10 @@ class GPUFrame:
         substrate_um,
         chalk_index=None,
         material_model="legacy",
+        origin_upper=None,
+        origin_lower=None,
+        interaction_upper=None,
+        interaction_lower=None,
     ):
         frame = cls(
             context,
@@ -69,6 +77,10 @@ class GPUFrame:
             pigment_count - 1 if chalk_index is None else chalk_index,
             weakref.ref(owner),
             material_model,
+            origin_upper,
+            origin_lower,
+            interaction_upper,
+            interaction_lower,
         )
         frame.validate()
         return frame
@@ -76,6 +88,11 @@ class GPUFrame:
     @property
     def step(self):
         return self.token[0]
+
+    @property
+    def has_interaction(self):
+        """Whether this view carries the atomic material-history extension."""
+        return self.interaction_upper is not None
 
     def owner_alive(self):
         owner = self._owner()
@@ -115,6 +132,23 @@ class GPUFrame:
                 or texture.dtype != "f4"
             ):
                 raise ValueError("Native material views require matching RGBA32F textures")
+        extension = (
+            self.origin_upper,
+            self.origin_lower,
+            self.interaction_upper,
+            self.interaction_lower,
+        )
+        if any(texture is not None for texture in extension):
+            if any(texture is None for texture in extension) or self.material_model != "laminate":
+                raise ValueError("Interaction material views require all four laminate fields")
+            for texture in extension:
+                if (
+                    texture.ctx is not self.context
+                    or texture.size != self.size
+                    or texture.components != 4
+                    or texture.dtype != "f4"
+                ):
+                    raise ValueError("Interaction material views require matching RGBA32F textures")
         if (
             self.material_model not in ("legacy", "laminate")
             or type(self.chalk_index) is not int

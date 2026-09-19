@@ -423,6 +423,19 @@ mode, optical view, and source recording. Its label identifies the earlier
 version; it does not imply identical physical history or layout. The copied
 earlier image and design records remain available inside the new gallery.
 
+## Texture from paint encounters
+
+The optional [interaction material](INTERACTION_TEXTURES.md) records contact,
+deformation-aligned fabric, and aggregation while the paint moves. Named optical
+views compare the original finish, satin seams, and contact grain on the same
+complete history. All random material variation derives from the archived seed.
+The preserved Color & Form release remains the control for composition and
+pigment transport.
+
+Use `python -m tools.estuary_confluence.interaction_studies --help` for matched
+native-grid experiments. The guide explains the numerical model, controls,
+archive contract, limitations, and validation requirements.
+
 ## Validation
 
 ```sh

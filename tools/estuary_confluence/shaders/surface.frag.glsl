@@ -15,11 +15,29 @@ uniform float u_roughness_scale, u_roughness_bias;
 uniform float u_grain_height, u_grain_scale, u_shadow_strength, u_occlusion_strength, u_exposure;
 uniform int u_tone_map, u_crisp, u_glazed;
 uniform float u_mass_threshold, u_mass_reference, u_glaze_relief_strength;
+#ifdef PACKING_SURFACE
+uniform sampler2D u_packing;
+#endif
+#ifdef INTERACTION_SURFACE
+uniform sampler2DArray u_interaction; // Surface-owned upper/lower frozen histories
+uniform float u_silk_strength, u_grain_strength;
+#ifdef GRAIN_CONTRAST
+uniform float u_grain_contrast;
+#endif
+// INTERACTION_SCATTERING
+#endif
 const float PI = 3.141592653589793;
 const int GROUPS = (PIGMENT_COUNT + 3) / 4;
 
 vec2 field_uv(vec2 p) { return p / u_full_size + 0.5; }
 bool inside(vec2 uv) { return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))); }
+#ifdef PACKING_SURFACE
+float packed_height(float legacy_height,vec2 uv){
+    return legacy_height*(1.0+textureLod(u_packing,uv,0.0).r);
+}
+#else
+float packed_height(float legacy_height,vec2 uv){return legacy_height;}
+#endif
 float surface_height(vec2 p) {
     vec2 uv = field_uv(p);
     if (!inside(uv)) return 0.0;
@@ -30,9 +48,9 @@ float surface_height(vec2 p) {
         // This is a bounded appearance transform; the archived height is intact.
         float bank=smoothstep(0.6,2.2,ratio);
         float scale=mix(1.0,bank,u_glaze_relief_strength);
-        return textureLod(u_geometry,uv,0.0).r*u_height_scale*scale;
+        return packed_height(textureLod(u_geometry,uv,0.0).r*u_height_scale*scale,uv);
     }
-    return textureLod(u_geometry, uv, 0.0).r * u_height_scale;
+    return packed_height(textureLod(u_geometry, uv, 0.0).r * u_height_scale,uv);
 }
 
 void upper_material(vec2 uv, float total_mass, out float share, out float porosity) {
@@ -51,6 +69,25 @@ void upper_material(vec2 uv, float total_mass, out float share, out float porosi
     float strength=scatter/max(upper_mass,1e-20);
     porosity=strength/(1.0+strength);
 }
+
+#ifdef INTERACTION_SURFACE
+vec4 material_interaction(vec2 uv) {
+    float upper=0.0, lower=0.0;
+    for (int group=0;group<GROUPS;++group) {
+        vec4 a=textureLod(u_phases,vec3(uv,2*GROUPS+group),0.0);
+        vec4 b=textureLod(u_phases,vec3(uv,group),0.0);
+        for (int j=0;j<4;++j) if (4*group+j<PIGMENT_COUNT) {
+            upper+=a[j]; lower+=b[j];
+        }
+    }
+    // Material fractions control which history is visible. Empty support never
+    // acquires an interaction response, including at interpolated boundaries.
+    float total=upper+lower;
+    if(total<=1e-20)return vec4(0);
+    return (textureLod(u_interaction,vec3(uv,0),0.0)*upper
+           +textureLod(u_interaction,vec3(uv,1),0.0)*lower)/total;
+}
+#endif
 
 vec3 hit_surface(vec3 origin, vec3 view) {
     // A frontal camera hits the exact pixel column; tilted views march through
@@ -139,11 +176,19 @@ float lambda_ggx(vec3 w, vec3 n, vec3 t, vec3 b, vec2 alpha) {
     float x = dot(w, t) * alpha.x, y = dot(w, b) * alpha.y;
     return (sqrt(1.0 + (x*x + y*y)/(wz*wz)) - 1.0) * 0.5;
 }
-vec3 light_brdf(vec3 n, vec3 t, vec3 b, vec3 v, vec3 l, vec3 color, float roughness, float coherence, float paint_presence) {
+vec3 light_brdf(vec3 n, vec3 t, vec3 b, vec3 v, vec3 l, vec3 color, float roughness, float coherence, float paint_presence
+#ifdef INTERACTION_SURFACE
+    ,float diffuse_roughness
+#endif
+) {
     float nl = max(dot(n, l), 0.0), nv = max(dot(n, v), 1e-5);
     if (nl <= 0.0) return vec3(0);
     vec3 h = normalize(v + l);
+#ifdef INTERACTION_SURFACE
+    float ratio = sqrt(1.0 - 0.9 * coherence);
+#else
     float ratio = sqrt(1.0 - 0.9 * u_anisotropy * coherence);
+#endif
     float alpha = max(roughness * roughness, 0.0064);
     vec2 a = vec2(alpha / ratio, alpha * ratio);
     float ht = dot(h, t)/a.x, hb = dot(h, b)/a.y, hn = max(dot(h, n), 0.0);
@@ -155,6 +200,16 @@ vec3 light_brdf(vec3 n, vec3 t, vec3 b, vec3 v, vec3 l, vec3 color, float roughn
     if (u_glazed==1) f0=mix(0.012,0.028,paint_presence);
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
     float specular = distribution * geometry * fresnel / max(4.0 * nv * nl, 1e-5);
+#ifdef INTERACTION_SURFACE
+    if(diffuse_roughness>0.0) {
+        // Only angular redistribution changes. White EON retains the existing
+        // pigment reflectance's directional-hemispherical diffuse integral.
+        float true_nv=max(dot(n,v),0.0);
+        float tangent_dot=dot(l-n*nl,v-n*true_nv);
+        float angular=white_eon(nl,true_nv,tangent_dot,diffuse_roughness);
+        return ((1.0-fresnel)*color/PI*angular+vec3(specular))*nl*PI;
+    }
+#endif
     // Lambertian paint reflectance plus energy-reduced dielectric interface.
     return ((1.0 - fresnel) * color / PI + vec3(specular)) * nl * PI;
 }
@@ -180,6 +235,23 @@ void main() {
     vec2 axial = textureLod(u_finish, uv, 0.0).xy;
     float coherence = clamp(length(axial), 0.0, 1.0);
     float angle = coherence > 1e-6 ? atan(axial.y, axial.x) * 0.5 : 0.0;
+#ifdef INTERACTION_SURFACE
+    vec4 history=material_interaction(uv);
+    float fabric=clamp(length(history.yz),0.0,1.0);
+    float silk=u_silk_strength*fabric;
+#ifdef GRAIN_CONTRAST
+    float aggregate=u_grain_strength*aggregate_response(clamp(history.w,0.0,1.0),u_grain_contrast);
+#else
+    float aggregate=u_grain_strength*clamp(history.w,0.0,1.0);
+#endif
+    coherence*=u_anisotropy;
+    if(silk>1e-6) {
+        // No velocity, hue or procedural noise: the nematic tensor stores a
+        // material-space axis. Camera motion merely reveals that frozen axis.
+        angle=0.5*atan(history.z,history.y);
+        coherence=mix(coherence,0.9,silk);
+    }
+#endif
     vec3 n = normal_at(point, material.a);
     vec3 raw_t = vec3(cos(angle), sin(angle), 0.0);
     vec3 t = normalize(raw_t - n * dot(raw_t, n));
@@ -205,6 +277,14 @@ void main() {
         paint_presence=coating;
         color*=mix(1.0,0.96,material.g*upper_share);
     } else color *= mix(1.0, 0.91, material.g);
+#ifdef INTERACTION_SURFACE
+    // These are bounded surface-scattering interpretations of recorded fabric
+    // and aggregation. No pigment coefficient, mass, height or normal changes.
+    // Grain disrupts the smooth satin interface; its variation is exclusively
+    // the transported aggregate fraction, never a screen-space texture.
+    roughness=mix(roughness,max(0.2,roughness*0.55),silk);
+    roughness=mix(roughness,max(roughness,0.88),aggregate);
+#endif
     float ao = occlusion(point);
     vec3 radiance = color * u_ambient * ao * (0.65 + 0.35 * max(n.z, 0.0));
     vec3 key_t = normalize(cross(vec3(0, 0, 1), u_key_direction + vec3(1e-6, 0, 0)));
@@ -215,10 +295,18 @@ void main() {
         vec2 offset = i == 0 ? vec2(0) : i == 1 ? vec2(-0.16,0) : i == 2 ? vec2(0.16,0)
                     : i == 3 ? vec2(0,-0.1) : vec2(0,0.1);
         vec3 light = normalize(u_key_direction + key_t * offset.x + key_b * offset.y);
-        radiance += light_brdf(n,t,b,u_camera_view,light,color,roughness,coherence,paint_presence) * u_key_strength * visibility / 5.0;
+        radiance += light_brdf(n,t,b,u_camera_view,light,color,roughness,coherence,paint_presence
+#ifdef INTERACTION_SURFACE
+            ,aggregate
+#endif
+        ) * u_key_strength * visibility / 5.0;
     }
     vec3 fill = normalize(vec3(-u_key_direction.xy, 0.8));
-    radiance += light_brdf(n,t,b,u_camera_view,fill,color,roughness,coherence,paint_presence) * u_fill_strength * ao;
+    radiance += light_brdf(n,t,b,u_camera_view,fill,color,roughness,coherence,paint_presence
+#ifdef INTERACTION_SURFACE
+        ,aggregate
+#endif
+    ) * u_fill_strength * ao;
     radiance = max(radiance * u_exposure, vec3(0));
     if (u_tone_map == 1) {
         float luminance = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
