@@ -619,7 +619,7 @@
         <span
           >Every film spans the complete recorded trajectory. The finished
           painting remains fixed during the final camera movement.</span
-        ><a href="http://127.0.0.1:8789/">Previous collection</a>
+        ><a href="http://127.0.0.1:8796/films/">Saved Color &amp; Form collection</a>
       </footer>
     </main>
     <script>
@@ -636,7 +636,15 @@
         previousOverflow = "";
       const shortSeed = (seed) =>
         seed.replace(/^0x/i, "").slice(0, 8).toUpperCase();
+      const interactionFinish = {
+        control: "Control finish",
+        silk: "Satin seams",
+        "silk-grain": "Contact finish",
+      };
       const version = (study) =>
+        (study.interaction_version && interactionFinish[study.group]
+          ? interactionFinish[study.group] + " · " + study.experiment_label
+          : null) ||
         study.collection_label ||
         (study.material_model === "laminate"
           ? "Layered painting"
