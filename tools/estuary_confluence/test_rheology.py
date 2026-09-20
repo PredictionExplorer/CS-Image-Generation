@@ -198,7 +198,7 @@ class RheologyTests(unittest.TestCase):
         self.assertGreater(float(stiff[8, 9]), float(soft[8, 9]) + 0.5)
 
 
-@unittest.skipUnless(os.environ.get("ESTUARY_GPU_TESTS") == "1", "GPU qualification is opt-in")
+@unittest.skipUnless(os.environ.get("ESTUARY_TEST_GPU") == "1", "GPU qualification is opt-in")
 class RheologyGPUTests(unittest.TestCase):
     def engine(self, **overrides):
         engine = Engine(
