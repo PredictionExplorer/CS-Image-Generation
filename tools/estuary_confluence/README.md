@@ -4,6 +4,12 @@ Seeded pigment, selective deposition, and revealed underpainting driven by the
 complete recorded three-body trajectory. This experiment extends Tidal Fresco
 without changing the earlier Estuary, depth, or studio packages.
 
+## Paint material experiments
+
+See [PAINT_MATERIALS.md](PAINT_MATERIALS.md) for fuller relief, directional contact
+structure, transported seeded properties, and paint resistance with memory. These
+opt-in studies preserve RC1 as the all-three-body reference.
+
 ## Color and shape experiments
 
 See [COLOR_SHAPE_STUDIES.md](COLOR_SHAPE_STUDIES.md) for one-, two-, three-, and

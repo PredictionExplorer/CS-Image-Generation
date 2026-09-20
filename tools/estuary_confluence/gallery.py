@@ -23,7 +23,13 @@ from tools.estuary_studio.common import artifact, checked, encoded, read, requir
 from tools.estuary_studio.gallery import FILM_CAPTION, _copy_verified, _json_artifact
 
 from .palette import SUPPORTED_CHROMATIC_COUNTS, normalize_seed
-from .run import INTERACTION_LOOKS, interaction_metadata, surface_configs, verify_run
+from .run import (
+    INTERACTION_LOOKS,
+    interaction_metadata,
+    rheology_metadata,
+    surface_configs,
+    verify_run,
+)
 
 EARLIER_CAPTION = "Earlier version · same trajectory"
 PUBLICATION_VERSION = 2
@@ -36,6 +42,7 @@ GROUPS = {
     "silk-grain": "Satin + grain",
 }
 INTERACTION_PUBLIC_FIELDS = frozenset({"interaction_version", "base_material_sha256"})
+RHEOLOGY_PUBLIC_FIELDS = frozenset({"rheology_version"})
 BODY_MARKER_PUBLIC_FIELDS = frozenset({"body_markers", "body_marker_record"})
 TEMPLATE = Path(__file__).with_suffix(".html")
 TITLE_TOKEN = "__CONFLUENCE_TITLE_HTML__"
@@ -111,6 +118,7 @@ def _study_metadata(request, receipt, look):
     if "material_model" in recipe["simulation"]:
         metadata["material_model"] = recipe["simulation"]["material_model"]
     metadata.update(_interaction_metadata(request, receipt))
+    metadata.update(_rheology_metadata(request, receipt))
     metadata.update(_body_marker_metadata(request, receipt))
     return metadata
 
@@ -148,6 +156,21 @@ def _interaction_metadata(request, receipt):
         "Published interaction needs its original-material identity",
     )
     return {"interaction_version": expected["version"], "base_material_sha256": base_hash}
+
+
+def _rheology_metadata(request, receipt):
+    expected = rheology_metadata(request["recipe"])
+    if expected is None:
+        require(
+            "rheology" not in request and "rheology" not in receipt,
+            "Disabled rheology cannot publish structural material",
+        )
+        return {}
+    require(
+        request.get("rheology") == expected and receipt.get("rheology") == expected,
+        "Published rheology differs from its material and response plan",
+    )
+    return {"rheology_version": expected["version"]}
 
 
 def _body_marker_metadata(request, receipt):
@@ -971,6 +994,11 @@ def verify_gallery(output):
                 INTERACTION_PUBLIC_FIELDS.intersection(study)
                 == INTERACTION_PUBLIC_FIELDS.intersection(metadata),
                 "Unbound or missing published interaction metadata",
+            )
+            require(
+                RHEOLOGY_PUBLIC_FIELDS.intersection(study)
+                == RHEOLOGY_PUBLIC_FIELDS.intersection(metadata),
+                "Unbound or missing published rheology metadata",
             )
             experiment_metadata = _experiment_metadata(request, look) if layout == "studies" else {}
             if layout == "studies":

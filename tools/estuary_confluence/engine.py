@@ -75,7 +75,7 @@ DEFAULTS = {
 def validate_config(value):
     """Resolve a bounded, flat configuration before allocating GPU resources."""
     if type(value) is not dict or set(value) - (
-        set(DEFAULTS) | {"interaction", "initial_composition", "body_influence"}
+        set(DEFAULTS) | {"interaction", "initial_composition", "body_influence", "rheology"}
     ):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
@@ -205,6 +205,15 @@ def validate_config(value):
         if result["material_model"] != "laminate":
             raise ValueError("Interaction history requires source-free laminate paint")
         result["interaction"] = interaction_config(interaction)
+    from .rheology import response_plan
+    from .rheology import validate_config as rheology_config
+
+    rheology = rheology_config(result.pop("rheology", None))
+    if rheology is not None:
+        if result["material_model"] != "laminate":
+            raise ValueError("Rheology requires source-free laminate paint")
+        response_plan(result["resolution"], result["domain_scale"], rheology)
+        result["rheology"] = rheology
     result["initial_pigment_weights"] = validate_initial_weights(result["initial_pigment_weights"])
     if result["initial_pigment_weights"] is not None and (
         result["initial_pattern"] not in ("scattered", "engaged") or result["deposition"] != 0
@@ -489,6 +498,8 @@ class Engine:
         )
 
         influence = settings.get("body_influence")
+        from .rheology import initialization_config as rheology_initialization
+
         self.palette = copy.deepcopy(palette)
         self.events = events = validate_events(events)
         validate_event_eligibility(events, influence)
@@ -525,7 +536,7 @@ class Engine:
                 from .participation_layout import plan_engaged_layout
 
                 self.layout = layout = plan_engaged_layout(
-                    source, count - 1, initialization_config(settings)
+                    source, count - 1, rheology_initialization(initialization_config(settings))
                 )
             else:
                 self.layout = layout = plan_layout(
@@ -565,6 +576,7 @@ class Engine:
 
             def __init__(gpu):
                 gpu.interaction = None
+                gpu.rheology = None
                 try:
                     super().__init__(source, recipe, backend)
                     with gpu.ctx:
@@ -697,12 +709,32 @@ class Engine:
                                 tuple(block[0] for block in gpu.blocks),
                                 tuple(block[0] for block in gpu.underpaints),
                             )
+                        if settings.get("rheology") is not None:
+                            from .rheology import GPURheology
+
+                            gpu.rheology = GPURheology(
+                                gpu.ctx,
+                                (gpu.width, gpu.height),
+                                gpu.aspect,
+                                gpu.domain,
+                                settings["rheology"],
+                                settings,
+                                settings["lower_transport_scale"],
+                            )
+                            gpu.rheology.initialize(
+                                tuple(block[0] for block in gpu.blocks),
+                                tuple(block[0] for block in gpu.underpaints),
+                            )
                 except Exception:
                     if getattr(gpu, "ctx", None) is not None:
                         gpu.close()
                     raise
 
             def close(gpu):
+                if getattr(gpu, "ctx", None) is not None and gpu.rheology is not None:
+                    with gpu.ctx:
+                        gpu.rheology.close()
+                    gpu.rheology = None
                 if getattr(gpu, "ctx", None) is not None and gpu.interaction is not None:
                     with gpu.ctx:
                         gpu.interaction.close()
@@ -718,7 +750,38 @@ class Engine:
 
                     strains = pair_strain_uniforms(source.frame(fraction), settings["stir_radius"])
                     gpu.flow["u_strains"].write(strains.tobytes())
-                return super()._flow(fraction)
+                if gpu.rheology is None:
+                    return super()._flow(fraction)
+                # Preserve the exact analytic source field in an owned scratch
+                # texture. Only the response's discrete curl is subtracted.
+                target = gpu.velocity
+                gpu.velocity = gpu.rheology.source_velocity
+                try:
+                    super()._flow(fraction)
+                finally:
+                    gpu.velocity = target
+                tools, pairs, strains = forcing_uniforms(
+                    source.frame(fraction),
+                    settings["stir_radius"],
+                    influence,
+                    include_strain=True,
+                )
+                coupling = {}
+                if gpu.rheology.trait_amplitude is not None:
+                    coupling = {
+                        "traits": gpu.interaction.traits,
+                        "contact": gpu.interaction.states,
+                    }
+                return gpu.rheology.apply(
+                    tuple(block[0] for block in gpu.blocks),
+                    tuple(block[0] for block in gpu.underpaints),
+                    tools,
+                    pairs,
+                    strains,
+                    target,
+                    gpu.maxima,
+                    **coupling,
+                )
 
             def _flow_uniforms(gpu, frame):
                 if influence is None:
@@ -884,6 +947,13 @@ class Engine:
 
             def _transport(gpu, t0, t1):
                 dt = t1 - t0
+                if gpu.rheology is not None:
+                    gpu.rheology.transport(
+                        tuple(block[0] for block in gpu.blocks),
+                        tuple(block[0] for block in gpu.underpaints),
+                        gpu.velocity,
+                        dt,
+                    )
                 if gpu.interaction is not None:
                     # Transport history with OLD layer amounts, before any paint
                     # ping-pong buffers or local exchanges replace those inputs.
@@ -953,6 +1023,14 @@ class Engine:
                     gpu._exchange_layers(dt)
                 if gpu.interaction is not None:
                     gpu.interaction.update(
+                        tuple(block[0] for block in gpu.blocks),
+                        tuple(block[0] for block in gpu.underpaints),
+                        gpu.carrier[0],
+                        gpu.velocity,
+                        dt,
+                    )
+                if gpu.rheology is not None:
+                    gpu.rheology.update(
                         tuple(block[0] for block in gpu.blocks),
                         tuple(block[0] for block in gpu.underpaints),
                         gpu.carrier[0],
@@ -1215,6 +1293,8 @@ class Engine:
                 }
                 if gpu.interaction is not None:
                     result.update(gpu.interaction.snapshot(lambda t: gpu._read(t, factor)))
+                if gpu.rheology is not None:
+                    result.update(gpu.rheology.snapshot(lambda t: gpu._read(t, factor)))
                 if any(not np.isfinite(v).all() for v in result.values()):
                     raise FloatingPointError("Nonfinite Confluence material state")
                 return {
@@ -1357,6 +1437,21 @@ class Engine:
                 "compact stream-function support inside the unchanged simulation guard; "
                 "velocity and normal transport vanish at the active boundary"
             )
+        if settings.get("rheology") is not None:
+            self.metadata["rheology"] = {
+                "version": self._gpu.rheology.config["version"],
+                "response_plan": copy.deepcopy(self._gpu.rheology.plan),
+                "model": "authored 2D structural resistance; not a pressure or 3D fluid solver",
+                "kinetics": "exact frozen-rate recovery/drying/shear-breakdown reaction",
+                "transport": (
+                    "positive actual-pigment-mass weighted layer history; "
+                    "not locally conservative pigment transport"
+                ),
+                "time": (
+                    "history changes only on accepted physical substeps; "
+                    "flow retries and captures are read-only"
+                ),
+            }
         if settings["diffusion_coefficient"] > 0:
             self.metadata["interdiffusion"] = {
                 "model": "symmetric pigment-fraction exchange at fixed local film amount",
@@ -1447,6 +1542,13 @@ class Engine:
                 "interaction_lower": interaction.states[1],
             }
         )
+        if interaction is not None and interaction.traits is not None:
+            history.update(trait_upper=interaction.traits[0], trait_lower=interaction.traits[1])
+        if self._gpu.rheology is not None:
+            history.update(
+                structure_upper=self._gpu.rheology.states[0],
+                structure_lower=self._gpu.rheology.states[1],
+            )
         return GPUFrame.capture(
             owner=self,
             context=self._gpu.ctx,

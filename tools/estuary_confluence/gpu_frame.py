@@ -36,6 +36,10 @@ class GPUFrame:
     origin_lower: Any = None
     interaction_upper: Any = None
     interaction_lower: Any = None
+    trait_upper: Any = None
+    trait_lower: Any = None
+    structure_upper: Any = None
+    structure_lower: Any = None
 
     @classmethod
     def capture(
@@ -60,6 +64,10 @@ class GPUFrame:
         origin_lower=None,
         interaction_upper=None,
         interaction_lower=None,
+        trait_upper=None,
+        trait_lower=None,
+        structure_upper=None,
+        structure_lower=None,
     ):
         frame = cls(
             context,
@@ -81,6 +89,10 @@ class GPUFrame:
             origin_lower,
             interaction_upper,
             interaction_lower,
+            trait_upper,
+            trait_lower,
+            structure_upper,
+            structure_lower,
         )
         frame.validate()
         return frame
@@ -149,6 +161,24 @@ class GPUFrame:
                     or texture.dtype != "f4"
                 ):
                     raise ValueError("Interaction material views require matching RGBA32F textures")
+        for label, pair in (
+            ("traits", (self.trait_upper, self.trait_lower)),
+            ("structure", (self.structure_upper, self.structure_lower)),
+        ):
+            if not any(texture is not None for texture in pair):
+                continue
+            if any(texture is None for texture in pair) or self.material_model != "laminate":
+                raise ValueError(f"Material {label} require both laminate fields")
+            if label == "traits" and not self.has_interaction:
+                raise ValueError("Material traits require transported interaction history")
+            for texture in pair:
+                if (
+                    texture.ctx is not self.context
+                    or texture.size != self.size
+                    or texture.components != 4
+                    or texture.dtype != "f4"
+                ):
+                    raise ValueError(f"Material {label} require matching RGBA32F textures")
         if (
             self.material_model not in ("legacy", "laminate")
             or type(self.chalk_index) is not int

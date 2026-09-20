@@ -39,7 +39,13 @@ from .gpu_frame import GPUFrame
 from .interaction import BASE_FIELDS, FIELD_NAMES
 from .interaction import VERSION as INTERACTION_VERSION
 from .optics import palette_coefficients
-from .packing import DEFAULT_LENGTH_UM, FILM_FRACTION, LENGTH_BOUNDS_UM, PackingRelief
+from .packing import (
+    DEFAULT_LENGTH_UM,
+    FILM_FRACTION,
+    LENGTH_BOUNDS_UM,
+    PackingRelief,
+    validate_directional,
+)
 from .packing import VERSION as PACKING_VERSION
 from .palette import SUPPORTED_CHROMATIC_COUNTS
 
@@ -99,7 +105,9 @@ def validate_config(value=None):
     if result.get("interaction") is not None:
         controls = result["interaction"]
         if type(controls) is not dict or set(controls) - (
-            set(INTERACTION_DEFAULTS) | set(PACKING_DEFAULTS) | {"grain_contrast"}
+            set(INTERACTION_DEFAULTS)
+            | set(PACKING_DEFAULTS)
+            | {"grain_contrast", "directional_relief"}
         ):
             raise ValueError(
                 "Surface interaction must contain only silk, grain and packing controls"
@@ -125,6 +133,11 @@ def validate_config(value=None):
                     ),
                 }
             )
+        directional = validate_directional(controls.get("directional_relief"))
+        if directional is not None:
+            if result["interaction"].get("packing_strength", 0) <= 0:
+                raise ValueError("Directional relief requires positive packing_strength")
+            result["interaction"]["directional_relief"] = directional
     # Do not add controls to old archived surface dictionaries.
     if result["finish"] == "glazed":
         result = {**GLAZE_DEFAULTS, **result}
@@ -176,9 +189,21 @@ def validate_config(value=None):
 
 def validate_fields(fields, pigment_count=None):
     names = set(BASE_FIELDS)
-    if type(fields) is not dict or set(fields) not in (names, names | set(FIELD_NAMES)):
+    extensions = (
+        set(FIELD_NAMES),
+        {"trait_upper", "trait_lower"},
+        {"structure_upper", "structure_lower"},
+    )
+    if (
+        type(fields) is not dict
+        or not names <= set(fields)
+        or set(fields) - names - set.union(*extensions)
+        or any(set(fields) & group and not group <= set(fields) for group in extensions)
+        or ("trait_upper" in fields and not set(FIELD_NAMES) <= set(fields))
+    ):
         raise ValueError(
-            "Surface fields require the base material and either all or no interaction fields"
+            "Surface fields require the base material and either all or no interaction fields; "
+            "material traits and structure fields must occur as complete pairs"
         )
     has_interaction = set(FIELD_NAMES).issubset(fields)
     pigment = fields["pigment"]
@@ -258,6 +283,25 @@ def validate_fields(fields, pigment_count=None):
                     f"{name} must have bounded contact, fabric and aggregate fractions"
                 )
             arrays[name] = np.ascontiguousarray(array)
+    for prefix, channels, low, high in (("trait", 2, -1, 1), ("structure", None, 0, 1)):
+        for layer in ("upper", "lower"):
+            name = f"{prefix}_{layer}"
+            if name not in fields:
+                continue
+            array = fields[name]
+            shape = (h, w, channels) if channels is not None else (h, w)
+            if (
+                not isinstance(array, np.ndarray)
+                or array.dtype != np.float32
+                or array.shape != shape
+                or not np.isfinite(array).all()
+                or np.any(array < low)
+                or np.any(array > high)
+            ):
+                raise ValueError(
+                    f"{name} must be finite float32 with shape {shape} in [{low}, {high}]"
+                )
+            arrays[name] = np.ascontiguousarray(array)
     return arrays
 
 
@@ -283,6 +327,7 @@ class Surface:
         self.config = validate_config(config)
         self._interaction_enabled = interaction_enabled(self.config)
         self._packing_strength = (self.config.get("interaction") or {}).get("packing_strength", 0)
+        self._directional_relief = (self.config.get("interaction") or {}).get("directional_relief")
         self._grain_contrast = (self.config.get("interaction") or {}).get("grain_contrast", 1)
         self.palette = copy.deepcopy(palette)
         self._ratios, self._scattering, self._substrate = palette_coefficients(self.palette)
@@ -447,6 +492,26 @@ class Surface:
                         "maximum_coupling_cells": 16,
                         "source_material_unchanged": True,
                     }
+                    if self._directional_relief is not None:
+                        self.metadata["packing"].update(
+                            directional_relief={
+                                "config": copy.deepcopy(self._directional_relief),
+                                "affinity": (
+                                    "contact/fabric-weighted aggregate smoothing "
+                                    "along material fabric"
+                                ),
+                                "paths": "four directions with wholly occupied supercover paths",
+                                "response": (
+                                    "finite authored affinity reconstruction; "
+                                    "no new pigment or motion"
+                                ),
+                            },
+                            solver=(
+                                "28 affinity passes and 28 packing passes "
+                                "plus preparation/finalization"
+                            ),
+                            memory_bytes_per_native_pixel=20,
+                        )
                 if self._interaction_enabled and self._grain_contrast > 1:
                     self.metadata["interaction"]["grain_response"] = {
                         "formula": "g^c / (g^c + (1-g)^c)",
@@ -738,7 +803,9 @@ class Surface:
         if self._packing_strength <= 0:
             return
         if self._packing_relief is None:
-            self._packing_relief = PackingRelief(self.ctx, self._pigment_count)
+            self._packing_relief = PackingRelief(
+                self.ctx, self._pigment_count, directional=self._directional_relief is not None
+            )
         self._packing_relief.prepare(
             self._textures[1],
             self._textures[0],

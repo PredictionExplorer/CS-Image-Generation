@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import material_traits
 from .palette import normalize_seed
 
 VERSION = "contact-microstructure-v1"
@@ -70,7 +71,9 @@ def validate_config(value):
     """Return a resolved opt-in config; omission does not enable microstructure."""
     if value is None:
         return None
-    if type(value) is not dict or set(value) - (set(DEFAULTS) | {"advection"}):
+    if type(value) is not dict or set(value) - (
+        set(DEFAULTS) | {"advection", "material_variation"}
+    ):
         raise ValueError("Interaction config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
@@ -91,7 +94,21 @@ def validate_config(value):
         if not valid:
             raise ValueError(f"Interaction {key} must be finite and in [{low}, {high}]")
         result[key] = float(v)
+    variation = material_traits.validate_config(result.pop("material_variation", None))
+    if variation is not None:
+        result["material_variation"] = variation
     return result
+
+
+def field_names(config):
+    """Archive field contract; legacy names remain unchanged when traits are disabled."""
+    settings = validate_config(config)
+    if settings is None:
+        return ()
+    return FIELD_NAMES + (material_traits.FIELD_NAMES if "material_variation" in settings else ())
+
+
+validate_traits = material_traits.validate_fields
 
 
 def seed_key(seed):
@@ -221,7 +238,7 @@ def velocity_derivatives(velocity, pixel_size):
     )
 
 
-def update_state(state, contact, wetness, strain, spin, nucleation, *, config, dt):
+def update_state(state, contact, wetness, strain, spin, nucleation, *, config, dt, traits=None):
     """Independent float64 reference for bounded local constitutive kinetics.
 
     Strain is the axial representation of the symmetric trace-free velocity
@@ -255,6 +272,12 @@ def update_state(state, contact, wetness, strain, spin, nucleation, *, config, d
         or np.any(np.linalg.norm(s[..., 1:3], axis=-1) > s[..., 0] + 1e-6)
     ):
         raise ValueError("Microstructure must obey its concentration and fabric bounds")
+    variation = settings.get("material_variation")
+    multipliers = None
+    if variation is not None:
+        multipliers = material_traits.rate_multipliers(traits, contact, wetness, variation)
+    elif traits is not None:
+        raise ValueError("Material traits require enabled variation")
     if dt == 0:
         return s.copy()
     result = np.empty_like(s)
@@ -274,6 +297,8 @@ def update_state(state, contact, wetness, strain, spin, nucleation, *, config, d
         return np.stack((c * q[..., 0] - sn * q[..., 1], sn * q[..., 0] + c * q[..., 1]), -1)
 
     align = settings["fabric_rate"] * contact * wetness * magnitude
+    if multipliers is not None:
+        align *= multipliers[2]
     relaxation = align + settings["fabric_relaxation"] * wetness
     mix = -np.expm1(-relaxation * dt)
     target_weight = np.divide(align, relaxation, out=np.zeros_like(align), where=relaxation > 0)
@@ -289,6 +314,9 @@ def update_state(state, contact, wetness, strain, spin, nucleation, *, config, d
     result[..., 1:3] = q
     formation = settings["aggregation_rate"] * contact * wetness * nucleation
     breakup = settings["breakup_rate"] * wetness * magnitude
+    if multipliers is not None:
+        formation *= multipliers[0]
+        breakup *= multipliers[1]
     rate = formation + breakup
     equilibrium = np.divide(formation, rate, out=np.zeros_like(formation), where=rate > 0)
     result[..., 3] = s[..., 3] + (equilibrium - s[..., 3]) * -np.expm1(-rate * dt)
@@ -421,6 +449,8 @@ class GPUInteraction:
         self.groups = tuple((n + 15) // 16 for n in size)
         self._resources = []
         self._origins, self._states = [], []
+        self._traits = []
+        self._trait_advection = None
         self._predictor = self._corrector = None
         self._forward = self._backward = None
         root = Path(__file__).parent / "shaders"
@@ -428,9 +458,13 @@ class GPUInteraction:
             self.advect = self._own(
                 ctx.compute_shader((root / "interaction-advect.glsl").read_text())
             )
-            self.reaction = self._own(
-                ctx.compute_shader((root / "interaction-update.glsl").read_text())
-            )
+            reaction_source = (root / "interaction-update.glsl").read_text()
+            variation = self.config.get("material_variation")
+            if variation is not None:
+                reaction_source = reaction_source.replace(
+                    "#version 430", "#version 430\n#define MATERIAL_VARIATION", 1
+                )
+            self.reaction = self._own(ctx.compute_shader(reaction_source))
             for shader in (self.advect, self.reaction):
                 shader["u_size"].value = self.size
                 shader["u_domain"].value = self.domain
@@ -445,6 +479,24 @@ class GPUInteraction:
             for _ in range(2):
                 self._origins.append([self._texture(origins) for _ in range(2)])
                 self._states.append([self._texture(zeros) for _ in range(2)])
+            if variation is not None:
+                self.reaction["u_trait_amplitude"].value = variation["amplitude"]
+                self._trait_advection = self._own(
+                    ctx.compute_shader((root / "material-traits-transport.glsl").read_text())
+                )
+                for name, value in (
+                    ("u_size", self.size),
+                    ("u_aspect", self.aspect),
+                    ("u_domain", self.domain),
+                    ("u_minimum_concentration", self.config["minimum_concentration"]),
+                ):
+                    self._trait_advection[name].value = value
+                initial = np.zeros((size[1], size[0], 4), dtype="f4")
+                initial[..., :2] = material_traits.initial_traits(
+                    initial_origins(size, aspect, domain)[..., :2], seed, variation
+                )
+                for _ in range(2):
+                    self._traits.append([self._texture(initial.tobytes()) for _ in range(2)])
             if self.config.get("advection", "linear") == "maccormack":
                 self._predictor = self._own(
                     ctx.compute_shader((root / "interaction-predict.glsl").read_text())
@@ -482,6 +534,10 @@ class GPUInteraction:
     def states(self):
         return tuple(layer[0] for layer in self._states)
 
+    @property
+    def traits(self):
+        return tuple(layer[0] for layer in self._traits) if self._traits else None
+
     def _dispatch(self, shader, bindings):
         for unit, (name, texture) in enumerate(bindings):
             texture.use(unit)
@@ -511,6 +567,8 @@ class GPUInteraction:
             if len(paint) not in (1, 2):
                 raise ValueError("Interaction transport requires one or two RGBA pigment packs")
             origin, state = self._origins[index], self._states[index]
+            if self._traits:
+                self._transport_traits(self._traits[index], paint, velocity, dt * scale)
             if self._predictor is not None and dt != 0:
                 self._transport_maccormack(origin, state, paint, velocity, dt * scale)
                 origin.reverse()
@@ -532,6 +590,38 @@ class GPUInteraction:
             )
             origin.reverse()
             state.reverse()
+
+    def _transport_traits(self, traits, paint, velocity, dt):
+        """Transport actual initialized attributes; origins never supply their values.
+
+        MacCormack temporarily borrows history scratch buffers. All trait passes
+        finish before history transport starts, so no additional scratch is owned.
+        """
+        shader = self._trait_advection
+        shader["u_has_other"].value = len(paint) == 2
+        corrected = self._predictor is not None and dt != 0
+        forward = self._forward[0] if corrected else traits[1]
+        backward = self._backward[0] if corrected else traits[0]
+        passes = ((0, traits[0], forward, dt),)
+        if corrected:
+            passes += ((1, forward, backward, -dt), (2, traits[0], traits[1], dt))
+        for phase, source, target, duration in passes:
+            shader["u_phase"].value = phase
+            shader["u_keep_support"].value = corrected and phase != 2
+            shader["u_dt"].value = duration
+            target.bind_to_image(0, read=False, write=True)
+            self._dispatch(
+                shader,
+                (
+                    ("u_field", source),
+                    ("u_forward", forward),
+                    ("u_backward", backward),
+                    ("u_paint", paint[0]),
+                    ("u_paint_other", paint[-1]),
+                    ("u_velocity", velocity),
+                ),
+            )
+        traits.reverse()
 
     def _transport_maccormack(self, origin, state, paint, velocity, dt):
         """Three passes on attributes only; OLD actual pigment is read-only."""
@@ -586,6 +676,14 @@ class GPUInteraction:
         self.reaction["u_has_other"].value = len(upper) == 2
         for index, state in enumerate(self._states):
             state[1].bind_to_image(index, read=False, write=True)
+        trait_bindings = ()
+        if self._traits:
+            for index, layer in enumerate(self._traits):
+                layer[1].bind_to_image(index + 2, read=False, write=True)
+            trait_bindings = (
+                ("u_upper_traits", self.traits[0]),
+                ("u_lower_traits", self.traits[1]),
+            )
         self._dispatch(
             self.reaction,
             (
@@ -599,19 +697,23 @@ class GPUInteraction:
                 ("u_lower_other", lower[-1]),
                 ("u_carrier", carrier),
                 ("u_velocity", velocity),
+                *trait_bindings,
             ),
         )
         for state in self._states:
             state.reverse()
+        for layer in self._traits:
+            layer.reverse()
 
     def snapshot(self, read_fn):
         """Read actual material state through the engine's reduction/read helper."""
         return dict(
             zip(
-                FIELD_NAMES,
+                field_names(self.config),
                 (
                     *(read_fn(texture)[..., :2].copy() for texture in self.origins),
                     *(read_fn(texture) for texture in self.states),
+                    *(read_fn(texture)[..., :2].copy() for texture in (self.traits or ())),
                 ),
                 strict=True,
             )

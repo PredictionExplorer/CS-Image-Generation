@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>__TITLE__</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        color: #eee9df;
+        background: #151816;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1860px;
+        margin: auto;
+        padding: 12px 2vw 48px;
+      }
+      h1,
+      h2 {
+        font-family: Georgia, serif;
+        font-weight: 400;
+      }
+      h1 {
+        font-size: clamp(24px, 2.8vw, 38px);
+        letter-spacing: -0.035em;
+        line-height: 1.1;
+        margin: 4px 0 6px;
+      }
+      h2 {
+        font-size: 27px;
+        margin: 30px 0 12px;
+      }
+      p {
+        line-height: 1.65;
+        color: #bdc3b9;
+      }
+      .intro {
+        max-width: 1200px;
+        font-size: 13px;
+        line-height: 1.45;
+        margin: 0 0 6px;
+      }
+      .eyebrow {
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #a2bbab;
+        margin: 0;
+      }
+      button,
+      select,
+      a,
+      input {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      select {
+        min-height: 44px;
+        background: #232c26;
+        border: 1px solid #617566;
+        border-radius: 4px;
+        padding: 8px 10px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover {
+        background: #354339;
+      }
+      button[aria-pressed="true"] {
+        background: #d6dfce;
+        color: #19261d;
+      }
+      a {
+        text-underline-offset: 4px;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      select {
+        max-width: 100%;
+      }
+      :focus-visible {
+        outline: 3px solid #c1e2b3;
+        outline-offset: 3px;
+      }
+      .toolbar,
+      .modes {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 0;
+      }
+      #status {
+        font-size: 12px;
+        margin: 0 0 8px;
+      }
+      .controls {
+        display: flex;
+        gap: 8px 18px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .pick-filter {
+        min-height: 44px;
+      }
+      #mode-note {
+        margin: 6px 0;
+        line-height: 1.35;
+      }
+      .toolbar select {
+        max-width: 245px;
+      }
+      .pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .panel {
+        min-width: 0;
+      }
+      .panel select {
+        width: 100%;
+        margin-bottom: 4px;
+      }
+      .art {
+        position: relative;
+        aspect-ratio: 4/3;
+        background: #0b0d0b;
+        border: 1px solid #303d33;
+        overflow: hidden;
+      }
+      .art img,
+      .art video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .art img.zoom {
+        transform: scale(2);
+        transform-origin: var(--x, 50%) var(--y, 50%);
+      }
+      .art.detail {
+        touch-action: none;
+      }
+      .caption {
+        min-height: 52px;
+        font-size: 13px;
+        margin: 10px 0;
+      }
+      .links {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        font-size: 13px;
+      }
+      .note {
+        font-size: 12px;
+        color: #aeb9ad;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 18px;
+        margin-top: 18px;
+      }
+      .card {
+        padding: 0;
+        text-align: left;
+        border: 1px solid #3e4d41;
+        background: #1c221e;
+        overflow: hidden;
+      }
+      .card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4/3;
+        object-fit: contain;
+        background: #0b0d0b;
+      }
+      .card .text {
+        display: block;
+        padding: 14px;
+      }
+      .card strong {
+        font-size: 14px;
+        display: block;
+        margin-bottom: 8px;
+      }
+      .chips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        font-size: 10px;
+        letter-spacing: 0.03em;
+        border: 1px solid #576858;
+        border-radius: 3px;
+        padding: 4px 5px;
+        color: #ced9c8;
+      }
+      .pick {
+        border-color: #d4b977;
+      }
+      .pick-note {
+        color: #e2cf9d;
+      }
+      .empty {
+        padding: 28px;
+      }
+      .error {
+        background: #432c2a;
+        padding: 20px;
+      }
+      details {
+        margin-top: 20px;
+      }
+      summary {
+        cursor: pointer;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #101512;
+        font-size: 11px;
+        max-height: 350px;
+      }
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .focus-paintings .review-header,
+      .focus-paintings .after-pair,
+      .focus-paintings .caption,
+      .focus-paintings .links,
+      .focus-paintings .pick-filter {
+        display: none;
+      }
+      .focus-paintings #status,
+      .focus-paintings #mode-note {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      .focus-paintings .controls {
+        margin-bottom: 8px;
+      }
+      @media (min-width: 701px) {
+        .focus-paintings main {
+          max-width: none;
+          height: 100dvh;
+          padding: 12px 2vw;
+          display: flex;
+          flex-direction: column;
+        }
+        .focus-paintings #content {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+          min-height: 0;
+        }
+        .focus-paintings .pair {
+          flex: 1;
+          min-height: 0;
+        }
+        .focus-paintings .panel {
+          display: grid;
+          grid-template-rows: auto auto minmax(0, 1fr);
+          min-height: 0;
+        }
+        .focus-paintings .art {
+          aspect-ratio: auto;
+          min-height: 0;
+        }
+      }
+      @media (max-width: 700px) {
+        main {
+          padding: 12px 12px 36px;
+        }
+        .pair {
+          grid-template-columns: 1fr;
+        }
+        .toolbar label:first-child {
+          width: 100%;
+        }
+        .controls,
+        .toolbar {
+          width: 100%;
+        }
+        .modes {
+          gap: 6px;
+        }
+        .toolbar select {
+          flex: 1;
+          min-width: 0;
+        }
+        .caption {
+          min-height: 0;
+        }
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .card .text {
+          padding: 10px;
+        }
+        .card strong {
+          font-size: 12px;
+        }
+        .chip {
+          font-size: 9px;
+        }
+        .intro {
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="review-header">
+        <p class="eyebrow">Three bodies / Paint with memory</p>
+        <h1>__TITLE__</h1>
+        <p class="intro">
+          All three bodies, the same starting colors, and the complete
+          trajectory. Compare RC1 with any treatment; choose a card below to
+          change the right painting.
+        </p>
+      </header>
+      <div id="status" role="status" aria-live="polite">
+        Loading verified paintings…
+      </div>
+      <div id="content" hidden>
+        <div class="controls">
+          <div class="toolbar">
+            <label
+              >Seed
+              <select id="seed"></select></label
+            ><button id="previous" aria-label="Previous seed">←</button
+            ><button id="next" aria-label="Next seed">→</button
+            ><label class="pick-filter"
+              ><input type="checkbox" id="only-picks" /> My visual picks</label
+            >
+          </div>
+          <div class="modes" aria-label="Comparison mode">
+            <button data-mode="final" aria-pressed="true">
+              Final paintings</button
+            ><button data-mode="initial" aria-pressed="false">
+              Starting paint</button
+            ><button data-mode="film" aria-pressed="false">Films</button
+            ><button id="zoom" aria-pressed="false">2× detail</button>
+            <button id="focus" aria-pressed="false">Focus paintings</button>
+          </div>
+        </div>
+        <p id="mode-note" class="note">
+          Full-resolution images. With 2× detail enabled, move over either image
+          to inspect the same area in both.
+        </p>
+        <div class="pair">
+          <section class="panel" aria-label="Left painting">
+            <label for="left" class="note">Left treatment</label
+            ><select id="left"></select>
+            <div class="art" id="art-left"></div>
+            <p class="caption" id="caption-left"></p>
+            <div class="links" id="links-left"></div>
+          </section>
+          <section class="panel" aria-label="Right painting">
+            <label for="right" class="note">Right treatment</label
+            ><select id="right"></select>
+            <div class="art" id="art-right"></div>
+            <p class="caption" id="caption-right"></p>
+            <div class="links" id="links-right"></div>
+          </section>
+        </div>
+        <div class="after-pair">
+          <details>
+            <summary>Exact settings for this comparison</summary>
+            <pre id="settings"></pre>
+          </details>
+          <div class="section-head">
+            <h2>All treatments for this seed</h2>
+            <span class="note" id="count"></span>
+          </div>
+          <p class="note">
+            F = fuller paint · D = directional relief · S = seeded properties ·
+            R = resistance and memory. Gold outlines mark my subjective visual
+            picks.
+          </p>
+          <div class="grid" id="grid"></div>
+        </div>
+      </div>
+    </main>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id);
+      let data,
+        mode = "final",
+        zoom = false;
+      let panX = 50,
+        panY = 50;
+      let focused = false,
+        previousScroll = 0;
+      function setFocus(value) {
+        if (!data || value === focused) return;
+        if (value) previousScroll = window.scrollY;
+        focused = value;
+        document.body.classList.toggle("focus-paintings", focused);
+        $("focus").setAttribute("aria-pressed", String(focused));
+        $("focus").textContent = focused ? "Exit focus" : "Focus paintings";
+        window.scrollTo({
+          top: focused ? 0 : previousScroll,
+          left: 0,
+          behavior: "auto",
+        });
+      }
+      const featureNames = {
+        fuller: "F · Fuller",
+        relief: "D · Directional",
+        traits: "S · Seeded",
+        resistance: "R · Memory",
+      };
+      function pickFor(row) {
+        return data.picks.find(
+          (p) => p.seed === row.seed && p.variant === row.variant,
+        );
+      }
+      function cohort() {
+        return data.rows.filter((r) => r.seed === $("seed").value);
+      }
+      function selected(side) {
+        return cohort().find((r) => r.variant === $(side).value);
+      }
+      function element(tag, text, className) {
+        const node = document.createElement(tag);
+        if (text !== undefined) node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      }
+      function options(select, rows, value, fallback) {
+        select.replaceChildren(
+          ...rows.map((row) => {
+            const option = element("option", row.label);
+            option.value = row.variant;
+            return option;
+          }),
+        );
+        select.value = rows.some((r) => r.variant === value) ? value : fallback;
+      }
+      function link(text, url) {
+        const a = element("a", text);
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        return a;
+      }
+      function pauseFilms() {
+        document.querySelectorAll("video").forEach((v) => v.pause());
+      }
+      function disposeFilms() {
+        document.querySelectorAll("video").forEach((video) => {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        });
+      }
+      function panTo(x, y) {
+        panX = Math.max(0, Math.min(100, x));
+        panY = Math.max(0, Math.min(100, y));
+        for (const side of ["left", "right"]) {
+          $("art-" + side).style.setProperty("--x", panX + "%");
+          $("art-" + side).style.setProperty("--y", panY + "%");
+        }
+      }
+      function updatePanel(side) {
+        const row = selected(side),
+          art = $("art-" + side);
+        art.replaceChildren();
+        art.tabIndex = zoom && mode !== "film" ? 0 : -1;
+        art.classList.toggle("detail", zoom && mode !== "film");
+        art.setAttribute("role", "region");
+        art.setAttribute(
+          "aria-label",
+          side === "left" ? "Left painting detail" : "Right painting detail",
+        );
+        art.setAttribute("aria-describedby", "mode-note");
+        if (mode === "film" && row.film) {
+          const video = element("video");
+          video.controls = true;
+          video.preload = "metadata";
+          video.playsInline = true;
+          video.src = row.film;
+          video.poster = row.preview;
+          video.addEventListener("error", () => {
+            if (
+              art.firstChild !== video ||
+              mode !== "film" ||
+              selected(side) !== row
+            )
+              return;
+            $("caption-" + side).textContent =
+              "Film could not load. Use the film link below to open it directly.";
+          });
+          art.append(video);
+        } else if (mode === "film") {
+          art.append(
+            element(
+              "p",
+              "This treatment is an image study. A film has not been rendered for it.",
+              "empty",
+            ),
+          );
+        } else {
+          const image = element("img");
+          image.src = mode === "initial" ? row.initial : row.image;
+          image.alt = row.label + " · " + row.seed;
+          image.classList.toggle("zoom", zoom);
+          art.append(image);
+        }
+        const pick = pickFor(row);
+        const size =
+          mode === "initial"
+            ? row.initial_resolution
+            : mode === "film"
+              ? row.film_resolution
+              : row.resolution;
+        $("caption-" + side).textContent =
+          row.description +
+          (size
+            ? " " +
+              size.join(" × ") +
+              (mode === "film" ? " · " + row.film_fps + " fps." : " pixels.")
+            : "") +
+          (pick ? " My pick: " + pick.note : "");
+        $("caption-" + side).classList.toggle("pick-note", Boolean(pick));
+        const links = [
+          link(
+            mode === "initial" ? "Starting image ↗" : "Full image ↗",
+            mode === "initial" ? row.initial : row.image,
+          ),
+          link("Settings ↗", row.request),
+        ];
+        if (row.film) links.push(link("Open film ↗", row.film));
+        $("links-" + side).replaceChildren(...links);
+      }
+      function renderPair() {
+        if (!data) return;
+        disposeFilms();
+        updatePanel("left");
+        updatePanel("right");
+        $("zoom").disabled = mode === "film";
+        $("mode-note").textContent =
+          mode === "film"
+            ? "Films use the complete trajectory, followed by the saved camera sequence. Play each with its own controls."
+            : "With 2× detail enabled, move or drag over either image to inspect both. Keyboard: focus an image, use arrow keys to pan, or Home to center.";
+        const settings = {};
+        for (const side of ["left", "right"]) {
+          const r = selected(side);
+          settings[side] = {
+            treatment: r.label,
+            display_height: r.surface.height_scale,
+            directional_relief:
+              r.surface.interaction.directional_relief ?? null,
+            material_variation: r.material_variation,
+            resistance: r.rheology,
+            roughness_bias: r.surface.roughness_bias,
+          };
+        }
+        $("settings").textContent = JSON.stringify(settings, null, 2);
+      }
+      function renderGrid() {
+        if (!data) return;
+        const rows = cohort().filter(
+          (r) => !$("only-picks").checked || pickFor(r),
+        );
+        $("count").textContent =
+          rows.length +
+          (rows.length === 1 ? " treatment · " : " treatments · ") +
+          cohort().filter((r) => r.film).length +
+          (cohort().filter((r) => r.film).length === 1 ? " film" : " films");
+        $("grid").replaceChildren(
+          ...rows.map((row) => {
+            const button = element(
+              "button",
+              undefined,
+              "card" + (pickFor(row) ? " pick" : ""),
+            );
+            button.type = "button";
+            button.setAttribute(
+              "aria-label",
+              "Compare " + row.label + " on the right",
+            );
+            const img = element("img");
+            img.src = row.preview;
+            img.alt = row.label;
+            img.loading = "lazy";
+            const text = element("span", undefined, "text");
+            text.append(element("strong", row.label));
+            const chips = element("span", undefined, "chips");
+            for (const [key, active] of Object.entries(row.features))
+              if (active)
+                chips.append(element("span", featureNames[key], "chip"));
+            if (row.variant === "rc1")
+              chips.append(element("span", "Reference", "chip"));
+            if (row.film) chips.append(element("span", "Film", "chip"));
+            text.append(chips);
+            button.append(img, text);
+            button.addEventListener("click", () => {
+              $("right").value = row.variant;
+              renderPair();
+              $("right").focus();
+              window.scrollTo({
+                top: $("content").offsetTop,
+                behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+                  ? "auto"
+                  : "smooth",
+              });
+            });
+            return button;
+          }),
+        );
+        if (!rows.length)
+          $("grid").append(
+            element(
+              "p",
+              "No visual picks recorded for this seed. Turn off the filter to see every treatment.",
+            ),
+          );
+      }
+      function chooseSeed() {
+        if (!data) return;
+        const rows = cohort();
+        options($("left"), rows, $("left").value || "rc1", "rc1");
+        const preferred =
+          data.picks.find((p) => p.seed === $("seed").value)?.variant ||
+          "fuller-relief-traits-resistance";
+        const fallback =
+          rows.find((row) => row.variant === preferred)?.variant ||
+          rows.find((row) => row.variant !== "rc1")?.variant ||
+          "rc1";
+        options($("right"), rows, $("right").value || preferred, fallback);
+        renderPair();
+        renderGrid();
+        $("status").textContent =
+          data.rows.length +
+          (data.rows.length === 1
+            ? " painting across "
+            : " paintings across ") +
+          data.seeds.length +
+          (data.seeds.length === 1 ? " seed · " : " seeds · ") +
+          "full trajectory in every image";
+        const url = new URL(location);
+        url.searchParams.set("seed", $("seed").value);
+        history.replaceState(null, "", url);
+      }
+      for (const side of ["left", "right"]) {
+        $(side).addEventListener("change", renderPair);
+        $("art-" + side).addEventListener("pointermove", (event) => {
+          if (!zoom || mode === "film") return;
+          const r = event.currentTarget.getBoundingClientRect(),
+            x = (100 * (event.clientX - r.left)) / r.width,
+            y = (100 * (event.clientY - r.top)) / r.height;
+          panTo(x, y);
+        });
+        $("art-" + side).addEventListener("pointerdown", (event) => {
+          if (zoom && mode !== "film" && event.pointerType === "touch")
+            event.currentTarget.setPointerCapture(event.pointerId);
+        });
+        $("art-" + side).addEventListener("keydown", (event) => {
+          if (!zoom || mode === "film") return;
+          const delta = {
+            ArrowLeft: [-5, 0],
+            ArrowRight: [5, 0],
+            ArrowUp: [0, -5],
+            ArrowDown: [0, 5],
+          }[event.key];
+          if (event.key === "Home") {
+            event.preventDefault();
+            panTo(50, 50);
+          } else if (delta) {
+            event.preventDefault();
+            panTo(panX + delta[0], panY + delta[1]);
+          }
+        });
+      }
+      $("seed").addEventListener("change", chooseSeed);
+      $("only-picks").addEventListener("change", renderGrid);
+      for (const [id, direction] of [
+        ["previous", -1],
+        ["next", 1],
+      ])
+        $(id).addEventListener("click", () => {
+          if (!data) return;
+          $("seed").selectedIndex =
+            ($("seed").selectedIndex + direction + data.seeds.length) %
+            data.seeds.length;
+          chooseSeed();
+        });
+      document.querySelectorAll("[data-mode]").forEach((button) =>
+        button.addEventListener("click", () => {
+          if (!data) return;
+          mode = button.dataset.mode;
+          document
+            .querySelectorAll("[data-mode]")
+            .forEach((b) =>
+              b.setAttribute("aria-pressed", String(b === button)),
+            );
+          renderPair();
+        }),
+      );
+      $("zoom").addEventListener("click", () => {
+        if (!data) return;
+        zoom = !zoom;
+        $("zoom").setAttribute("aria-pressed", String(zoom));
+        renderPair();
+      });
+      $("focus").addEventListener("click", () => setFocus(!focused));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && focused) {
+          event.preventDefault();
+          setFocus(false);
+          $("focus").focus();
+        }
+      });
+      fetch("comparison.json")
+        .then((response) => {
+          if (!response.ok)
+            throw new Error("Gallery data could not be loaded.");
+          return response.json();
+        })
+        .then((result) => {
+          if (
+            result.version !== "paint-material-review-v1" ||
+            !Array.isArray(result.rows) ||
+            !result.rows.length ||
+            !Array.isArray(result.seeds) ||
+            !result.seeds.length ||
+            !Array.isArray(result.picks) ||
+            result.seeds.some(
+              (seed) =>
+                !result.rows.some(
+                  (row) => row.seed === seed && row.variant === "rc1",
+                ),
+            )
+          )
+            throw new Error("Invalid gallery data.");
+          data = result;
+          $("seed").replaceChildren(
+            ...data.seeds.map((seed, i) => {
+              const o = element("option", i + 1 + " · " + seed);
+              o.value = seed;
+              return o;
+            }),
+          );
+          const requested = new URL(location).searchParams.get("seed");
+          if (data.seeds.includes(requested)) $("seed").value = requested;
+          $("content").hidden = false;
+          chooseSeed();
+        })
+        .catch((error) => {
+          $("status").textContent = error.message;
+          $("status").className = "error";
+        });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) pauseFilms();
+      });
+      window.addEventListener("pagehide", disposeFilms);
+      window.addEventListener("pageshow", (event) => {
+        if (event.persisted && data && mode === "film") renderPair();
+      });
+    </script>
+  </body>
+</html>

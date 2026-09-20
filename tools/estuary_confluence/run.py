@@ -190,6 +190,7 @@ def validate_recipe(raw):
         capture = [sw, sh]
         while (
             simulation.get("interaction") is None
+            and simulation.get("rheology") is None
             and capture[0] > 2048
             and all(n % 2 == 0 for n in capture)
         ):
@@ -202,6 +203,10 @@ def validate_recipe(raw):
     require(
         simulation.get("interaction") is None or render["capture_resolution"] == [sw, sh],
         "Interaction capture requires the full native material grid",
+    )
+    require(
+        simulation.get("rheology") is None or render["capture_resolution"] == [sw, sh],
+        "Rheology capture requires the full native material grid",
     )
     require(render["capture_pipeline"] in ("cpu", "native-gpu"), "Unknown capture pipeline")
     require(
@@ -325,6 +330,10 @@ def capture_metadata(recipe):
         recipe["simulation"].get("interaction") is None or capture == native,
         "Interaction capture requires the full native material grid",
     )
+    require(
+        recipe["simulation"].get("rheology") is None or capture == native,
+        "Rheology capture requires the full native material grid",
+    )
     factor = render.get("frame_supersampling", 1)
     result = {
         "schema_version": 1,
@@ -351,17 +360,26 @@ def capture_metadata(recipe):
     if "capture_pipeline" in render:
         result["capture_pipeline"] = pipeline
     if recipe["simulation"].get("interaction") is not None:
-        from tools.estuary_confluence.interaction import FIELD_NAMES, VERSION
+        from tools.estuary_confluence.interaction import VERSION, field_names
 
         result["interaction_material"] = {
             "version": VERSION,
-            "fields": sorted(FIELD_NAMES),
+            "fields": sorted(field_names(recipe["simulation"]["interaction"])),
             "capture": (
                 "borrowed native textures from the same canonical material step"
                 if pipeline == "native-gpu"
                 else "read-only snapshots from the same canonical material step"
             ),
             "camera": "reuse the final material; no interaction update during hold or orbit",
+        }
+    if recipe["simulation"].get("rheology") is not None:
+        from tools.estuary_confluence.rheology import FIELD_NAMES, VERSION
+
+        result["structural_material"] = {
+            "version": VERSION,
+            "fields": sorted(FIELD_NAMES),
+            "capture": "full native material grid at the same accepted simulation step",
+            "camera": "frozen during hold and orbit; capture never advances structure",
         }
     return result
 
@@ -423,6 +441,7 @@ def surface_configs(recipe):
                 controls["grain_strength"] = 0.0
                 if "packing_strength" in controls:
                     controls["packing_strength"] = 0.0
+                controls.pop("directional_relief", None)
             configs[look] = {
                 **recipe["surface"],
                 "mode": "layered",
@@ -468,10 +487,15 @@ def resolved_layout(recipe, seed, source=None):
     if settings["initial_pattern"] == "engaged":
         from tools.estuary_confluence.body_influence import initialization_config
         from tools.estuary_confluence.participation_layout import plan_engaged_layout
+        from tools.estuary_confluence.rheology import (
+            initialization_config as rheology_initialization,
+        )
 
         require(source is not None, "Engaged layout requires its complete source recording")
         return plan_engaged_layout(
-            source, recipe["chromatic_count"], initialization_config(settings)
+            source,
+            recipe["chromatic_count"],
+            rheology_initialization(initialization_config(settings)),
         )
     if settings["initial_pattern"] != "scattered":
         return None
@@ -597,7 +621,7 @@ def interaction_metadata(recipe, seed):
         "Interaction surface settings must be normalized",
     )
     require_interaction_geometry(recipe["simulation"], recipe["surface"])
-    return {
+    metadata = {
         "version": VERSION,
         "seed": normalize_seed(seed),
         "settings": settings,
@@ -615,6 +639,68 @@ def interaction_metadata(recipe, seed):
         },
         "base_material_fields": sorted(BASE_FIELDS),
     }
+    if settings.get("material_variation") is not None:
+        from tools.estuary_confluence.material_traits import VERSION as trait_version
+
+        metadata["initialization"]["material_traits"] = {
+            "version": trait_version,
+            "streams": "full seed, property and scale; initialized once in world coordinates",
+            "scale_units": "projected simulation world units",
+            "transport": "paint-mass-weighted signed intensive properties",
+        }
+        for layer in ("upper", "lower"):
+            metadata["fields"][f"trait_{layer}"] = ["aggregation_affinity", "fabric_response"]
+    return metadata
+
+
+def rheology_metadata(recipe):
+    """Describe the bounded authored response without implying full fluid mechanics."""
+    from tools.estuary_confluence.rheology import (
+        FIELD_NAMES,
+        VERSION,
+        response_plan,
+        validate_config,
+    )
+
+    supplied = recipe["simulation"].get("rheology")
+    settings = validate_config(supplied)
+    if supplied is not None:
+        from tools.estuary_confluence.engine import validate_config as simulation_config
+
+        require(
+            recipe["simulation"] == simulation_config(recipe["simulation"]),
+            "Rheology simulation settings must be normalized",
+        )
+    if settings is None:
+        return None
+    require(settings == supplied, "Rheology settings must be normalized")
+    simulation = recipe["simulation"]
+    metadata = {
+        "version": VERSION,
+        "settings": settings,
+        "model": "authored 2D quasistatic structural resistance; not a free-surface fluid solver",
+        "resolution": list(simulation["resolution"]),
+        "dtype": "float32",
+        "fields": {name: ["structure"] for name in FIELD_NAMES},
+        "initialization": "uniform structure on occupied paint; unchanged RC1 layout pilot",
+        "transport": "paint-mass-weighted structure in each layer",
+        "reaction": "exponential frozen-rate rebuild and shear breakdown per accepted substep",
+        "response": response_plan(
+            tuple(simulation["resolution"]), simulation["domain_scale"], settings
+        ),
+    }
+    variation = (simulation.get("interaction") or {}).get("material_variation")
+    if variation is not None:
+        metadata["material_coupling"] = {
+            "trait": "transported aggregation affinity",
+            "gate": "recorded paint-contact dose",
+            "aggregation": (
+                "paint-mass-weighted trait times contact, across both layers in each response cell"
+            ),
+            "resistance_factor": "1 + amplitude * mean; bounded to [1-amplitude, 1+amplitude]",
+            "amplitude": variation["amplitude"],
+        }
+    return metadata
 
 
 def validate_archived_material(fields, recipe):
@@ -623,14 +709,20 @@ def validate_archived_material(fields, recipe):
     Optical validation checks array values without rewriting them. The archive
     binds the raw state returned by the engine, rather than a display projection.
     """
-    from tools.estuary_confluence.interaction import BASE_FIELDS, FIELD_NAMES
+    from tools.estuary_confluence.interaction import BASE_FIELDS, field_names
+    from tools.estuary_confluence.rheology import FIELD_NAMES as STRUCTURE_FIELDS
     from tools.estuary_confluence.surface import validate_fields
 
     enabled = recipe["simulation"].get("interaction") is not None
-    expected = set(BASE_FIELDS) | (set(FIELD_NAMES) if enabled else set())
+    structural = recipe["simulation"].get("rheology") is not None
+    expected = set(BASE_FIELDS) | (
+        set(field_names(recipe["simulation"]["interaction"])) if enabled else set()
+    )
+    if structural:
+        expected.update(STRUCTURE_FIELDS)
     require(set(fields) == expected, "Archived material fields differ from interaction settings")
     validate_fields(fields, recipe["chromatic_count"] + 1)
-    if enabled:
+    if enabled or structural:
         width, height = recipe["simulation"]["resolution"]
         require(
             fields["height"].shape == (height, width),
@@ -1104,6 +1196,17 @@ def verify_run(folder):
             request.get("interaction") == interaction and receipt.get("interaction") == interaction,
             "Interaction version, seed, settings or field contract differs",
         )
+    rheology = rheology_metadata(request["recipe"])
+    if rheology is None:
+        require(
+            "rheology" not in request and "rheology" not in receipt,
+            "Disabled rheology cannot advertise structural material",
+        )
+    else:
+        require(
+            request.get("rheology") == rheology and receipt.get("rheology") == rheology,
+            "Rheology settings, solver plan or field contract differs",
+        )
     require(set(receipt["looks"]) == set(request["recipe"]["looks"]), "View selection differs")
     ledger = read(folder / "frame-ledger.json")
     require(len(ledger) == len(request["frames"]), "Frame ledger length differs")
@@ -1238,6 +1341,7 @@ def run(args):
     sw, sh = recipe["simulation"]["resolution"]
     source = Source.read(args.source, aspect=sw / sh, **recipe["projection"])
     interaction = interaction_metadata(recipe, source.seed)
+    rheology = rheology_metadata(recipe)
     palette = generate_palette(source.seed, recipe["chromatic_count"], mode=recipe["palette_mode"])
     background = None
     if "background" in recipe:
@@ -1308,6 +1412,8 @@ def run(args):
                 request["background"] = background
             if interaction is not None:
                 request["interaction"] = interaction
+            if rheology is not None:
+                request["rheology"] = rheology
             if influence is not None:
                 request["body_influence"] = influence
             if markers is not None:
@@ -1537,6 +1643,7 @@ def run(args):
                     "solver_diagnostics": getattr(engine, "diagnostics", None),
                     "physical_state_sha256": final_identity,
                     **({"body_influence": influence} if influence is not None else {}),
+                    **({"rheology": rheology} if rheology is not None else {}),
                     **({"body_markers": markers} if markers is not None else {}),
                     **(
                         {

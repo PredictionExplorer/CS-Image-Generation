@@ -13,6 +13,12 @@ uniform float u_domain,u_dt,u_lower_scale,u_minimum_concentration;
 uniform float u_contact_rate,u_origin_distance,u_composition_threshold;
 uniform float u_fabric_rate,u_fabric_relaxation,u_aggregation_rate,u_breakup_rate;
 uniform float u_nucleation_scale,u_nucleation_contrast;
+#ifdef MATERIAL_VARIATION
+layout(rgba32f,binding=2) writeonly uniform image2D upper_trait_output;
+layout(rgba32f,binding=3) writeonly uniform image2D lower_trait_output;
+uniform sampler2D u_upper_traits,u_lower_traits;
+uniform float u_trait_amplitude;
+#endif
 
 float relaxed(float x) {
     // Stable 1-exp(-x), including tiny canonical substeps in float32.
@@ -44,12 +50,20 @@ vec2 rotate(vec2 q,float angle) {
     float c=cos(angle),s=sin(angle);
     return vec2(c*q.x-s*q.y,s*q.x+c*q.y);
 }
-vec4 react(vec4 old,vec2 origin,float contact,float wet,vec2 strain,float spin) {
+vec4 react(vec4 old,vec2 origin,float contact,float wet,vec2 strain,float spin
+#ifdef MATERIAL_VARIATION
+           ,vec2 traits
+#endif
+) {
     float dose=clamp(old.x+(1.-old.x)*relaxed(u_contact_rate*contact*wet*u_dt),0.,1.);
     float raw_magnitude=length(strain);
     vec2 axis=raw_magnitude>1e-20?strain/raw_magnitude:vec2(0.);
     float magnitude=min(40.,raw_magnitude);
     float align=u_fabric_rate*contact*wet*magnitude;
+#ifdef MATERIAL_VARIATION
+    vec2 variation=u_trait_amplitude*contact*wet*traits;
+    align*=1.+variation.y;
+#endif
     float relaxation=align+u_fabric_relaxation*wet;
     float blend=relaxed(relaxation*u_dt);
     float target_weight=relaxation>0.?align/relaxation:0.;
@@ -60,6 +74,10 @@ vec4 react(vec4 old,vec2 origin,float contact,float wet,vec2 strain,float spin) 
     q*=min(1.,dose/max(length(q),1e-20));
     float formation=u_aggregation_rate*contact*wet*nucleation(origin);
     float breakup=u_breakup_rate*wet*magnitude;
+#ifdef MATERIAL_VARIATION
+    formation*=1.+variation.x;
+    breakup*=1.-variation.x;
+#endif
     float rate=formation+breakup;
     float equilibrium=rate>0.?formation/rate:0.;
     float aggregate=clamp(old.w+(equilibrium-old.w)*relaxed(rate*u_dt),0.,1.);
@@ -94,9 +112,19 @@ void main() {
     vec2 strain=.5*vec2(vx.x-vy.y,vx.y+vy.x);
     float spin=.5*(vx.y-vy.x);
     vec4 sa=vec4(0.),sb=vec4(0.);
+#ifdef MATERIAL_VARIATION
+    vec2 ta=a>u_minimum_concentration?texelFetch(u_upper_traits,p,0).xy:vec2(0.);
+    vec2 tb=b>u_minimum_concentration?texelFetch(u_lower_traits,p,0).xy:vec2(0.);
+    if(a>u_minimum_concentration)sa=react(texelFetch(u_upper_state,p,0),oa,contact,wet,strain,spin,ta);
+    if(b>u_minimum_concentration)sb=react(texelFetch(u_lower_state,p,0),ob,contact,wet,
+                                       strain*u_lower_scale,spin*u_lower_scale,tb);
+    imageStore(upper_trait_output,p,vec4(ta,0.,0.));
+    imageStore(lower_trait_output,p,vec4(tb,0.,0.));
+#else
     if(a>u_minimum_concentration)sa=react(texelFetch(u_upper_state,p,0),oa,contact,wet,strain,spin);
     if(b>u_minimum_concentration)sb=react(texelFetch(u_lower_state,p,0),ob,contact,wet,
                                        strain*u_lower_scale,spin*u_lower_scale);
+#endif
     imageStore(upper_output,p,sa);
     imageStore(lower_output,p,sb);
 }
