@@ -272,6 +272,8 @@ class PaintMaterialGalleryTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Requires Node.js for gallery controls")
     def test_media_cleanup_stale_errors_keyboard_and_touch_detail_controls(self):
         data = self.build()
+        # A preferred reference must not make the initial two sides identical.
+        data["picks"] = [{"seed": data["seeds"][0], "variant": "rc1", "note": "Best gesture"}]
         page = gallery.document("Controls")
         ids = re.findall(r'\bid="([^"]+)"', page)
         self.assertEqual(len(ids), len(set(ids)))

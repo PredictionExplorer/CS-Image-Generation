@@ -94,7 +94,7 @@ class PaintMaterialStudiesTests(unittest.TestCase):
         accepted, _ = released_recipe(seed)
         reference = next(row for row in studies.references()["cases"] if row["seed"] == seed)
         plan = studies.make_plan([seed], suite="all")
-        self.assertEqual(len(plan["cases"]), 23)
+        self.assertEqual(len(plan["cases"]), 27)
         for case in plan["cases"]:
             spec = studies.VARIANTS[case["study"]["variant"]]
             self.assertEqual(case["reference_initial_mass"], [*reference["target_mass"], 0])
@@ -128,12 +128,33 @@ class PaintMaterialStudiesTests(unittest.TestCase):
             {case["study"]["variant"] for case in strengths["cases"]}, set(studies.STRENGTHS)
         )
         all_cases = studies.make_plan(suite="all")["cases"]
-        self.assertEqual(len(all_cases), 69)
+        self.assertEqual(len(all_cases), 81)
         films = studies.make_plan(
             [studies.DEFAULT_SEEDS[1]], ["rc1", "traits-resistance"], film=True
         )
         self.assertTrue(all(case["mode"] == "film" for case in films["cases"]))
         self.assertTrue(all(len(frame_plan(case["recipe"])) == 937 for case in films["cases"]))
+
+    def test_refinements_keep_history_cutoff_separate_from_paint_amount_response(self):
+        plan = studies.make_plan(suite="refinements")
+        self.assertEqual(len(plan["cases"]), 12)
+        for case in plan["cases"]:
+            name = case["study"]["variant"]
+            config = case["recipe"]["simulation"]["rheology"]
+            self.assertEqual(config["minimum_concentration"], 1e-5)
+            self.assertEqual(case["study"]["suite"], "refinements")
+            if name == "resistance-wide":
+                self.assertEqual(config["response_length"], 0.08)
+                self.assertNotIn("occupancy_mass_reference", config)
+            else:
+                self.assertEqual(
+                    config["occupancy_mass_reference"],
+                    0.02 if name == "resistance-mass-02" else 0.01,
+                )
+                self.assertEqual(config["response_length"], 0.04)
+        for name in studies.FACTORIAL:
+            _, _, recipe = studies.material_recipe(studies.DEFAULT_SEEDS[0], name)
+            self.assertNotIn("occupancy_mass_reference", recipe["simulation"].get("rheology", {}))
 
     def test_exact_catalog_rejects_control_palette_camera_or_label_drift(self):
         seed = studies.DEFAULT_SEEDS[0]

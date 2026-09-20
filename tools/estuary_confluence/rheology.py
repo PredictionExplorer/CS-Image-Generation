@@ -45,18 +45,20 @@ BOUNDS = {
     "response_length": (0.005, 0.5),
     "minimum_concentration": (1e-10, 1),
 }
+OPTIONAL_BOUNDS = {"occupancy_mass_reference": (1e-5, 1)}
 
 
 def validate_config(value=None):
     """Normalize opt-in controls; zero resistance preserves the legacy path."""
     if value is None:
         return None
-    if type(value) is not dict or set(value) - set(DEFAULTS):
+    if type(value) is not dict or set(value) - (set(DEFAULTS) | set(OPTIONAL_BOUNDS)):
         raise ValueError("Rheology config must contain only documented fields")
     result = {**copy.deepcopy(DEFAULTS), **copy.deepcopy(value)}
     if result["version"] != VERSION:
         raise ValueError(f"Rheology version must be {VERSION}")
-    for key, (low, high) in BOUNDS.items():
+    bounds = {**BOUNDS, **{key: limit for key, limit in OPTIONAL_BOUNDS.items() if key in result}}
+    for key, (low, high) in bounds.items():
         number = result[key]
         try:
             valid = type(number) in (int, float) and math.isfinite(number) and low <= number <= high
@@ -66,6 +68,20 @@ def validate_config(value=None):
             raise ValueError(f"Rheology {key} must be finite and in [{low}, {high}]")
         result[key] = float(number)
     return result if result["strength"] else None
+
+
+def occupancy_factor(mass, reference):
+    """Bounded paint-amount response, independent of the history support cutoff."""
+    value = np.asarray(mass, dtype="f8")
+    try:
+        valid = (
+            type(reference) in (int, float) and math.isfinite(reference) and 1e-5 <= reference <= 1
+        )
+    except OverflowError:
+        valid = False
+    if not np.isfinite(value).all() or np.any(value < 0) or not valid:
+        raise ValueError("Occupancy requires finite nonnegative paint and a reference in [1e-5, 1]")
+    return value / (value + reference)
 
 
 def initialization_config(config):
@@ -256,6 +272,10 @@ class GPURheology:
                 code = (root / name).read_text()
                 if name == "rheology-prepare.glsl" and self.trait_amplitude is not None:
                     code = code.replace("#version 430", "#version 430\n#define RHEOLOGY_TRAITS", 1)
+                if name == "rheology-prepare.glsl" and "occupancy_mass_reference" in self.config:
+                    code = code.replace(
+                        "#version 430", "#version 430\n#define RHEOLOGY_OCCUPANCY_REFERENCE", 1
+                    )
                 code = code.replace(
                     '#include "rheology-streamfunction.glsl"',
                     (root / "rheology-streamfunction.glsl").read_text(),
@@ -282,6 +302,10 @@ class GPURheology:
             self.reaction["u_lower_scale"].value = lower_transport_scale
             self.prepare["u_coarse_size"].value = self.coarse_size
             self.prepare["u_resistance_strength"].value = self.config["strength"]
+            if "occupancy_mass_reference" in self.config:
+                self.prepare["u_occupancy_mass_reference"].value = self.config[
+                    "occupancy_mass_reference"
+                ]
             if self.trait_amplitude is not None:
                 self.prepare["u_trait_amplitude"].value = self.trait_amplitude
             for key, value in {

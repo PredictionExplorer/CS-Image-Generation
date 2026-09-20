@@ -6,6 +6,9 @@ uniform sampler2D u_upper_state,u_lower_state,u_upper,u_lower,u_upper_other,u_lo
 uniform ivec2 u_size,u_coarse_size;
 uniform bool u_has_other;
 uniform float u_aspect,u_domain,u_minimum,u_resistance_strength;
+#ifdef RHEOLOGY_OCCUPANCY_REFERENCE
+uniform float u_occupancy_mass_reference;
+#endif
 #ifdef RHEOLOGY_TRAITS
 uniform sampler2D u_upper_trait,u_lower_trait,u_upper_contact,u_lower_contact;
 uniform float u_trait_amplitude;
@@ -42,7 +45,13 @@ void main() {
     float cells=float((hi.x-lo.x)*(hi.y-lo.y));
     float average_mass=mass/cells;
     float structure=mass>u_minimum?clamp(moment/mass,0.,1.):0.;
+#ifdef RHEOLOGY_OCCUPANCY_REFERENCE
+    // A paint-amount scale changes resistance only, retaining the independent
+    // small concentration cutoff used to carry and rebuild material history.
+    float resistance=u_resistance_strength*structure*structure*average_mass/(average_mass+u_occupancy_mass_reference);
+#else
     float resistance=u_resistance_strength*structure*structure*average_mass/(average_mass+u_minimum);
+#endif
 #ifdef RHEOLOGY_TRAITS
     float affinity=mass>u_minimum?clamp(affinity_moment/mass,-1.,1.):0.;
     resistance*=1.+u_trait_amplitude*affinity;

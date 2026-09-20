@@ -22,6 +22,7 @@ from .rheology import (
     discrete_curl,
     evolve_structure,
     initialization_config,
+    occupancy_factor,
     response_plan,
     screened_response,
     validate_config,
@@ -50,6 +51,29 @@ def settings(**overrides):
 
 
 class RheologyTests(unittest.TestCase):
+    def test_occupancy_reference_is_optional_and_independent_of_history_support(self):
+        self.assertNotIn("occupancy_mass_reference", DEFAULTS)
+        self.assertNotIn("occupancy_mass_reference", validate_config({}))
+        self.assertEqual(validate_config(DEFAULTS), DEFAULTS)
+        for value in (1e-5, 0.01, 0.02, 1):
+            resolved = validate_config({"occupancy_mass_reference": value})
+            self.assertEqual(resolved.pop("occupancy_mass_reference"), float(value))
+            self.assertEqual(resolved, DEFAULTS)
+        for value in (None, False, 0, 0.000001, 1.01, float("nan"), float("inf"), 10**400):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_config({"occupancy_mass_reference": value})
+
+    def test_occupancy_gate_is_bounded_monotone_and_half_strength_at_reference(self):
+        masses = np.array([0, 1e-7, 1e-5, 1e-4, 0.001, 0.01, 0.1, 1, 10])
+        for reference in (1e-5, 0.01, 0.02, 1):
+            gate = occupancy_factor(masses, reference)
+            self.assertTrue(np.all((gate >= 0) & (gate < 1)))
+            self.assertTrue(np.all(np.diff(gate) > 0))
+            self.assertEqual(float(occupancy_factor(reference, reference)), 0.5)
+            self.assertEqual(float(gate[0]), 0)
+        self.assertTrue(np.all(occupancy_factor(masses, 0.02) <= occupancy_factor(masses, 0.01)))
+        self.assertAlmostEqual(float(occupancy_factor(0.008, 0.01)), 4 / 9)
+
     def test_contact_gated_traits_are_bounded_neutral_and_mass_weighted(self):
         mass = np.array([1, 3, 0])
         affinity, contact = np.array([1, -1, 1]), np.array([0.5, 0.25, 1])
@@ -221,6 +245,79 @@ class RheologyGPUTests(unittest.TestCase):
         self.assertEqual(set(fields), set(second.snapshot()))
         for name, field in fields.items():
             np.testing.assert_array_equal(second.snapshot()[name], field)
+
+    def test_explicit_legacy_occupancy_reference_preserves_all_omitted_state_bytes(self):
+        controls = {"interaction": {"material_variation": {"amplitude": 0.25}}}
+        baseline = self.engine(rheology={}, **controls)
+        baseline.advance_to(baseline.steps)
+        expected, diagnostics = baseline.snapshot(), baseline.diagnostics
+        baseline.close()
+        explicit = self.engine(rheology={"occupancy_mass_reference": 1e-5}, **controls)
+        explicit.advance_to(explicit.steps)
+        self.assertEqual(explicit.diagnostics, diagnostics)
+        self.assertEqual(set(explicit.snapshot()), set(expected))
+        for name, field in expected.items():
+            self.assertEqual(explicit.snapshot()[name].tobytes(), field.tobytes())
+
+    def test_amount_reference_sets_expected_coefficient_with_and_without_traits(self):
+        for coupled in (False, True):
+            interaction = {"material_variation": {"amplitude": 0.25}} if coupled else None
+            engine = self.engine(
+                rheology={"strength": 3, "occupancy_mass_reference": 0.01},
+                interaction=interaction,
+                resolution=[128, 96],
+            )
+            gpu = engine._gpu
+            self.assertEqual(gpu.rheology.config["minimum_concentration"], 1e-5)
+            state = np.zeros((gpu.height, gpu.width, 4), dtype="f4")
+            state[..., 0] = 0.75
+            with gpu.ctx:
+                for texture in gpu.rheology.states:
+                    texture.write(state.tobytes())
+                if coupled:
+                    contact = np.zeros_like(state)
+                    contact[..., 0] = 1
+                    for texture in (*gpu.interaction.traits, *gpu.interaction.states):
+                        texture.write(contact.tobytes())
+                measured = []
+                for mass in (0, 0.0001, 0.001, 0.01, 0.1):
+                    paint = np.zeros_like(state)
+                    paint[..., 0] = mass / 2
+                    for block in (*gpu.blocks, *gpu.underpaints):
+                        block[0].write(paint.tobytes())
+                    gpu._flow(0.37)
+                    coefficient = np.frombuffer(gpu.rheology.guide.read(), "f4").reshape(-1, 4)[
+                        :, 1
+                    ]
+                    expected = 3 * 0.75**2 * occupancy_factor(mass, 0.01) * (1.25 if coupled else 1)
+                    np.testing.assert_allclose(coefficient, expected, rtol=3e-6, atol=2e-7)
+                    measured.append(float(coefficient.mean()))
+                self.assertTrue(np.all(np.diff(measured) > 0))
+            engine.close()
+
+    def test_amount_reference_changes_feedback_retaining_budget_and_capture_cadence(self):
+        controls = {"interaction": {"material_variation": {"amplitude": 0.25}}}
+        baseline = self.engine(rheology={"strength": 3}, **controls)
+        initial_mass = pigment_mass(baseline.snapshot()["pigment"], 1.6)
+        baseline.advance_to(baseline.steps)
+        legacy = baseline.snapshot()["pigment"]
+        baseline.close()
+        new_controls = {**controls, "rheology": {"strength": 3, "occupancy_mass_reference": 0.01}}
+        engine = self.engine(**new_controls)
+        engine.advance_to(engine.steps)
+        final, diagnostics = engine.snapshot(), engine.diagnostics
+        self.assertGreater(float(np.abs(final["pigment"] - legacy).max()), 1e-5)
+        np.testing.assert_allclose(
+            pigment_mass(final["pigment"], 1.6), initial_mass, rtol=5e-6, atol=1e-12
+        )
+        engine.close()
+        split = self.engine(**new_controls)
+        for step in (0, 3, 7, 12, 20):
+            split.advance_to(step)
+            split.snapshot([48, 36])
+        self.assertEqual(split.diagnostics, diagnostics)
+        for name, field in final.items():
+            np.testing.assert_array_equal(split.snapshot()[name], field)
 
     def test_combined_zero_contact_is_exact_and_signed_traits_scale_only_resistance(self):
         baseline = self.engine(rheology={"strength": 3}, interaction={})

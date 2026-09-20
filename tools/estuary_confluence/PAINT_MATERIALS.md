@@ -33,6 +33,15 @@ not selections in this material study.
    solver. Variable resistance can redistribute flow, so it does not promise that
    every pixel moves more slowly.
 
+An optional `rheology.occupancy_mass_reference` separates the visible paint-amount
+response from the numerical history-support threshold. When present, the coarse
+resistance factor uses `mean_mass / (mean_mass + occupancy_mass_reference)`;
+`minimum_concentration` still governs history support. When absent, the earlier
+formula and normalized recipe remain exact. Values 0.01 and 0.02 test whether
+letting thin paint offer less resistance improves the contours. A separate
+response-length 0.08 study changes both the spatial response and its derived
+coarse grid; it is not an isolated grid-resolution experiment.
+
 Matte/satin variants use the existing small roughness bias. They retain the
 interaction-driven variation already present in RC1; there is no extra canvas
 noise layer.
@@ -81,7 +90,7 @@ settings succeed across seeds and where the original RC1 still works better.
 ## Reproduce and publish
 
 ```sh
-# Four full-source smoke cases, then all 23 settings on three seeds.
+# Four full-source smoke cases, then all 27 settings on three seeds.
 python -m tools.estuary_confluence.paint_material_studies \
   --seeds 0xb7f327f9f722 --variants rc1 relief traits resistance \
   --source-root /path/to/orbits --output /path/to/smoke

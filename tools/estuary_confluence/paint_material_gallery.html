@@ -656,8 +656,9 @@
         const rows = cohort();
         options($("left"), rows, $("left").value || "rc1", "rc1");
         const preferred =
-          data.picks.find((p) => p.seed === $("seed").value)?.variant ||
-          "fuller-relief-traits-resistance";
+          data.picks.find(
+            (p) => p.seed === $("seed").value && p.variant !== $("left").value,
+          )?.variant || "fuller-relief-traits-resistance";
         const fallback =
           rows.find((row) => row.variant === preferred)?.variant ||
           rows.find((row) => row.variant !== "rc1")?.variant ||

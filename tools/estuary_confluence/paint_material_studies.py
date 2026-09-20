@@ -49,6 +49,8 @@ class StudySpec:
     trait_amplitude: float | None = None
     resistance_strength: float | None = None
     roughness_bias: float | None = None
+    occupancy_mass_reference: float | None = None
+    response_length: float | None = None
 
 
 def _factorial_specs():
@@ -113,8 +115,47 @@ STRENGTHS = {
         roughness_bias=-0.04,
     ),
 }
-VARIANTS = {**FACTORIAL, **STRENGTHS}
-SUITES = {"factorial": tuple(FACTORIAL), "strengths": tuple(STRENGTHS), "all": tuple(VARIANTS)}
+REFINEMENTS = {
+    "resistance-mass-01": StudySpec(
+        "Resistance follows paint thickness",
+        "Thin paint offers less resistance; the material-history threshold stays unchanged.",
+        ("resistance",),
+        resistance_strength=3.0,
+        occupancy_mass_reference=0.01,
+    ),
+    "resistance-mass-02": StudySpec(
+        "Less resistance in thin paint",
+        "A broader transition between thin and thick paint, with the same resistance strength.",
+        ("resistance",),
+        resistance_strength=3.0,
+        occupancy_mass_reference=0.02,
+    ),
+    "resistance-wide": StudySpec(
+        "Wider resistance response",
+        "Paint responds over a wider area while keeping the same resistance strength.",
+        ("resistance",),
+        resistance_strength=3.0,
+        response_length=0.08,
+    ),
+    "gentle-worked-paint": StudySpec(
+        "Gentle worked paint",
+        "Gentle versions of all four effects, softer resistance in thin paint, and a matte finish.",
+        FEATURES,
+        height_scale=63.0,
+        relief_strength=0.3,
+        trait_amplitude=0.10,
+        resistance_strength=1.0,
+        roughness_bias=0.04,
+        occupancy_mass_reference=0.01,
+    ),
+}
+VARIANTS = {**FACTORIAL, **STRENGTHS, **REFINEMENTS}
+SUITES = {
+    "factorial": tuple(FACTORIAL),
+    "strengths": tuple(STRENGTHS),
+    "refinements": tuple(REFINEMENTS),
+    "all": tuple(VARIANTS),
+}
 
 
 def _reference_recipe(seed):
@@ -168,6 +209,10 @@ def _apply_variant(original, variant):
             "version": "paint-rheology-v1",
             "strength": spec.resistance_strength,
         }
+    for key in ("occupancy_mass_reference", "response_length"):
+        value = getattr(spec, key)
+        if value is not None:
+            recipe["simulation"]["rheology"][key] = value
     if spec.roughness_bias is not None:
         recipe["surface"]["roughness_bias"] = spec.roughness_bias
     return validate_recipe(recipe)
@@ -219,7 +264,13 @@ def _study_metadata(variant, recipe, accepted):
     return {
         "version": VERSION,
         "variant": variant,
-        "suite": "factorial" if variant in FACTORIAL else "strengths",
+        "suite": (
+            "factorial"
+            if variant in FACTORIAL
+            else "strengths"
+            if variant in STRENGTHS
+            else "refinements"
+        ),
         "label": spec.label,
         "description": spec.description,
         "features": {feature: feature in spec.features for feature in FEATURES},
