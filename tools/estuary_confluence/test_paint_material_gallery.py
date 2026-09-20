@@ -79,8 +79,11 @@ class PaintMaterialGalleryTests(unittest.TestCase):
         receipt["final_step"] = recipe["simulation"]["steps"]
         receipt["base_material_sha256"] = accepted["base_material_sha256"]
         physical = accepted["physical_state_sha256"]
-        if "material_variation" in recipe["simulation"]["interaction"]:
-            physical = hashlib.sha256((seed + variant).encode()).hexdigest()
+        if (
+            "material_variation" in recipe["simulation"]["interaction"]
+            or "rheology" in recipe["simulation"]
+        ):
+            physical = hashlib.sha256(seed.encode() + encoded(recipe["simulation"])).hexdigest()
         receipt["physical_state_sha256"] = physical
         for look in recipe["looks"]:
             receipt["looks"][look]["physical_state_sha256"] = physical
@@ -223,6 +226,20 @@ class PaintMaterialGalleryTests(unittest.TestCase):
         self.refresh(path, request, receipt)
         with self.assertRaisesRegex(ValueError, "reference painting differs"):
             self.build()
+
+    def test_appearance_changes_to_new_physics_must_share_the_same_material_history(self):
+        seed = DEFAULT_SEEDS[0]
+        first, second = self.case(seed, "resistance"), self.case(seed, "fuller-resistance")
+        cases = [self.cases[0], first, second]
+        self.build(cases)
+        shutil.rmtree(self.output)
+        request, receipt = self.fixture.verified_case(second)
+        receipt["physical_state_sha256"] = "f" * 64
+        for view in receipt["looks"].values():
+            view["physical_state_sha256"] = receipt["physical_state_sha256"]
+        self.refresh(second, request, receipt)
+        with self.assertRaisesRegex(ValueError, "Identical simulation settings"):
+            self.build(cases)
 
     def test_visual_picks_need_known_distinct_identities_and_nonempty_notes(self):
         for picks in (

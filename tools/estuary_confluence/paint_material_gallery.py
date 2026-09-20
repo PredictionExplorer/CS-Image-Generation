@@ -63,7 +63,7 @@ def manifest(output, *, title, picks):
     references, accepted = _references(output)
     root = output / "studies"
     collection, provenance = verify_gallery(root)
-    rows, indexed, seeds, requests = [], set(), [], {}
+    rows, indexed, seeds, requests, histories = [], set(), [], {}, {}
     for study in collection["studies"]:
         if study["group"] != "silk-grain":
             continue
@@ -113,6 +113,12 @@ def manifest(output, *, title, picks):
         require(
             "body_influence" not in request["recipe"]["simulation"],
             "Material studies require all three bodies",
+        )
+        history_key = seed, encoded(request["recipe"]["simulation"])
+        previous_history = histories.setdefault(history_key, receipt["physical_state_sha256"])
+        require(
+            receipt["physical_state_sha256"] == previous_history,
+            "Identical simulation settings produced different material histories",
         )
         rows.append(
             {
