@@ -75,3 +75,43 @@ geometry, capture-cadence independence, artifact binding, and native pigment
 budgets. Tests of inactive-body isolation hold the original projection and layout
 fixed while changing the inactive body's sampled measurements. Recomputing the
 projection or initial arrangement would be a different experiment.
+
+## Qualification
+
+The Confluence suites ran 574 tests on CPU and on the render server, without
+failures (88 CPU skips and nine server skips). The base Estuary suite ran 83
+tests without failures; all 83 ran on the server GPU environment. The dedicated
+body-influence GPU suite ran all 11 tests, including inactive-motion isolation,
+unchanged initial pigment fields, eligible pair forcing, and wetting/deposition.
+
+A complete native-resolution all-body control for seed `0xb7f327f9f722`
+reproduced RC1's full final material hash and final PNG bytes exactly. The
+qualification renderer is `7972c69`; `f842a0d` adds the dedicated tests and has
+the same recorded numerical and presentation runtime identity. The experiment
+is preserved separately on `codex/estuary-body-influence`.
+
+## Verified collection
+
+The [release record](releases/body-influence-rc1-v1.json) binds all 60 new films
+and final paintings to the frozen source, original RC1 inputs, and independent
+audit. All initial images, layouts, pigment amounts, palettes, and controls outside
+body influence match RC1 exactly. All films cover the complete recording: 56,220
+new frames in total. Maximum final pigment-budget error was 6.79e-8 relative,
+below the 5e-6 limit.
+
+Four concurrent workers completed the batch in 58.12 minutes, with peak sampled
+GPU memory of 7,704 MiB. The portable gallery contains all six reduced selections
+for every seed plus ten saved RC1 references. Shared playback and seeking compare
+any two histories at the same source time; starting paint and final paintings
+have their own views.
+
+The published gallery and local copy were independently verified. All 431 media
+and record URLs responded successfully, including byte-range requests for all
+70 films. Browser review covered every seed's images/previews and representative
+real-film playback, completion, shared seeking, body/seed selection changes,
+focus mode, and keyboard exit. No browser errors or warnings were reported.
+
+All 60 final paintings were visually inspected alongside RC1. There was no
+canvas-edge clipping or large tile/straight seams; some native-size contours
+retain minor stepping or ribbing. These are controlled experiments: quiet singles
+and less successful compositions remain available alongside promising pairs.

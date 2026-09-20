@@ -1,0 +1,4390 @@
+{
+  "cases": [
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "6e5796cf7c70c776638812f1b94c2b864769592150f852afe7e5b1a0ad81a2f4",
+      "body_influence_metadata_sha256": "701cdb733e69510eca17bc88c558d699a21f7aadd9e21c30580d836e78e01357",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb7f327f9f722-body-1",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 2.1580156025006827e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "daa7336d08bc002e80d2f8fa673e91a846d86fe849e2ca9e61df3aa9c77f9d8b",
+      "receipt_artifact": {
+        "bytes": 174675,
+        "sha256": "3cded1d901c4c836c03f89826e03f1a7e541215fd9746655094b1c6b637f6c9a"
+      },
+      "recipe_sha256": "b0733ad78dfeaea22623a02dc29d761ce5bcda6bcbc866321ce6f47e3735183a",
+      "request_artifact": {
+        "bytes": 244236,
+        "sha256": "9e728587748de0415f95d8b195a58f02a8da79b3aaf87665bc2e8afe4a0af0cd"
+      },
+      "request_identity_sha256": "9e728587748de0415f95d8b195a58f02a8da79b3aaf87665bc2e8afe4a0af0cd",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 808657,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "843d225315df481aae3778f6be59b5bbcda5a4819cf071425e9b4b51909293a7"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1067336,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "89c288edfb9741d29fddfccb8dfb7222210ff30a8cc1838a1a567f6c3c2babe9"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "77a9749c8fd47522e66e70804ae1c0fc792faafe4bcf3661f56b4239f37a056d",
+      "body_influence_metadata_sha256": "544a221ff6104652a9f5147db2de5c38490432366a1ad0e5d4be3c3c0f1ce917",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb7f327f9f722-body-2",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 3.658109972582788e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "47b16965e37b6e230b88f183c7bc2fba819eb2013c95b54f9ba8c6338d303595",
+      "receipt_artifact": {
+        "bytes": 174198,
+        "sha256": "11d0455a3e01f8d3ff9f838b5b5d639bf61aa882222266609d20edae0ca5a8c4"
+      },
+      "recipe_sha256": "f0297a3b01d492630599a093c518e32eac34fcedcfc3819ed176970ece56ca69",
+      "request_artifact": {
+        "bytes": 244236,
+        "sha256": "ba7aec44fbfdb6e06503e2afaae96585b8dbe1ddabaf3a3101d5ff82555cbdc6"
+      },
+      "request_identity_sha256": "ba7aec44fbfdb6e06503e2afaae96585b8dbe1ddabaf3a3101d5ff82555cbdc6",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 314793,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "adcb3275a880cca7ec801144cac520177260a95706c501b596358f27ac07d392"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 282410,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "5ab5c49674aaca06c10bccab1b4b260aceb22436de8c0a08888ee70b6e2b9c6b"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "19e2556d67dadd763864223ca0a7440f052020df0d032a90cd3f7c2caa707d81",
+      "body_influence_metadata_sha256": "731f73856adc1da44199b21b67b69165e068c8078d040b15f434e165b21bb896",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb7f327f9f722-body-3",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 2.5825386660689718e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "00e57c2bb3b7b4ec7226f0da82fef06cad01e355e0bb6c3d21d984e6e836d3ec",
+      "receipt_artifact": {
+        "bytes": 174925,
+        "sha256": "001df6e6efdb19ebdfe7994e5021ff8b9c3707fd7d46386e6b3dcec0eaf78317"
+      },
+      "recipe_sha256": "3fe0a952e0260b3b2624e5d5354289b731470574011e9b54e580355e321d5eee",
+      "request_artifact": {
+        "bytes": 244236,
+        "sha256": "196d4fef419663aa9bfe5122367a35c5da04fc0f79afad7804bec15a3e220450"
+      },
+      "request_identity_sha256": "196d4fef419663aa9bfe5122367a35c5da04fc0f79afad7804bec15a3e220450",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1250827,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "fd77ae6a539ad52b15683537ad2afd8831221e7dd1b42387c53913d59b6c9c3c"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1458928,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "1e18fce592b05dc8e3d7f3215f4708dd17e9a197b77ed6e368997ea44da5e15c"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "1d8990169a11b9928cdf643b440934a3d6580e3e6fe49a0b4a544c0c6acc77d7",
+      "body_influence_metadata_sha256": "2e450a05ed2f40e6c82586df1658f15ce013b09b54fd39a01d031d82f6aca381",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb7f327f9f722-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 4.8926223157114585e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "ef864d12155352e3eaad5c6bef71bb21101d95e11c8e892a3a123364dafceafb",
+      "receipt_artifact": {
+        "bytes": 174722,
+        "sha256": "3021f01ec9fd22307375541944508bc6088737af27bffaf68a547e9bca7887fe"
+      },
+      "recipe_sha256": "d74b439f8b414add326e53fdfab9633dc684bf4953a5c34aa38f1a47aa7cad58",
+      "request_artifact": {
+        "bytes": 244389,
+        "sha256": "9e6a04273e6a2450dcd79ccd881f959ed0230a08e95147b437a2a5ef84875797"
+      },
+      "request_identity_sha256": "9e6a04273e6a2450dcd79ccd881f959ed0230a08e95147b437a2a5ef84875797",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 911716,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "07b749f973b9bbc27a82df66c05ddf82b5fa2c9a730215ce933c3c58320aa4c5"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1283880,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "beb59a45c8900805bbae1ed19ba3379ddf078f262f4a3ca44035a0e7d0174b6c"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "d5b8e636b6038bc6aa744d68ab23663091106d0d804d2229fb98f3c1014ae014",
+      "body_influence_metadata_sha256": "4c8148a56e733de9084a848145a1a500d41448b3a3eccf5d00e5e4afea082873",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1174,
+        "sha256": "4e330478a951d28730761dfdba7f2b436fc889e2435790c1f1f5b7be37d07d40"
+      },
+      "id": "0xb7f327f9f722-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 3.262879529314793e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "22b27eebbe4fe7e66bc01287c8aa8c752517a976b1bbc61f8cbef8514d6ea6fe",
+      "receipt_artifact": {
+        "bytes": 175281,
+        "sha256": "a5a8915574744e5012a6a13fd5cd5dfa97740dc2c191a22e4554e73a7676a483"
+      },
+      "recipe_sha256": "3f762d2e65034cf313fe4479b7fb47e48051970fd4a2ec703bd7992b35955520",
+      "request_artifact": {
+        "bytes": 245808,
+        "sha256": "6dd85d175d857b92aa4ebf702f04d8edda02828b6553266503784854476af091"
+      },
+      "request_identity_sha256": "6dd85d175d857b92aa4ebf702f04d8edda02828b6553266503784854476af091",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2242925,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "6232fdeb9fdd55df0e93efb5fd42fa80fb4c20301aa8b875a7d7fb4888119f10"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3235835,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "7a272ea15ab2b89232e85207f23e9cee8c028091cbd343d57664cb40a97dcd76"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "7aeb2d00a55fb89f65f4d9d21aca424bce257b71584ccd73b5c74a492185082f",
+      "body_influence_metadata_sha256": "9cba1a3922da08e71c16ffaeb3f2280d8ef30bbc51c21525cc2e7ef7bcde0592",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb7f327f9f722-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 25099,
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "layout_artifact": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "maximum_final_relative_mass_error": 1.2458504814730661e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "f5bdc3dd2f2fc270f76faf2bdf66dc1dda0977d205be8c26a893c49b1faaa528",
+      "receipt_artifact": {
+        "bytes": 175023,
+        "sha256": "12be428877827c1203f4727bcb6274c2c0bd2173f37e542d54ea98d64fa54562"
+      },
+      "recipe_sha256": "e979c415507850740a6a6dff2e55c10b80e3bfc42dd8261d5d8820d08a40cfc4",
+      "request_artifact": {
+        "bytes": 244389,
+        "sha256": "036f2564f20c956c592a15cb8db5ed07ee100760179c89b8772f6bea3af38e77"
+      },
+      "request_identity_sha256": "036f2564f20c956c592a15cb8db5ed07ee100760179c89b8772f6bea3af38e77",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "target_mass": [
+        0.024668941557634452,
+        0.012762379717919613,
+        0.005819188630013683,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1402562,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "96d7b5ca0e053d9049cc7f59e0e62ab4cafca6e0fbc24909facdc5da6079cf9d"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2049860,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "8d4433480fe37039d3aff8ac1dd752d71079ab35ed65c80adffa64c59bb8d860"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "9b1859dbcb7e566bb683c206dc9b31a78cadec7e1321ed659ffd2558c50a8f75",
+      "body_influence_metadata_sha256": "f26d14600c0cd10ee7218a59975edea6a588de0892cfef712dda4b58b22f3907",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xceddf97909f39cc2-body-1",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 3.0063252489160346e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "09554c0a2c7b71ec32bb4fb09000d565f862badde4e4fdd67a8f619daab6ac49",
+      "receipt_artifact": {
+        "bytes": 174865,
+        "sha256": "7c0c882348e56a2b59b34d490f145910313ed7aff31ca97346e49bfcc126fcf9"
+      },
+      "recipe_sha256": "d86f341972c832976925360a64beb272c2a3770fe759690b7d0a20eb75f44074",
+      "request_artifact": {
+        "bytes": 243757,
+        "sha256": "59320a7959e2089729c628245154b6bc344dc20bb634a9f25e3a86835498edaf"
+      },
+      "request_identity_sha256": "59320a7959e2089729c628245154b6bc344dc20bb634a9f25e3a86835498edaf",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1570889,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "51a29c267db49caf4c9e63bfa3dba2309bb08f34dd51476953802b2d0b68c489"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1523455,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "78e2609e151af6f6ed9b27744707de2f56870d2b3fb1f770eab3280a77384bad"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "80e8f1cab6399331eb47eb5ebec27effdda84e0e394963843f83156f1099652c",
+      "body_influence_metadata_sha256": "0a56d1fcc2ceac8a91e09c1d97c2601ce4871b9e321b44c244e442cece538fb5",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xceddf97909f39cc2-body-2",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 2.6078879516045598e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "d845b3fe2238700c6f70f797b85380369847e7b89622214d484b6488808be2ac",
+      "receipt_artifact": {
+        "bytes": 174842,
+        "sha256": "1875de81b78bcd9340caadc95dff69c0d2f394cb63ca1fc395053ad10103e5c0"
+      },
+      "recipe_sha256": "19da7443ffc78be0e3d8ecbdee5cdbe0106b481d9bec92cb1c1fa96b102f3d5d",
+      "request_artifact": {
+        "bytes": 243757,
+        "sha256": "be573cf1f195399a4c0db6d5157b08e6b1d7c79a0e245a3042dc9c668eb602d9"
+      },
+      "request_identity_sha256": "be573cf1f195399a4c0db6d5157b08e6b1d7c79a0e245a3042dc9c668eb602d9",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1720738,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "80f9edcd52ff05da23b12957d3396e6225a110320b65c48a85236d8c91aa8fa4"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1393585,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fefe0870d57bca354a53accb350141fb3ddc151147cf20815dc6124a17647d5f"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "55cfa0b7155be5c5ee5c3d5c68519ba2ef5c60c34b3a88556c72c9a839985f24",
+      "body_influence_metadata_sha256": "c03b1c2abf25126e11e82c4b85242e533848d098e94581055794e4509f3eca03",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xceddf97909f39cc2-body-3",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 6.085792173533546e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "c78d88dff77c51bfa653dd6f0042b1b3cf0da0f82e38f40db38c29c960f9bd04",
+      "receipt_artifact": {
+        "bytes": 174854,
+        "sha256": "734554b43173f0f724042f744b8ea10c0bad8d19b8bc47bd8939c07ac2be6416"
+      },
+      "recipe_sha256": "eec0faa2b74aca0b204a8fd3e543a466e738584a60d0450d81b5cf827ce214ff",
+      "request_artifact": {
+        "bytes": 243757,
+        "sha256": "ca1aa84400b522b318f9b95442435cf5088f91b22f897799568fb50e435330bc"
+      },
+      "request_identity_sha256": "ca1aa84400b522b318f9b95442435cf5088f91b22f897799568fb50e435330bc",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1569471,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "bfc178a19675c6f1481e619e00656c6457ae94a985502f600394879f24d34a82"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1416101,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "24fd2463ecb27f1ba7a1cbc196e70e8dc6be995cd032ca78d88e65c711540859"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "80799cb692a6ce06db33aece03aa4630d10f845dac397b0113474912b6079873",
+      "body_influence_metadata_sha256": "92c5d1f8635dd979fbc0098467539609148a6ac654ae003133acc2211f823a3c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1181,
+        "sha256": "682936d27e718783debe1e4b191cbd34b5e2645f8bc977ea2f5882996ca7b865"
+      },
+      "id": "0xceddf97909f39cc2-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 2.7328648606037118e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "9dba1e19a3475c2ffc4dc37c81d3df7145dc3a7cba1769bcad91bdd310c46180",
+      "receipt_artifact": {
+        "bytes": 175157,
+        "sha256": "7a12497d353cac9f51279293f5c02f6453191ae94525ac0fc45338344ae0acdc"
+      },
+      "recipe_sha256": "2f564279f909c442c174e44aa732d9889c5a1965db0380bc4924b2f58a870d42",
+      "request_artifact": {
+        "bytes": 245336,
+        "sha256": "c32159c28cc9cf87f5308abe37bb000845b150e08d85e48602f6b55757dd1936"
+      },
+      "request_identity_sha256": "c32159c28cc9cf87f5308abe37bb000845b150e08d85e48602f6b55757dd1936",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 2711609,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "bb93a2b8f629336e861a9c8eeb7269f78f68cc607497f4201b2e88ed80152b10"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3442466,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "2a82d3a7059de3d8e8c9fc317c4b4a699308e26b0ad12fae907c4f9600046753"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "675a8d04d476fdef8908140e9fa0765f0a456aac4928254ddf7227be4c201c03",
+      "body_influence_metadata_sha256": "5ca4922ae057c57589568863f0bb886e6c7380c598ec51481913bc522c2718bc",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1182,
+        "sha256": "d8a2f95f45a0ffd2aa1252254ffc79f42ab5b49f2d9f60adbfb5929fdaa15829"
+      },
+      "id": "0xceddf97909f39cc2-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 2.867224583667003e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "4d488a52b6a204c8f735fe48c76dedc367e22a71ac84ba4fdd210d48749b855c",
+      "receipt_artifact": {
+        "bytes": 175147,
+        "sha256": "c5f346c52fa57d97f8a66a7feaee60c2691cd00746f278d9f2ff93b2a4bcdbb7"
+      },
+      "recipe_sha256": "6c33d6bffdbe33931256f102eaac28d5997836ad0a5e3e6147462e2722814c81",
+      "request_artifact": {
+        "bytes": 245337,
+        "sha256": "512a1ce2af6a6a7d07b6e63f5ed44a14f4681b745599b5c94580d2e06c03dcfc"
+      },
+      "request_identity_sha256": "512a1ce2af6a6a7d07b6e63f5ed44a14f4681b745599b5c94580d2e06c03dcfc",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2494223,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "6dcaa9823dc962d1e9c0c3b027a58e6d99127f028757e0b0ae678e7d78a3294f"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2997501,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "052368737805318911c1702007bc5fdc39fc33e5e0a35b08d0acd240de854182"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "e706510502b3b6ea19d797904d2c2c46a85501d72a1718dd9946e0115b2bbd59",
+      "body_influence_metadata_sha256": "5237a530b5cfcda3d4b41e5b38f4f28e6c15d3c86635dc6a1f88c950cb998d34",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 787,
+        "sha256": "9dcc04d51dd292abd80cbbc1e743ddb1941c0aa24cedb359b528a053c9b7c3e4"
+      },
+      "id": "0xceddf97909f39cc2-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36456,
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "maximum_final_relative_mass_error": 2.862451572653395e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "a913c4a8559c09140dc7bb62683a0b848d9d0bbe29897ec45cac42d4425be3f3",
+      "receipt_artifact": {
+        "bytes": 175107,
+        "sha256": "e71474ba9cb65421b153d96eb62db17a102368b4a5bc69b6f467f458031394f2"
+      },
+      "recipe_sha256": "c38bf8e56b56f7bdca4d985e25ddc405ee8f07f73480f2d2ef7dfc88298e9200",
+      "request_artifact": {
+        "bytes": 244862,
+        "sha256": "2bf84131e6b1b7cf053958ca4eae96730e069c2b1d69727630cef4501a94770f"
+      },
+      "request_identity_sha256": "2bf84131e6b1b7cf053958ca4eae96730e069c2b1d69727630cef4501a94770f",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "target_mass": [
+        0.04284541920224202,
+        0.01570840266648517,
+        0.011246049488273588,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2559688,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "19a85b693a8c7aba2be30ecedde5e1592be1d7910e714ea1d136c205ba75ba9b"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3413004,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "27776a2a9b5678ff250420325f6a64ccd1b20978e82525971dbedef6da2f46a0"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "6da96522a72541f0bf110403e1be67781028031c70db64d498559811e04c7850",
+      "body_influence_metadata_sha256": "0f02accf09b194d918166bbb0d5886ac87aab9096fe9886de5809474349c1810",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x808861c25b6c-body-1",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 2.744711996224525e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "22d81936c94f34025af3ea2191b4cb58763525b8d5b932a9fc33fc982661844a",
+      "receipt_artifact": {
+        "bytes": 174884,
+        "sha256": "7c5fc1bd63499f94c015f151e4df54da4d9f65a52a751c3cfdcc1ee33a342db2"
+      },
+      "recipe_sha256": "b2bf29b371cd365fcca4e665c97b5985090cec96c68c3597b69a89af69b2797e",
+      "request_artifact": {
+        "bytes": 243745,
+        "sha256": "b2a48d2bc985e2d673f4456dc2ea1068741dbbab513983f585550357adc8e24d"
+      },
+      "request_identity_sha256": "b2a48d2bc985e2d673f4456dc2ea1068741dbbab513983f585550357adc8e24d",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1927177,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "619733d0a781116942586b2a4fc3a5d6bd62ea698fc8410923200e77174e0804"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1925063,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "d6134f50ff434904b891c6d7bf1a068ee8429f06669cbe5d879df81812a2ca2f"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "0f8a4564d74cdb79446296c4538e62793934f4d09ba1bdcf45428cdcd26dae8a",
+      "body_influence_metadata_sha256": "658f6c95ffc9270b7e4222c7510b90c87c75805bc6435354ea6ba09bc4e4feda",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x808861c25b6c-body-2",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 2.03663953608238e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "b483b56c66f376c464c5fc60bba88396ad7c0de0bdefe08b2e287cd9ce694f9c",
+      "receipt_artifact": {
+        "bytes": 174964,
+        "sha256": "c1dd2b0df268edf1b9e48f80318aa359abc1743ec529381964ca70d18aa0e59d"
+      },
+      "recipe_sha256": "de99f12b1989983d243a9de0184c2ccf4915a72046b20cc5ef8e5b8eea72e6c4",
+      "request_artifact": {
+        "bytes": 243745,
+        "sha256": "9727babd4268b3b6ecd810f1e04934b9028fc908f9e11e2a4c3d2098005b2d3e"
+      },
+      "request_identity_sha256": "9727babd4268b3b6ecd810f1e04934b9028fc908f9e11e2a4c3d2098005b2d3e",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1806337,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "f736fdbdbc7fce1db38d53d1cfe0fb6417de5680bad9e4ca28f7ce17d5a095e9"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1606864,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "55231106461242e2a074da565f8968e0d7deb3bb6a0ef026539cb57b30eccb74"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "a0849ad222b1bb458f8901c7b8d52111ffb58fcf799241fec63d44bda4ca85ac",
+      "body_influence_metadata_sha256": "4d893d01b56d67503937ec58308adde05b831b9a6019cc6dc84ad3b0ef08631c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x808861c25b6c-body-3",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 2.8680994029124164e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "01c13905b2f0e24053686bc9aeb56602671928f8021a9a5c572631ed449ec265",
+      "receipt_artifact": {
+        "bytes": 174953,
+        "sha256": "38f1e596963eed8704ff2cd08ca8a17adfb404a9a65cf2aafad2080ea3c45212"
+      },
+      "recipe_sha256": "3f140474b94951c6ba5dbb214b92e21dc40ee69d617fa8e66d6a811a504f405d",
+      "request_artifact": {
+        "bytes": 243745,
+        "sha256": "f5f37c039786468a5dc43de44d2a2ed8bc49760a6ae9098b20f4d0f4c1e65869"
+      },
+      "request_identity_sha256": "f5f37c039786468a5dc43de44d2a2ed8bc49760a6ae9098b20f4d0f4c1e65869",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1248238,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "ffa44c6f25939633a8642e8b6eb33f7b72eeedd7aef0fc3e97aee8f485a7293d"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 903446,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "0161877b784a15f3228e013ff857b7f2ece40111a15bf47c3111967423e96a20"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "3eda9e18300cfb819cd058c229b2a79edaec19f54d091c65e5564c798545b8ca",
+      "body_influence_metadata_sha256": "1a74efb92ce160420e5fe6408bccb8554a060d46e5dcb59f35de75baa47a633b",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1181,
+        "sha256": "0ea0b91f4cb601bb54962df342acaf59918972a71fff6e3ea98dd19f86593367"
+      },
+      "id": "0x808861c25b6c-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 2.1464710250585295e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "ce9155c63b8111f4dee522ca4f5075961d3ff44422e21ac0f65e3300b94b60eb",
+      "receipt_artifact": {
+        "bytes": 175192,
+        "sha256": "d3f85e9a489b96caddc4515d6b421f8eaa3948e37be084d63ed0503762fb9fad"
+      },
+      "recipe_sha256": "7782da752de0ed74d7911608a71dd245f49b0afe363ecb13be03defe5839d137",
+      "request_artifact": {
+        "bytes": 245324,
+        "sha256": "94702e0d91398100126743fb2745ea6ddb539fa1e2c8ce930613081ec52d4a4a"
+      },
+      "request_identity_sha256": "94702e0d91398100126743fb2745ea6ddb539fa1e2c8ce930613081ec52d4a4a",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 2837556,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "f67884ad7b737b77b861a1c010f211e2bb8b812815101fccd1fb97bf60527acf"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3294702,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "41433629116e530f779cba007daa84e41c277903d9b25160eeee4ecc5d80125a"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "f5186d6dee7ca8777e8c4a9f1255b9e21ba362d6143f2b97153a39e2af82da30",
+      "body_influence_metadata_sha256": "3770e4846efb0d9c30ce3225deb55596edd4410ff9a8bfe5a1cf6bc166997153",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x808861c25b6c-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 2.4823402278881388e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "115ffae214402fe578956f2cc4ff19cacdf4b996d59e430488b907631041fc88",
+      "receipt_artifact": {
+        "bytes": 175039,
+        "sha256": "1afe2de1a27b9b3f88e2fe77bfb60eb518fecfafe6ee8863123f4474aa6b36ec"
+      },
+      "recipe_sha256": "7695ae93863e8ed43b05c9679ef807dab1b0f1f98bc1ad4d276a1294ad051875",
+      "request_artifact": {
+        "bytes": 243898,
+        "sha256": "5e362ec4f0aad8822e83dd4fa2a1e78a03d8bb60765fbcdc24a9ba1fe495a611"
+      },
+      "request_identity_sha256": "5e362ec4f0aad8822e83dd4fa2a1e78a03d8bb60765fbcdc24a9ba1fe495a611",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2432058,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "7100ced9643f2980f7a792812cb27ed1c3f51db0e3c3308018ca7153db586b46"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3207542,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "bf0fea9fb3e08d81d578c941d1b686a2d289916d40c78c67b456084f16c84f90"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "fffa017f9e4e5460a24e47a1f8272a5d30f0a890b7e8a1382d05e778ad570946",
+      "body_influence_metadata_sha256": "7398fdd8a97c8a46f6333914bebc1a8a7150f767db26c84e0ceadbb9599afe90",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x808861c25b6c-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 34870,
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "maximum_final_relative_mass_error": 5.7771760847449005e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "09feee4f39a8eab1142e148dddfc2be9fdb187e4a166f74f9c0105e8efae341b",
+      "receipt_artifact": {
+        "bytes": 175050,
+        "sha256": "b1ffb5b5fa060382be98e830ce9b636c77b1ea848fcee203f3c64ae45971e0a5"
+      },
+      "recipe_sha256": "c41ddb3c4638d6cd173b2cea69365bc58bf2a782720cd053937b6bb68ad0558c",
+      "request_artifact": {
+        "bytes": 243898,
+        "sha256": "c999ef6fd72ff2ce6745f14b2fd380539366bcabb894f8432b53b2c6f09746e3"
+      },
+      "request_identity_sha256": "c999ef6fd72ff2ce6745f14b2fd380539366bcabb894f8432b53b2c6f09746e3",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "target_mass": [
+        0.044245704423060604,
+        0.017972282726260495,
+        0.008168465438904737,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2497426,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "62cca62a13437e276e821623c9c3a96bfcad115ed88332359717d45d191e2e92"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3143810,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "9352c2ba33537c5396944bf2a18cf5024a0bc911302cb11a1e55f96ce25827b1"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "2855f199ee83ccb378e86abf8c18a09b6c6d24295c69094cbf2bc0b2f6ea528f",
+      "body_influence_metadata_sha256": "071b6ee953a127e7ba714c2c3fe8b4a1d1798e475a6d375cc6ec09051eb9476f",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5b26dc8faef2-body-1",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 3.738502813125965e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "3b4acf6b903abfdce97222b59b3f904faa563b94265b3c6d42c5a0561b36d009",
+      "receipt_artifact": {
+        "bytes": 175008,
+        "sha256": "134e1c1854aa7b3ccec082ee26768151a200b8947ce4b6d310920ea53416e670"
+      },
+      "recipe_sha256": "b42f05c94126e7601625da94c59f63588591efa35619ec67064d311060a7a5d6",
+      "request_artifact": {
+        "bytes": 243767,
+        "sha256": "8e1fecfc39e2cf8ca91bc998cc9562129bc490b736744612177669c5a6cd17f6"
+      },
+      "request_identity_sha256": "8e1fecfc39e2cf8ca91bc998cc9562129bc490b736744612177669c5a6cd17f6",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1378780,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "cde5220130c167fdf36c523f4a6ce56b280bbb5a5e790edf14f8a764aec00b6c"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1633281,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fb9650a52b0250a8cbfd0cdb953371802654b771592d21ca36a0b2c00ed1207e"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "3b39d31b503a7cd3a46bc942708e1dfadc0de272fe34d47b7183eb178ab3bb5a",
+      "body_influence_metadata_sha256": "54e34afbeff9cf7488611165022eb31f563178477e1ccd19f6eb70c429d7fe6c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5b26dc8faef2-body-2",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 1.7937861747688715e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "079cee62f0a1aa3915e73224559de32b7e1468be3723001922f3c18a210e91fd",
+      "receipt_artifact": {
+        "bytes": 174161,
+        "sha256": "3587df640eaf91b9be23d75b00a5c34f3494d2724ed1b93939f3ad6c6a02fb88"
+      },
+      "recipe_sha256": "c2282f377793abca077188be9f687fe6b007783c2af037d1d453cb663e79028e",
+      "request_artifact": {
+        "bytes": 243767,
+        "sha256": "8100c6af8128303dd0804a6f67391446e66b06c2f053214c1c0a36ce17d39ed2"
+      },
+      "request_identity_sha256": "8100c6af8128303dd0804a6f67391446e66b06c2f053214c1c0a36ce17d39ed2",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 895431,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "a9a4179397cced491be182f66245743e702f9b695950fc55a5985e4673f7cf72"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1121920,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "683562a8fbd069302e08be0c1bc3ce27c4e48dd659d5998ca1347356b104b2c1"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "6cfce86b486743879222031fa87fbb4bd244c1faaf3de8547192e65c7064afc0",
+      "body_influence_metadata_sha256": "7a6937c0ed3344fdfcff1d8eed18a816c3b055ff356295174b2c12109377d502",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5b26dc8faef2-body-3",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 2.7327401577081584e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "75c541e4fece275b1b139cbf2fa9272838bcef494fe74b04e8b52de7e639ffc7",
+      "receipt_artifact": {
+        "bytes": 175037,
+        "sha256": "0cdceca72b77555d10b77d0c187374eba85be675dc856c8bc8ce532e15b094dd"
+      },
+      "recipe_sha256": "2c7e7ba8c66d5ed16b943ee4f0037721b1efb781e72e3017397944be10ce7b3d",
+      "request_artifact": {
+        "bytes": 243767,
+        "sha256": "a9f005275c01793d3270982c3bd9ca4b3c46568526ab1bf229871e4bc76f8b57"
+      },
+      "request_identity_sha256": "a9f005275c01793d3270982c3bd9ca4b3c46568526ab1bf229871e4bc76f8b57",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1401864,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "dfc576acf56183a1d505eaee5b66c2d9133264e4f8ec652e7d03f605e1b52d9b"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1116876,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "cae26d24621efdc0c93f118c9381bbc2cbe62a24a8fe0067532a8531681e28f8"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "6fd2bdc14105778af5e64a70af4346fd3f353bf94d1716deeec3f45ccdf9633b",
+      "body_influence_metadata_sha256": "7ae58b438ca1e7b57ea62fe1caf92d1dfcd47e4e8e00258ed62639eccf795cd3",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1171,
+        "sha256": "532976ec9c68adb031307dab32cc491631fcb2efc9706a6e6d40d45183f876c2"
+      },
+      "id": "0x5b26dc8faef2-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 3.1921132168520256e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "3136c1561d62dea7afb637dd36f08bc9f5dd93771ab4eec366a5a172e3faef13",
+      "receipt_artifact": {
+        "bytes": 175251,
+        "sha256": "9efdfac4fd30dde3c03e7c498a7a4db7c470936d69e65617fb6dfd12fab3ba0a"
+      },
+      "recipe_sha256": "363a4b0bf4e01e21ad188709d24393db8d8f5eefa2487175a89eab06b7fc9904",
+      "request_artifact": {
+        "bytes": 245336,
+        "sha256": "4d50fd6bac30c1ed2d0d0cad57dd1cdf36847ddc0a5dd7467d3d04fd42bd0810"
+      },
+      "request_identity_sha256": "4d50fd6bac30c1ed2d0d0cad57dd1cdf36847ddc0a5dd7467d3d04fd42bd0810",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1606454,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "12ef7cf68884c986711c9dd3a0090787a57d740d461f263e5b89b6c3b8dae9bd"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2036380,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "181b23e938bbd6c6687beeb940a2a89c50c8e8ae985615cdfdf7f6eeb90fffbf"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "d20b29fe3e42ba9fc7000321ab3ca6d74f34fdf30466739c8f56dad5c9171da8",
+      "body_influence_metadata_sha256": "0a2837ac7ec3955647b9befa2f7cdbd373a2b50f3e33261d45d58bf86a61104a",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5b26dc8faef2-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 2.0980396916798155e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "ad1a2eb15bd21dd353cb1c021846842822b62072732bca168d99903c185dbe0b",
+      "receipt_artifact": {
+        "bytes": 175118,
+        "sha256": "ae9cfb1b7a5214e41e2fb506326e77c903b4b3156cd2e1ae83b0500437d91d70"
+      },
+      "recipe_sha256": "14a585370356d5132b094d1a9099c9ac82ffc2cb4a926d4429f336df65645933",
+      "request_artifact": {
+        "bytes": 243920,
+        "sha256": "1e6459242a6c39930a98d3770e3f0c1aec7f74d792a495ea344e28d7b7c348e6"
+      },
+      "request_identity_sha256": "1e6459242a6c39930a98d3770e3f0c1aec7f74d792a495ea344e28d7b7c348e6",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1907573,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "32154584d0491d67f837c9b3810dce8584826beb8301962b34b4f51ee925e86c"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2351909,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "f9513d8ba0f9ff885bd0f7d02c85c07bfee8b932c87316a54aad854a0ebc5ce6"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "1fa7646d81f3b92f06ae7f332e8c4625a2726ebf0bbe3bd383642b43289b9a40",
+      "body_influence_metadata_sha256": "105a24f0e63655ee2704e8d422a79a86cd71b7ce67f960144283b347a9ac92f7",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5b26dc8faef2-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 35083,
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "layout_artifact": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "maximum_final_relative_mass_error": 6.785538221552125e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "42022de7d7301bf4f8bb4c577760991b5a851d91a3f53941bf56933b16fd4a8b",
+      "receipt_artifact": {
+        "bytes": 175107,
+        "sha256": "08d2cb741e1077c2b39f9cabe56cb00a09cd1582fe49fd90604730c1eaeff648"
+      },
+      "recipe_sha256": "8b5b77392b78c47e99b3fcc0d85c7b463fa77712437029a6fe4f841fcaf4ef3a",
+      "request_artifact": {
+        "bytes": 243920,
+        "sha256": "08beb2952e0924b92b5cfd4456c42672d8e1aaf72711516bb858d92dba852685"
+      },
+      "request_identity_sha256": "08beb2952e0924b92b5cfd4456c42672d8e1aaf72711516bb858d92dba852685",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "target_mass": [
+        0.037390684619552396,
+        0.01665873428750123,
+        0.011203643768304263,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1844415,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "5b676e59612f032bf0df53a6365f8ff6a8169b7afa3559b1293fae86d5693996"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2127408,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "11ec6f217847ad61a1c6c4429ea790ba1158e46264940e2c1ed46449d36ab9e6"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "b85a49ead28e6606026f0825443a7261dd17ad5e485224095139d543be8d46e2",
+      "body_influence_metadata_sha256": "1ca40406ce9492f79da37aa10223bed61ded9401258f1a44cf44babc4a1e1c82",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x6210d183445b5dd5-body-1",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 2.6409511333161156e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "3cd37db8d272418d4c75fcfff414d86072ebae85db9d981d4f0aae6df18b32a4",
+      "receipt_artifact": {
+        "bytes": 174734,
+        "sha256": "49af8eb46c173ab2ff42228a0a49d3763a7bd31b2e5277680075b0f7e78b4cda"
+      },
+      "recipe_sha256": "e1e4667ac9ab87cac545db91692831fdeff8cdc8fc073cddca6ea37a8c8f1b2a",
+      "request_artifact": {
+        "bytes": 243728,
+        "sha256": "fb600b85d86dccd052068f90d1887f1380a1dfedeba7235d83ff459068b564b9"
+      },
+      "request_identity_sha256": "fb600b85d86dccd052068f90d1887f1380a1dfedeba7235d83ff459068b564b9",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1602506,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e826dee796379b5e43dbd4ef8c61221d8440b962d48538badab4e462e3ca03be"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1667790,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fb01db9a2f45c9a40552b5b72c05270f9e2ed2875a78ca666f78b89bbdeb05a9"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "e07e279af4d039022b4e2aa23b3e70b92c039a9270d4617f97ef88e8135877c8",
+      "body_influence_metadata_sha256": "d72a4f50395fd23071afd52761dd482cf87a6a44c42927ff17ba77618da6bb61",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x6210d183445b5dd5-body-2",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 4.4230007482751544e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "2ec25c7a083a71f9c423fb2a8ba45b1e74389b232b44fa70d26a502b8d91b848",
+      "receipt_artifact": {
+        "bytes": 174546,
+        "sha256": "38e67f74893ea7887b024975346bf30826c26f0fee97fceb9c3963df5cdc0204"
+      },
+      "recipe_sha256": "e67627affa834fa1943fa351529b7ca483a0362849c0eb082b158e18d4d8ec56",
+      "request_artifact": {
+        "bytes": 243728,
+        "sha256": "b97f6aa9ea7b53f15f06322aeaf717c134842dd69c723e93e3aed5a8a984ddb8"
+      },
+      "request_identity_sha256": "b97f6aa9ea7b53f15f06322aeaf717c134842dd69c723e93e3aed5a8a984ddb8",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 925212,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "0b431acbafd36439f9045ae0d6224d342b5e742f04e847a7fcd1e21488d62a88"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 923577,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "8aad965e506a913a8c46b82478cf6abb85ebe4bd126d6146a6ee235adca7c8f9"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "7e604fb1cbfd125f77bfae3801476b4997d96561af1c511588ecdbd6e703d248",
+      "body_influence_metadata_sha256": "264d9ed416089f7b6cf834332c0f6716bbf433bb727f0c5aab3a9815e3cac00c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x6210d183445b5dd5-body-3",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 5.262318307736885e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "5115e69d8314549a1bce1df2adf2fddb843983bee22eea16e8df52025b6088f8",
+      "receipt_artifact": {
+        "bytes": 174736,
+        "sha256": "a0bbf2a9476f4ea8ea020f7a041e308fbef04d95183a35566655b4392834c341"
+      },
+      "recipe_sha256": "8f8fa6473ec863424fd50743c099f69805c6decd08879180847320fb43f55d1a",
+      "request_artifact": {
+        "bytes": 243728,
+        "sha256": "ea6f80f9884910839cb193c4ed120eb968bcfe5e367341d346f19e5e5339acdf"
+      },
+      "request_identity_sha256": "ea6f80f9884910839cb193c4ed120eb968bcfe5e367341d346f19e5e5339acdf",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1218567,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "01ec580c50d7ecbec3dc4c87d2527d9da911291fcf704a71c86b4348207415ec"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1079054,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "bb244d0b074355dbb7e28947bbf8095ccf7e3cf14bf08c951c6a5bdf9241a7ce"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "d073594527948fbaac63e7e5a392e5a9ee6ec7e9b76e87d7da1d79bbbf481dfb",
+      "body_influence_metadata_sha256": "fa427f1405bb1df1725e92d4dbbdf6818d91a5b467521c1d4182aef8846e2730",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1184,
+        "sha256": "589b36a5095892789e0cf3570217a0ecba9bc0d6843b55ccdbb928d64424912b"
+      },
+      "id": "0x6210d183445b5dd5-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 2.3378767541106976e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "e2e6495816522b698c698ea8ffe660c32788f8472c26d9ed0ddb3a8c2b45ed6f",
+      "receipt_artifact": {
+        "bytes": 175150,
+        "sha256": "eaf08f061956de9f768100d5bee9089440ce6756181bb2036137b2ffb87eda9d"
+      },
+      "recipe_sha256": "6992d51f1d4b7f8cc33d5a490402db61457fbf72549baba140c9a9514910910e",
+      "request_artifact": {
+        "bytes": 245310,
+        "sha256": "45fa051a03b6dc4fe9daf66797cb9ca7add41f769f77daf44f48d8841f7a0dca"
+      },
+      "request_identity_sha256": "45fa051a03b6dc4fe9daf66797cb9ca7add41f769f77daf44f48d8841f7a0dca",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 2237421,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "2f81ad77659898576e00e77f4e933ac26da6f4de9090b0327ed34db069fb2e0e"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2503459,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "d5245757fa720788fb0757bf62b1844dc75098a1297496eb3e1326e4a6958cf7"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "107e7ffa64e25ab47e7845275400419a7ee5a629bb6d12fcef90d89e0570ddf9",
+      "body_influence_metadata_sha256": "a5eba0a96ad6c6d24860c57f4773641b27245ad749c40fe4b58cb8acc72974c4",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 395,
+        "sha256": "e10c261c3d7bfafed0ab8c91991584590accc018a3ea4703dc6f285b6190ccac"
+      },
+      "id": "0x6210d183445b5dd5-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 6.747684561117786e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "bd9353d6a8c4b525cdc3dfbd84dd112a598caf0f9507ca3f34e476ac56ee6e90",
+      "receipt_artifact": {
+        "bytes": 175036,
+        "sha256": "546328a2637364168eb20135cd31308a899195193155096b9138784b3ae6a04c"
+      },
+      "recipe_sha256": "72faedd17d85ba3940c2c94868707ab97eba811aa81c49ed96f56ca84b7e483f",
+      "request_artifact": {
+        "bytes": 244361,
+        "sha256": "20fa445f3bca64880dce2625e3ce6935c8e9c4c9de22b1a3a8daaa916212a994"
+      },
+      "request_identity_sha256": "20fa445f3bca64880dce2625e3ce6935c8e9c4c9de22b1a3a8daaa916212a994",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2453103,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "dd85796da8dc7cf20ac682a6468fd8b699c89e5c17e8ba752cc3d3f9e69df3bb"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2842400,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "edec6083e6c86d99773925310254c210d933004815b73a60efb3f8e2d9516209"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "e4840404651caf999b48c54cbf49c22296b739c191a1962e24ceb6159d4626c3",
+      "body_influence_metadata_sha256": "c817f5f0c41514977bb283c9f729e822bfea3f735691a797334592f6372dcf51",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x6210d183445b5dd5-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36189,
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "layout_artifact": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "maximum_final_relative_mass_error": 4.654307073001285e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "81e570f298b1484b822ab083ff37a73e48b60c554c9b62909524d94f14c7d25d",
+      "receipt_artifact": {
+        "bytes": 174922,
+        "sha256": "ef6606740c05d87053bc88486814306d0c0825b5de4d7f8014b97694d665b051"
+      },
+      "recipe_sha256": "aa767d75dd6a8a405acaf775a9bec7bd60c213c72431bbac06a9a92dbd5c77fd",
+      "request_artifact": {
+        "bytes": 243881,
+        "sha256": "57a39fe3695961743bb42255acff8371c7fa10dee3a206cdc319654047a9ddd2"
+      },
+      "request_identity_sha256": "57a39fe3695961743bb42255acff8371c7fa10dee3a206cdc319654047a9ddd2",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "target_mass": [
+        0.04054448659971028,
+        0.018789015595326666,
+        0.009582223714467245,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1645572,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "9e7fd43fe4121cee849f5501e5dfb3d5a7489bfc525f5a74b0c242fec34c5902"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2091063,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "9dab21798198f2589344c8225486f8bbf04f3b0e25a636edd72eb83a94d8e660"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "22d76320e1367dddae7306c100d7d17dc1061c45799f6ae2d0b41ee74365a99f",
+      "body_influence_metadata_sha256": "1551a5689aac5819c4277f59c6604c224b231936b9e74cbc949e57916723c461",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb08c219a243f-body-1",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 2.9300491375225665e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "1a7366ddbebb7b1386d0e01b99c256bc3da3a00f8a49952010b08eeaaa72339a",
+      "receipt_artifact": {
+        "bytes": 174984,
+        "sha256": "7275af09d48dcdc782ead392c7547170cdef40185f4ae9eb99efddb2503f31c7"
+      },
+      "recipe_sha256": "25d121d40f7fe61def4c5f2ba703d001d48f9f4d023f92eeeff46228fdca15a2",
+      "request_artifact": {
+        "bytes": 243713,
+        "sha256": "88b66da41d21326dfce845691bf3ce0a4df3fb99092084df6c4153372f0ce1ef"
+      },
+      "request_identity_sha256": "88b66da41d21326dfce845691bf3ce0a4df3fb99092084df6c4153372f0ce1ef",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1854737,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "a3168e5e4dfae97572fe5111a01139a095d41ae81d1a01a0af61479528d46367"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1820858,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "9c71e0400d1daa43bd79b4f8253204713d049b22305cfdf088941604169b470a"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "a65fb3c36dd57873ecd31e1e48e1fd79edd85df1d5bc8dc128757bd79e7effdc",
+      "body_influence_metadata_sha256": "2563684edba8fc9c729c30811b166702ba42b3c341ad6090e42b8726abf1c97e",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb08c219a243f-body-2",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 3.02823813595619e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "bd7d26828eef12f2f807221f082910150baefa67bbd5fb3b69afa6e25f54d481",
+      "receipt_artifact": {
+        "bytes": 174919,
+        "sha256": "49cd8fef2ca6e06e8fd4bb23347d004283c76fb715c192f8d5fc032b2e75d668"
+      },
+      "recipe_sha256": "31f5fca5f46d2daf5f7452c728140b66bf0cbc2eb46dd924baf49e8798fa7bc1",
+      "request_artifact": {
+        "bytes": 243713,
+        "sha256": "748fbacb31e398149af30843012f2dc2d16e6bd1d90b13d8f0d28dbebc5873ea"
+      },
+      "request_identity_sha256": "748fbacb31e398149af30843012f2dc2d16e6bd1d90b13d8f0d28dbebc5873ea",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1610620,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "31170c6486f86d8018396209e85eb2d5d68462ff5b8dc354843b7a2f71dfccfb"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1425297,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "b2c3b0b9a524092086723a7f3ac8834544449d47cddecb3fe2837013c2c3573d"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "8f425226213cd38eef451520d3e6b2b5dc30040defd1aca43dd3eec74a4ef965",
+      "body_influence_metadata_sha256": "d502b4cbf7544cb40de201e88f595fa69043b4303295cc0189f86eca59ea482c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb08c219a243f-body-3",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 2.6870362705688233e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "69c0443232499c09fb047b0247b55f4bab03837077a8c595c999c17cbe3177c3",
+      "receipt_artifact": {
+        "bytes": 174784,
+        "sha256": "85a6ce7e3d619aae981a9184cae89b2d9f0fcd4d7d5936895605802895c6d84e"
+      },
+      "recipe_sha256": "b0444ad2f821991cf374446a856aded965b0c67c3c613c170da9bddf9d5382a0",
+      "request_artifact": {
+        "bytes": 243713,
+        "sha256": "dd4b1e4a9f830213a34ff8aff7557de1d32ee6af40336c122c9aa44256180d31"
+      },
+      "request_identity_sha256": "dd4b1e4a9f830213a34ff8aff7557de1d32ee6af40336c122c9aa44256180d31",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1417695,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "2a5b53f43696ec278d6ab67aa0921860b2623de7ea891d3c6a7a336b04487ceb"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1440397,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "13e8e44ef28cdaa3f7f0a0fc4d2db68494694920fc28a109177b56c9b14e9270"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "ce33c8fbb99c23a1a53dd980f8049efb7bcc85d22208b0862cdf6d46b25bc663",
+      "body_influence_metadata_sha256": "5d74cdd8b080ce708e101846c936bb5cf7e0a4c57f6c8932e6f2dec033bd76a5",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 394,
+        "sha256": "756c43d53aaa20533d85ef769c2811145192c7b4b8cb3849721aaacd9d2ae017"
+      },
+      "id": "0xb08c219a243f-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 2.8029446857545267e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "dc42c5c0641bc8112f8e1433f25aa8ab0fabb7c208e602e777838b333ffb0382",
+      "receipt_artifact": {
+        "bytes": 175124,
+        "sha256": "4b596dc31e871632c0865b38aa75e778be4c1c3625cc50b3c2cd910fcddd27da"
+      },
+      "recipe_sha256": "ce3442bf05ccf3dfd877a8dd37013a9bdbe6d5e2b8d0e5e4f255f7d0bf936b57",
+      "request_artifact": {
+        "bytes": 244345,
+        "sha256": "6bb5017482d1f2850e348dbeacc98b16e23ad59e687c4bd9fd7eae6689f1cf84"
+      },
+      "request_identity_sha256": "6bb5017482d1f2850e348dbeacc98b16e23ad59e687c4bd9fd7eae6689f1cf84",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 3215326,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "938d6d55fe8d81df0e1a9672632cd6b118fb39823f7fa9c18eaa32cf46aa2aef"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4021305,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "6cfc4077a883bc4a0dc0cd8cb11051931af6b92536b76ab97a7f1ea974f9b7d6"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "11865e2375a6d4b0d88046b935ec290bfbc1d6b94144ed61312c8711ce307329",
+      "body_influence_metadata_sha256": "099a64c14b5152fbb17f453c785f68acafd26f6a4b3071b69b956c501535555d",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xb08c219a243f-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 2.8631182656917446e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "d31982f6e34683d4426ffa476b0c7d4cf890547e884032ee1ae2328c52d303b2",
+      "receipt_artifact": {
+        "bytes": 175069,
+        "sha256": "abf32a2b292b8cf078043c47ab9e8397bccc6648685dd3d2c06bb0bf9ba44ff8"
+      },
+      "recipe_sha256": "9a2ae33357bb035df4d34ebe99cf38bc4c0c36cefb0964ed9a7249dbc9dac1b1",
+      "request_artifact": {
+        "bytes": 243866,
+        "sha256": "2ec99a2ebafaeb0d0a8e71b770cd633f89634e40eaf69f9861ca4cb39b11fe3a"
+      },
+      "request_identity_sha256": "2ec99a2ebafaeb0d0a8e71b770cd633f89634e40eaf69f9861ca4cb39b11fe3a",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 3399277,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "4f8304cd9ef1057f5be124922fbef1ddce340baf68ff1389f3a520282ec2e01d"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4428355,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "e7339ca70a644beb04c4a716ec4d203f96195880c5aac785693805591e582791"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "a9a71a19bd3b0204f0c960f8a651f6f34881f52f46f62a119f0a26bad281c59d",
+      "body_influence_metadata_sha256": "ad60a8b811b10982aaa2d7771f1a7dc9a9f1651496352f8dd4721d5b744c529e",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1176,
+        "sha256": "c318e9f78681ee005045e3eb40389f6afbff7965b75e578537c3c66d1675f941"
+      },
+      "id": "0xb08c219a243f-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36102,
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "layout_artifact": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "maximum_final_relative_mass_error": 1.8197792987033238e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "277fefb6bdd45644f688e16070b6765ecf6a0953559d9d03e19f9439e732e80e",
+      "receipt_artifact": {
+        "bytes": 175155,
+        "sha256": "28644de4c4d4ad51ffeae9f68e06779a70de508f6a78e3c8480dff7b96d38257"
+      },
+      "recipe_sha256": "80f1b872bdca45de85fe8e645b3eca850cd3eedaa462ae2930b6939ecaacdeb2",
+      "request_artifact": {
+        "bytes": 245287,
+        "sha256": "ee678f6c5c871d6d900160d4182fa6fdd5bf29644da059386e3079a4c6c42e68"
+      },
+      "request_identity_sha256": "ee678f6c5c871d6d900160d4182fa6fdd5bf29644da059386e3079a4c6c42e68",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "target_mass": [
+        0.03493739607765418,
+        0.021104181048526592,
+        0.012342478598463179,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2691287,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "ea16aee4935a1951d206aa1f505235f23e62262db03fed3dda85fb58b416a7d0"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3325786,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "efae9d1c5de17b551c824e1c5307379c3dfc2e715a0bdb9d58d9564d73c4e50a"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "1e2ca5d51510d28d37da65c6eea79cfc8b7ab43aa14713443dc132693585dac0",
+      "body_influence_metadata_sha256": "7442c370b707e7abea125adb68241df12d8e5d7dbf47ef9ce6ab7c570356b82f",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xa0c78ebadfb75018-body-1",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 2.793903385528429e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "5000a808e23784598ed2be9663a28a02a228d238a118630d33338f238c3a6ede",
+      "receipt_artifact": {
+        "bytes": 175026,
+        "sha256": "00579067eb6e8cf48bf2a2aabae30ae97376bf745888ede5b444d5ea3bbe0ea8"
+      },
+      "recipe_sha256": "411c64cefeb82ae597f3b569f49d854003d5d2305ad163732771f9843b50b8c5",
+      "request_artifact": {
+        "bytes": 244240,
+        "sha256": "e5c9381439ead8b99efad5d19deac0de41e298b71094f4b6daa3c5ac27fbbdf0"
+      },
+      "request_identity_sha256": "e5c9381439ead8b99efad5d19deac0de41e298b71094f4b6daa3c5ac27fbbdf0",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 2469729,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "34eb669ec6a1444bb23eeb15957521fdfaaee149fcb65c15fccf8265387ff15f"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2582436,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "7cc5fbd6019bc596e2b5b6001fcd3ce5fd3b87431f16c066d8904e198ecd6bb0"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "870c53c7d60139d6d9faba0b324da179c71545b1c9717c31f20819004a480a20",
+      "body_influence_metadata_sha256": "b90f0dabe2b7711cd7ec6e01f9e63ca85ae0deca176cd6d8aafcefb08e062004",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xa0c78ebadfb75018-body-2",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 8.192476450309176e-09,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "ce9e93766df03fef1df6d041cefcc10d79d29e123cf8a0b027320f41f5d2b1cb",
+      "receipt_artifact": {
+        "bytes": 175021,
+        "sha256": "073ada73118fb92438e8e3cbab31bbe6b077bc76cacd9450ea5bb023789c07b0"
+      },
+      "recipe_sha256": "150ef81339ebbe0032275291f4dc61cbbf575a5aff3e4e74fbd3088f4fb246db",
+      "request_artifact": {
+        "bytes": 244240,
+        "sha256": "a0012fc2bf2e32f3a05098fdf626aa057d468fe81de04d5d990eda628964628a"
+      },
+      "request_identity_sha256": "a0012fc2bf2e32f3a05098fdf626aa057d468fe81de04d5d990eda628964628a",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1954344,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b1299fb041a094d10a127098eeaac33d2f3f06787490baba947b3890b65dcd00"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1904327,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "0826a31603b131f5e9d6eaaabbde7f42b8edc54848ef291431ea0702daaaf972"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "9214a0ad90422f8e9b875185ecf6a09c61f9084af2a2182540e93ad6846358a1",
+      "body_influence_metadata_sha256": "b4fe52dbc6aae83204331d9852b181c01dba186941467ef0e87f3dc48982396c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xa0c78ebadfb75018-body-3",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 5.684929527994015e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "35eb3487982fafe1573f1752a7a82a0df3588c46a748aab28bb3dd9eb4cf544c",
+      "receipt_artifact": {
+        "bytes": 174895,
+        "sha256": "344f27884c086f39319a17a9819dcc0e7caa22895d96de61bc2abe76d7df93e5"
+      },
+      "recipe_sha256": "628c13817c9991d31ed127e8f8294e05155d8b925f71149fec2eeba733308a39",
+      "request_artifact": {
+        "bytes": 244240,
+        "sha256": "299611cd72824a5d6ec3764c010d86c1fc5f701b4616162b1e5a4d30afbe35cb"
+      },
+      "request_identity_sha256": "299611cd72824a5d6ec3764c010d86c1fc5f701b4616162b1e5a4d30afbe35cb",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1425395,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "85decc70c0c2ff127ac5f200b4bfce71c60fc256b0240df159189778fb5c153f"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1434338,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "455726e839dc989bae8fd4858f15ca6fe21286d85948cdebc1096f6293dfd6d8"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "c73a981cfb6d61ac639ad5f0e6577086bc906440a1943949ab15a88d2a9fe2c5",
+      "body_influence_metadata_sha256": "ca18e4184a3260b7285a20a34b0a320ec52b8654293d7cb739101c004c95f416",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1177,
+        "sha256": "a0d6e53022c008be767f8beeac4ab0f95ed3532aca19e5e8f6e7c38d3e7349fe"
+      },
+      "id": "0xa0c78ebadfb75018-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 2.8670804406518732e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "56852edd0f8af4bf11cb29f41e4a3ed55ac3ee62ea774e90cbe17189b03b8f68",
+      "receipt_artifact": {
+        "bytes": 175286,
+        "sha256": "e93d9323bd2f43b75ab4d2a8423ad1e4cd3ae3469f0d00f9962df8781acd009f"
+      },
+      "recipe_sha256": "b41492958247e895af8a03a642b028c1a2e83788626cff5364a08515db7ccaff",
+      "request_artifact": {
+        "bytes": 245815,
+        "sha256": "7369e75fed3f0135bbb0f200bfa6c9e2558ac284e0dcc132e4c708dfafb1c666"
+      },
+      "request_identity_sha256": "7369e75fed3f0135bbb0f200bfa6c9e2558ac284e0dcc132e4c708dfafb1c666",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 3711490,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "44c7c028f5011554d3d79277936559f8d18b2076e9a2bae82c8f39c8a93f199b"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4516844,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "0896bbdba16638aea6993f7b9ed9b4daf2f0866a3123f2371c4c85b0dcab8e0f"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "b3b63d614bfd5803d11862299922f0f89f271a24e412b8c33d872be2193beda4",
+      "body_influence_metadata_sha256": "3e98083d60cc2e84b63cad6cf9bb98d02c4cf18fd9682af925af4ae53d84a6ab",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1186,
+        "sha256": "7b771d8f0d22231904015c2d602641601b3f1eda94cfe87a410cba65d37b9f2c"
+      },
+      "id": "0xa0c78ebadfb75018-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 6.010112653784557e-09,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "4e2545857107930e46f7d9923403ceffe67d4c89ce7e350ceb35fccad1fdb46a",
+      "receipt_artifact": {
+        "bytes": 175291,
+        "sha256": "3f875ca14262937300e20a99893e89f7f7ccec4dfde0cd3154aa9a137b94baf6"
+      },
+      "recipe_sha256": "456fbf1647e8f210d790b15eb20e1d9bb7e009207cf0473a079dc6ad628fed15",
+      "request_artifact": {
+        "bytes": 245824,
+        "sha256": "f48324488abe316b1cd866a1834e382a9ce12c9accada312235ec16c8d424dba"
+      },
+      "request_identity_sha256": "f48324488abe316b1cd866a1834e382a9ce12c9accada312235ec16c8d424dba",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 3149462,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "4548068f711410c19d61ba61c8e3e6d2984fa01bc8008da0a1ee42682e392799"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3796897,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "3ec45fdb03c577f141fd4ee21c88c0aa475d3cc31341d7e06d478ccea49ca537"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "9f6ad068a5e794c0795971aca0d54b18198108f77c72b34e42181e070d6738c0",
+      "body_influence_metadata_sha256": "e3c2a77b7f50e9f023fbbbfaa929045b5507591831e95eb747305fcea777e9f1",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1178,
+        "sha256": "739cbc661fc2e5fa15d8c7bd1176dbf0fd3fc83519e2ad96042d7338d9101605"
+      },
+      "id": "0xa0c78ebadfb75018-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36871,
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "layout_artifact": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "maximum_final_relative_mass_error": 2.803232838371906e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "9f878b5554d98b2130bc17e1ca9cff962722f21ac1652a6bb8b6986506d18548",
+      "receipt_artifact": {
+        "bytes": 175278,
+        "sha256": "9af8c3ea9e9b9dfaa43402792c7259d7db2e075bd806eea811f71aa77e812b4a"
+      },
+      "recipe_sha256": "7cf0135f393afa06a8e823277ae6226725d5e0f114059010451c197fbcf98d58",
+      "request_artifact": {
+        "bytes": 245816,
+        "sha256": "4fd3b74b04eea0b2ceee436be578696a5bd27073637fe80bcd9b9d507f8787ee"
+      },
+      "request_identity_sha256": "4fd3b74b04eea0b2ceee436be578696a5bd27073637fe80bcd9b9d507f8787ee",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "target_mass": [
+        0.0406227850906441,
+        0.019951520011209062,
+        0.010988559162568936,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2982679,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b3c9abfdfd2895201caa20b293c07a4d214a44bbfd8518227e45811384294073"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3645116,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "4a045f13b3d5e4a3059c9841fc62f33d4795403fe6a1935ef7ab35f3f2228842"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "2cd47d6caef311bad599355cae0f611cc327d73fb0018034f8f91fa7706cc6bf",
+      "body_influence_metadata_sha256": "d0f80cdabae92a8e1f423ccb00ba2190c11a886edf19f1ada0ba08763a4550e7",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x2d01093da35729b3-body-1",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 3.4997774660972665e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "165027d406e2ad99167e055625b96600d10d600986b28771c592685304656674",
+      "receipt_artifact": {
+        "bytes": 174863,
+        "sha256": "a437b50d2f9ef30886efc09ee021f56821c4161e81269bdb6a6d50287ee702ed"
+      },
+      "recipe_sha256": "eb37d1b3865c25b45ad2c2e1643b25863214a1f650aefaa8efdfae2eda21fd0f",
+      "request_artifact": {
+        "bytes": 243793,
+        "sha256": "4b4c89d674838c24b87e37498fc8637ee9f6c026c08456aa60635fea2e01b269"
+      },
+      "request_identity_sha256": "4b4c89d674838c24b87e37498fc8637ee9f6c026c08456aa60635fea2e01b269",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1889981,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "3d51396a17940b60623c66718e0b0d91c6a3a17d20f8e80a3f310d6a9dad3ef7"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2156709,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "8de7761ce720661982dac8213cf543af5751e7497ae16cb7949a4dea88f93a5e"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "aa9acc903e57efbf4b65a34b754a3d10c83cc8c4984be08bf4cc1aff2392a8bc",
+      "body_influence_metadata_sha256": "4998c8f24dd4a970f4fa9b8d8f1d041b428c8f7bbb94f1c83ba6affd0f9c3ab9",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x2d01093da35729b3-body-2",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 5.001789286004292e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "aa80ce92f386ae90d86f05c5f454ce247c6122859fbf60f6a17147e1c6269455",
+      "receipt_artifact": {
+        "bytes": 174874,
+        "sha256": "a5e2b186633a0eef44b0e287a5bcffd9dbbb0612e54457d66f28d422ac80e9de"
+      },
+      "recipe_sha256": "d73ad3c59ca088d5d3193e6edd233544c025a51c3386a0986e17ea7019a01167",
+      "request_artifact": {
+        "bytes": 243793,
+        "sha256": "b086a5644ff19dc8111b2239dd9d123626abe1fad619e214a663492796b39322"
+      },
+      "request_identity_sha256": "b086a5644ff19dc8111b2239dd9d123626abe1fad619e214a663492796b39322",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1854161,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b11ef83618660c782b5fcd61fe2e74912a32e4fc6d5bde841055365fc0af6b10"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1893910,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "68af41441473ec1a16ee0821355f09695cbf36d40f715d2ca828028e12d0cb3a"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "1062e036a0787ea0a0f6c14b9c59847d77e3d2fa8a4c10c267c723744b9c4ed4",
+      "body_influence_metadata_sha256": "404785e89cd11a3580750db0d10980869979b44fc6a599a7f7218fc74acef614",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x2d01093da35729b3-body-3",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 1.8818515298745254e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "371853c8f4c710ab5bf1bfddfc2f00c75df211e157cbb2c901bca89b7665f450",
+      "receipt_artifact": {
+        "bytes": 174900,
+        "sha256": "113dfa88522a0cc5231df5f55e70419f8bdb59762e384f53c7c43bb3de9408b3"
+      },
+      "recipe_sha256": "45bf351e884d19e4a58d02ad7b7eaa6d64b3856a164193bca17929c755e2864c",
+      "request_artifact": {
+        "bytes": 243793,
+        "sha256": "e43440c13454c00c8a02c8156edfb38cd308eba34bce33f062f18ab06d6b3113"
+      },
+      "request_identity_sha256": "e43440c13454c00c8a02c8156edfb38cd308eba34bce33f062f18ab06d6b3113",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2282772,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e0f82f52954f5398b3cdfbc3b005119385dfc23eaad18b2fb8bcfc2b305ad06c"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2439866,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "28276cee462957cc97d846c176cb880e45443fd93a46bd315542c70199552980"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "e3e781643c9ae3a41f5eb75f8399c8d54dcb5aa916640d9f7d2652881ebfaa6e",
+      "body_influence_metadata_sha256": "86929b2cb91f44b91359c343bb71093d3ecee09244afd853da38e165d0775883",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1132,
+        "sha256": "615b5d3358db399af6db0a0bb5d3a21cbe774389e27fa87ff84702107adef82c"
+      },
+      "id": "0x2d01093da35729b3-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 2.183498945038739e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "d8ba057a9ac7d31be2cb1b0ccdac2bbcd5f67b1ab7a565a88a15eac2884e5176",
+      "receipt_artifact": {
+        "bytes": 175140,
+        "sha256": "98a17868e1af41101aa75e4527208bda2670ed52eb430692bfb4678117cdc909"
+      },
+      "recipe_sha256": "22032acdfe510a54905c8e51a0d922e589a21e5398cf55de2291c9f6fb6d009d",
+      "request_artifact": {
+        "bytes": 245323,
+        "sha256": "4c0ba8309910e1b5e5c585a660be7d37c6289413fe6c22ba74676ec669392778"
+      },
+      "request_identity_sha256": "4c0ba8309910e1b5e5c585a660be7d37c6289413fe6c22ba74676ec669392778",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 2369411,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "36b167b0fd47d71b9bcf416b54e43aa19770c0408fb1764eee803bb9967d83c4"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2920592,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "8f561f4a8d1891ae0aef68478a4c9dd05840205333e78aa7addeac220112edb7"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "f57f8362939199dd592138ab96995a5c07984f93699d92ac7e2b3d8d65c86697",
+      "body_influence_metadata_sha256": "89067c1ed0f88515a6c17d1b50e7ae961dac8e08965f3e3301e4acca40a58442",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1151,
+        "sha256": "5dfb09bf4b73b22256ea8c75ea38fb8a0ac299fca18cb739c7491cf9904aceec"
+      },
+      "id": "0x2d01093da35729b3-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 1.996560339852086e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "4df6b89c954be20938224926402b82588ae717cd418f408cfaeb128545ffa6f2",
+      "receipt_artifact": {
+        "bytes": 175184,
+        "sha256": "f19c8597c915aca1739179038cd63ae9b104777dc1c5914bbd3a2d7ece63b64d"
+      },
+      "recipe_sha256": "59126eee3c6ceb0c6a62d10083c59e4a81676a991401ac2c3dd4248ae83f202d",
+      "request_artifact": {
+        "bytes": 245342,
+        "sha256": "8606c817aff9b6355852932e0a5156b3ec4aa505a957f591f9d369d92fac4cfd"
+      },
+      "request_identity_sha256": "8606c817aff9b6355852932e0a5156b3ec4aa505a957f591f9d369d92fac4cfd",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2765987,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "29fe1eb8cf99a88ab96f435963eba830b082dce6a3ef585c704b859463a61489"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3571886,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "084afcfaf1928329652f7a380b300810e1c33cdc4b8efafd6b0f7ce713d11ac0"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "b97058f0ab4f1338d22bcd8976a065501b97de67a5ba009613f7e3de5ebff59f",
+      "body_influence_metadata_sha256": "2b1450ab4256bd862ae9b3dc8275fab22941b8a536d3aac6760ae38faea6995d",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1149,
+        "sha256": "29d7047c2909ce2a48138b0ad543c671a3c3184beed69a88acbffe5268014dc4"
+      },
+      "id": "0x2d01093da35729b3-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36490,
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "layout_artifact": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "maximum_final_relative_mass_error": 2.4224181866993445e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "6fc8f99fa5c4fabeda13389a217c8bf53cb961c4e0ca566ce472c701a2fffb59",
+      "receipt_artifact": {
+        "bytes": 175180,
+        "sha256": "fea1b91d3116fcaea5b2a927eb7539fa7f7ed33ea787603ffc9af37f362c1800"
+      },
+      "recipe_sha256": "5ff2c4df4665b6d4eeb180ac45960fc2538335586db3d0adf212cac1c84f8f14",
+      "request_artifact": {
+        "bytes": 245340,
+        "sha256": "41327fffc61cff5b56e0a00a9b2a1bc27ff54154e326e4b1bd6e4377fc9f3cf8"
+      },
+      "request_identity_sha256": "41327fffc61cff5b56e0a00a9b2a1bc27ff54154e326e4b1bd6e4377fc9f3cf8",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "target_mass": [
+        0.04405523341774658,
+        0.01619432687037161,
+        0.011128285790952095,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2569206,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "574aff9e1994f57e708e00108de045f74dec17d822f8d483e5ec8f61141e1efd"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3199737,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "62571ec8ea90f7b5629cf60c6247124ccab6d248fa4dc1813c04fe3a16b136df"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "f2a5a0c6cec4f413e917c85c3569ee3c29cff7008b961d2c55a41174564a5c0d",
+      "body_influence_metadata_sha256": "ffd01362e3b4caff0bb2a603134312b7fe9d0deab04b08d11376d75ee50aa80b",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xbc53af1cd380-body-1",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 4.563907664828946e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "26e9123730d493ed7a9b5fe78bb5a9861de526f12f816569887082fe2cf572c0",
+      "receipt_artifact": {
+        "bytes": 175004,
+        "sha256": "4a21ed1a5e03ceaffcc58c734755ae653d94bd8b052f030149d3891ce9b9bbef"
+      },
+      "recipe_sha256": "fd83bcd7ebe203bf8c1e37a5ec3556acb406510ac948fc89dd94aad05e3ac78c",
+      "request_artifact": {
+        "bytes": 243790,
+        "sha256": "14b74eab037f53ad071445b275219dab7a5c8b369808b01cba4fdd4a544f053f"
+      },
+      "request_identity_sha256": "14b74eab037f53ad071445b275219dab7a5c8b369808b01cba4fdd4a544f053f",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1726666,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b9d766582573f4f1d68577f287647b3861f41427e2f40a17f00ac03edafb57d8"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1895896,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "5f0be327a22c67b683f7cd72dba328848169d8bc3cf3df4ca61dadc366d78c8c"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "1382c7ba070f062283ea7ceb1ff034f4f472e21234cc64b3e34b2fa5f26407eb",
+      "body_influence_metadata_sha256": "9f303579460356de55f5559a7888b094e2176f7497a869476d09d5fbd81da1a0",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xbc53af1cd380-body-2",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 2.1675971970899418e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "638f90765c839d51c9ca6f18720ff6b93d8d80b5929b8c4f20b3ef01c2a55272",
+      "receipt_artifact": {
+        "bytes": 174968,
+        "sha256": "08c78603d47f83261077beab02ba2a5b8a3cd49e5c65ab329fa2593c8be87ea3"
+      },
+      "recipe_sha256": "7f785338fd21accc487d742bd0a44e553ce077944e06aae9109a9d1a9d4ee5bb",
+      "request_artifact": {
+        "bytes": 243790,
+        "sha256": "603d3e738f04fbdc7378737935bcd4d1a05b153aeb08f79585776b0245bf0745"
+      },
+      "request_identity_sha256": "603d3e738f04fbdc7378737935bcd4d1a05b153aeb08f79585776b0245bf0745",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1528938,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "d8b6f14ca52263c6cc6e3f20971b086795a56c7901299c29007601d522e42437"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1505774,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "188d45baff1ac5c4ab32bcaff02fe00f56646df826b3cebeec198425ac71e13e"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "f7e1f4e9d52c5d63e617c49a12bd1c792c81af6ce01726396e1e3999f28f1302",
+      "body_influence_metadata_sha256": "f232a6591dae903ec62b66d9daa8d3f75f3493d6d83c9b4f12f0bae24afd989b",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xbc53af1cd380-body-3",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 5.633751008062361e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "afe76d9f6fd9d3c7ef0e2fe77d6b033c353f92d17ef00d75cd96fec5e061c556",
+      "receipt_artifact": {
+        "bytes": 175034,
+        "sha256": "d6fd6b351715eb5b9c605c66525770a2210297105295f9158e4f8a4873cbf755"
+      },
+      "recipe_sha256": "b45953179fa9a4632d7d2e75f32ba1df953e1ce50dd5ba0438b68234c9b6abd1",
+      "request_artifact": {
+        "bytes": 243790,
+        "sha256": "c815221d99da7a6004d8640bd06be5dd6d4ea405d6d7b0f5442ab8d165fe4f0f"
+      },
+      "request_identity_sha256": "c815221d99da7a6004d8640bd06be5dd6d4ea405d6d7b0f5442ab8d165fe4f0f",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1516431,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "e67a4a52e94afce862270bb2b0226f895138335884cc545a16e22b3bbb0df025"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1656656,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "c5336f0f58bf3fe8ad8ebd3b6d05d8c454eb150dba9ec4212c2ab96dc5398e45"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "788ae76f71490f738c7717df2d4612d169b64b49340c69cd0df1b3dbcda8b3b5",
+      "body_influence_metadata_sha256": "e3189cee3e5fcbc2ec044790fc48bae46c164d0d89737e5d546799ea95a8638d",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1169,
+        "sha256": "2aafbbfc037703c6feb2cd7437ba0e698e8c70bc5258a0f8ded47db14d2c835a"
+      },
+      "id": "0xbc53af1cd380-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 1.750276940226466e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "c53387e059211bff85c8f9d5eed6632d08a4f0d6637ee16acd5c18c3cdff15a9",
+      "receipt_artifact": {
+        "bytes": 175243,
+        "sha256": "43b385f8b06af7a6a65f33ca2759f44e04a3fb002c03a4e9a4da77da9a66a24c"
+      },
+      "recipe_sha256": "caecb41c9951cd264256d5644f6b00a7d104173208a6c8644425c98a164fb504",
+      "request_artifact": {
+        "bytes": 245357,
+        "sha256": "3289bbf6ff89d756f766575531aadee17b7232144942dc92f58034a2e3194299"
+      },
+      "request_identity_sha256": "3289bbf6ff89d756f766575531aadee17b7232144942dc92f58034a2e3194299",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 2655221,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "c7e530d1ccd2ad5fb4a79bc45637d069fb39dc2d8f86d9ade73ff15be067fe60"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3164623,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "9b2a817b61571d0be005dc8fa0b8a8eff55162444c2de03e019909f716830983"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "68edbb4592e41e34b659c7ee35f7c781b6729e346133a0e39fec428371561bbb",
+      "body_influence_metadata_sha256": "d229a80fd3162c852b45bbed7fe8c824a86e502d8f09b2e30ca43baab3dfa957",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0xbc53af1cd380-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 2.73319945350003e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "913f92608e6a8023f6b08e20a516aaaa188057fab5c1b90e7c073fc3bcfa4e5f",
+      "receipt_artifact": {
+        "bytes": 175120,
+        "sha256": "f8b41f1f6fec81057227f5c25457648461d23132c484c2afc397d066f425411c"
+      },
+      "recipe_sha256": "0e4eb4d72a23e4dab8762803a7a3ce68571eb09ade433195ea63cb67f9e6b33b",
+      "request_artifact": {
+        "bytes": 243943,
+        "sha256": "e8fdb2f00b1eacefe7be0669cda7b1c867fba3ae93d8cba9ca195c5d0486e344"
+      },
+      "request_identity_sha256": "e8fdb2f00b1eacefe7be0669cda7b1c867fba3ae93d8cba9ca195c5d0486e344",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2406899,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "2334169678f90e276fe0a3152ed3b8ad5af0b03c0252a00dff21101c3f8f0564"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3161020,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "89f2e649c90cc4d4ec6223359513737b2b2fcd3e82d3ba07b9b7d5f516e56fb4"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "97b551da6111e106b2677b6c2844d84c22a9cc6dd1c255432503906341522718",
+      "body_influence_metadata_sha256": "8332ac451da508ce7602483a4e80c1fce38e587c9cf9cf8ad9f2848d64b52222",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1178,
+        "sha256": "cb7c45d0e5a6e63867c09ce6b45159569c930571aaea0ab7b559e47a33b46d5b"
+      },
+      "id": "0xbc53af1cd380-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36813,
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "layout_artifact": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "maximum_final_relative_mass_error": 2.6080058216998927e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "672cb42184031fc60dae468d326cafa00ef1b69f551d52d4809218b79f6883e2",
+      "receipt_artifact": {
+        "bytes": 175297,
+        "sha256": "e28652a6aab872bc8b6928881c2c68590c800c460dd01f86cc5091d772fb1339"
+      },
+      "recipe_sha256": "3ea88f87a1617ffb783e5924593dce3ed5992e5279ac685344b306019442415a",
+      "request_artifact": {
+        "bytes": 245366,
+        "sha256": "6aaa77d18b166da0989a11f95bd8b3198d7a48c03e4d491fc7cf0f1252611779"
+      },
+      "request_identity_sha256": "6aaa77d18b166da0989a11f95bd8b3198d7a48c03e4d491fc7cf0f1252611779",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "target_mass": [
+        0.042871424964523626,
+        0.018407787680631706,
+        0.009057461667696175,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2959195,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "90b4eddb0f6f61181b8f7629adaf50e0e71704842d1c5e43d03518d99846b970"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3654759,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "582678342c05b776ee7bdf2c6e740387055ec617600804ecfc843f8c4765830a"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0
+      ],
+      "base_material_sha256": "1b69713c3d215f66d0798f818ba2def399ae3fa1917d05167c3f09026f5375fe",
+      "body_influence_metadata_sha256": "d9d9b44a27fc1e4389824269bfc9b87021911506eeaa11b4c20d07a66be20f7b",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5584badfb5d82790-body-1",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 1.4856471032652662e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "e5084b04427912cf78d8d8f6d63c36bf6a0e8f205916258cf0d6e79f7b221a29",
+      "receipt_artifact": {
+        "bytes": 174905,
+        "sha256": "01f093655f9f9bec1a0d7be18dcb15de94d02c3f7b575bf2f99fce8b14945176"
+      },
+      "recipe_sha256": "acb283216e27e881e38810676c0af4673cc06532ce4b42df86784b443143196f",
+      "request_artifact": {
+        "bytes": 243695,
+        "sha256": "24565fe1baf1cc7ae8aaf3d0ba6e0f477bbe0947e539a775fcb3c0263c44d995"
+      },
+      "request_identity_sha256": "24565fe1baf1cc7ae8aaf3d0ba6e0f477bbe0947e539a775fcb3c0263c44d995",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "body-1",
+      "views": [
+        {
+          "image": {
+            "bytes": 1510769,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b7474caa509bb3929c96d7154ea868c3ee8ac2b892949d83d0ca1d8e1538cf3a"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1553277,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "aefc1e18c2f134abe8f1fae82cc8b3ea5e597b89f2bae0b73dbcc3af98ec33cc"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1
+      ],
+      "base_material_sha256": "f38a2010f13f62fda9244817c83cf5b41316e5f8c0db0ab05b557ed338a9a705",
+      "body_influence_metadata_sha256": "1d52923fcd2323bc93bf5bf621d05828fd61bab49d36d6ef6ad7060d1917a69c",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5584badfb5d82790-body-2",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 2.8582529108990033e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "46764e576e38a2f0b97d3636217db49e0a7bd36cd1cad189ac4b53533b257293",
+      "receipt_artifact": {
+        "bytes": 174978,
+        "sha256": "892ea55c55599d8702cd5ad7945a9e2ee9b4faad6740202c7a4d5a6541bad220"
+      },
+      "recipe_sha256": "510d46f964ae82c83bd886ad2944831ca7fff860c8efc81d6c564cab34687f4b",
+      "request_artifact": {
+        "bytes": 243695,
+        "sha256": "52069aa435c1e51ce69836335e3e280a1dd028d9e5892586ce44aa31f1ab59a5"
+      },
+      "request_identity_sha256": "52069aa435c1e51ce69836335e3e280a1dd028d9e5892586ce44aa31f1ab59a5",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "body-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 1434932,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "03fee3a79ac59e4ec06f0071aa730738766f5eb4f10461b48ac5db57a87d9203"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1681998,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "dae58ff97ea828501a4864873849d442123417b7e1d6bd786045b085d64d3310"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        2
+      ],
+      "base_material_sha256": "01e2df907ec6e9c428a65dae35ad3c8c5985cfb8b748da0f13595f27baa01b2f",
+      "body_influence_metadata_sha256": "8e4d4b5a191eecbbef86b40e4ae478ffbaccfbeff0f4de537498603eac8659f3",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 3,
+        "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "id": "0x5584badfb5d82790-body-3",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 3.5320822796302674e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "a3f1d992f97de45bea37734eac6dfe37c9f4d115b8a7c8893f5ae4402b533d05",
+      "receipt_artifact": {
+        "bytes": 174940,
+        "sha256": "9ae314d7b47bdbc61ff75c8ce1220fe18d67a53f39a34c1a8e44a644568898e9"
+      },
+      "recipe_sha256": "94e64a5f3adeb872dcaf0ef981d6e292d1ee1cc4faa6568bb7798e436782d03d",
+      "request_artifact": {
+        "bytes": 243695,
+        "sha256": "283ddc5b0b315062eba8a55bef52c36088a585c28d27d8cfea8e155c63ad114b"
+      },
+      "request_identity_sha256": "283ddc5b0b315062eba8a55bef52c36088a585c28d27d8cfea8e155c63ad114b",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "body-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 1386577,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "b1248831110407e8fd4e7ae36e3d5b45caab60c4109ef2645d5a10b042f253fb"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 1551722,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "0393421985bea8f5a8c3e65bb5e43cacbffe8c7b25694b5dc539bcb0e5d25489"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        1
+      ],
+      "base_material_sha256": "a648ed779f7e9054769d90fdf088383878aee68e8f5d4d128faccd58e6f2499f",
+      "body_influence_metadata_sha256": "717723515624ff237dac908103be2ae1c6ae49729b623246b9be9c3b4d6a1302",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1184,
+        "sha256": "35f1fa6198f2c1403905d5701eb9a4aaac3512e496d026197fddf4d64728d9e2"
+      },
+      "id": "0x5584badfb5d82790-bodies-1-2",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 2.5457479089600185e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "64ea43f2bfed8d22737aecaa4423070afc4ff62f554e6d0df056d649243f33ba",
+      "receipt_artifact": {
+        "bytes": 175223,
+        "sha256": "c94ad68db23bb2ad045e914c891b50c55184eb432cca2150ea2e7a1ddfb82a1a"
+      },
+      "recipe_sha256": "70e3d7f35538b15ee79130f12bad765a9ccc43705bb30768b707cc2ac2824c08",
+      "request_artifact": {
+        "bytes": 245277,
+        "sha256": "aa081657392c5d5fa95073a9de20a9ec1da712d75f7778c763adf9341a545347"
+      },
+      "request_identity_sha256": "aa081657392c5d5fa95073a9de20a9ec1da712d75f7778c763adf9341a545347",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "bodies-1-2",
+      "views": [
+        {
+          "image": {
+            "bytes": 3079024,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "a0af19adcc47882d1935e4a9361993d9fb31194fb8fcc8d5fec2850afd569517"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 4149960,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "f572e599590d5d816c8324045a29af7927df665892d98d3ecf44a37ec49620af"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        0,
+        2
+      ],
+      "base_material_sha256": "8b605a92a277632412c9513bd37030f16dae40d503405dc16d08eaecdfb09379",
+      "body_influence_metadata_sha256": "7abe5569d02227e63cfd19533f7af15a70e02e83d74f1d497d01429aaf067044",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 1164,
+        "sha256": "2dc2525963c0a694351d84d9607b0305a12fe89ae67d9e87bea0e80fe746a1d7"
+      },
+      "id": "0x5584badfb5d82790-bodies-1-3",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 2.9545652112537754e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "4a086f68061494c5feb7590cc41b933c8f54113d3622fb8b99f55de6e4dedf8d",
+      "receipt_artifact": {
+        "bytes": 175171,
+        "sha256": "3c873ac30e7907b37059381030cb08c140f47018e38fce7b897f0d6b5d5985cd"
+      },
+      "recipe_sha256": "aacfbe0b9b6b8bf408f678bbd1c1928daf665d34f7bd75b293d18ebf1f896c20",
+      "request_artifact": {
+        "bytes": 245257,
+        "sha256": "affa537538e506e9a1508cfb91ac8e726ecb7e1dc20477b5d13069da74c05130"
+      },
+      "request_identity_sha256": "affa537538e506e9a1508cfb91ac8e726ecb7e1dc20477b5d13069da74c05130",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "bodies-1-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2511343,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "3038fb187090f72897b2b26e93d25cf6a2c7d39245d4c81c62c545d4c37c40fc"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 3203295,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "38bafac88a46ebe5742b506dd3443f5c192b3c6690b4f608ba729d7cb193a6de"
+          }
+        }
+      ]
+    },
+    {
+      "active_bodies": [
+        1,
+        2
+      ],
+      "base_material_sha256": "b2c87f3d9ea298b0c7160c6f5afda2ee808bf212842950de72ab6a8d9a4ae554",
+      "body_influence_metadata_sha256": "dca9580689462ebc75b6433a514de9b3b473aab42e503061a4ebd233efb0097b",
+      "chromatic_count": 3,
+      "events_artifact": {
+        "bytes": 384,
+        "sha256": "3aeec4499b223eeb9005fe377c49e170fd4076da044d965db8430bec06b896d6"
+      },
+      "id": "0x5584badfb5d82790-bodies-2-3",
+      "initial_image_artifact": {
+        "bytes": 36870,
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "layout_artifact": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "maximum_final_relative_mass_error": 1.782692472145199e-08,
+      "maximum_initial_relative_mass_error": 0.0,
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "c0e6201e256f9d9392cddea38bca2f838010a1513d414c1a32e6b52acc2d61e2",
+      "receipt_artifact": {
+        "bytes": 175132,
+        "sha256": "737bc77ab3a1f13d700898928e2cc1e0453287789aa2001541cce44229a28002"
+      },
+      "recipe_sha256": "c874df50d9c0068468f8199a74a02c061b0e5fdfd9dfc000b9546230d5c40b54",
+      "request_artifact": {
+        "bytes": 244317,
+        "sha256": "86a1eb30910b6042be0b6e4d32500195ff05a9940664b6105179d80e13815bcc"
+      },
+      "request_identity_sha256": "86a1eb30910b6042be0b6e4d32500195ff05a9940664b6105179d80e13815bcc",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "target_mass": [
+        0.051621920090600945,
+        0.017087127974508887,
+        0.007942285755418945,
+        0.0
+      ],
+      "variant": "bodies-2-3",
+      "views": [
+        {
+          "image": {
+            "bytes": 2345210,
+            "resolution": [
+              2048,
+              1536
+            ],
+            "sha256": "c7ccdfebb30aa1ca43191cf3df77dfadc6b8200cfae54234338557eb95e069ba"
+          },
+          "look": "silk-grain",
+          "movie": {
+            "bytes": 2972651,
+            "duration_seconds": 39.041666666666664,
+            "fps": 24,
+            "frames": 937,
+            "full_decode_verified": true,
+            "resolution": [
+              1440,
+              1080
+            ],
+            "sha256": "fe4db0baad92de4e625888a259e4655312674d16183805de08045b544ad2a04c"
+          }
+        }
+      ]
+    }
+  ],
+  "name": "The Estuary \u00b7 Body influence",
+  "native_all_body_baseline": {
+    "full_rc1_material_exact": true,
+    "physical_state_sha256": "f8c819de1880aeaf60128c869072ca71406e5015bc741319dd572b8ee324ac8a",
+    "poster_artifact": {
+      "bytes": 2480709,
+      "sha256": "6a42d7b85bb5e7ed0a729a6d25011323766ced42378a7a28df17cb7c924285a8"
+    },
+    "proof_artifact": {
+      "bytes": 9817,
+      "sha256": "524f9dc2043a2248d2a64b0a4f6bd9f79196be9703c4cfd3d0c7074e307acf9d"
+    },
+    "rc1_poster_png_exact": true,
+    "receipt_artifact": {
+      "bytes": 26170,
+      "sha256": "cb024146d40dfc85debe9504ec89dfa17d47db0c980ba0b14f93a3ac9ffc23a4"
+    },
+    "scope": "One full native all-body baseline; identical runtime source to production, exact RC1 material and PNG bytes.",
+    "seed": "0xb7f327f9f722",
+    "source_fraction": 1.0
+  },
+  "production": {
+    "archive_id": "production-f842a0d",
+    "plan_artifact": {
+      "bytes": 322913,
+      "sha256": "31ff82834f864456f1b671ae1675abbe7f666605ad76dcfda43395dcffaed42c"
+    },
+    "plan_identity_sha256": "c89af4b3fc940d26a12dda7ddbb28abd119e0dab24ee101b82ecb0ddbb656bf2",
+    "resource_ledger_artifact": {
+      "bytes": 135850,
+      "sha256": "4378bdacf279f796d5850a7af776cd4654243bad33ffb502ebe329361ff12948"
+    },
+    "resource_scope": "Parent samples every two seconds; peaks are observed samples, not continuous maxima.",
+    "resources": {
+      "concurrent_batches": 2,
+      "failed_samples": 0,
+      "peak_gpu_memory_mib": 7704,
+      "peak_gpu_utilization_percent": 100,
+      "samples": 1723,
+      "scope": "Two bounded batches of native 2048, three-pigment, single-view films",
+      "workers_per_batch": 2
+    },
+    "result_artifact": {
+      "bytes": 26773,
+      "sha256": "1c56988b401019604adf554908b641c905cc3aa167ff6a57823f58217ad8fbf3"
+    },
+    "summed_case_elapsed_seconds": 13653.063821022632,
+    "wall_seconds": 3487.3292938239756
+  },
+  "publication": {
+    "browser_review": {
+      "all_ten_seed_image_sets_loaded": true,
+      "body_selection_and_seed_changes_preserve_paused_time": true,
+      "browser": "Codex in-app browser",
+      "browser_error_or_warning_count": 0,
+      "complete_playback_returns_to_final_paintings_and_releases_media": true,
+      "distinct_rc1_and_two_body_films_played_in_sync": true,
+      "download_attributes_and_destinations_present": true,
+      "escape_exits_focus": true,
+      "focus_view_keeps_complete_canvases_visible": true,
+      "images_per_seed_in_main_view": 9,
+      "initial_paint_comparison_checked": true,
+      "scope": "All ten seeds checked for image/preview loading; representative real videos exercised through complete playback, replay, shared seeking and selection changes. All70 film URLs checked for range access; every new film has complete decode evidence.",
+      "shared_seek_seconds_verified": 20
+    },
+    "comparison_manifest_artifact": {
+      "bytes": 573715,
+      "sha256": "3844626b3d3dc53ec9905a9b325111b6351aca5dd43b3bfb42e92023d3a0e9c0"
+    },
+    "comparison_verification_artifact": {
+      "bytes": 999,
+      "sha256": "4c81376a347997cec8e5230a660b45aefb7e873a3abbd64b40d2f5071db8a1f2"
+    },
+    "http_checks": {
+      "films_with_successful_byte_ranges": 70,
+      "report_artifact": {
+        "bytes": 63118,
+        "sha256": "8739b48761d2b1cace35115c372e9d109efe157be0d40565ce0b3cd2a6b2174e"
+      },
+      "urls": 431
+    },
+    "local_copy_independently_verified": true,
+    "new_views": 60,
+    "publication_report_artifact": {
+      "bytes": 1264,
+      "sha256": "7ab008aa0756267ed8f144cb491e245e011c647750e21c15c0295496e7c5f862"
+    },
+    "publisher_commit": "f842a0d72f16f5ed5b3a9ab1f748ae69c9ca567a",
+    "rc1_reference_views": 10,
+    "selections_including_reference": 7
+  },
+  "reference_inputs_sha256": "da720c0654bebf79dd57cb7af2775154c491aec7d76137e9ed293008de793b4b",
+  "reference_release_sha256": "320b48e55c8196f2d7f466caefe00e436a30c5384c0eed4622fe9b0c9c12dd86",
+  "reference_tag": "RC1",
+  "reference_tag_commit": "dda34ef942425f765795d37e16d45c427428c203",
+  "renderer_commit": "f842a0d72f16f5ed5b3a9ab1f748ae69c9ca567a",
+  "renderer_source_snapshot": "influence-f842a0d",
+  "runtime_identity_hash_format": "SHA-256 of common.encoded(plan.runtime): sorted JSON, indent=2, final newline.",
+  "runtime_identity_sha256": "29d4ac1973a7389df3b51760c7eb47bb19f1a0fe242d98a5751726f596c0ffc6",
+  "schema_version": 1,
+  "study_scope": "Ten RC1 seeds and all six proper nonempty body subsets. Complete source trajectories, projection, starting paint layout, initial pixels, palette, pigment amounts, other simulation controls, lighting, camera and full film timeline are held fixed. Direct material forcing and adaptive source-travel criteria use active bodies; pair forcing and eligible encounter selection require both endpoints active. Eligible events are selected before ranking and refractory competition. Strengths are not renormalized. Reduced final material identities are expected to differ.",
+  "validation": {
+    "audit_artifact": {
+      "bytes": 676809,
+      "sha256": "99cb298f1736278c398e8dbd23379db7d2a31698a0077b40968c16980e4df352"
+    },
+    "audit_record": "body-influence-production-audit-v1",
+    "cases": 60,
+    "event_verification": "Eligible encounter schedules independently regenerated from each archived complete source and canonical active-body subset.",
+    "film_fps": 24,
+    "film_resolution": [
+      1440,
+      1080
+    ],
+    "films": 60,
+    "frames_per_film": 937,
+    "image_resolution": [
+      2048,
+      1536
+    ],
+    "mass_absolute_tolerance": 1e-12,
+    "mass_relative_tolerance": 5e-06,
+    "maximum_final_relative_mass_error": 6.785538221552125e-08,
+    "maximum_initial_relative_mass_error": 0.0,
+    "media_verification": "Complete decode receipts plus independently checked movie, frame, source and artifact associations for every case.",
+    "paintings": 60,
+    "poster_visual_review": {
+      "canvas_border_clipping_found": false,
+      "large_straight_or_tile_seams_found": false,
+      "new_posters": 60,
+      "notes": "Minor native-scale contour stepping/ribbing remains in some images; no general aesthetic improvement claimed. Final posters inspected; this is not certification of every movie frame.",
+      "rc1_references": 10,
+      "report_artifact": {
+        "bytes": 1222,
+        "sha256": "c2b670b68f76a5569bb43d86bb1463c787f661507741f1f60bef71570a22acb2"
+      }
+    },
+    "rc1_initial_layout_exact": true,
+    "rc1_initial_mass_exact": true,
+    "rc1_initial_png_exact": true,
+    "rc1_palette_source_and_other_settings_exact": true,
+    "seeds": 10,
+    "source_fraction": 1.0,
+    "test_suites": {
+      "base_cpu": {
+        "failures": 0,
+        "log_artifact": {
+          "bytes": 622,
+          "sha256": "3a863c12f2716e581cfe379d4c055cac477b25b310e07c4a6c55ccdcc8f033e8"
+        },
+        "skipped": 7,
+        "tests": 83
+      },
+      "base_server_gpu": {
+        "failures": 0,
+        "log_artifact": {
+          "bytes": 506,
+          "sha256": "5db0008baf3cd6ec6c235b467c6832589defd0034e53da76e2c7f5e10424bd24"
+        },
+        "skipped": 0,
+        "tests": 83
+      },
+      "body_influence_focused_gpu": {
+        "failures": 0,
+        "log_artifact": {
+          "bytes": 2538,
+          "sha256": "2718782b0658053bfdb8e5a69e246e2aa2525ca12caa01a6929d8c099ff7284c"
+        },
+        "skipped": 0,
+        "tests": 11
+      },
+      "confluence_cpu": {
+        "failures": 0,
+        "log_artifact": {
+          "bytes": 1633,
+          "sha256": "5c0745b7e3b5243750c41d4398480df48237cb660857c4ac9f5d93c4ce0b471a"
+        },
+        "skipped": 88,
+        "tests": 574
+      },
+      "confluence_server_gpu": {
+        "failures": 0,
+        "log_artifact": {
+          "bytes": 1632,
+          "sha256": "8619417f6d6371f2e531474340bf090dc06a7b4537e82c3afbbed5ff3ed6f9b7"
+        },
+        "skipped": 9,
+        "tests": 574
+      }
+    },
+    "total_film_frames": 56220,
+    "zero_chalk_preserved": true
+  },
+  "variants": {
+    "bodies-1-2": [
+      0,
+      1
+    ],
+    "bodies-1-3": [
+      0,
+      2
+    ],
+    "bodies-2-3": [
+      1,
+      2
+    ],
+    "body-1": [
+      0
+    ],
+    "body-2": [
+      1
+    ],
+    "body-3": [
+      2
+    ]
+  }
+}
