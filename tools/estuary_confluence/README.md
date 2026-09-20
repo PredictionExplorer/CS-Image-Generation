@@ -452,6 +452,13 @@ palette, source recording, flow, surface finish, and complete film timeline.
 The comparison page pairs any two setups with shared playback and seeking, and
 includes the saved RC1 artwork as a reference.
 
+## Selecting the bodies that influence paint
+
+[Body-influence studies](BODY_INFLUENCE.md) compare each body and each pair against
+RC1's all-three reference. The original trajectories, initial painting, palette,
+and film timeline stay fixed. Body forcing, pair effects, wetting, and adaptive
+travel bounds follow the selection without compensating for reduced strength.
+
 ## Validation
 
 ```sh

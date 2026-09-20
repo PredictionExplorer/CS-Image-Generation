@@ -14,6 +14,9 @@ import copy
 import fcntl
 import hashlib
 import html
+import json
+import re
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import numpy as np
@@ -41,11 +44,69 @@ SETUPS = {
 }
 
 
-def document(title):
+@dataclass(frozen=True)
+class ComparisonPresentation:
+    """Explicit copy and selection defaults for the shared two-player page."""
+
+    manifest_version: str = VERSION
+    default_setup: str = "body-wedges"
+    eyebrow: str = "One dance / Different beginnings"
+    intro: str = (
+        "Compare the same seed side by side. The trajectory, colors, paint amounts, camera "
+        "and lighting are matched. Different starting arrangements develop into "
+        "different paintings."
+    )
+    selector_label: str = "composition"
+    browse_title: str = "All compositions for this seed"
+    browse_note: str = (
+        "Choose which two to compare. Switching a composition pauses both films at the same point."
+    )
+    initial_status: str = "Starting paint · same amount of each pigment"
+    final_status: str = "Final paintings · same trajectory, different beginnings"
+    ready_status: str = "Final paintings · choose two compositions to compare"
+
+    def __post_init__(self):
+        for field in fields(self):
+            value = getattr(self, field.name)
+            require(
+                type(value) is str and 0 < len(value) <= 600 and value.strip() == value,
+                f"Invalid comparison presentation field: {field.name}",
+            )
+        for name in ("manifest_version", "default_setup"):
+            require(
+                re.fullmatch(r"[a-z][a-z0-9-]{0,79}", getattr(self, name)) is not None,
+                f"Invalid comparison presentation identifier: {name}",
+            )
+
+
+COMPOSITION_PRESENTATION = ComparisonPresentation()
+
+
+def document(title, *, presentation=COMPOSITION_PRESENTATION):
     require(type(title) is str and 0 < len(title) <= 120, "Use a short comparison title")
+    require(
+        type(presentation) is ComparisonPresentation, "Use explicit comparison presentation options"
+    )
     template = TEMPLATE.read_text(encoding="utf-8")
-    require(template.count(TITLE_TOKEN) == 2, "Comparison title placeholders differ")
-    return template.replace(TITLE_TOKEN, html.escape(title))
+    replacements = {
+        TITLE_TOKEN: html.escape(title),
+        "__COMPARISON_EYEBROW__": html.escape(presentation.eyebrow),
+        "__COMPARISON_INTRO__": html.escape(presentation.intro),
+        "__COMPARISON_SELECTOR__": html.escape(presentation.selector_label),
+        "__COMPARISON_BROWSE_TITLE__": html.escape(presentation.browse_title),
+        "__COMPARISON_BROWSE_NOTE__": html.escape(presentation.browse_note),
+        "__COMPARISON_PRESENTATION__": json.dumps(asdict(presentation), ensure_ascii=True)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026"),
+    }
+    for token in replacements:
+        count = 2 if token in (TITLE_TOKEN, "__COMPARISON_SELECTOR__") else 1
+        require(template.count(token) == count, "Comparison presentation placeholders differ")
+    # One substitution pass prevents a title from introducing a second token.
+    return re.sub(
+        "|".join(map(re.escape, replacements)), lambda match: replacements[match[0]], template
+    )
 
 
 def _same(actual, expected, message):
@@ -124,11 +185,11 @@ def _view(study, prefix, setup, label, request, amounts):
     }
 
 
-def comparison_manifest(output, *, title):
-    """Derive all UI claims from independently verified portable records."""
+def _reference_context(output, *, inputs_name="composition-inputs.json"):
+    """Validate the preserved RC1 cohort and its pinned initial-paint records."""
     output = Path(output)
     inputs, release = (
-        read(output / "composition-inputs.json"),
+        read(output / inputs_name),
         read(output / "reference-release.json"),
     )
     require(
@@ -147,29 +208,15 @@ def comparison_manifest(output, *, title):
     require(
         set(released) == set(seeds) and len(released) == len(release["cases"]), "RC1 cohort differs"
     )
-    reference_root, studies_root = output / "reference", output / "studies"
+    reference_root = output / "reference"
     references, reference_provenance = verify_gallery(reference_root)
-    studies, study_provenance = verify_gallery(studies_root)
     selected_reference = [s for s in references["studies"] if s["group"] == "silk-grain"]
     require(
         len(selected_reference) == len(seeds)
         and {s["seed"] for s in selected_reference} == set(seeds),
         "Expected exactly one RC1 contact-finish reference for every seed",
     )
-    require(
-        len(studies["studies"]) == len(seeds) * len(SETUPS)
-        and all(s["group"] == "silk-grain" for s in studies["studies"]),
-        "Expected six complete composition films per seed",
-    )
-    rows = []
-    new_index = {}
-    for study in studies["studies"]:
-        request, receipt, origin = _record(studies_root, study_provenance, study)
-        spec = request["recipe"]["simulation"].get("initial_composition")
-        require(type(spec) is dict and spec.get("setup") in SETUPS, "Unknown starting composition")
-        key = (study["seed"], spec["setup"])
-        require(key not in new_index, "Duplicate composition for one seed")
-        new_index[key] = study, request, receipt, origin
+    reference_rows = []
     for inputs_row in input_rows:
         seed = normalize_seed(inputs_row["seed"])
         ref = next(s for s in selected_reference if s["seed"] == seed)
@@ -212,6 +259,33 @@ def comparison_manifest(output, *, title):
         _same(radii, inputs_row["reference_radii"], "Reference pool radii differ")
         ref_mass = _initial_mass(reference_root, origin, ref)
         _same(ref_mass[:3].tolist(), inputs_row["target_mass"], "RC1 starting paint amounts differ")
+        reference_rows.append((inputs_row, ref, reference, receipt, origin, ref_mass))
+    return seeds, reference_rows
+
+
+def comparison_manifest(output, *, title):
+    """Derive all UI claims from independently verified portable records."""
+    output = Path(output)
+    seeds, references = _reference_context(output)
+    studies_root = output / "studies"
+    studies, study_provenance = verify_gallery(studies_root)
+    require(
+        len(studies["studies"]) == len(seeds) * len(SETUPS)
+        and all(s["group"] == "silk-grain" for s in studies["studies"]),
+        "Expected six complete composition films per seed",
+    )
+    new_index = {}
+    for study in studies["studies"]:
+        request, receipt, origin = _record(studies_root, study_provenance, study)
+        spec = request["recipe"]["simulation"].get("initial_composition")
+        require(type(spec) is dict and spec.get("setup") in SETUPS, "Unknown starting composition")
+        key = (study["seed"], spec["setup"])
+        require(key not in new_index, "Duplicate composition for one seed")
+        new_index[key] = study, request, receipt, origin
+    rows = []
+    for inputs_row, ref, reference, _receipt, _origin, ref_mass in references:
+        seed = normalize_seed(inputs_row["seed"])
+        target = np.asarray(inputs_row["target_mass"], dtype="f8")
         rows.append(_view(ref, "reference", "rc1", "RC1 · saved composition", reference, ref_mass))
         for setup, label in SETUPS.items():
             require((seed, setup) in new_index, "A seed is missing a composition")

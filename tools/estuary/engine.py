@@ -181,9 +181,13 @@ class Engine:
         shader.run(*self.groups)
         self.ctx.memory_barrier()
 
+    def _flow_uniforms(self, frame):
+        """Descriptor hook; the default retains the original conditioning exactly."""
+        return tool_uniforms(frame, self.recipe["simulation"]["stir_radius"])
+
     def _flow(self, fraction):
         frame = self.source.frame(fraction)
-        tools, pairs = tool_uniforms(frame, self.recipe["simulation"]["stir_radius"])
+        tools, pairs = self._flow_uniforms(frame)
         self.flow["u_tools"].write(tools.tobytes())
         self.flow["u_pairs"].write(pairs.tobytes())
         self.velocity.bind_to_image(0, read=False, write=True)
@@ -235,6 +239,10 @@ class Engine:
         if self.internal_steps > MAX_INTERNAL_STEPS:
             raise RuntimeError("Transport work cap exceeded; reduce flow or simulation resolution")
 
+    def _source_travel(self, start, end):
+        """Source-clock subdivision hook with unchanged default arithmetic."""
+        return self.source.frame(end).arc_lengths - self.source.frame(start).arc_lengths
+
     @_current_context
     def advance_to(self, step):
         """Advance complete canonical steps; output cadence never changes physics."""
@@ -244,17 +252,14 @@ class Engine:
         pixel = 2.0 * self.domain / self.height
         for index in range(self.step, step):
             start, end = index / self.steps, (index + 1) / self.steps
-            travel = self.source.frame(end).arc_lengths - self.source.frame(start).arc_lengths
+            travel = self._source_travel(start, end)
             pieces = max(1, math.ceil(float(np.max(travel)) / (settings["brush_radius"] * 0.4)))
             t = start
             proposal = (end - start) / pieces
             while end - t > 1e-14:
                 interval = min(proposal, end - t)
                 for _ in range(16):
-                    actual_travel = (
-                        self.source.frame(t + interval).arc_lengths
-                        - self.source.frame(t).arc_lengths
-                    )
+                    actual_travel = self._source_travel(t, t + interval)
                     ratio = float(np.max(actual_travel)) / (settings["brush_radius"] * 0.4)
                     if ratio > 1.0 + 1e-10:
                         interval *= min(0.8, 0.95 / ratio)

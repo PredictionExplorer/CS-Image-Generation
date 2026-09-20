@@ -75,11 +75,16 @@ DEFAULTS = {
 def validate_config(value):
     """Resolve a bounded, flat configuration before allocating GPU resources."""
     if type(value) is not dict or set(value) - (
-        set(DEFAULTS) | {"interaction", "initial_composition"}
+        set(DEFAULTS) | {"interaction", "initial_composition", "body_influence"}
     ):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
     result.update(copy.deepcopy(value))
+    from .body_influence import validate_config as influence_config
+
+    influence = influence_config(result.pop("body_influence", None))
+    if influence is not None:
+        result["body_influence"] = influence
     if result["material_model"] not in ("legacy", "laminate"):
         raise ValueError("material_model must be legacy or laminate")
     resolution = result["resolution"]
@@ -475,8 +480,18 @@ class Engine:
         from tools.estuary.optics import Material
 
         self.config = settings = validate_config(config)
+        from .body_influence import (
+            arc_travel,
+            forcing_uniforms,
+            initialization_config,
+            movement_segments,
+            validate_event_eligibility,
+        )
+
+        influence = settings.get("body_influence")
         self.palette = copy.deepcopy(palette)
         self.events = events = validate_events(events)
+        validate_event_eligibility(events, influence)
         count, arrays = _palette_arrays(palette)
         shaped = settings["initial_pattern"] == "shaped"
         if shaped and (count != 4 or palette["chalk_index"] != 3):
@@ -509,7 +524,9 @@ class Engine:
             if settings["initial_pattern"] == "engaged":
                 from .participation_layout import plan_engaged_layout
 
-                self.layout = layout = plan_engaged_layout(source, count - 1, settings)
+                self.layout = layout = plan_engaged_layout(
+                    source, count - 1, initialization_config(settings)
+                )
             else:
                 self.layout = layout = plan_layout(
                     palette["seed"],
@@ -696,12 +713,33 @@ class Engine:
                 # The base transport retains its exact old shader and arithmetic
                 # when strain is disabled. Descriptors follow the source clock,
                 # including adaptive substeps, never the movie frame cadence.
-                if settings["pair_strain"]:
+                if influence is None and settings["pair_strain"]:
                     from .pair_strain import pair_strain_uniforms
 
                     strains = pair_strain_uniforms(source.frame(fraction), settings["stir_radius"])
                     gpu.flow["u_strains"].write(strains.tobytes())
                 return super()._flow(fraction)
+
+            def _flow_uniforms(gpu, frame):
+                if influence is None:
+                    return super()._flow_uniforms(frame)
+                tools, pairs, strains = forcing_uniforms(
+                    frame,
+                    settings["stir_radius"],
+                    influence,
+                    include_strain=settings["pair_strain"] > 0,
+                )
+                if strains is not None:
+                    gpu.flow["u_strains"].write(strains.tobytes())
+                return tools, pairs
+
+            def _source_travel(gpu, start, end):
+                if influence is None:
+                    return super()._source_travel(start, end)
+                # Keep proposal and retry subdivision independent of inactive
+                # paths, using the original complete-source clock.
+                after, before = source.frame(end), source.frame(start)
+                return arc_travel(before.arc_lengths, after.arc_lengths, influence)
 
             def _initialize_paint(gpu):
                 if shaped:
@@ -856,8 +894,12 @@ class Engine:
                         dt,
                     )
                 a, b = source.frame(t0), source.frame(t1)
-                segments = np.concatenate([a.positions, b.positions], axis=1).astype("f4")
-                travel = np.maximum(0, b.arc_lengths - a.arc_lengths)
+                if influence is None:
+                    segments = np.concatenate([a.positions, b.positions], axis=1).astype("f4")
+                    travel = np.maximum(0, b.arc_lengths - a.arc_lengths)
+                else:
+                    segments = movement_segments(a.positions, b.positions, influence)
+                    travel = np.maximum(0, arc_travel(a.arc_lengths, b.arc_lengths, influence))
                 fade = math.exp(-settings["fade"] * (t0 + t1) * 0.5)
                 amounts = (
                     settings["deposition"]
@@ -1204,6 +1246,21 @@ class Engine:
                 "GPU exact integer area integration of phase concentrations before appearance"
             ),
         }
+        if influence is not None:
+            from .body_influence import eligible_pairs
+
+            self.metadata["body_influence"] = {
+                "config": copy.deepcopy(influence),
+                "eligible_pairs": [list(pair) for pair in eligible_pairs(influence)],
+                "initialization": "unchanged full-source layout and all initial pigment channels",
+                "forcing": (
+                    "zero inactive descriptors, wetting/deposition travel "
+                    "and adaptive travel limits"
+                ),
+                "events": "eligible active pairs selected before count and refractory competition",
+                "strength_normalization": "none",
+                "recording": "the original complete three-body trajectories are not reintegrated",
+            }
         if settings["pair_strain"]:
             from .pair_strain import VERSION as STRAIN_VERSION
 

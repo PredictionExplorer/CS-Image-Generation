@@ -400,13 +400,9 @@
   <body>
     <main>
       <header>
-        <p class="eyebrow">One dance / Different beginnings</p>
+        <p class="eyebrow">__COMPARISON_EYEBROW__</p>
         <h1>__COMPOSITION_TITLE__</h1>
-        <p class="intro">
-          Compare the same seed side by side. The trajectory, colors, paint
-          amounts, camera and lighting are matched. Different starting
-          arrangements develop into different paintings.
-        </p>
+        <p class="intro">__COMPARISON_INTRO__</p>
       </header>
       <div class="selection">
         <label for="seed"
@@ -457,7 +453,7 @@
       <section class="pair" aria-label="Same-seed comparison">
         <article class="panel">
           <label for="leftSetup"
-            >Left composition
+            >Left __COMPARISON_SELECTOR__
             <select id="leftSetup" disabled></select
           ></label>
           <figure>
@@ -489,7 +485,7 @@
         </article>
         <article class="panel">
           <label for="rightSetup"
-            >Right composition
+            >Right __COMPARISON_SELECTOR__
             <select id="rightSetup" disabled></select
           ></label>
           <figure>
@@ -523,11 +519,8 @@
         </article>
       </section>
       <section class="browse" aria-labelledby="browseTitle">
-        <h2 id="browseTitle">All compositions for this seed</h2>
-        <p>
-          Choose which two to compare. Switching a composition pauses both films
-          at the same point.
-        </p>
+        <h2 id="browseTitle">__COMPARISON_BROWSE_TITLE__</h2>
+        <p>__COMPARISON_BROWSE_NOTE__</p>
         <div id="grid" class="grid"></div>
       </section>
       <footer>
@@ -545,6 +538,7 @@
     </main>
     <script>
       "use strict";
+      const PRESENTATION = __COMPARISON_PRESENTATION__;
       const $ = (id) => document.getElementById(id);
       const sides = ["left", "right"];
       const videos = sides.map((side) => $(side + "Video"));
@@ -765,8 +759,8 @@
         else
           status(
             mode === "initial"
-              ? "Starting paint · same amount of each pigment"
-              : "Final paintings · same trajectory, different beginnings",
+              ? PRESENTATION.initial_status
+              : PRESENTATION.final_status,
           );
       }
       function selectPair() {
@@ -781,8 +775,8 @@
         else
           status(
             mode === "initial"
-              ? "Starting paint · same amount of each pigment"
-              : "Final paintings · same trajectory, different beginnings",
+              ? PRESENTATION.initial_status
+              : PRESENTATION.final_status,
           );
       }
       function renderGrid() {
@@ -942,7 +936,7 @@
         })
         .then((value) => {
           if (
-            value.version !== "composition-comparison-v1" ||
+            value.version !== PRESENTATION.manifest_version ||
             !Array.isArray(value.seeds) ||
             !value.seeds.length ||
             !Array.isArray(value.setups) ||
@@ -981,8 +975,9 @@
           $("seed").value = selectedSeed = data.seeds[0];
           $("leftSetup").value = "rc1";
           $("rightSetup").value = (
-            data.setups.find((setup) => setup.id === "body-wedges") ||
-            data.setups.find((setup) => setup.id !== "rc1")
+            data.setups.find(
+              (setup) => setup.id === PRESENTATION.default_setup,
+            ) || data.setups.find((setup) => setup.id !== "rc1")
           ).id;
           for (const id of [
             "seed",
@@ -997,7 +992,7 @@
           ])
             $(id).disabled = false;
           updatePanels();
-          status("Final paintings · choose two compositions to compare");
+          status(PRESENTATION.ready_status);
         })
         .catch((error) => {
           $("error").hidden = false;

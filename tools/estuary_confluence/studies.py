@@ -134,6 +134,20 @@ def verify_reference_mass(report, expected):
     )
 
 
+def verify_reference_design(request, receipt, case):
+    """Pin starting geometry and palette when a study changes only forcing."""
+    if case.get("reference_layout_artifact") is not None:
+        require(
+            receipt["artifacts"].get("layout.json") == case["reference_layout_artifact"],
+            "Study changed the matched reference starting layout",
+        )
+    if case.get("reference_palette_identity_sha256") is not None:
+        require(
+            request["palette"]["identity_sha256"] == case["reference_palette_identity_sha256"],
+            "Study changed the matched reference palette",
+        )
+
+
 def execute_plan(output, plan, *, workers=2):
     """Run at most two independent GPU jobs, keeping failed archives inspectable."""
     require(type(workers) is int and 1 <= workers <= 2, "Use one or two GPU workers")
@@ -214,6 +228,7 @@ def execute_plan(output, plan, *, workers=2):
             verify_reference_mass(
                 read(destination / "mass-budget.json"), case["reference_initial_mass"]
             )
+        verify_reference_design(request, receipt, case)
         require(request["source"]["sha256"] == case["source_sha256"], "Rendered recording differs")
         require(
             receipt["source_fraction"] == 1 and receipt["complete"], "Incomplete source traversal"

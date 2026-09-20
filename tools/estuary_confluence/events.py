@@ -14,6 +14,8 @@ import numpy as np
 
 from tools.estuary.source import PAIRS
 
+from .body_influence import normalize_bodies
+
 VERSION = "confluence-encounters-v1"
 SAMPLE_COUNT = 4097
 REFRACTORY_FRACTION = 0.12
@@ -21,18 +23,28 @@ MIN_CLOSENESS = 0.35
 MIN_PROMINENCE = 0.08
 
 
-def plan_events(source, count: int = 3) -> list[dict]:
+def plan_events(source, count: int = 3, *, bodies=None) -> list[dict]:
     """Return up to ``count`` meaningful encounters in chronological order.
 
     Position and radius use the source's fixed projected coordinate system.
     ``duration`` is a Gaussian standard deviation in complete-source fractions.
     Strength is the dimensionless 3D closeness at the selected distance minimum.
     Selection suppresses nearby competing pairs as one compositional event.
+    A body subset admits only pairs with both endpoints active, before candidates
+    compete. Projection and encounter-distance conditioning stay source-fixed.
     """
     if type(count) is not int or not 0 <= count <= 12:
         raise ValueError("Event count must be an integer in [0, 12]")
-    if count == 0:
+    active_bodies = normalize_bodies(bodies)
+    if count == 0 or (active_bodies is not None and len(active_bodies) == 1):
         return []
+    eligible_pairs = (
+        range(3)
+        if active_bodies is None
+        else tuple(
+            index for index, (a, b) in enumerate(PAIRS) if a in active_bodies and b in active_bodies
+        )
+    )
     fractions = np.linspace(0, 1, SAMPLE_COUNT)
     sample = source.sample(fractions)
     distance = np.asarray(sample.pair_distances, dtype=np.float64)
@@ -52,7 +64,7 @@ def plan_events(source, count: int = 3) -> list[dict]:
     closeness = 1 / (1 + np.minimum(distance / scale, 1e50) ** 4)
     shoulder = int(0.035 * (SAMPLE_COUNT - 1))
     candidates = []
-    for pair in range(3):
+    for pair in eligible_pairs:
         curve = closeness[:, pair]
         peaks = np.flatnonzero((curve[1:-1] > curve[:-2]) & (curve[1:-1] >= curve[2:])) + 1
         for index in peaks:
@@ -101,14 +113,14 @@ def plan_events(source, count: int = 3) -> list[dict]:
             right += 1
         # FWHM to sigma; only the material response is bounded, not encounter time.
         duration = float(np.clip((fractions[right] - fractions[left]) / 2.355, 0.003, 0.025))
-        bodies = PAIRS[pair]
-        position = fine_positions[minimum, bodies].mean(axis=0)
+        pair_bodies = PAIRS[pair]
+        position = fine_positions[minimum, pair_bodies].mean(axis=0)
         chosen.append(
             {
                 "version": VERSION,
                 "fraction": fraction,
                 "position": position.tolist(),
-                "pair": bodies.tolist(),
+                "pair": pair_bodies.tolist(),
                 "strength": strength,
                 "duration": duration,
                 "radius": 0.055 + 0.045 * strength,

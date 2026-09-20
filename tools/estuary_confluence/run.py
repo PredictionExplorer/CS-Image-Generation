@@ -466,10 +466,13 @@ def resolved_layout(recipe, seed, source=None):
             source=source if body_wedges else None,
         )
     if settings["initial_pattern"] == "engaged":
+        from tools.estuary_confluence.body_influence import initialization_config
         from tools.estuary_confluence.participation_layout import plan_engaged_layout
 
         require(source is not None, "Engaged layout requires its complete source recording")
-        return plan_engaged_layout(source, recipe["chromatic_count"], settings)
+        return plan_engaged_layout(
+            source, recipe["chromatic_count"], initialization_config(settings)
+        )
     if settings["initial_pattern"] != "scattered":
         return None
     width, height = settings["resolution"]
@@ -644,6 +647,53 @@ def base_material_digest(fields):
     from tools.estuary_confluence.interaction import BASE_FIELDS
 
     return field_digest({key: fields[key] for key in BASE_FIELDS})
+
+
+def body_influence_metadata(recipe, source_metadata, events):
+    """Bind a proper body subset to its source and eligible encounter schedule."""
+    from tools.estuary_confluence.body_influence import (
+        VERSION,
+        eligible_pairs,
+        validate_config,
+        validate_event_eligibility,
+    )
+    from tools.estuary_confluence.engine import validate_events
+    from tools.estuary_confluence.events import VERSION as event_version
+
+    supplied = recipe["simulation"].get("body_influence")
+    settings = validate_config(supplied)
+    if settings is None:
+        return None
+    require(encoded(supplied) == encoded(settings), "Body-influence settings must be normalized")
+    validate_events(events)
+    validate_event_eligibility(events, settings)
+    require(len(events) <= recipe["encounters"], "Body-influence event count exceeds its recipe")
+    return {
+        "version": VERSION,
+        "config": settings,
+        "body_labels": [body + 1 for body in settings["bodies"]],
+        "eligible_pairs": [list(pair) for pair in eligible_pairs(settings)],
+        "source": copy.deepcopy(source_metadata),
+        "projection": copy.deepcopy(recipe["projection"]),
+        "events_sha256": hashlib.sha256(encoded(events)).hexdigest(),
+        "event_selection": {
+            "version": event_version,
+            "candidate_filter": (
+                "both bodies active before prominence, sorting, count and refractory selection"
+            ),
+            "requested_count": recipe["encounters"],
+            "selected_count": len(events),
+            "selected_pairs": [list(event["pair"]) for event in events],
+            "conditioning": "unchanged full-record projection and proximity scale",
+        },
+        "initialization": "unchanged full-source layout, palette and pigment amounts",
+        "forcing": (
+            "active body flow, wetting and deposition; pair swirl/strain requires both bodies"
+        ),
+        "source_clock": "complete original recording; travel subdivision uses active bodies only",
+        "strength_normalization": "none; active contributions retain their original amplitudes",
+        "background": "carrier, drying, diffusion and material laws are unchanged",
+    }
 
 
 def body_marker_metadata(recipe, source_metadata):
@@ -912,17 +962,52 @@ def verify_run(folder):
     )
     bound_source = None
     simulation = request["recipe"]["simulation"]
+    influence = body_influence_metadata(request["recipe"], request["source"], request["events"])
+    if influence is None:
+        require(
+            "body_influence" not in request and "body_influence" not in receipt,
+            "Default body influence cannot advertise a reduced-body record",
+        )
+    else:
+        require(
+            encoded(request.get("body_influence")) == encoded(influence)
+            and encoded(receipt.get("body_influence")) == encoded(influence),
+            "Body-influence source, selection or event binding differs",
+        )
+        require(
+            receipt["artifacts"]["events.json"]["sha256"] == influence["events_sha256"],
+            "Body-influence event artifact differs",
+        )
     body_wedges = (
         simulation["initial_pattern"] == "shaped"
         and simulation["initial_composition"]["setup"] == "body-wedges"
     )
-    if simulation["initial_pattern"] == "engaged" or body_wedges or markers is not None:
+    if (
+        simulation["initial_pattern"] == "engaged"
+        or body_wedges
+        or markers is not None
+        or influence is not None
+    ):
         w, h = request["recipe"]["simulation"]["resolution"]
         bound_source = Source.read(
             folder / "inputs/source.orbit", aspect=w / h, **request["recipe"]["projection"]
         )
         require(
             equivalent_design(bound_source.metadata, request["source"]), "Source projection differs"
+        )
+    if influence is not None:
+        from tools.estuary_confluence.events import plan_events
+
+        require(
+            equivalent_design(
+                request["events"],
+                plan_events(
+                    bound_source,
+                    request["recipe"]["encounters"],
+                    bodies=influence["config"]["bodies"],
+                ),
+            ),
+            "Body-influence events differ from eligible source encounters",
         )
     expected_layout = resolved_layout(request["recipe"], request["source"]["seed"], bound_source)
     require(
@@ -1166,7 +1251,13 @@ def run(args):
         from tools.estuary_confluence.spectral import build_spectral_material
 
         spectral = build_spectral_material(palette)
-    events = plan_events(source, recipe["encounters"])
+    influence_settings = recipe["simulation"].get("body_influence")
+    events = (
+        plan_events(source, recipe["encounters"])
+        if influence_settings is None
+        else plan_events(source, recipe["encounters"], bodies=influence_settings["bodies"])
+    )
+    influence = body_influence_metadata(recipe, source.metadata, events)
     frames = [] if args.still_only else frame_plan(recipe)
     marker_ledger = make_body_marker_ledger(recipe, source, frames, has_initial=layout is not None)
     markers = None if marker_ledger is None else marker_ledger["metadata"]
@@ -1217,6 +1308,8 @@ def run(args):
                 request["background"] = background
             if interaction is not None:
                 request["interaction"] = interaction
+            if influence is not None:
+                request["body_influence"] = influence
             if markers is not None:
                 request["body_markers"] = markers
             identity = hashlib.sha256(encoded(request)).hexdigest()
@@ -1443,6 +1536,7 @@ def run(args):
                     "final_step": engine.step,
                     "solver_diagnostics": getattr(engine, "diagnostics", None),
                     "physical_state_sha256": final_identity,
+                    **({"body_influence": influence} if influence is not None else {}),
                     **({"body_markers": markers} if markers is not None else {}),
                     **(
                         {
