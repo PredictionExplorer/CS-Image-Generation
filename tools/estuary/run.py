@@ -364,7 +364,11 @@ def encode_movie(output, recipe, ffmpeg, ffprobe):
     return result
 
 
-def checkpoint(output, identity, engine, index, step, records, *, initial_image=False):
+def checkpoint(
+    output, identity, engine, index, step, records, *, initial_image=False, retention=None
+):
+    if retention is not None and (type(retention) is not int or retention < 2):
+        raise ValueError("Retain at least two checkpoints, or omit retention")
     folder = output / "checkpoints"
     folder.mkdir(exist_ok=True)
     path = folder / f"state-{index:06d}.npy"
@@ -384,6 +388,21 @@ def checkpoint(output, identity, engine, index, step, records, *, initial_image=
             ),
         },
     )
+    if retention is not None:
+        # Publish the new checkpoint before retiring older owned recovery states.
+        # Frames and final archive artifacts are retained independently.
+        states = sorted(
+            file
+            for file in folder.glob("state-*.npy")
+            if file.is_file()
+            and not file.is_symlink()
+            and file.stem.removeprefix("state-").isdigit()
+            and len(file.stem.removeprefix("state-")) == 6
+            and int(file.stem.removeprefix("state-")) <= index
+        )
+        for retired in states[:-retention]:
+            if retired != path:
+                retired.unlink()
 
 
 def restore_checkpoint(output, identity, engine, plan, *, initial_image=False):
@@ -428,6 +447,9 @@ def run(args):
     from tools.estuary.recipe import read_recipe
     from tools.estuary.source import Source
 
+    retention = getattr(args, "checkpoint_retention", None)
+    if retention is not None and (type(retention) is not int or retention < 2):
+        raise ValueError("Retain at least two checkpoints, or omit retention")
     started, code = time.monotonic(), code_identity()
     recipe = read_recipe(args.recipe)
     grid = recipe["simulation"]["resolution"]
@@ -477,6 +499,8 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
             "poster": "sharp final state",
         },
     }
+    if getattr(args, "checkpoint_retention", None) is not None:
+        request["checkpoint_retention"] = args.checkpoint_retention
     identity = hashlib.sha256(encoded(request)).hexdigest()
     output = args.output.resolve()
     existing = output.exists()
@@ -549,6 +573,7 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
                             plan[index],
                             records,
                             initial_image=initial_image,
+                            retention=getattr(args, "checkpoint_retention", None),
                         )
                     write_json(
                         output / "progress.json",
@@ -623,6 +648,11 @@ def parser():
     result.add_argument("--backend", default="egl")
     result.add_argument("--ffmpeg", type=Path)
     result.add_argument("--ffprobe", type=Path)
+    result.add_argument(
+        "--checkpoint-retention",
+        type=int,
+        help="Keep this many recent recovery states (at least two); omit to retain all",
+    )
     return result
 
 

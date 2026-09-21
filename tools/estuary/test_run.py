@@ -216,6 +216,64 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed or missing"):
                 renderer.restore_checkpoint(folder, "identity", engine, [0, 12])
 
+    def test_checkpoint_retention_preserves_current_state_and_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "frames").mkdir()
+            engine = SimpleNamespace(
+                read_state=lambda: np.ones((2, 2, 4), dtype=np.float32),
+                restore=Mock(),
+                internal_steps=3,
+                maximum_courant=0.5,
+            )
+            records = []
+            for index in range(4):
+                frame = folder / "frames" / f"{index:06d}.png"
+                renderer.write_png(frame, np.ones((2, 2, 3)), 8)
+                records.append(renderer.artifact(frame, folder))
+                renderer.checkpoint(folder, "identity", engine, index, index, records, retention=2)
+            self.assertEqual(
+                sorted(path.name for path in (folder / "checkpoints").iterdir()),
+                ["state-000002.npy", "state-000003.npy"],
+            )
+            first, restored = renderer.restore_checkpoint(
+                folder, "identity", engine, list(range(5))
+            )
+            self.assertEqual((first, restored), (4, records))
+            unrelated = folder / "checkpoints/state-not-owned.npy"
+            unrelated.write_bytes(b"keep")
+            future = folder / "checkpoints/state-999999.npy"
+            future.write_bytes(b"keep")
+            renderer.checkpoint(folder, "identity", engine, 3, 3, records, retention=2)
+            self.assertEqual(unrelated.read_bytes(), b"keep")
+            self.assertEqual(future.read_bytes(), b"keep")
+
+    def test_failed_checkpoint_publication_does_not_retire_recovery_states(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            engine = SimpleNamespace(
+                read_state=lambda: np.ones((2, 2, 4), dtype=np.float32),
+                internal_steps=1,
+                maximum_courant=0.5,
+            )
+            for index in range(3):
+                renderer.checkpoint(folder, "identity", engine, index, index, [])
+            previous = (folder / "checkpoint.json").read_bytes()
+            with patch.object(renderer, "write_json", side_effect=OSError("full disk")):
+                with self.assertRaises(OSError):
+                    renderer.checkpoint(folder, "identity", engine, 3, 3, [], retention=2)
+            self.assertEqual((folder / "checkpoint.json").read_bytes(), previous)
+            self.assertTrue((folder / "checkpoints/state-000000.npy").exists())
+            self.assertTrue((folder / "checkpoints/state-000002.npy").exists())
+
+    def test_checkpoint_retention_rejects_unsafe_counts_before_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            for value in (0, 1, -1, True, 2.5):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    renderer.checkpoint(folder, "identity", Mock(), 0, 0, [], retention=value)
+            self.assertFalse((folder / "checkpoints").exists())
+
     def test_incomplete_archive_without_checkpoint_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
