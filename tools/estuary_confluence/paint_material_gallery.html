@@ -344,13 +344,9 @@
   <body>
     <main>
       <header class="review-header">
-        <p class="eyebrow">Three bodies / Paint with memory</p>
+        <p class="eyebrow">__EYEBROW__</p>
         <h1>__TITLE__</h1>
-        <p class="intro">
-          All three bodies, the same starting colors, and the complete
-          trajectory. Compare RC1 with any treatment; choose a card below to
-          change the right painting.
-        </p>
+        <p class="intro">__INTRO__</p>
       </header>
       <div id="status" role="status" aria-live="polite">
         Loading verified paintings…
@@ -406,17 +402,14 @@
             <h2>All treatments for this seed</h2>
             <span class="note" id="count"></span>
           </div>
-          <p class="note">
-            F = fuller paint · D = directional relief · S = seeded properties ·
-            R = resistance and memory. Gold outlines mark my subjective visual
-            picks.
-          </p>
+          <p class="note">__LEGEND__</p>
           <div class="grid" id="grid"></div>
         </div>
       </div>
     </main>
     <script>
       "use strict";
+      const presentation = __REVIEW_SETTINGS__;
       const $ = (id) => document.getElementById(id);
       let data,
         mode = "final",
@@ -580,7 +573,7 @@
         const settings = {};
         for (const side of ["left", "right"]) {
           const r = selected(side);
-          settings[side] = {
+          settings[side] = r.settings ?? {
             treatment: r.label,
             display_height: r.surface.height_scale,
             directional_relief:
@@ -658,7 +651,7 @@
         const preferred =
           data.picks.find(
             (p) => p.seed === $("seed").value && p.variant !== $("left").value,
-          )?.variant || "gentle-worked-paint";
+          )?.variant || presentation.default_variant;
         const fallback =
           rows.find((row) => row.variant === preferred)?.variant ||
           rows.find((row) => row.variant !== "rc1")?.variant ||
@@ -755,7 +748,7 @@
         })
         .then((result) => {
           if (
-            result.version !== "paint-material-review-v1" ||
+            result.version !== presentation.version ||
             !Array.isArray(result.rows) ||
             !result.rows.length ||
             !Array.isArray(result.seeds) ||

@@ -75,7 +75,14 @@ DEFAULTS = {
 def validate_config(value):
     """Resolve a bounded, flat configuration before allocating GPU resources."""
     if type(value) is not dict or set(value) - (
-        set(DEFAULTS) | {"interaction", "initial_composition", "body_influence", "rheology"}
+        set(DEFAULTS)
+        | {
+            "interaction",
+            "initial_composition",
+            "initial_choreography",
+            "body_influence",
+            "rheology",
+        }
     ):
         raise ValueError("Confluence config must contain only documented fields")
     result = copy.deepcopy(DEFAULTS)
@@ -155,8 +162,15 @@ def validate_config(value):
     if type(flow_domain) not in (int, float) or not 1 <= flow_domain <= result["domain_scale"]:
         raise ValueError("flow_domain_scale must be within [1, domain_scale]")
     result["flow_domain_scale"] = float(flow_domain)
-    if result["initial_pattern"] not in ("strata", "pools", "scattered", "engaged", "shaped"):
-        raise ValueError("initial_pattern must be strata, pools, scattered, engaged or shaped")
+    if result["initial_pattern"] not in (
+        "strata",
+        "pools",
+        "scattered",
+        "engaged",
+        "shaped",
+        "choreographed",
+    ):
+        raise ValueError("Unknown initial paint pattern")
     composition = result.pop("initial_composition", None)
     if result["initial_pattern"] == "shaped":
         from .initial_composition import validate_config as composition_config
@@ -170,6 +184,21 @@ def validate_config(value):
         result["initial_composition"] = composition_config(composition)
     elif composition is not None:
         raise ValueError("initial_composition is only valid with initial_pattern=shaped")
+    choreography = result.pop("initial_choreography", None)
+    if result["initial_pattern"] == "choreographed":
+        from .choreography import validate_config as choreography_config
+
+        if choreography is None:
+            raise ValueError("Choreographed initialization requires initial_choreography")
+        if result["material_model"] != "laminate":
+            raise ValueError("Choreographed initialization requires source-free laminate paint")
+        if result["initial_pigment_weights"] is not None:
+            raise ValueError("Choreographed target masses already include pigment weights")
+        if influence is not None:
+            raise ValueError("Choreographed initialization requires all three source bodies")
+        result["initial_choreography"] = choreography_config(choreography)
+    elif choreography is not None:
+        raise ValueError("initial_choreography is only valid with initial_pattern=choreographed")
     if result["initial_pattern"] in ("scattered", "engaged"):
         from .layout import MAX_LOAD_RADIUS
 
@@ -178,14 +207,14 @@ def validate_config(value):
         if result["load_radius"] > MAX_LOAD_RADIUS:
             raise ValueError(f"Scattered load_radius must not exceed {MAX_LOAD_RADIUS}")
     if interval and (
-        result["initial_pattern"] not in ("scattered", "engaged", "shaped")
+        result["initial_pattern"] not in ("scattered", "engaged", "shaped", "choreographed")
         or result["deposition"] != 0
         or result["settling_scale"] != 0
         or result["underpaint_strength"] != 0
     ):
         raise ValueError("Mass budgets require source-free scattered, engaged or shaped paint")
     if result["material_model"] == "laminate" and (
-        result["initial_pattern"] not in ("scattered", "engaged", "shaped")
+        result["initial_pattern"] not in ("scattered", "engaged", "shaped", "choreographed")
         or any(
             result[key] != 0
             for key in (
@@ -210,6 +239,10 @@ def validate_config(value):
 
     rheology = rheology_config(result.pop("rheology", None))
     if rheology is not None:
+        if result["initial_pattern"] == "choreographed":
+            raise ValueError(
+                "Choreographed initialization requires the prescribed RC1 flow without rheology"
+            )
         if result["material_model"] != "laminate":
             raise ValueError("Rheology requires source-free laminate paint")
         response_plan(result["resolution"], result["domain_scale"], rheology)
@@ -455,7 +488,19 @@ def mass_budget_factors(initial_mass, current_mass):
 
 def _shaped_initial_state(layout, settings):
     """Use already-budgeted chromatic rasters, adding only the empty chalk channel."""
-    from .initial_composition import rasterize
+    return _budgeted_initial_state(layout, settings)
+
+
+def _budgeted_initial_state(layout, settings):
+    """Rasterize the selected explicit-amount initializer without legacy loading."""
+    if settings["initial_pattern"] == "choreographed":
+        from .choreography import rasterize
+
+        controls = settings["initial_choreography"]
+    else:
+        from .initial_composition import rasterize
+
+        controls = settings["initial_composition"]
 
     width, height = settings["resolution"]
     chromatic = rasterize(layout, settings["resolution"], settings["domain_scale"])
@@ -469,9 +514,7 @@ def _shaped_initial_state(layout, settings):
     ):
         raise ValueError("Initial composition must produce bounded native float32 pigment fields")
     actual = chromatic.sum(axis=(0, 1), dtype="f8") * (2 * settings["domain_scale"] / height) ** 2
-    if not np.allclose(
-        actual, settings["initial_composition"]["target_mass"], rtol=MASS_BUDGET_RTOL, atol=1e-12
-    ):
+    if not np.allclose(actual, controls["target_mass"], rtol=MASS_BUDGET_RTOL, atol=1e-12):
         raise FloatingPointError("Initial composition does not meet its declared pigment targets")
     state = np.zeros((height, width, 4), dtype="f4")
     state[..., :3] = chromatic
@@ -505,7 +548,9 @@ class Engine:
         validate_event_eligibility(events, influence)
         count, arrays = _palette_arrays(palette)
         shaped = settings["initial_pattern"] == "shaped"
-        if shaped and (count != 4 or palette["chalk_index"] != 3):
+        choreographed = settings["initial_pattern"] == "choreographed"
+        budgeted = shaped or choreographed
+        if budgeted and (count != 4 or palette["chalk_index"] != 3):
             raise ValueError(
                 "Shaped initialization requires exactly three pigments followed by chalk"
             )
@@ -515,8 +560,18 @@ class Engine:
             from .laminate import layer_fractions
 
             arrays["layer_fractions"] = layer_fractions(palette, count)
+            if choreographed:
+                from .choreography import effective_layer_fractions
+
+                arrays["layer_fractions"] = effective_layer_fractions(
+                    palette, settings["initial_choreography"]
+                )
         self.layout = layout = None
-        if shaped:
+        if choreographed:
+            from .choreography import plan_layout
+
+            self.layout = layout = plan_layout(source, settings, palette)
+        elif shaped:
             from .initial_composition import plan_layout
 
             composition = settings["initial_composition"]
@@ -805,8 +860,8 @@ class Engine:
                 return arc_travel(before.arc_lengths, after.arc_lengths, influence)
 
             def _initialize_paint(gpu):
-                if shaped:
-                    state = _shaped_initial_state(layout, settings)
+                if budgeted:
+                    state = _budgeted_initial_state(layout, settings)
                 else:
                     x = (
                         (np.arange(gpu.width, dtype=np.float32) + 0.5) / gpu.width * 2 * gpu.aspect
@@ -879,7 +934,7 @@ class Engine:
                 # The quiet buried accent is spatially tied to the initial
                 # triangle's strata. This is actual pigment, never an overlay.
                 under = np.zeros_like(state)
-                if not shaped:
+                if not budgeted:
                     buried = band(radius * 0.12, radius * 0.68)
                     if settings["initial_pattern"] == "pools":
                         # A buried accent is confined to the loaded paint. A

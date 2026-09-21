@@ -110,6 +110,7 @@ def validate_recipe(raw):
             "projection",
             "render",
             "assessment",
+            "launch_assessment",
             "background",
         },
         "Unknown confluence recipe keys",
@@ -142,7 +143,7 @@ def validate_recipe(raw):
     require(type(encounters) is int and 0 <= encounters <= 3, "Use at most three encounter blooms")
     simulation = simulation_config(raw.get("simulation", {}))
     require(
-        simulation["initial_pattern"] != "shaped" or count == 3,
+        simulation["initial_pattern"] not in ("shaped", "choreographed") or count == 3,
         "Shaped initial compositions require exactly three chromatic pigments",
     )
     weights = simulation.get("initial_pigment_weights")
@@ -268,6 +269,12 @@ def validate_recipe(raw):
         "render": render,
         "assessment": assessment,
     }
+    from tools.estuary_confluence.launch_assessment import validate_config as launch_config
+
+    launch = launch_config(raw.get("launch_assessment"))
+    if launch is not None:
+        result["launch_assessment"] = launch
+        launch_assessment_plan(result)
     if "background" in raw:
         from tools.estuary_confluence.backgrounds import NAMES
 
@@ -462,6 +469,20 @@ def resolved_layout(recipe, seed, source=None):
     from tools.estuary_confluence.layout import plan_layout
 
     settings = recipe["simulation"]
+    if settings["initial_pattern"] == "choreographed":
+        from tools.estuary_confluence.choreography import plan_layout as choreography_layout
+
+        from tools.estuary_confluence.engine import validate_config as simulation_config
+        from tools.estuary_confluence.palette import generate_palette
+
+        require(recipe["chromatic_count"] == 3, "Choreography requires three chromatic pigments")
+        require(
+            settings == simulation_config(settings),
+            "Choreographed simulation settings must be normalized",
+        )
+        require(source is not None, "Choreography requires the complete source recording")
+        palette = generate_palette(seed, 3, mode=recipe.get("palette_mode", "curated"))
+        return choreography_layout(source, settings, palette)
     if settings["initial_pattern"] == "shaped":
         from tools.estuary_confluence.engine import validate_config as simulation_config
         from tools.estuary_confluence.initial_composition import plan_layout as composition_layout
@@ -531,6 +552,88 @@ def assessment_steps(recipe):
         return []
     end = recipe["simulation"]["steps"]
     return sorted({*range(0, end + 1, settings["interval_steps"]), end})
+
+
+def launch_assessment_plan(recipe):
+    """Opt-in observations reuse existing participation checkpoints and readbacks."""
+    from tools.estuary_confluence.launch_assessment import SOURCE_FRACTIONS, VERSION
+    from tools.estuary_confluence.launch_assessment import validate_config as launch_config
+
+    supplied = recipe.get("launch_assessment")
+    settings = launch_config(supplied)
+    if settings is None:
+        return None
+    require(settings == supplied, "Launch assessment settings must be normalized")
+    assessment = recipe.get("assessment")
+    require(assessment is not None, "Launch assessment requires existing participation checkpoints")
+    end = recipe["simulation"]["steps"]
+    steps = sorted({round(end * fraction) for fraction in SOURCE_FRACTIONS})
+    require(
+        set(steps) <= set(assessment_steps(recipe)),
+        "Launch source samples must coincide with existing participation checkpoints",
+    )
+    width, height = assessment["resolution"]
+    factor = 1
+    while width // factor > 256 and width % (factor * 2) == height % (factor * 2) == 0:
+        factor *= 2
+    return {
+        "version": VERSION,
+        "steps": steps,
+        "source_fractions": [step / end for step in steps],
+        "input_resolution": [width, height],
+        "sample_resolution": [width // factor, height // factor],
+        "reduction_factor": factor,
+        "reduction": "float32 CPU integer-area means of existing GPU participation readbacks",
+        "observation": "read-only Eulerian diagnostics; no additional physical advance calls",
+    }
+
+
+def _launch_sample(pigment, plan):
+    width, height = plan["sample_resolution"]
+    factor = plan["reduction_factor"]
+    value = np.asarray(pigment)
+    require(
+        value.ndim == 3
+        and value.shape[:2] == (height * factor, width * factor)
+        and value.dtype == np.float32,
+        "Launch input differs from its declared readback grid",
+    )
+    if factor == 1:
+        return value.copy()
+    return value.reshape(height, factor, width, factor, value.shape[-1]).mean(
+        axis=(1, 3), dtype=np.float32
+    )
+
+
+def launch_assessment_report(samples, final, recipe, source_metadata):
+    """Reconstruct the report from bound diagnostic rasters and native final paint."""
+    from tools.estuary_confluence.launch_assessment import LaunchAssessment
+
+    plan = launch_assessment_plan(recipe)
+    require(plan is not None, "Launch samples require an enabled assessment")
+    names = [f"step_{step:06d}" for step in plan["steps"]]
+    require(set(samples) == set(names), "Launch sample schedule differs")
+    width, height = plan["sample_resolution"]
+    count = recipe["chromatic_count"]
+    for value in samples.values():
+        require(
+            isinstance(value, np.ndarray)
+            and value.dtype == np.float32
+            and value.shape == (height, width, count + 1)
+            and np.isfinite(value).all()
+            and np.all(value >= 0),
+            "Launch sample dimensions, dtype or concentrations differ",
+        )
+    collector = LaunchAssessment(
+        samples[names[0]],
+        count,
+        recipe["simulation"]["domain_scale"],
+        source_metadata=source_metadata,
+        config=recipe["launch_assessment"],
+    )
+    for name, fraction in zip(names[1:], plan["source_fractions"][1:], strict=True):
+        collector.sample(samples[name], fraction)
+    return {**collector.report(final_native=final["pigment"]), "capture_plan": plan}
 
 
 def measure(fields, recipe):
@@ -1019,6 +1122,18 @@ def verify_run(folder):
         required.add("spectral.json")
     if request["recipe"].get("assessment") is not None:
         required.add("assessment.json")
+    launch_plan = launch_assessment_plan(request["recipe"])
+    if launch_plan is not None:
+        required.update({"launch-assessment.json", "launch-samples.npz"})
+        require(request.get("launch_assessment") == launch_plan, "Launch capture metadata differs")
+    else:
+        require(
+            "launch_assessment" not in request
+            and not {"launch-assessment.json", "launch-samples.npz"} & receipt["artifacts"].keys()
+            and not (folder / "launch-assessment.json").exists()
+            and not (folder / "launch-samples.npz").exists(),
+            "Disabled launch assessment cannot advertise diagnostic records",
+        )
     if request["recipe"]["simulation"].get("mass_budget_interval_steps", 0):
         required.add("mass-budget.json")
     else:
@@ -1075,7 +1190,7 @@ def verify_run(folder):
         and simulation["initial_composition"]["setup"] == "body-wedges"
     )
     if (
-        simulation["initial_pattern"] == "engaged"
+        simulation["initial_pattern"] in ("engaged", "choreographed")
         or body_wedges
         or markers is not None
         or influence is not None
@@ -1232,6 +1347,16 @@ def verify_run(folder):
     validate_archived_material(final, request["recipe"])
     actual_state = field_digest(final)
     require(actual_state == receipt["physical_state_sha256"], "Physical state identity differs")
+    if launch_plan is not None:
+        with np.load(folder / "launch-samples.npz", allow_pickle=False) as archive:
+            samples = {name: archive[name] for name in archive.files}
+        require(
+            equivalent_design(
+                read(folder / "launch-assessment.json"),
+                launch_assessment_report(samples, final, request["recipe"], request["source"]),
+            ),
+            "Launch report differs from its diagnostic samples and native final paint",
+        )
     if interaction is not None:
         require(
             receipt.get("base_material_sha256") == base_material_digest(final),
@@ -1363,6 +1488,7 @@ def run(args):
     )
     influence = body_influence_metadata(recipe, source.metadata, events)
     frames = [] if args.still_only else frame_plan(recipe)
+    launch_plan = launch_assessment_plan(recipe)
     marker_ledger = make_body_marker_ledger(recipe, source, frames, has_initial=layout is not None)
     markers = None if marker_ledger is None else marker_ledger["metadata"]
     binaries = {}
@@ -1414,6 +1540,8 @@ def run(args):
                 request["interaction"] = interaction
             if rheology is not None:
                 request["rheology"] = rheology
+            if launch_plan is not None:
+                request["launch_assessment"] = launch_plan
             if influence is not None:
                 request["body_influence"] = influence
             if markers is not None:
@@ -1467,6 +1595,7 @@ def run(args):
             if marker_ledger is not None:
                 artifacts["body-markers.json"] = artifact(output / "body-markers.json")
             measurements = []
+            launch_samples = {}
             pending = iter(assessment_steps(recipe))
             next_checkpoint = next(pending, None)
 
@@ -1485,6 +1614,10 @@ def run(args):
                             "metrics": measure(sampled, recipe),
                         }
                     )
+                    if launch_plan is not None and next_checkpoint in launch_plan["steps"]:
+                        launch_samples[f"step_{next_checkpoint:06d}"] = _launch_sample(
+                            sampled["pigment"], launch_plan
+                        )
                     next_checkpoint = next(pending, None)
                 if engine.step < target:
                     engine.advance_to(target)
@@ -1562,6 +1695,14 @@ def run(args):
                 artifacts["mass-budget.json"] = artifact(output / "mass-budget.json")
             record_array(output / "final.npz", final)
             final_identity = field_digest(final)
+            if launch_plan is not None:
+                record_array(output / "launch-samples.npz", launch_samples)
+                write(
+                    output / "launch-assessment.json",
+                    launch_assessment_report(launch_samples, final, recipe, source.metadata),
+                )
+                for name in ("launch-samples.npz", "launch-assessment.json"):
+                    artifacts[name] = artifact(output / name)
             if recipe["assessment"] is not None:
                 from tools.estuary_confluence.assessment import VERSION as assessment_version
 

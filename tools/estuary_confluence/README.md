@@ -458,7 +458,13 @@ palette, source recording, flow, surface finish, and complete film timeline.
 The comparison page pairs any two setups with shared playback and seeking, and
 includes the saved RC1 artwork as a reference.
 
+[Deliberate beginnings](CHOREOGRAPHED_STARTS.md) returns to the accepted RC1
+appearance and tests trajectory-informed placement, unequal sizes, elongated
+deposits and split components. Every pigment retains its original amount;
+separate experiments vary its starting allocation between the existing layers.
+
 ## Selecting the bodies that influence paint
+
 
 [Body-influence studies](BODY_INFLUENCE.md) compare each body and each pair against
 RC1's all-three reference. The original trajectories, initial painting, palette,

@@ -91,14 +91,18 @@ def initial_material_mass(layout, simulation):
     float32 pixels and later layer splitting are certified within the existing
     tolerance, not described as bit-identical mass sums across different shapes.
     """
-    if simulation.get("initial_pattern") != "shaped":
+    if simulation.get("initial_pattern") not in ("shaped", "choreographed"):
         return initial_pool_mass(
             layout,
             simulation["resolution"],
             simulation["domain_scale"],
             weights=simulation.get("initial_pigment_weights"),
         )
-    from .initial_composition import rasterize, validate_config
+    choreographed = simulation["initial_pattern"] == "choreographed"
+    if choreographed:
+        from .choreography import rasterize, validate_config
+    else:
+        from .initial_composition import rasterize, validate_config
 
     require(
         simulation.get("initial_pigment_weights") is None,
@@ -108,8 +112,9 @@ def initial_material_mass(layout, simulation):
         simulation.get("material_model") == "laminate",
         "Shaped pigment budgets require laminate material",
     )
-    controls = validate_config(simulation.get("initial_composition"))
-    require(controls is not None, "Shaped pigment budgets need initial_composition")
+    key = "initial_choreography" if choreographed else "initial_composition"
+    controls = validate_config(simulation.get(key))
+    require(controls is not None, f"Budgeted pigment initialization requires {key}")
     width, height = simulation["resolution"]
     raster = rasterize(layout, simulation["resolution"], simulation["domain_scale"])
     require(
@@ -134,7 +139,7 @@ def validate_report(report, recipe, fields, *, layout):
         require(report is None, "Disabled mass restoration cannot advertise a report")
         return
     require(
-        simulation.get("initial_pattern") in ("scattered", "engaged", "shaped")
+        simulation.get("initial_pattern") in ("scattered", "engaged", "shaped", "choreographed")
         and all(
             type(simulation.get(key)) in (int, float) and simulation[key] == 0
             for key in ("deposition", "settling_scale", "underpaint_strength")
@@ -150,7 +155,7 @@ def validate_report(report, recipe, fields, *, layout):
         "Invalid mass-budget report schema",
     )
     count = recipe["chromatic_count"] + 1
-    if simulation.get("initial_pattern") == "shaped":
+    if simulation.get("initial_pattern") in ("shaped", "choreographed"):
         require(count == 4, "Shaped pigment budgets require three chromatic pigments")
 
     def vector(value, name):
@@ -175,7 +180,7 @@ def validate_report(report, recipe, fields, *, layout):
         np.allclose(initial, target, rtol=RELATIVE_TOLERANCE, atol=1e-12)
         and np.all(target[empty] == 0),
         "Pigment budgets differ from the regenerated initial composition"
-        if simulation.get("initial_pattern") == "shaped"
+        if simulation.get("initial_pattern") in ("shaped", "choreographed")
         else "Pigment budgets differ from the regenerated starting pools",
     )
     rows = report["corrections"]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import html
 import json
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from .composition_gallery import _initial_mass, _record
 from .gallery import build_gallery, verify_gallery
 from .paint_material_studies import FEATURES, INPUTS, RELEASE, VARIANTS, identify_recipe
 from .palette import validate_palette
+from .review_page import document
 
 VERSION = "paint-material-review-v1"
 TEMPLATE = Path(__file__).with_suffix(".html")
@@ -190,13 +190,6 @@ def manifest(output, *, title, picks):
         "rows": rows,
         "picks": picks,
     }
-
-
-def document(title):
-    require(type(title) is str and 0 < len(title) <= 120, "Use a short gallery title")
-    source = TEMPLATE.read_text()
-    require(source.count("__TITLE__") == 2, "Gallery title placeholders differ")
-    return source.replace("__TITLE__", html.escape(title))
 
 
 def build_review(output, cases, *, picks=None, title="The Estuary · Paint material studies"):
