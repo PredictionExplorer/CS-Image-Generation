@@ -8,10 +8,13 @@ Failed attempts are preserved, while certified paint checkpoints can resume.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import fcntl
 import hashlib
 import json
+import math
+import os
 import queue
 import re
 import signal
@@ -22,10 +25,12 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
+import numpy as np
+
 from tools.estuary.run import checked_artifact, completed, exposure_plan, frame_plan
 from tools.estuary_confluence.run import runtime_identity
 from tools.estuary_depth import film
-from tools.estuary_depth.experiment import finished, stop, verify_render
+from tools.estuary_depth.experiment import finished, verify_render
 from tools.estuary_depth.filament_batch import (
     SPECIFIC_VOLUMES,
     _runtime_contract,
@@ -41,6 +46,7 @@ from tools.estuary_depth.filament_motion import (
     make_photo_recipe,
 )
 from tools.estuary_depth.prepare import build_bundle, verified_run
+from tools.estuary_depth.render import camera_pose, motion_angles
 from tools.estuary_studio.common import artifact, encoded, read, require, write
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +54,9 @@ VERSION = "fine-fold-film-study-v1"
 BUNDLE_RESOLUTION = (4096, 3072)
 MESH_RESOLUTION = (1536, 1152)
 STAGE_TIMEOUT = 3 * 3600
+# A stage wrapper first stops its own detached Blender/encoder with an 8-second
+# grace. Give that cleanup time to finish before killing the wrapper itself.
+WRAPPER_STOP_GRACE = 20
 
 
 def _sha(value):
@@ -345,6 +354,54 @@ def _verify_material(plan, material, folder):
     return request, identity, artifacts, bundle
 
 
+def validate_camera_ledger(records, camera, frames):
+    """Verify every declared pose without accessing live source or bundle files.
+
+    The first matrix supplies only the fixed target's height. Its orientation,
+    horizontal target, all subsequent poses and camera timing are independently
+    reconstructed from the canonical camera controls. This does not independently
+    remeasure the target's height from paint geometry.
+    """
+    require(type(frames) is int and frames >= 1, "Invalid camera frame count")
+    require(type(records) is list and len(records) == frames, "Camera ledger length differs")
+    target = None
+    for index, pose in enumerate(records):
+        expected = motion_angles(camera, index, frames)
+        require(
+            type(pose) is dict and type(pose.get("frame")) is int and pose["frame"] == index,
+            "Camera frame order differs from its canonical path",
+        )
+        require(
+            all(
+                type(pose.get(key)) in (int, float)
+                and math.isfinite(pose[key])
+                # Covers only floating-point evaluation differences, not a
+                # meaningful edit to the authored camera movement.
+                and math.isclose(pose[key], angle, rel_tol=0, abs_tol=1e-10)
+                for key, angle in zip(("tilt_degrees", "azimuth_degrees"), expected, strict=True)
+            ),
+            "Camera pose differs from its canonical path or paired photograph",
+        )
+        matrix = pose.get("matrix_world")
+        require(
+            type(matrix) is list
+            and len(matrix) == 4
+            and all(
+                type(row) is list
+                and len(row) == 4
+                and all(type(value) in (int, float) and math.isfinite(value) for value in row)
+                for row in matrix
+            ),
+            "Camera matrix must be finite 4 by 4 values",
+        )
+        if target is None:
+            target = [*camera["target"], matrix[2][3] - 0.8 * math.cos(math.radians(expected[0]))]
+        require(
+            np.allclose(matrix, camera_pose(*expected, target), rtol=0, atol=1e-10),
+            "Camera matrix differs from the canonical orientation or fixed target",
+        )
+
+
 def _verify_photograph(plan, case, folder, bundle, *, motion):
     experiment = read(folder.parent / "experiment-request.json")
     require(
@@ -380,16 +437,19 @@ def _verify_photograph(plan, case, folder, bundle, *, motion):
             and movie["resolution"] == case["motion_recipe"]["render"]["resolution"],
             "Incomplete motion movie",
         )
-        camera = read(folder / "camera.json")
         require(
-            len(camera) == MOTION_FRAMES
-            and [camera[-1]["tilt_degrees"], camera[-1]["azimuth_degrees"]]
+            case["motion_recipe"]["camera"]["orbit_end"]
             == [
                 case["photo_recipe"]["camera"]["tilt_degrees"],
                 case["photo_recipe"]["camera"]["azimuth_degrees"],
             ],
             "Motion does not finish at the paired photograph",
         )
+    validate_camera_ledger(
+        read(folder / "camera.json"),
+        case["motion_recipe" if motion else "photo_recipe"]["camera"],
+        expected_frames,
+    )
     return receipt
 
 
@@ -399,6 +459,15 @@ def _inspect_case(folder, plan, case):
     request, paint_id, artifacts, bundle = _verify_material(plan, material, paths["material"])
     photo = _verify_photograph(plan, case, paths["photograph"], bundle, motion=False)
     motion = _verify_photograph(plan, case, paths["motion"], bundle, motion=True)
+    require(
+        np.allclose(
+            read(paths["motion"] / "camera.json")[-1]["matrix_world"],
+            read(paths["photograph"] / "camera.json")[0]["matrix_world"],
+            rtol=0,
+            atol=1e-10,
+        ),
+        "Motion does not finish at the paired photograph matrix",
+    )
     edited = film.verify_complete(paths["film"])
     source, inputs, timeline = film.validate_inputs(paths["paint"], paths["motion"])
     edit_request = read(paths["film"] / "request.json")
@@ -464,6 +533,29 @@ def _preserve_attempt(path):
     path.rename(path.with_name(f"{path.name}.incomplete-{time.time_ns()}"))
 
 
+class _OwnedStage:
+    """Serialize cancellation and the worker's error cleanup for one wrapper."""
+
+    def __init__(self, child):
+        self.child, self.lock, self.stopped = child, threading.Lock(), False
+
+    def stop(self):
+        with self.lock:
+            if self.stopped:
+                return
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.child.pid, signal.SIGTERM)
+            try:
+                self.child.wait(timeout=WRAPPER_STOP_GRACE)
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(self.child.pid, signal.SIGKILL)
+                self.child.wait()
+                self.stopped = True
+
+
 class _Processes:
     def __init__(self):
         self.lock, self.children, self.cancelled = threading.Lock(), set(), False
@@ -482,23 +574,24 @@ class _Processes:
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
-                self.children.add(child)
+                owned = _OwnedStage(child)
+                self.children.add(owned)
             try:
                 result = child.wait(timeout=STAGE_TIMEOUT)
                 require(result == 0, f"Film stage exited with status {result}; inspect {log}")
             except BaseException:
-                stop(child)
+                owned.stop()
                 raise
             finally:
                 with self.lock:
-                    self.children.discard(child)
+                    self.children.discard(owned)
 
     def cancel(self):
         with self.lock:
             self.cancelled = True
             children = list(self.children)
-        for child in children:
-            stop(child)
+        for owned in children:
+            owned.stop()
 
 
 def _ensure_material(root, plan, key, processes, progress):

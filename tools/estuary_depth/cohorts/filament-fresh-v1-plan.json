@@ -1,0 +1,4809 @@
+{
+  "derivation": {
+    "algorithm": "SHA-256(version ASCII + NUL + domain UTF-8 + NUL + uint64 big-endian counter)",
+    "attempts": [
+      {
+        "accepted": true,
+        "counter": 0,
+        "rejection": null,
+        "seed": "0xa709b7f63f68f9f92b92af3a3e8d4e578d3486296e165c7cba7d5b85dce8cb81"
+      },
+      {
+        "accepted": true,
+        "counter": 1,
+        "rejection": null,
+        "seed": "0x21eb3506af1b4588ff6f215ea6b3addb280056657e0263e0c1e27823b8e5018c"
+      },
+      {
+        "accepted": true,
+        "counter": 2,
+        "rejection": null,
+        "seed": "0x7c64b90932c87725a0a3eefbff9239900f4d91daf3f108d593a1c9ec0cd498c1"
+      },
+      {
+        "accepted": true,
+        "counter": 3,
+        "rejection": null,
+        "seed": "0xa4c9e168298657c97ae754b35aa34b5173799e219a02cc9a11a07048f386b2b2"
+      },
+      {
+        "accepted": true,
+        "counter": 4,
+        "rejection": null,
+        "seed": "0x00dbadbd782a9f2a7353d942595566f2045376f4d30a05298304b9646e2d1bed"
+      },
+      {
+        "accepted": true,
+        "counter": 5,
+        "rejection": null,
+        "seed": "0xaa9a0a63a684942220a6332d3e2e124dead7de2e58fa262ea24ca24cb4e741fd"
+      },
+      {
+        "accepted": true,
+        "counter": 6,
+        "rejection": null,
+        "seed": "0x94292c6a7754b03272585c08815ebb51cdde38a485927ed70cf07b9348c31896"
+      },
+      {
+        "accepted": true,
+        "counter": 7,
+        "rejection": null,
+        "seed": "0x6f79bc0c0b2e24c93e283b10cf640f250823a6e9c0cd112f5c371f579400557d"
+      },
+      {
+        "accepted": true,
+        "counter": 8,
+        "rejection": null,
+        "seed": "0x50cb30c7967de4a21edb63c7986a92e71e3a9729c711d43614f6c9bb10bdf7a2"
+      },
+      {
+        "accepted": true,
+        "counter": 9,
+        "rejection": null,
+        "seed": "0x7a8965a69e38d74eb98a770752738f220d117baf773ae363d10423f6f7da7e75"
+      }
+    ],
+    "domain": "the-estuary/filament-films/new-cohort-v1",
+    "encoding": "0x followed by all 64 lowercase hexadecimal digest digits; never trim leading zeros",
+    "historical_seeds": [
+      "0x0",
+      "0x1",
+      "0x4",
+      "0x8",
+      "0x9",
+      "0x11",
+      "0x74",
+      "0xc3",
+      "0xfb",
+      "0x102",
+      "0x1234",
+      "0x1ca3",
+      "0x4279",
+      "0x793d",
+      "0xcbd6f",
+      "0x100033",
+      "0x483095",
+      "0x46b54ba",
+      "0x116528fd",
+      "0x31637661",
+      "0x31637668",
+      "0x46205528",
+      "0x5b26dc8faef2",
+      "0x808861c25b6c",
+      "0xb08c219a243f",
+      "0xb7f327f9f722",
+      "0xbc53af1cd380",
+      "0x1f66ba3cf4df563",
+      "0x228ce9dd77e4b96",
+      "0x2f7f7601f326c94",
+      "0x4131dd169cf0e0e",
+      "0x42162e05de6bd26",
+      "0x428263ede16b9e0",
+      "0x440d37e6616a507",
+      "0x4d15328b81540f1",
+      "0x4ed103be62f67da",
+      "0x5708725428cb456",
+      "0x78e561043fa5413",
+      "0x8505647ad512ba3",
+      "0x9833bf8ea9332a4",
+      "0xa945c51066fce3f",
+      "0xace7eefb0e5090e",
+      "0xaef6658fcf81803",
+      "0xc84c115eaba1a41",
+      "0xc9336c73191edbd",
+      "0xdfe9f26bb73c1d2",
+      "0xe14d2a45aa1fd06",
+      "0xe6ff6bf8edc5e6e",
+      "0xecb66a3db3576a7",
+      "0xf05c7fa3c97e0a3",
+      "0xf353d485436a197",
+      "0xffd796bf4c65c91",
+      "0x1075bdf53573e45c",
+      "0x109bdff0194edfa2",
+      "0x1173914a15c1401d",
+      "0x11c87f6968afcb6c",
+      "0x1500d891aaf5e993",
+      "0x15b3ba51b8170a71",
+      "0x18001b9984fa190f",
+      "0x18ae50a2f66ce593",
+      "0x1aad3a3a63750c52",
+      "0x1ac59c216a900bf5",
+      "0x1af0c80318cde198",
+      "0x1b681d1f98fb9364",
+      "0x1bbd9f9e057c1d3c",
+      "0x1cbc6cdf91d84e9f",
+      "0x1d08611b55b2a1d8",
+      "0x1f5ccbda126d39cf",
+      "0x1f6918f005a48ddd",
+      "0x1f7d0afebbc42529",
+      "0x1fdcf167021071a1",
+      "0x209b1fac36338ef0",
+      "0x2142e41601c9b950",
+      "0x23b9d3e855208be0",
+      "0x262bcf943c92fea1",
+      "0x2698ea07f26af64e",
+      "0x27f56f1033b18704",
+      "0x298f22e9c8189b66",
+      "0x29b7213bdd65a691",
+      "0x29bf5f8c51b0a2c0",
+      "0x2a19e2523ba0acc1",
+      "0x2a5a47842ee093b2",
+      "0x2ab0ab2fc899144f",
+      "0x2bb76c3d3cbfb8bd",
+      "0x2c918140226cd936",
+      "0x2d01093da35729b3",
+      "0x2d7d4bc9646fd5aa",
+      "0x2dddab023f23e68f",
+      "0x2e49165e1d2c2c5c",
+      "0x3022ec32810bce28",
+      "0x30fcd7d3b55d7d0f",
+      "0x31353a312796847e",
+      "0x32f1357f9b5dbd90",
+      "0x347df8a9189abc6c",
+      "0x353b4d5f8340712f",
+      "0x36ac78dae1d3db6f",
+      "0x379da9dacbb7ddfd",
+      "0x37a6debc58b959b6",
+      "0x382e7a3b5eebc583",
+      "0x3939c013a15416b4",
+      "0x3946c5249e6c5803",
+      "0x397d88b32cf7f9df",
+      "0x3982390d2355d93f",
+      "0x39954bbb0f5d9160",
+      "0x39c18eb463b4a343",
+      "0x39ccf536257f24f9",
+      "0x3bf9c58692f12c71",
+      "0x3f6ac7fecb50cc00",
+      "0x3f8cc9c0f10e1700",
+      "0x3f97635eb872b110",
+      "0x3fa9e2ac35fac8d8",
+      "0x3fadaec8935324e8",
+      "0x3fba72ebd8091ce8",
+      "0x3fbbff0f96157328",
+      "0x3fbe78d65192b232",
+      "0x3fc06d0837e340bc",
+      "0x3fc3ef22553f70b7",
+      "0x3fc9b8b0f0c25314",
+      "0x3fca6e9847dbd5d1",
+      "0x3fcad116cc9644c4",
+      "0x3fd0c86a815e63c3",
+      "0x3fd1759305e85f6c",
+      "0x3fd19040c6a144d2",
+      "0x3fd1ad541674bcb3",
+      "0x3fdb1070ecbcec7e",
+      "0x3fdc0b6d9ead74e6",
+      "0x3fdc93ea1bb2d764",
+      "0x3fdd0d467c3db67c",
+      "0x3fdd1eb1426ae7de",
+      "0x3fdf7f7f7f6ff69a",
+      "0x3fdf9649a6ab70f2",
+      "0x3fe0e938a208c322",
+      "0x3fe1d55ee61e4dc6",
+      "0x3fe2ce441b5c878f",
+      "0x3fe3329c22e626eb",
+      "0x3fe49fede8ab0389",
+      "0x3fe56d82ac2b773e",
+      "0x3fe5d8df770ac4fe",
+      "0x3fe6564bf178fa56",
+      "0x3fe6ccb3e85c69bb",
+      "0x3fe76b6ca538afee",
+      "0x3fe7e8532a61bc40",
+      "0x3fe8b6933f5c1b63",
+      "0x3fe9602aee274eb2",
+      "0x3fe9e9dadc3add6e",
+      "0x3feb8e44c6fb5fe1",
+      "0x3feba5893636d53b",
+      "0x3feec1ca76918233",
+      "0x3ff221a289c5dc96",
+      "0x3ff2d74c3321fa48",
+      "0x401c8738a7bc40f0",
+      "0x401df5bf73cd6e88",
+      "0x40278d9fea53f050",
+      "0x4027cf95e6507780",
+      "0x4029a9a3c7aea640",
+      "0x403ec7f407349608",
+      "0x40403fa6a86deb93",
+      "0x40409a68c9ec942e",
+      "0x4040ba14bc25f258",
+      "0x40420934f6b467ec",
+      "0x4042f643e5592298",
+      "0x4043a8e5738b3594",
+      "0x4043ef773ed36df0",
+      "0x404749057b72168e",
+      "0x404a3c198039f970",
+      "0x404d698d2301de40",
+      "0x404fe2a7979f72f4",
+      "0x4050d31fbd153bfa",
+      "0x4055ad44e4e43b18",
+      "0x4055c1b59d68d06a",
+      "0x4057688d096d0fb7",
+      "0x405771e54b136104",
+      "0x405852e6ca742b7b",
+      "0x40594522dc30b883",
+      "0x405964880327ef50",
+      "0x405a0e29f0d6a8f3",
+      "0x405acccfbcf5cc3b",
+      "0x405b640475d1ab0f",
+      "0x405bddeeabfd898b",
+      "0x405c599496bfbb38",
+      "0x405d33240f48641c",
+      "0x405d793d23f3ae61",
+      "0x405dfe4f25d4215c",
+      "0x405e180300011c46",
+      "0x405e365276879b4c",
+      "0x405ebfba150d12a2",
+      "0x405f9d1332624048",
+      "0x405fae079e2f8356",
+      "0x406023da368e0474",
+      "0x406032893f7b8230",
+      "0x40607a02b01c972c",
+      "0x406083362207da3b",
+      "0x4061276f25c92f04",
+      "0x4062359ebc59dfac",
+      "0x4062f7d762c8220a",
+      "0x4063166549d2806a",
+      "0x406317c7eadb0830",
+      "0x4064529ff05f158c",
+      "0x406474e59b8ddd2e",
+      "0x406485094186d12e",
+      "0x40657921d5269918",
+      "0x40659ac2e2cf3b46",
+      "0x4065a67510a2fec0",
+      "0x406629c1b1467ca8",
+      "0x40667c2c95a8ae6a",
+      "0x406845d38094d27d",
+      "0x406850ba7f20cff6",
+      "0x40689a445aec93f5",
+      "0x406961f778ff47c4",
+      "0x406aecc258f8d557",
+      "0x406c88bba53f7666",
+      "0x406d8ef5d896e194",
+      "0x406ee04e4d90722b",
+      "0x406f6d47c0a10be8",
+      "0x406feb4db46f4fb0",
+      "0x407019b60d3ee1f6",
+      "0x40704a693253cea6",
+      "0x4070782aafe6b164",
+      "0x40714bd4b4662378",
+      "0x4071a5402375075e",
+      "0x4071d6cb65ef7af2",
+      "0x407251f8424bc2f6",
+      "0x40727de236fffc54",
+      "0x4073d7e4815b9fe1",
+      "0x4074273754e7bf99",
+      "0x4140dbf6548ac893",
+      "0x423d411dde267c96",
+      "0x4313cfc8a6955c3b",
+      "0x43ec36284b569e9a",
+      "0x4552f762088b9663",
+      "0x46f34200823a19f8",
+      "0x478cf72513b51f45",
+      "0x48cce56d7346b97c",
+      "0x496ab85e5375a1b7",
+      "0x499c1ad99932cdaf",
+      "0x4a323024dd302290",
+      "0x4c6cfb83badb3802",
+      "0x4c98d344b0d830d8",
+      "0x4d5f2e1b275d7fe6",
+      "0x4d60edd1012c569e",
+      "0x4e4bd049448bc950",
+      "0x4fbfc5f1fab28497",
+      "0x52718b52ef6a1388",
+      "0x535afbe9506f1d3e",
+      "0x5584badfb5d82790",
+      "0x55ad76806f742be5",
+      "0x563596df924fee5c",
+      "0x575d17bc2b864e2a",
+      "0x59b79b7c8039d570",
+      "0x5cfe09bd147e11a6",
+      "0x5dd1d5f495843344",
+      "0x5def457ca11ce59f",
+      "0x5e62a31236a6b8f0",
+      "0x5eb01f0765e34c6d",
+      "0x61b6ca89ff3100e0",
+      "0x6210d183445b5dd5",
+      "0x62326bb8812cde06",
+      "0x636e75050cc33d1c",
+      "0x64299ca16adbecff",
+      "0x64ca5fbaf32c6c39",
+      "0x65e20869f569684a",
+      "0x6617271ab4e26099",
+      "0x67663252a58e48a1",
+      "0x6a4550153a3a1f9e",
+      "0x6b47d38c128911b5",
+      "0x6d46be5b6bfd5f35",
+      "0x6e01baf99bbaacb9",
+      "0x72e47b410f2236de",
+      "0x730a9aa96e667092",
+      "0x755bb8e0d2a36e93",
+      "0x769f90563627c9fa",
+      "0x789fbfbfcef318e6",
+      "0x7d17169c46ab3f07",
+      "0x7d2f4e0404178575",
+      "0x7e063bf8d0859099",
+      "0x803ea334989adfad",
+      "0x8137aaade069dba4",
+      "0x816f6fce7657b48e",
+      "0x81924ccba51e2d78",
+      "0x826950de8e6554d7",
+      "0x82d3a7c8383674b3",
+      "0x830bf9c5e9ca58ea",
+      "0x86ea68f38d92240f",
+      "0x87a3923d9eee680c",
+      "0x87cd2c76e03b63b0",
+      "0x88f523750547731e",
+      "0x896342cac5257e31",
+      "0x899e030a21b4dfb0",
+      "0x8b5ef5adc352e7a6",
+      "0x8b80ca21dc53d60f",
+      "0x8cdb55d6ab82e397",
+      "0x8d6a49f6bfc0b927",
+      "0x8d6f31993b56ecd5",
+      "0x8dc9ffd5f59bc260",
+      "0x8e9d58067dc4832c",
+      "0x8f7bbc0487213bb0",
+      "0x907bf1d89815e010",
+      "0x9189a7f72cdfc0be",
+      "0x91cff5510e702f42",
+      "0x940f7c084e933a93",
+      "0x94455f39b2b63b57",
+      "0x971335aa0f7b7f7f",
+      "0x980f5676cac76b02",
+      "0x980f7283c513a58f",
+      "0x9a56d95d78343ee3",
+      "0x9b48b9d71220add8",
+      "0x9bae1ae16cf4dbde",
+      "0x9be6f1b66020ca2b",
+      "0x9f636327d910ceb7",
+      "0xa0c78ebadfb75018",
+      "0xa0d4cab03d336c12",
+      "0xa11ce7ecf201e6d7",
+      "0xa2cf71c287b1f6d9",
+      "0xa2f4f7b3282bf355",
+      "0xa52f3b0ad08d69c5",
+      "0xa5520fb10ccfc63e",
+      "0xa6307e80e05c2505",
+      "0xa657487b848061bf",
+      "0xa7d056d7578df8db",
+      "0xa84203526047ffb7",
+      "0xa84890dd5571ca97",
+      "0xa86b7a19774cdb42",
+      "0xa8e03acb3463dc44",
+      "0xa946a0b3f19315d9",
+      "0xaa2acdbe3f118d4b",
+      "0xaa8d2bf46f8f5cf4",
+      "0xab3676f2bfa4625b",
+      "0xab7f1a64af41cdd4",
+      "0xac298dea5d100f3d",
+      "0xadf1e4ba6d479d3f",
+      "0xae3e1bf2ee17d851",
+      "0xae88134f9185689f",
+      "0xb34eada23118e9e0",
+      "0xb395f6fa59f46088",
+      "0xb411ae47e725f5cf",
+      "0xb440b43d7a2e0ffa",
+      "0xb4dc3fd1aaad4726",
+      "0xb52deed1fc210c44",
+      "0xb5b7a105b0ff7c33",
+      "0xb62eca59343b62bc",
+      "0xb721b846c198d74f",
+      "0xb88664e6a1405aa7",
+      "0xb8a4fd3f34c082a8",
+      "0xb8d375b3b05ce123",
+      "0xb989db66dcd5e907",
+      "0xb99272b964ad3b77",
+      "0xb99dfd71e528cee9",
+      "0xb9d6f23104747007",
+      "0xbaa6d8498bf44448",
+      "0xbabbd8627a41a858",
+      "0xbd566b6230d4dd76",
+      "0xbe096745d8607fa9",
+      "0xbed53c81eca488b9",
+      "0xbef39a6a48da34c6",
+      "0xbf250739a7634885",
+      "0xbf7e13a80c912ac0",
+      "0xbf849410f6da589c",
+      "0xbf8a020104845660",
+      "0xbf96b920fa2fccc0",
+      "0xbf98c1917c896f20",
+      "0xbfa2fad2f225db4c",
+      "0xbfa681043bf6a8a8",
+      "0xbfa91c72d87e419b",
+      "0xbfae5a30219a2670",
+      "0xbfb0a6832ba43855",
+      "0xbfb0df57c24e93f0",
+      "0xbfb3ac36dd3f0936",
+      "0xbfb85c008e1da430",
+      "0xbfba9601136a212e",
+      "0xbfbe11a589e11b50",
+      "0xbfc5792cc866467a",
+      "0xbfcac601bef6ee1c",
+      "0xbfcc1e4cf3a33a9c",
+      "0xbfccabc2b42559b4",
+      "0xbfce389b5f280e28",
+      "0xbfced94a76bfb664",
+      "0xbfcf283e8ee4c19e",
+      "0xbfd261d271e7936a",
+      "0xbfd2b6dd52ee7522",
+      "0xbfd43361473e7ac8",
+      "0xbfd46fbd8ebe77bd",
+      "0xbfd859cb0d8722a8",
+      "0xbfd995eadc4dba16",
+      "0xbfd9b6da93d06bf4",
+      "0xbfdb4e9dff1a1b08",
+      "0xbfdc030e2c1024b7",
+      "0xbfdcd0ce37945cd4",
+      "0xbfdd61c554d5b02c",
+      "0xbfe0d5d0b5b45873",
+      "0xbfe22765c8ef849d",
+      "0xbfe23a63f0c905c9",
+      "0xbfe2f6ad43dd76d4",
+      "0xbfe479d140e7d120",
+      "0xbfe52651468713e3",
+      "0xbfe670378e51ae8a",
+      "0xbfe6b150468d185e",
+      "0xbfe87646745d492f",
+      "0xbfe943b397944d54",
+      "0xbfea160dc9a86ac4",
+      "0xbfee440400dfef3d",
+      "0xbfefbf7a56ead14e",
+      "0xbff2f6264651b978",
+      "0xbff322afd7d5812a",
+      "0xc00421fae12df800",
+      "0xc010521b1ba702c0",
+      "0xc01eb47449de6650",
+      "0xc022306f52dc7e00",
+      "0xc02965a1e4a38760",
+      "0xc0303807a34e05c4",
+      "0xc03d931d638f2ed8",
+      "0xc041c63d7d0cfdc0",
+      "0xc045f6874ebcef22",
+      "0xc047ad32e3f62de6",
+      "0xc0493b153f348d46",
+      "0xc04a28ba78a046dc",
+      "0xc04b71fd913af3b8",
+      "0xc04bcf1fa121a81a",
+      "0xc04c4f5d03e59188",
+      "0xc05003d854dd553f",
+      "0xc05047f2e829adef",
+      "0xc05164147d0e25c2",
+      "0xc0516686656b0c66",
+      "0xc051c147359ed5ed",
+      "0xc053e25e17a6a1e0",
+      "0xc057eec6dd1f1835",
+      "0xc058433a900cf4c8",
+      "0xc05930a94b4eaf69",
+      "0xc05a708625164577",
+      "0xc05b19818931d104",
+      "0xc05c01cddead7c8e",
+      "0xc05c9867d1313387",
+      "0xc05cc915c3f7f9d4",
+      "0xc05e617a86741ecc",
+      "0xc05fe72505b2eace",
+      "0xc060670ab85fbdd1",
+      "0xc060c9f1f6c634bc",
+      "0xc06142a61d41d8b1",
+      "0xc0639026b05e9ede",
+      "0xc064025a865015a9",
+      "0xc0645788e0a9ce28",
+      "0xc064a593de054e26",
+      "0xc0657083683bad4a",
+      "0xc0661057838c7090",
+      "0xc068cdd492db0bac",
+      "0xc069361a009d5b8b",
+      "0xc0698274efbf6671",
+      "0xc06a46b470a082ca",
+      "0xc06d10191e2a1b4a",
+      "0xc07a221f6d5104bb",
+      "0xc153fd29e2e70f27",
+      "0xc1efd342d2ea54d2",
+      "0xc255cae7ae8e76b9",
+      "0xc3978f0514d703d8",
+      "0xc41e073088d476ca",
+      "0xc427a8e78e9b13d6",
+      "0xc4a286676cd1345b",
+      "0xc727f5457e2e2ef7",
+      "0xc816e49552c04671",
+      "0xc89b87f933d15b6b",
+      "0xc98e2742c91fe466",
+      "0xca34651d2b4f4bec",
+      "0xca7e1ec38f2cc346",
+      "0xca97830c0ace00b5",
+      "0xcadcfd956d4780ee",
+      "0xcbb460034a5842b6",
+      "0xcca5b0bf23098b78",
+      "0xcca9b1f032fcd36d",
+      "0xccb14008fdeacdad",
+      "0xcd71fea4d64272e5",
+      "0xce0770c4c3132a95",
+      "0xceddf97909f39cc2",
+      "0xd0a3f4116637ffa9",
+      "0xd1b75aa66dddf701",
+      "0xd21096c14a8c4716",
+      "0xd2815e168872ddbe",
+      "0xd284f78a1bd3e9cc",
+      "0xd28a2a68121850cb",
+      "0xd2964fe78998cd7b",
+      "0xd2e26cc1b8526a51",
+      "0xd3786b9aba67eaf5",
+      "0xd45c5569084aa202",
+      "0xd5e245579161abdd",
+      "0xd65ad88b6f24e5fb",
+      "0xd76ecbef996f5528",
+      "0xd96a1ad54d112205",
+      "0xd9eba46ded6fad57",
+      "0xda2ba729ce60f9a2",
+      "0xda40d593f0967231",
+      "0xdc48eaa909d3040b",
+      "0xdf17f3c54c7f9bb5",
+      "0xdff140390887b2c6",
+      "0xe1a653e38bf800cd",
+      "0xe203ca3554d4e7b2",
+      "0xe2549291bf6cdc48",
+      "0xe2c51a162b513704",
+      "0xe32ad3a0c33396be",
+      "0xe39512a32c60014d",
+      "0xe3b4a95ca8f48eb9",
+      "0xe3db8493327dd2c8",
+      "0xe44db04bba11dd59",
+      "0xe5d328d228d18c5c",
+      "0xe617b0536472610f",
+      "0xe69dd5aec862f948",
+      "0xe72d30b20a7567c9",
+      "0xe7802342145a0656",
+      "0xebd55a99f2eeef6d",
+      "0xec3bb7d9fe7074da",
+      "0xecd488d98b8a7591",
+      "0xed00351ba98ce2b2",
+      "0xedef01f6f88a9da2",
+      "0xee7b1ba1ff057266",
+      "0xeeee96e90e9570cf",
+      "0xefb0cd7fd100b03e",
+      "0xf091c04b506c8f50",
+      "0xf109017d736034b8",
+      "0xf12761832950053a",
+      "0xf3f809c90f375ab3",
+      "0xf609e1a9add80063",
+      "0xf721ebd853fe507b",
+      "0xf796b7ffcd71d860",
+      "0xf7e2c952a072b4a7",
+      "0xf9d1e61662f861d8",
+      "0xfcb714ef7f2397fd",
+      "0xfd21bcc9828a887d",
+      "0x3108837490f9fd840a44e70590173c7f95340872f60eaa13482b4ecb8fb0a8",
+      "0x82f04a131becec289fb0d93bda9442cf26a11e560c749a05d0eddf99df33d8f",
+      "0xe66edd80a61ecef2f89f9b4291f2dc59c58f2099f21d4ba1e3b81fd13ec1f7c",
+      "0x1362465d6ffe31bfc33a924a9406663e313cf417c35d8d4461e66db845d39903",
+      "0x17d61f1c00e5d16c399a8e341e9feaea32b275e5426a4375394e74cc855affcc",
+      "0x18952be1a43822726d7920df20bc2e1a2be06c1f907a0dc80e7469e50be3ce4b",
+      "0x203581755eca174027d8d64b53dcb54d320fd2195fae1c7fbf152dfe83c69855",
+      "0x2a345aa3f8a0419fc11cd031c98c49d171f3dd2151d9c06fd327e9254e1db962",
+      "0x36794583b610f71be4a51d19a01af5bfe05b673c31d86f3f0c3310c3e4261fce",
+      "0x37c73b71ae24c2a263b46ca3399d91b4de4fe97f1eb4dfe608475101f69e590e",
+      "0x38b23b92766de4c8989e563ea11b3b3aab1965a546a84c6780a715df3b3df0b1",
+      "0x4a0d5b57e13cf40c56cddb4ee2c10f50ab7aff755e24c61a687855663713f5b5",
+      "0x4c7dc283fabb2c4a4971b65cd7806b4e48d76440e3fbee3e4eef58d2269470e2",
+      "0x4fbcf97cd52e5a670e14f706d1c01518fdd7f89d89515bc71b592912b9af59eb",
+      "0x5084a87375896c7103ba17b57264f20de35d9e6eb545314680ad5e074dfc33ad",
+      "0x521f97cd91656a41eebd88c365fa81626ca6d8ccf05e6c19c1cd9aba80784382",
+      "0x55abfa5aa9c648d15d2f46ea2dc9ad640e32247e130962cf87604029da9c6982",
+      "0x56d7e21a3dd131a46f7541b0d4fc85faf7996a325f090d5f18d53d099cade7b8",
+      "0x5bbb0a5a29213be7a45e008e31a64e4f3d5e5d84909c6e4bfc90cab43eb14e95",
+      "0x5d7f31e88057c2e06c44e817ebf4b9ec833971e5afa709e75fedf419a0e5d1fb",
+      "0x69e0f4c123a0a888f182a7780f53ad0f9d97d0492d005d205244e2e3b8e079c4",
+      "0x6b151e995a5743f834635c5535e2596ab20d88053454d64c86fb6a700add782b",
+      "0x6b273359fbc21c34f58a546c86a88b21c2bd307797e3c4959c5eccc8e326e4fd",
+      "0x6dd498f93b24ea9493acfed9a8e4069a5b3e6e7c3b426fe43de472010c2636a6",
+      "0x6fb8e9b6e2e57ad9a4da10357ad1cd81a21361382a29155a072abe265006c27c",
+      "0x70f7093200501942444ac597e61579d75d2a9185f51ddce457e0cc50d28dbf37",
+      "0x7a3dc84c82a0a2c7955ea5d6d4d7adef8a11fe4cddd2ba293752d71fd06ddf8f",
+      "0x7c7a189f987bf1e87a0598cac4f802fca3178613e8519ec390b880e401e4312c",
+      "0x7cf13e581c17179bf2c6152f7861b99c53fcd9b1dc646bfd9a9fad6f2031638e",
+      "0x7f12ef4506339e9ccc3c665a5ae8c1878fcf241b7dcbdc4209a95a164622e204",
+      "0x7f16d855c0e049505aa951db48ebd2427ee39ba812dd2e41a2e5492096673db5",
+      "0x7f5cf3453c81fc1b11767f9c3495712ff3962f3e6f1902c2e2768c679cb5eb01",
+      "0x7fc88c81e4f2a1c79eab4ac335d45cf6124be4cbf2350c4626bb6c23b43bad6f",
+      "0x882c7b9547f87eeb407f34b466c072265f4742e0cdb84bb990149fb0c16e4e9e",
+      "0x8b834c15a096e3e2ba8ecaea21627117e104bb37f844f69648c0fdf9406d3457",
+      "0x95c22c676296e4cca545427249c75a2cc99e4e3a43abd24869c9a09ca5960f8a",
+      "0x968abc5270909ae342e06322a85fa4a519f98dd16a87917621996aa5237691e2",
+      "0x988fa7e1fa02207cf5a75d04fa6c321ec78fc2cb862d85be151f71df224905ff",
+      "0xa15616486bba97e54b2e6d0b91523af26a969720324f5e9f820d716b7d4cd020",
+      "0xadbf95ffe328567a552743028b0f8b204fe6ca747fdbce42ede267a8eee7bf0e",
+      "0xae7e4b937e44eddb5693b29148b6bd03f65417f7a363b60829a562ca2370ec0d",
+      "0xafc587b3c960ca50ba824520a3370fda7756be5f60ef6e06500fecf1ece4beb9",
+      "0xb0135869a031d80d579dead0d010120b12fd1c334be85174e0474cd359bbdc95",
+      "0xb7bd8fb366c9ae47dab5fa448153dd537098743a48fe33af35de8ddd4d584c25",
+      "0xb96b34a0a5fa29b0c30f5f8ba1168629b2a8bf6bf75dace7c28321193d9b178c",
+      "0xcdab48977fb18d3c9c46d1e9405c6342cdc58a500013fe856ffb142d31cef6dc",
+      "0xd485462e33dfa28a96e4596012f5a5027443f2d7992490ddc9c2bb65e1f465f7",
+      "0xd58c15acfea8309d55d345531d501edf65f867e52a6cc20d50f364f311a68efd",
+      "0xde2db170b595fcceb0e584c552a47dedb701aa4fcd32f6d1e368a3419259d872",
+      "0xde37ad470f34709af38b247150babc6825575a6b954374f5941831a2b96796ec",
+      "0xe1b2c47ad2308dbc6456a0995ec9a7572964bb4650e9f7034c427b1e4185d620",
+      "0xe29887e5f8aea85d6b775ab8dc95df16a5a0ad2979ace2b539058a0040aca67d",
+      "0xf36f93da75d41f35844da6b6169ba99088ef0c8d3d1990beea4960a1b23c25db",
+      "0xf4362bafb766d5a5dfc78b0fcd91607544a4bb6a540ca076f55dd74643a453c2",
+      "0xf4bcfd7913601331aff2ff6f771f05806cd4983381a217fc02b7e4f2c497f788",
+      "0xf5a6f1d364517c39dd5f1d0fdbeeb0cfb7a73a26e5e17a17f91e7b7f16e0ef36",
+      "0xfb56077944020a3562a3dc2320e37b2149601b297ded3147c8c8c31dcd9b9179",
+      "0xfecd05a4e7f537281200ed720a095da2d5d4db14867a37d2627ebdaa2d2ad1e6"
+    ],
+    "historical_seeds_sha256": "bb2a0e8c6a1d9be7965fd1f50fd6dc5243648154977b6480e5eae5043fefd7c3",
+    "seeds": [
+      "0xa709b7f63f68f9f92b92af3a3e8d4e578d3486296e165c7cba7d5b85dce8cb81",
+      "0x21eb3506af1b4588ff6f215ea6b3addb280056657e0263e0c1e27823b8e5018c",
+      "0x7c64b90932c87725a0a3eefbff9239900f4d91daf3f108d593a1c9ec0cd498c1",
+      "0xa4c9e168298657c97ae754b35aa34b5173799e219a02cc9a11a07048f386b2b2",
+      "0x00dbadbd782a9f2a7353d942595566f2045376f4d30a05298304b9646e2d1bed",
+      "0xaa9a0a63a684942220a6332d3e2e124dead7de2e58fa262ea24ca24cb4e741fd",
+      "0x94292c6a7754b03272585c08815ebb51cdde38a485927ed70cf07b9348c31896",
+      "0x6f79bc0c0b2e24c93e283b10cf640f250823a6e9c0cd112f5c371f579400557d",
+      "0x50cb30c7967de4a21edb63c7986a92e71e3a9729c711d43614f6c9bb10bdf7a2",
+      "0x7a8965a69e38d74eb98a770752738f220d117baf773ae363d10423f6f7da7e75"
+    ],
+    "version": "fresh-filament-cohort-v1"
+  },
+  "generator": {
+    "bytes": 3979944,
+    "parallel_exports": 2,
+    "path": "tools/tidal_silk-full-v02",
+    "sha256": "2192e58590fb593e371232b871066031ebcb9fdc66abd81d00e949b4b24fc261",
+    "threads_per_export": 8
+  },
+  "historical_inventory": {
+    "evidence": [
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/three_body_problem-31j4hmveou6ee/s-hmbxrqa4nm-1un528o-820zs66isy1xwfb8qrxav137z/ee9s0fa2j0x0lvhpxjc4tdytp.o",
+        "kind": "filename",
+        "observations": 3,
+        "seed": "0x0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/codec-diagnostic-x3wk_zn8/edit/probe.json",
+        "kind": "json-value",
+        "observations": 14,
+        "seed": "0x1"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/three_body_problem-300yt7djkct8x/s-hmbxrn8fiv-1arvjxo-digfz01u6r6uxthzglsof1bag/cnw7w0x04q7etxw7kya0wmapa.o",
+        "kind": "filename",
+        "observations": 1,
+        "seed": "0x4"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/three_body_problem-20zhzcybcrl3h/s-hmbw7umn9s-0m0fcqj-6xdycc6xdxbjxtak2tzaush7h/a6r4ro78qpt8n5sgr4t30x8qj.o",
+        "kind": "filename",
+        "observations": 1,
+        "seed": "0x8"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/orbital_atelier-0egnt0wnyjbyz/s-hmbw7umqxh-056u5sm-dtk3sawoek1f02rhy3d00h64l/aohm0x9q1nqjxt9nsteq6veou.o",
+        "kind": "filename",
+        "observations": 1,
+        "seed": "0x9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_studio/recipes/fresco.json",
+        "kind": "json-value",
+        "observations": 125,
+        "seed": "0x11"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/three_body_problem-31j4hmveou6ee/s-hmbxrqa4nm-1un528o-820zs66isy1xwfb8qrxav137z/exi4ce38c8k85z9jy0x74s3rj.o",
+        "kind": "filename",
+        "observations": 2,
+        "seed": "0x74"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/tidal_silk-20o1jydy5n0pq/s-hmbw7vst0t-1m0pioh-3khq2pxye8fkiwmau1rwzi8qf/bb3lusi492grg1lg0xc3oyzeo.o",
+        "kind": "filename",
+        "observations": 1,
+        "seed": "0xc3"
+      },
+      {
+        "first_evidence": "/home/user/polarized-crystal/ic-target/debug/incremental/orbital_atelier-1oou1se3qkklo/s-hmbw3gox4n-1mjugzq-2crwboj0ijcxgpvqi9j489hpc/b3wb2phg0uu2frd5h0xfby280.o",
+        "kind": "filename",
+        "observations": 2,
+        "seed": "0xfb"
+      },
+      {
+        "first_evidence": "/home/user/tidal-silk/six-studies-b7/qa-assembly-v03/source.orbit",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x102"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/codec-diagnostic-x3wk_zn8/edit/receipt.json",
+        "kind": "json-value",
+        "observations": 2,
+        "seed": "0x1234"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/tests/fixtures/atelier-v03-manifest.json",
+        "kind": "json-value",
+        "observations": 314,
+        "seed": "0x1ca3"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/tools/remaining_form/studio-porcelain.json",
+        "kind": "json-value",
+        "observations": 2983,
+        "seed": "0x4279"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/experiments/final-8088/21-deep/recipe.json",
+        "kind": "json-value",
+        "observations": 542,
+        "seed": "0x793d"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/tests/fixtures/atelier-v08-loom-manifest.json",
+        "kind": "json-value",
+        "observations": 125,
+        "seed": "0xcbd6f"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/docs/fixtures/nft_traits.example.json",
+        "kind": "json-value",
+        "observations": 25,
+        "seed": "0x100033"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/tests/fixtures/atelier-v11-aurora-manifest.json",
+        "kind": "json-value",
+        "observations": 107,
+        "seed": "0x483095"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/seed-variants-v1/plan.json",
+        "kind": "json-value",
+        "observations": 105,
+        "seed": "0x46b54ba"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/seed-variants-v1/plan.json",
+        "kind": "json-value",
+        "observations": 105,
+        "seed": "0x116528fd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/codec-diagnostic-x3wk_zn8/edit/probe.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x31637661"
+      },
+      {
+        "first_evidence": "/home/user/remembering-shell/full-comparison/run-v2/gallery/0x808861c25b6c/comparison.json",
+        "kind": "json-value",
+        "observations": 4,
+        "seed": "0x31637668"
+      },
+      {
+        "first_evidence": "/home/user/estuary/releases/5705895/ci/reference/baseline_512x288.json",
+        "kind": "json-value",
+        "observations": 26,
+        "seed": "0x46205528"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 2642,
+        "seed": "0x5b26dc8faef2"
+      },
+      {
+        "first_evidence": "/home/user/estuary/experiments/v007/master-8088/receipt.json",
+        "kind": "json-value",
+        "observations": 7843,
+        "seed": "0x808861c25b6c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 2631,
+        "seed": "0xb08c219a243f"
+      },
+      {
+        "first_evidence": "/home/user/estuary/experiments/v003/mineral-dusk/receipt.json",
+        "kind": "json-value",
+        "observations": 9484,
+        "seed": "0xb7f327f9f722"
+      },
+      {
+        "first_evidence": "/home/user/estuary/experiments/v005/silver-current-bc53/receipt.json",
+        "kind": "json-value",
+        "observations": 4663,
+        "seed": "0xbc53af1cd380"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1f66ba3cf4df563"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x228ce9dd77e4b96"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x2f7f7601f326c94"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x4131dd169cf0e0e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x42162e05de6bd26"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x428263ede16b9e0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x440d37e6616a507"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x4d15328b81540f1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x4ed103be62f67da"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x5708725428cb456"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x78e561043fa5413"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x8505647ad512ba3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x9833bf8ea9332a4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa945c51066fce3f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xace7eefb0e5090e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xaef6658fcf81803"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc84c115eaba1a41"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xc9336c73191edbd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xdfe9f26bb73c1d2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xe14d2a45aa1fd06"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xe6ff6bf8edc5e6e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xecb66a3db3576a7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xf05c7fa3c97e0a3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0xf353d485436a197"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xffd796bf4c65c91"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1075bdf53573e45c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x109bdff0194edfa2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1173914a15c1401d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x11c87f6968afcb6c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1500d891aaf5e993"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x15b3ba51b8170a71"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x18001b9984fa190f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0x18ae50a2f66ce593"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1aad3a3a63750c52"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1ac59c216a900bf5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1af0c80318cde198"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x1b681d1f98fb9364"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1bbd9f9e057c1d3c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1cbc6cdf91d84e9f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x1d08611b55b2a1d8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1f5ccbda126d39cf"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0x1f6918f005a48ddd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x1f7d0afebbc42529"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x1fdcf167021071a1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x209b1fac36338ef0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0x2142e41601c9b950"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0x23b9d3e855208be0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x262bcf943c92fea1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x2698ea07f26af64e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x27f56f1033b18704"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x298f22e9c8189b66"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x29b7213bdd65a691"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x29bf5f8c51b0a2c0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0x2a19e2523ba0acc1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x2a5a47842ee093b2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x2ab0ab2fc899144f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x2bb76c3d3cbfb8bd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x2c918140226cd936"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 2746,
+        "seed": "0x2d01093da35729b3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x2d7d4bc9646fd5aa"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x2dddab023f23e68f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x2e49165e1d2c2c5c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x3022ec32810bce28"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x30fcd7d3b55d7d0f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x31353a312796847e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x32f1357f9b5dbd90"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x347df8a9189abc6c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x353b4d5f8340712f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x36ac78dae1d3db6f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x379da9dacbb7ddfd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x37a6debc58b959b6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x382e7a3b5eebc583"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0x3939c013a15416b4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x3946c5249e6c5803"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x397d88b32cf7f9df"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x3982390d2355d93f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x39954bbb0f5d9160"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x39c18eb463b4a343"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x39ccf536257f24f9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x3bf9c58692f12c71"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3f6ac7fecb50cc00"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3f8cc9c0f10e1700"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3f97635eb872b110"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fa9e2ac35fac8d8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fadaec8935324e8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fba72ebd8091ce8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fbbff0f96157328"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fbe78d65192b232"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fc06d0837e340bc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fc3ef22553f70b7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fc9b8b0f0c25314"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fca6e9847dbd5d1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fcad116cc9644c4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fd0c86a815e63c3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fd1759305e85f6c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fd19040c6a144d2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fd1ad541674bcb3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdb1070ecbcec7e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdc0b6d9ead74e6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdc93ea1bb2d764"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdd0d467c3db67c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdd1eb1426ae7de"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdf7f7f7f6ff69a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fdf9649a6ab70f2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe0e938a208c322"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe1d55ee61e4dc6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe2ce441b5c878f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe3329c22e626eb"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe49fede8ab0389"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe56d82ac2b773e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe5d8df770ac4fe"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe6564bf178fa56"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe6ccb3e85c69bb"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe76b6ca538afee"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe7e8532a61bc40"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe8b6933f5c1b63"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x3fe9602aee274eb2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3fe9e9dadc3add6e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3feb8e44c6fb5fe1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3feba5893636d53b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3feec1ca76918233"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3ff221a289c5dc96"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x3ff2d74c3321fa48"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x401c8738a7bc40f0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x401df5bf73cd6e88"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40278d9fea53f050"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4027cf95e6507780"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4029a9a3c7aea640"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x403ec7f407349608"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40403fa6a86deb93"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40409a68c9ec942e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4040ba14bc25f258"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40420934f6b467ec"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4042f643e5592298"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4043a8e5738b3594"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4043ef773ed36df0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x404749057b72168e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x404a3c198039f970"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x404d698d2301de40"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x404fe2a7979f72f4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4050d31fbd153bfa"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4055ad44e4e43b18"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4055c1b59d68d06a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4057688d096d0fb7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405771e54b136104"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405852e6ca742b7b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40594522dc30b883"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405964880327ef50"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405a0e29f0d6a8f3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405acccfbcf5cc3b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405b640475d1ab0f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405bddeeabfd898b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405c599496bfbb38"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405d33240f48641c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405d793d23f3ae61"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405dfe4f25d4215c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405e180300011c46"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405e365276879b4c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405ebfba150d12a2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405f9d1332624048"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x405fae079e2f8356"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406023da368e0474"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406032893f7b8230"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40607a02b01c972c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406083362207da3b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4061276f25c92f04"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4062359ebc59dfac"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4062f7d762c8220a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4063166549d2806a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406317c7eadb0830"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4064529ff05f158c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406474e59b8ddd2e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406485094186d12e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40657921d5269918"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40659ac2e2cf3b46"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4065a67510a2fec0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406629c1b1467ca8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40667c2c95a8ae6a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406845d38094d27d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406850ba7f20cff6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40689a445aec93f5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406961f778ff47c4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406aecc258f8d557"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406c88bba53f7666"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406d8ef5d896e194"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406ee04e4d90722b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406f6d47c0a10be8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x406feb4db46f4fb0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x407019b60d3ee1f6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40704a693253cea6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4070782aafe6b164"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40714bd4b4662378"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4071a5402375075e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4071d6cb65ef7af2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x407251f8424bc2f6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x40727de236fffc54"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4073d7e4815b9fe1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0x4074273754e7bf99"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x4140dbf6548ac893"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0x423d411dde267c96"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x4313cfc8a6955c3b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x43ec36284b569e9a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x4552f762088b9663"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0x46f34200823a19f8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x478cf72513b51f45"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x48cce56d7346b97c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x496ab85e5375a1b7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x499c1ad99932cdaf"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0x4a323024dd302290"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x4c6cfb83badb3802"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x4c98d344b0d830d8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x4d5f2e1b275d7fe6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 11,
+        "seed": "0x4d60edd1012c569e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x4e4bd049448bc950"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x4fbfc5f1fab28497"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x52718b52ef6a1388"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x535afbe9506f1d3e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 2605,
+        "seed": "0x5584badfb5d82790"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x55ad76806f742be5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x563596df924fee5c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x575d17bc2b864e2a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x59b79b7c8039d570"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x5cfe09bd147e11a6"
+      },
+      {
+        "first_evidence": "/home/user/viz-farm/CS-Image-Generation/orchestrator/state.json",
+        "kind": "json-value",
+        "observations": 3,
+        "seed": "0x5dd1d5f495843344"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x5def457ca11ce59f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0x5e62a31236a6b8f0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x5eb01f0765e34c6d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x61b6ca89ff3100e0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 3003,
+        "seed": "0x6210d183445b5dd5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x62326bb8812cde06"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x636e75050cc33d1c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x64299ca16adbecff"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x64ca5fbaf32c6c39"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x65e20869f569684a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x6617271ab4e26099"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x67663252a58e48a1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x6a4550153a3a1f9e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x6b47d38c128911b5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x6d46be5b6bfd5f35"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x6e01baf99bbaacb9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x72e47b410f2236de"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x730a9aa96e667092"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x755bb8e0d2a36e93"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x769f90563627c9fa"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x789fbfbfcef318e6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x7d17169c46ab3f07"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x7d2f4e0404178575"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x7e063bf8d0859099"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x803ea334989adfad"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x8137aaade069dba4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x816f6fce7657b48e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x81924ccba51e2d78"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x826950de8e6554d7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x82d3a7c8383674b3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x830bf9c5e9ca58ea"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x86ea68f38d92240f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x87a3923d9eee680c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x87cd2c76e03b63b0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x88f523750547731e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x896342cac5257e31"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x899e030a21b4dfb0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x8b5ef5adc352e7a6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x8b80ca21dc53d60f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x8cdb55d6ab82e397"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x8d6a49f6bfc0b927"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x8d6f31993b56ecd5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x8dc9ffd5f59bc260"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x8e9d58067dc4832c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x8f7bbc0487213bb0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0x907bf1d89815e010"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x9189a7f72cdfc0be"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x91cff5510e702f42"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x940f7c084e933a93"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x94455f39b2b63b57"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x971335aa0f7b7f7f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0x980f5676cac76b02"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x980f7283c513a58f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x9a56d95d78343ee3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x9b48b9d71220add8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0x9bae1ae16cf4dbde"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x9be6f1b66020ca2b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0x9f636327d910ceb7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 3086,
+        "seed": "0xa0c78ebadfb75018"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xa0d4cab03d336c12"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa11ce7ecf201e6d7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xa2cf71c287b1f6d9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa2f4f7b3282bf355"
+      },
+      {
+        "first_evidence": "/home/user/viz-farm/CS-Image-Generation/orchestrator/state.json",
+        "kind": "json-value",
+        "observations": 3,
+        "seed": "0xa52f3b0ad08d69c5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xa5520fb10ccfc63e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa6307e80e05c2505"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xa657487b848061bf"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa7d056d7578df8db"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xa84203526047ffb7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xa84890dd5571ca97"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xa86b7a19774cdb42"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xa8e03acb3463dc44"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xa946a0b3f19315d9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0xaa2acdbe3f118d4b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0xaa8d2bf46f8f5cf4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xab3676f2bfa4625b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xab7f1a64af41cdd4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xac298dea5d100f3d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xadf1e4ba6d479d3f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0xae3e1bf2ee17d851"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xae88134f9185689f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb34eada23118e9e0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xb395f6fa59f46088"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb411ae47e725f5cf"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb440b43d7a2e0ffa"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xb4dc3fd1aaad4726"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb52deed1fc210c44"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 11,
+        "seed": "0xb5b7a105b0ff7c33"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0xb62eca59343b62bc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0xb721b846c198d74f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xb88664e6a1405aa7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb8a4fd3f34c082a8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb8d375b3b05ce123"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb989db66dcd5e907"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xb99272b964ad3b77"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xb99dfd71e528cee9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xb9d6f23104747007"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xbaa6d8498bf44448"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xbabbd8627a41a858"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xbd566b6230d4dd76"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 11,
+        "seed": "0xbe096745d8607fa9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xbed53c81eca488b9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 11,
+        "seed": "0xbef39a6a48da34c6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0xbf250739a7634885"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbf7e13a80c912ac0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbf849410f6da589c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbf8a020104845660"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbf96b920fa2fccc0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbf98c1917c896f20"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfa2fad2f225db4c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfa681043bf6a8a8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfa91c72d87e419b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfae5a30219a2670"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfb0a6832ba43855"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfb0df57c24e93f0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfb3ac36dd3f0936"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfb85c008e1da430"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfba9601136a212e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfbe11a589e11b50"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfc5792cc866467a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfcac601bef6ee1c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfcc1e4cf3a33a9c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfccabc2b42559b4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfce389b5f280e28"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfced94a76bfb664"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfcf283e8ee4c19e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd261d271e7936a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd2b6dd52ee7522"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd43361473e7ac8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd46fbd8ebe77bd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd859cb0d8722a8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd995eadc4dba16"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfd9b6da93d06bf4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfdb4e9dff1a1b08"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfdc030e2c1024b7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfdcd0ce37945cd4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfdd61c554d5b02c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe0d5d0b5b45873"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe22765c8ef849d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe23a63f0c905c9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe2f6ad43dd76d4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe479d140e7d120"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe52651468713e3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe670378e51ae8a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe6b150468d185e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe87646745d492f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfe943b397944d54"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfea160dc9a86ac4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfee440400dfef3d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbfefbf7a56ead14e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbff2f6264651b978"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xbff322afd7d5812a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc00421fae12df800"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc010521b1ba702c0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc01eb47449de6650"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc022306f52dc7e00"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc02965a1e4a38760"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0303807a34e05c4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc03d931d638f2ed8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc041c63d7d0cfdc0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc045f6874ebcef22"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc047ad32e3f62de6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0493b153f348d46"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc04a28ba78a046dc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc04b71fd913af3b8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc04bcf1fa121a81a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc04c4f5d03e59188"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05003d854dd553f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05047f2e829adef"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05164147d0e25c2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0516686656b0c66"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc051c147359ed5ed"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc053e25e17a6a1e0"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc057eec6dd1f1835"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc058433a900cf4c8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05930a94b4eaf69"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05a708625164577"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05b19818931d104"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05c01cddead7c8e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05c9867d1313387"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05cc915c3f7f9d4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05e617a86741ecc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc05fe72505b2eace"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc060670ab85fbdd1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc060c9f1f6c634bc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc06142a61d41d8b1"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0639026b05e9ede"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc064025a865015a9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0645788e0a9ce28"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc064a593de054e26"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0657083683bad4a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0661057838c7090"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc068cdd492db0bac"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc069361a009d5b8b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc0698274efbf6671"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc06a46b470a082ca"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc06d10191e2a1b4a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/cohort.json",
+        "kind": "json-value",
+        "observations": 1,
+        "seed": "0xc07a221f6d5104bb"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc153fd29e2e70f27"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xc1efd342d2ea54d2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc255cae7ae8e76b9"
+      },
+      {
+        "first_evidence": "/home/user/viz-farm/CS-Image-Generation/orchestrator/state.json",
+        "kind": "json-value",
+        "observations": 3,
+        "seed": "0xc3978f0514d703d8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc41e073088d476ca"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc427a8e78e9b13d6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xc4a286676cd1345b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc727f5457e2e2ef7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xc816e49552c04671"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xc89b87f933d15b6b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xc98e2742c91fe466"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xca34651d2b4f4bec"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xca7e1ec38f2cc346"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xca97830c0ace00b5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xcadcfd956d4780ee"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xcbb460034a5842b6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xcca5b0bf23098b78"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xcca9b1f032fcd36d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xccb14008fdeacdad"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xcd71fea4d64272e5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xce0770c4c3132a95"
+      },
+      {
+        "first_evidence": "/home/user/estuary-depth/filament-studies/releases/final-review-v2/tools/estuary_confluence/releases/contact-textures-v1.json",
+        "kind": "json-value",
+        "observations": 5659,
+        "seed": "0xceddf97909f39cc2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0xd0a3f4116637ffa9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd1b75aa66dddf701"
+      },
+      {
+        "first_evidence": "/home/user/viz-farm/CS-Image-Generation/orchestrator/state.json",
+        "kind": "json-value",
+        "observations": 3,
+        "seed": "0xd21096c14a8c4716"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd2815e168872ddbe"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xd284f78a1bd3e9cc"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xd28a2a68121850cb"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd2964fe78998cd7b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd2e26cc1b8526a51"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd3786b9aba67eaf5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xd45c5569084aa202"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd5e245579161abdd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd65ad88b6f24e5fb"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xd76ecbef996f5528"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 6,
+        "seed": "0xd96a1ad54d112205"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xd9eba46ded6fad57"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xda2ba729ce60f9a2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 7,
+        "seed": "0xda40d593f0967231"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xdc48eaa909d3040b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xdf17f3c54c7f9bb5"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xdff140390887b2c6"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe1a653e38bf800cd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xe203ca3554d4e7b2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe2549291bf6cdc48"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xe2c51a162b513704"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe32ad3a0c33396be"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe39512a32c60014d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xe3b4a95ca8f48eb9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe3db8493327dd2c8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xe44db04bba11dd59"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe5d328d228d18c5c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 12,
+        "seed": "0xe617b0536472610f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe69dd5aec862f948"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe72d30b20a7567c9"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xe7802342145a0656"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xebd55a99f2eeef6d"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xec3bb7d9fe7074da"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xecd488d98b8a7591"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xed00351ba98ce2b2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xedef01f6f88a9da2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xee7b1ba1ff057266"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xeeee96e90e9570cf"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xefb0cd7fd100b03e"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xf091c04b506c8f50"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xf109017d736034b8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xf12761832950053a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xf3f809c90f375ab3"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xf609e1a9add80063"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xf721ebd853fe507b"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 8,
+        "seed": "0xf796b7ffcd71d860"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xf7e2c952a072b4a7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 9,
+        "seed": "0xf9d1e61662f861d8"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xfcb714ef7f2397fd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/sources/ten-seeds-v1/selection-ranking.json",
+        "kind": "json-value",
+        "observations": 13,
+        "seed": "0xfd21bcc9828a887d"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x3108837490f9fd840a44e70590173c7f95340872f60eaa13482b4ecb8fb0a8"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x82f04a131becec289fb0d93bda9442cf26a11e560c749a05d0eddf99df33d8f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-confluence/experiments/art-three-b7f3/palette.json",
+        "kind": "json-value",
+        "observations": 1124,
+        "seed": "0xe66edd80a61ecef2f89f9b4291f2dc59c58f2099f21d4ba1e3b81fd13ec1f7c"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0x1362465d6ffe31bfc33a924a9406663e313cf417c35d8d4461e66db845d39903"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x17d61f1c00e5d16c399a8e341e9feaea32b275e5426a4375394e74cc855affcc"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x18952be1a43822726d7920df20bc2e1a2be06c1f907a0dc80e7469e50be3ce4b"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x203581755eca174027d8d64b53dcb54d320fd2195fae1c7fbf152dfe83c69855"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x2a345aa3f8a0419fc11cd031c98c49d171f3dd2151d9c06fd327e9254e1db962"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x36794583b610f71be4a51d19a01af5bfe05b673c31d86f3f0c3310c3e4261fce"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x37c73b71ae24c2a263b46ca3399d91b4de4fe97f1eb4dfe608475101f69e590e"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x38b23b92766de4c8989e563ea11b3b3aab1965a546a84c6780a715df3b3df0b1"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x4a0d5b57e13cf40c56cddb4ee2c10f50ab7aff755e24c61a687855663713f5b5"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x4c7dc283fabb2c4a4971b65cd7806b4e48d76440e3fbee3e4eef58d2269470e2"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0x4fbcf97cd52e5a670e14f706d1c01518fdd7f89d89515bc71b592912b9af59eb"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x5084a87375896c7103ba17b57264f20de35d9e6eb545314680ad5e074dfc33ad"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x521f97cd91656a41eebd88c365fa81626ca6d8ccf05e6c19c1cd9aba80784382"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0x55abfa5aa9c648d15d2f46ea2dc9ad640e32247e130962cf87604029da9c6982"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x56d7e21a3dd131a46f7541b0d4fc85faf7996a325f090d5f18d53d099cade7b8"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x5bbb0a5a29213be7a45e008e31a64e4f3d5e5d84909c6e4bfc90cab43eb14e95"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0x5b26dc8faef2-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 301,
+        "seed": "0x5d7f31e88057c2e06c44e817ebf4b9ec833971e5afa709e75fedf419a0e5d1fb"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x69e0f4c123a0a888f182a7780f53ad0f9d97d0492d005d205244e2e3b8e079c4"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0xa0c78ebadfb75018-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 369,
+        "seed": "0x6b151e995a5743f834635c5535e2596ab20d88053454d64c86fb6a700add782b"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x6b273359fbc21c34f58a546c86a88b21c2bd307797e3c4959c5eccc8e326e4fd"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x6dd498f93b24ea9493acfed9a8e4069a5b3e6e7c3b426fe43de472010c2636a6"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x6fb8e9b6e2e57ad9a4da10357ad1cd81a21361382a29155a072abe265006c27c"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x70f7093200501942444ac597e61579d75d2a9185f51ddce457e0cc50d28dbf37"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x7a3dc84c82a0a2c7955ea5d6d4d7adef8a11fe4cddd2ba293752d71fd06ddf8f"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0xceddf97909f39cc2-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 767,
+        "seed": "0x7c7a189f987bf1e87a0598cac4f802fca3178613e8519ec390b880e401e4312c"
+      },
+      {
+        "first_evidence": "/home/user/estuary-confluence/experiments/gallery-proof/records/90c63e49909d4958/palette.json",
+        "kind": "json-value",
+        "observations": 1011,
+        "seed": "0x7cf13e581c17179bf2c6152f7861b99c53fcd9b1dc646bfd9a9fad6f2031638e"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0x7f12ef4506339e9ccc3c665a5ae8c1878fcf241b7dcbdc4209a95a164622e204"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0x7f16d855c0e049505aa951db48ebd2427ee39ba812dd2e41a2e5492096673db5"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x7f5cf3453c81fc1b11767f9c3495712ff3962f3e6f1902c2e2768c679cb5eb01"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x7fc88c81e4f2a1c79eab4ac335d45cf6124be4cbf2350c4626bb6c23b43bad6f"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0x882c7b9547f87eeb407f34b466c072265f4742e0cdb84bb990149fb0c16e4e9e"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x8b834c15a096e3e2ba8ecaea21627117e104bb37f844f69648c0fdf9406d3457"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0x95c22c676296e4cca545427249c75a2cc99e4e3a43abd24869c9a09ca5960f8a"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0x6210d183445b5dd5-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 398,
+        "seed": "0x968abc5270909ae342e06322a85fa4a519f98dd16a87917621996aa5237691e2"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0xb08c219a243f-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 295,
+        "seed": "0x988fa7e1fa02207cf5a75d04fa6c321ec78fc2cb862d85be151f71df224905ff"
+      },
+      {
+        "first_evidence": "/home/user/estuary-confluence/experiments/gallery-proof/records/e4dab5875673b1a9/palette.json",
+        "kind": "json-value",
+        "observations": 566,
+        "seed": "0xa15616486bba97e54b2e6d0b91523af26a969720324f5e9f820d716b7d4cd020"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0xadbf95ffe328567a552743028b0f8b204fe6ca747fdbce42ede267a8eee7bf0e"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 20,
+        "seed": "0xae7e4b937e44eddb5693b29148b6bd03f65417f7a363b60829a562ca2370ec0d"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xafc587b3c960ca50ba824520a3370fda7756be5f60ef6e06500fecf1ece4beb9"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xb0135869a031d80d579dead0d010120b12fd1c334be85174e0474cd359bbdc95"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0xb7bd8fb366c9ae47dab5fa448153dd537098743a48fe33af35de8ddd4d584c25"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xb96b34a0a5fa29b0c30f5f8ba1168629b2a8bf6bf75dace7c28321193d9b178c"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xcdab48977fb18d3c9c46d1e9405c6342cdc58a500013fe856ffb142d31cef6dc"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xd485462e33dfa28a96e4596012f5a5027443f2d7992490ddc9c2bb65e1f465f7"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0x5584badfb5d82790-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 289,
+        "seed": "0xd58c15acfea8309d55d345531d501edf65f867e52a6cc20d50f364f311a68efd"
+      },
+      {
+        "first_evidence": "/home/user/estuary-convergence/body-markers/ten-seeds-62bf3d0/cases/0x2d01093da35729b3-body-markers/palette.json",
+        "kind": "json-value",
+        "observations": 321,
+        "seed": "0xde2db170b595fcceb0e584c552a47dedb701aa4fcd32f6d1e368a3419259d872"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xde37ad470f34709af38b247150babc6825575a6b954374f5941831a2b96796ec"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xe1b2c47ad2308dbc6456a0995ec9a7572964bb4650e9f7034c427b1e4185d620"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0xe29887e5f8aea85d6b775ab8dc95df16a5a0ad2979ace2b539058a0040aca67d"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0xf36f93da75d41f35844da6b6169ba99088ef0c8d3d1990beea4960a1b23c25db"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xf4362bafb766d5a5dfc78b0fcd91607544a4bb6a540ca076f55dd74643a453c2"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 22,
+        "seed": "0xf4bcfd7913601331aff2ff6f771f05806cd4983381a217fc02b7e4f2c497f788"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xf5a6f1d364517c39dd5f1d0fdbeeb0cfb7a73a26e5e17a17f91e7b7f16e0ef36"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xfb56077944020a3562a3dc2320e37b2149601b297ded3147c8c8c31dcd9b9179"
+      },
+      {
+        "first_evidence": "/home/user/Dev/CS-Image-Generation/generation_log.json",
+        "kind": "json-value",
+        "observations": 10,
+        "seed": "0xfecd05a4e7f537281200ed720a095da2d5d4db14867a37d2627ebdaa2d2ad1e6"
+      }
+    ],
+    "roots": [
+      "/home/user/estuary",
+      "/home/user/estuary-depth",
+      "/home/user/estuary-studio",
+      "/home/user/estuary-confluence",
+      "/home/user/estuary-convergence",
+      "/home/user/estuary-scatter",
+      "/home/user/tidal-silk",
+      "/home/user/remaining-form",
+      "/home/user/remembering-shell",
+      "/home/user/polarized-crystal",
+      "/home/user/viz-farm/CS-Image-Generation",
+      "/home/user/Dev/CS-Image-Generation"
+    ],
+    "scan_counts": {
+      "invalid_json": 70,
+      "json": 69172,
+      "jsonl": 39,
+      "large_json_skipped": 0,
+      "orbit_headers": 689
+    },
+    "scope": "Seed values and hexadecimal seed filenames in known art archives; includes non-orbital render/material seeds conservatively. Source headers read without payload. Frames,checkpoints,vendor/builds excluded; new-cohort output excluded.",
+    "seeds": [
+      "0x0",
+      "0x1",
+      "0x4",
+      "0x8",
+      "0x9",
+      "0x11",
+      "0x74",
+      "0xc3",
+      "0xfb",
+      "0x102",
+      "0x1234",
+      "0x1ca3",
+      "0x4279",
+      "0x793d",
+      "0xcbd6f",
+      "0x100033",
+      "0x483095",
+      "0x46b54ba",
+      "0x116528fd",
+      "0x31637661",
+      "0x31637668",
+      "0x46205528",
+      "0x5b26dc8faef2",
+      "0x808861c25b6c",
+      "0xb08c219a243f",
+      "0xb7f327f9f722",
+      "0xbc53af1cd380",
+      "0x1f66ba3cf4df563",
+      "0x228ce9dd77e4b96",
+      "0x2f7f7601f326c94",
+      "0x4131dd169cf0e0e",
+      "0x42162e05de6bd26",
+      "0x428263ede16b9e0",
+      "0x440d37e6616a507",
+      "0x4d15328b81540f1",
+      "0x4ed103be62f67da",
+      "0x5708725428cb456",
+      "0x78e561043fa5413",
+      "0x8505647ad512ba3",
+      "0x9833bf8ea9332a4",
+      "0xa945c51066fce3f",
+      "0xace7eefb0e5090e",
+      "0xaef6658fcf81803",
+      "0xc84c115eaba1a41",
+      "0xc9336c73191edbd",
+      "0xdfe9f26bb73c1d2",
+      "0xe14d2a45aa1fd06",
+      "0xe6ff6bf8edc5e6e",
+      "0xecb66a3db3576a7",
+      "0xf05c7fa3c97e0a3",
+      "0xf353d485436a197",
+      "0xffd796bf4c65c91",
+      "0x1075bdf53573e45c",
+      "0x109bdff0194edfa2",
+      "0x1173914a15c1401d",
+      "0x11c87f6968afcb6c",
+      "0x1500d891aaf5e993",
+      "0x15b3ba51b8170a71",
+      "0x18001b9984fa190f",
+      "0x18ae50a2f66ce593",
+      "0x1aad3a3a63750c52",
+      "0x1ac59c216a900bf5",
+      "0x1af0c80318cde198",
+      "0x1b681d1f98fb9364",
+      "0x1bbd9f9e057c1d3c",
+      "0x1cbc6cdf91d84e9f",
+      "0x1d08611b55b2a1d8",
+      "0x1f5ccbda126d39cf",
+      "0x1f6918f005a48ddd",
+      "0x1f7d0afebbc42529",
+      "0x1fdcf167021071a1",
+      "0x209b1fac36338ef0",
+      "0x2142e41601c9b950",
+      "0x23b9d3e855208be0",
+      "0x262bcf943c92fea1",
+      "0x2698ea07f26af64e",
+      "0x27f56f1033b18704",
+      "0x298f22e9c8189b66",
+      "0x29b7213bdd65a691",
+      "0x29bf5f8c51b0a2c0",
+      "0x2a19e2523ba0acc1",
+      "0x2a5a47842ee093b2",
+      "0x2ab0ab2fc899144f",
+      "0x2bb76c3d3cbfb8bd",
+      "0x2c918140226cd936",
+      "0x2d01093da35729b3",
+      "0x2d7d4bc9646fd5aa",
+      "0x2dddab023f23e68f",
+      "0x2e49165e1d2c2c5c",
+      "0x3022ec32810bce28",
+      "0x30fcd7d3b55d7d0f",
+      "0x31353a312796847e",
+      "0x32f1357f9b5dbd90",
+      "0x347df8a9189abc6c",
+      "0x353b4d5f8340712f",
+      "0x36ac78dae1d3db6f",
+      "0x379da9dacbb7ddfd",
+      "0x37a6debc58b959b6",
+      "0x382e7a3b5eebc583",
+      "0x3939c013a15416b4",
+      "0x3946c5249e6c5803",
+      "0x397d88b32cf7f9df",
+      "0x3982390d2355d93f",
+      "0x39954bbb0f5d9160",
+      "0x39c18eb463b4a343",
+      "0x39ccf536257f24f9",
+      "0x3bf9c58692f12c71",
+      "0x3f6ac7fecb50cc00",
+      "0x3f8cc9c0f10e1700",
+      "0x3f97635eb872b110",
+      "0x3fa9e2ac35fac8d8",
+      "0x3fadaec8935324e8",
+      "0x3fba72ebd8091ce8",
+      "0x3fbbff0f96157328",
+      "0x3fbe78d65192b232",
+      "0x3fc06d0837e340bc",
+      "0x3fc3ef22553f70b7",
+      "0x3fc9b8b0f0c25314",
+      "0x3fca6e9847dbd5d1",
+      "0x3fcad116cc9644c4",
+      "0x3fd0c86a815e63c3",
+      "0x3fd1759305e85f6c",
+      "0x3fd19040c6a144d2",
+      "0x3fd1ad541674bcb3",
+      "0x3fdb1070ecbcec7e",
+      "0x3fdc0b6d9ead74e6",
+      "0x3fdc93ea1bb2d764",
+      "0x3fdd0d467c3db67c",
+      "0x3fdd1eb1426ae7de",
+      "0x3fdf7f7f7f6ff69a",
+      "0x3fdf9649a6ab70f2",
+      "0x3fe0e938a208c322",
+      "0x3fe1d55ee61e4dc6",
+      "0x3fe2ce441b5c878f",
+      "0x3fe3329c22e626eb",
+      "0x3fe49fede8ab0389",
+      "0x3fe56d82ac2b773e",
+      "0x3fe5d8df770ac4fe",
+      "0x3fe6564bf178fa56",
+      "0x3fe6ccb3e85c69bb",
+      "0x3fe76b6ca538afee",
+      "0x3fe7e8532a61bc40",
+      "0x3fe8b6933f5c1b63",
+      "0x3fe9602aee274eb2",
+      "0x3fe9e9dadc3add6e",
+      "0x3feb8e44c6fb5fe1",
+      "0x3feba5893636d53b",
+      "0x3feec1ca76918233",
+      "0x3ff221a289c5dc96",
+      "0x3ff2d74c3321fa48",
+      "0x401c8738a7bc40f0",
+      "0x401df5bf73cd6e88",
+      "0x40278d9fea53f050",
+      "0x4027cf95e6507780",
+      "0x4029a9a3c7aea640",
+      "0x403ec7f407349608",
+      "0x40403fa6a86deb93",
+      "0x40409a68c9ec942e",
+      "0x4040ba14bc25f258",
+      "0x40420934f6b467ec",
+      "0x4042f643e5592298",
+      "0x4043a8e5738b3594",
+      "0x4043ef773ed36df0",
+      "0x404749057b72168e",
+      "0x404a3c198039f970",
+      "0x404d698d2301de40",
+      "0x404fe2a7979f72f4",
+      "0x4050d31fbd153bfa",
+      "0x4055ad44e4e43b18",
+      "0x4055c1b59d68d06a",
+      "0x4057688d096d0fb7",
+      "0x405771e54b136104",
+      "0x405852e6ca742b7b",
+      "0x40594522dc30b883",
+      "0x405964880327ef50",
+      "0x405a0e29f0d6a8f3",
+      "0x405acccfbcf5cc3b",
+      "0x405b640475d1ab0f",
+      "0x405bddeeabfd898b",
+      "0x405c599496bfbb38",
+      "0x405d33240f48641c",
+      "0x405d793d23f3ae61",
+      "0x405dfe4f25d4215c",
+      "0x405e180300011c46",
+      "0x405e365276879b4c",
+      "0x405ebfba150d12a2",
+      "0x405f9d1332624048",
+      "0x405fae079e2f8356",
+      "0x406023da368e0474",
+      "0x406032893f7b8230",
+      "0x40607a02b01c972c",
+      "0x406083362207da3b",
+      "0x4061276f25c92f04",
+      "0x4062359ebc59dfac",
+      "0x4062f7d762c8220a",
+      "0x4063166549d2806a",
+      "0x406317c7eadb0830",
+      "0x4064529ff05f158c",
+      "0x406474e59b8ddd2e",
+      "0x406485094186d12e",
+      "0x40657921d5269918",
+      "0x40659ac2e2cf3b46",
+      "0x4065a67510a2fec0",
+      "0x406629c1b1467ca8",
+      "0x40667c2c95a8ae6a",
+      "0x406845d38094d27d",
+      "0x406850ba7f20cff6",
+      "0x40689a445aec93f5",
+      "0x406961f778ff47c4",
+      "0x406aecc258f8d557",
+      "0x406c88bba53f7666",
+      "0x406d8ef5d896e194",
+      "0x406ee04e4d90722b",
+      "0x406f6d47c0a10be8",
+      "0x406feb4db46f4fb0",
+      "0x407019b60d3ee1f6",
+      "0x40704a693253cea6",
+      "0x4070782aafe6b164",
+      "0x40714bd4b4662378",
+      "0x4071a5402375075e",
+      "0x4071d6cb65ef7af2",
+      "0x407251f8424bc2f6",
+      "0x40727de236fffc54",
+      "0x4073d7e4815b9fe1",
+      "0x4074273754e7bf99",
+      "0x4140dbf6548ac893",
+      "0x423d411dde267c96",
+      "0x4313cfc8a6955c3b",
+      "0x43ec36284b569e9a",
+      "0x4552f762088b9663",
+      "0x46f34200823a19f8",
+      "0x478cf72513b51f45",
+      "0x48cce56d7346b97c",
+      "0x496ab85e5375a1b7",
+      "0x499c1ad99932cdaf",
+      "0x4a323024dd302290",
+      "0x4c6cfb83badb3802",
+      "0x4c98d344b0d830d8",
+      "0x4d5f2e1b275d7fe6",
+      "0x4d60edd1012c569e",
+      "0x4e4bd049448bc950",
+      "0x4fbfc5f1fab28497",
+      "0x52718b52ef6a1388",
+      "0x535afbe9506f1d3e",
+      "0x5584badfb5d82790",
+      "0x55ad76806f742be5",
+      "0x563596df924fee5c",
+      "0x575d17bc2b864e2a",
+      "0x59b79b7c8039d570",
+      "0x5cfe09bd147e11a6",
+      "0x5dd1d5f495843344",
+      "0x5def457ca11ce59f",
+      "0x5e62a31236a6b8f0",
+      "0x5eb01f0765e34c6d",
+      "0x61b6ca89ff3100e0",
+      "0x6210d183445b5dd5",
+      "0x62326bb8812cde06",
+      "0x636e75050cc33d1c",
+      "0x64299ca16adbecff",
+      "0x64ca5fbaf32c6c39",
+      "0x65e20869f569684a",
+      "0x6617271ab4e26099",
+      "0x67663252a58e48a1",
+      "0x6a4550153a3a1f9e",
+      "0x6b47d38c128911b5",
+      "0x6d46be5b6bfd5f35",
+      "0x6e01baf99bbaacb9",
+      "0x72e47b410f2236de",
+      "0x730a9aa96e667092",
+      "0x755bb8e0d2a36e93",
+      "0x769f90563627c9fa",
+      "0x789fbfbfcef318e6",
+      "0x7d17169c46ab3f07",
+      "0x7d2f4e0404178575",
+      "0x7e063bf8d0859099",
+      "0x803ea334989adfad",
+      "0x8137aaade069dba4",
+      "0x816f6fce7657b48e",
+      "0x81924ccba51e2d78",
+      "0x826950de8e6554d7",
+      "0x82d3a7c8383674b3",
+      "0x830bf9c5e9ca58ea",
+      "0x86ea68f38d92240f",
+      "0x87a3923d9eee680c",
+      "0x87cd2c76e03b63b0",
+      "0x88f523750547731e",
+      "0x896342cac5257e31",
+      "0x899e030a21b4dfb0",
+      "0x8b5ef5adc352e7a6",
+      "0x8b80ca21dc53d60f",
+      "0x8cdb55d6ab82e397",
+      "0x8d6a49f6bfc0b927",
+      "0x8d6f31993b56ecd5",
+      "0x8dc9ffd5f59bc260",
+      "0x8e9d58067dc4832c",
+      "0x8f7bbc0487213bb0",
+      "0x907bf1d89815e010",
+      "0x9189a7f72cdfc0be",
+      "0x91cff5510e702f42",
+      "0x940f7c084e933a93",
+      "0x94455f39b2b63b57",
+      "0x971335aa0f7b7f7f",
+      "0x980f5676cac76b02",
+      "0x980f7283c513a58f",
+      "0x9a56d95d78343ee3",
+      "0x9b48b9d71220add8",
+      "0x9bae1ae16cf4dbde",
+      "0x9be6f1b66020ca2b",
+      "0x9f636327d910ceb7",
+      "0xa0c78ebadfb75018",
+      "0xa0d4cab03d336c12",
+      "0xa11ce7ecf201e6d7",
+      "0xa2cf71c287b1f6d9",
+      "0xa2f4f7b3282bf355",
+      "0xa52f3b0ad08d69c5",
+      "0xa5520fb10ccfc63e",
+      "0xa6307e80e05c2505",
+      "0xa657487b848061bf",
+      "0xa7d056d7578df8db",
+      "0xa84203526047ffb7",
+      "0xa84890dd5571ca97",
+      "0xa86b7a19774cdb42",
+      "0xa8e03acb3463dc44",
+      "0xa946a0b3f19315d9",
+      "0xaa2acdbe3f118d4b",
+      "0xaa8d2bf46f8f5cf4",
+      "0xab3676f2bfa4625b",
+      "0xab7f1a64af41cdd4",
+      "0xac298dea5d100f3d",
+      "0xadf1e4ba6d479d3f",
+      "0xae3e1bf2ee17d851",
+      "0xae88134f9185689f",
+      "0xb34eada23118e9e0",
+      "0xb395f6fa59f46088",
+      "0xb411ae47e725f5cf",
+      "0xb440b43d7a2e0ffa",
+      "0xb4dc3fd1aaad4726",
+      "0xb52deed1fc210c44",
+      "0xb5b7a105b0ff7c33",
+      "0xb62eca59343b62bc",
+      "0xb721b846c198d74f",
+      "0xb88664e6a1405aa7",
+      "0xb8a4fd3f34c082a8",
+      "0xb8d375b3b05ce123",
+      "0xb989db66dcd5e907",
+      "0xb99272b964ad3b77",
+      "0xb99dfd71e528cee9",
+      "0xb9d6f23104747007",
+      "0xbaa6d8498bf44448",
+      "0xbabbd8627a41a858",
+      "0xbd566b6230d4dd76",
+      "0xbe096745d8607fa9",
+      "0xbed53c81eca488b9",
+      "0xbef39a6a48da34c6",
+      "0xbf250739a7634885",
+      "0xbf7e13a80c912ac0",
+      "0xbf849410f6da589c",
+      "0xbf8a020104845660",
+      "0xbf96b920fa2fccc0",
+      "0xbf98c1917c896f20",
+      "0xbfa2fad2f225db4c",
+      "0xbfa681043bf6a8a8",
+      "0xbfa91c72d87e419b",
+      "0xbfae5a30219a2670",
+      "0xbfb0a6832ba43855",
+      "0xbfb0df57c24e93f0",
+      "0xbfb3ac36dd3f0936",
+      "0xbfb85c008e1da430",
+      "0xbfba9601136a212e",
+      "0xbfbe11a589e11b50",
+      "0xbfc5792cc866467a",
+      "0xbfcac601bef6ee1c",
+      "0xbfcc1e4cf3a33a9c",
+      "0xbfccabc2b42559b4",
+      "0xbfce389b5f280e28",
+      "0xbfced94a76bfb664",
+      "0xbfcf283e8ee4c19e",
+      "0xbfd261d271e7936a",
+      "0xbfd2b6dd52ee7522",
+      "0xbfd43361473e7ac8",
+      "0xbfd46fbd8ebe77bd",
+      "0xbfd859cb0d8722a8",
+      "0xbfd995eadc4dba16",
+      "0xbfd9b6da93d06bf4",
+      "0xbfdb4e9dff1a1b08",
+      "0xbfdc030e2c1024b7",
+      "0xbfdcd0ce37945cd4",
+      "0xbfdd61c554d5b02c",
+      "0xbfe0d5d0b5b45873",
+      "0xbfe22765c8ef849d",
+      "0xbfe23a63f0c905c9",
+      "0xbfe2f6ad43dd76d4",
+      "0xbfe479d140e7d120",
+      "0xbfe52651468713e3",
+      "0xbfe670378e51ae8a",
+      "0xbfe6b150468d185e",
+      "0xbfe87646745d492f",
+      "0xbfe943b397944d54",
+      "0xbfea160dc9a86ac4",
+      "0xbfee440400dfef3d",
+      "0xbfefbf7a56ead14e",
+      "0xbff2f6264651b978",
+      "0xbff322afd7d5812a",
+      "0xc00421fae12df800",
+      "0xc010521b1ba702c0",
+      "0xc01eb47449de6650",
+      "0xc022306f52dc7e00",
+      "0xc02965a1e4a38760",
+      "0xc0303807a34e05c4",
+      "0xc03d931d638f2ed8",
+      "0xc041c63d7d0cfdc0",
+      "0xc045f6874ebcef22",
+      "0xc047ad32e3f62de6",
+      "0xc0493b153f348d46",
+      "0xc04a28ba78a046dc",
+      "0xc04b71fd913af3b8",
+      "0xc04bcf1fa121a81a",
+      "0xc04c4f5d03e59188",
+      "0xc05003d854dd553f",
+      "0xc05047f2e829adef",
+      "0xc05164147d0e25c2",
+      "0xc0516686656b0c66",
+      "0xc051c147359ed5ed",
+      "0xc053e25e17a6a1e0",
+      "0xc057eec6dd1f1835",
+      "0xc058433a900cf4c8",
+      "0xc05930a94b4eaf69",
+      "0xc05a708625164577",
+      "0xc05b19818931d104",
+      "0xc05c01cddead7c8e",
+      "0xc05c9867d1313387",
+      "0xc05cc915c3f7f9d4",
+      "0xc05e617a86741ecc",
+      "0xc05fe72505b2eace",
+      "0xc060670ab85fbdd1",
+      "0xc060c9f1f6c634bc",
+      "0xc06142a61d41d8b1",
+      "0xc0639026b05e9ede",
+      "0xc064025a865015a9",
+      "0xc0645788e0a9ce28",
+      "0xc064a593de054e26",
+      "0xc0657083683bad4a",
+      "0xc0661057838c7090",
+      "0xc068cdd492db0bac",
+      "0xc069361a009d5b8b",
+      "0xc0698274efbf6671",
+      "0xc06a46b470a082ca",
+      "0xc06d10191e2a1b4a",
+      "0xc07a221f6d5104bb",
+      "0xc153fd29e2e70f27",
+      "0xc1efd342d2ea54d2",
+      "0xc255cae7ae8e76b9",
+      "0xc3978f0514d703d8",
+      "0xc41e073088d476ca",
+      "0xc427a8e78e9b13d6",
+      "0xc4a286676cd1345b",
+      "0xc727f5457e2e2ef7",
+      "0xc816e49552c04671",
+      "0xc89b87f933d15b6b",
+      "0xc98e2742c91fe466",
+      "0xca34651d2b4f4bec",
+      "0xca7e1ec38f2cc346",
+      "0xca97830c0ace00b5",
+      "0xcadcfd956d4780ee",
+      "0xcbb460034a5842b6",
+      "0xcca5b0bf23098b78",
+      "0xcca9b1f032fcd36d",
+      "0xccb14008fdeacdad",
+      "0xcd71fea4d64272e5",
+      "0xce0770c4c3132a95",
+      "0xceddf97909f39cc2",
+      "0xd0a3f4116637ffa9",
+      "0xd1b75aa66dddf701",
+      "0xd21096c14a8c4716",
+      "0xd2815e168872ddbe",
+      "0xd284f78a1bd3e9cc",
+      "0xd28a2a68121850cb",
+      "0xd2964fe78998cd7b",
+      "0xd2e26cc1b8526a51",
+      "0xd3786b9aba67eaf5",
+      "0xd45c5569084aa202",
+      "0xd5e245579161abdd",
+      "0xd65ad88b6f24e5fb",
+      "0xd76ecbef996f5528",
+      "0xd96a1ad54d112205",
+      "0xd9eba46ded6fad57",
+      "0xda2ba729ce60f9a2",
+      "0xda40d593f0967231",
+      "0xdc48eaa909d3040b",
+      "0xdf17f3c54c7f9bb5",
+      "0xdff140390887b2c6",
+      "0xe1a653e38bf800cd",
+      "0xe203ca3554d4e7b2",
+      "0xe2549291bf6cdc48",
+      "0xe2c51a162b513704",
+      "0xe32ad3a0c33396be",
+      "0xe39512a32c60014d",
+      "0xe3b4a95ca8f48eb9",
+      "0xe3db8493327dd2c8",
+      "0xe44db04bba11dd59",
+      "0xe5d328d228d18c5c",
+      "0xe617b0536472610f",
+      "0xe69dd5aec862f948",
+      "0xe72d30b20a7567c9",
+      "0xe7802342145a0656",
+      "0xebd55a99f2eeef6d",
+      "0xec3bb7d9fe7074da",
+      "0xecd488d98b8a7591",
+      "0xed00351ba98ce2b2",
+      "0xedef01f6f88a9da2",
+      "0xee7b1ba1ff057266",
+      "0xeeee96e90e9570cf",
+      "0xefb0cd7fd100b03e",
+      "0xf091c04b506c8f50",
+      "0xf109017d736034b8",
+      "0xf12761832950053a",
+      "0xf3f809c90f375ab3",
+      "0xf609e1a9add80063",
+      "0xf721ebd853fe507b",
+      "0xf796b7ffcd71d860",
+      "0xf7e2c952a072b4a7",
+      "0xf9d1e61662f861d8",
+      "0xfcb714ef7f2397fd",
+      "0xfd21bcc9828a887d",
+      "0x3108837490f9fd840a44e70590173c7f95340872f60eaa13482b4ecb8fb0a8",
+      "0x82f04a131becec289fb0d93bda9442cf26a11e560c749a05d0eddf99df33d8f",
+      "0xe66edd80a61ecef2f89f9b4291f2dc59c58f2099f21d4ba1e3b81fd13ec1f7c",
+      "0x1362465d6ffe31bfc33a924a9406663e313cf417c35d8d4461e66db845d39903",
+      "0x17d61f1c00e5d16c399a8e341e9feaea32b275e5426a4375394e74cc855affcc",
+      "0x18952be1a43822726d7920df20bc2e1a2be06c1f907a0dc80e7469e50be3ce4b",
+      "0x203581755eca174027d8d64b53dcb54d320fd2195fae1c7fbf152dfe83c69855",
+      "0x2a345aa3f8a0419fc11cd031c98c49d171f3dd2151d9c06fd327e9254e1db962",
+      "0x36794583b610f71be4a51d19a01af5bfe05b673c31d86f3f0c3310c3e4261fce",
+      "0x37c73b71ae24c2a263b46ca3399d91b4de4fe97f1eb4dfe608475101f69e590e",
+      "0x38b23b92766de4c8989e563ea11b3b3aab1965a546a84c6780a715df3b3df0b1",
+      "0x4a0d5b57e13cf40c56cddb4ee2c10f50ab7aff755e24c61a687855663713f5b5",
+      "0x4c7dc283fabb2c4a4971b65cd7806b4e48d76440e3fbee3e4eef58d2269470e2",
+      "0x4fbcf97cd52e5a670e14f706d1c01518fdd7f89d89515bc71b592912b9af59eb",
+      "0x5084a87375896c7103ba17b57264f20de35d9e6eb545314680ad5e074dfc33ad",
+      "0x521f97cd91656a41eebd88c365fa81626ca6d8ccf05e6c19c1cd9aba80784382",
+      "0x55abfa5aa9c648d15d2f46ea2dc9ad640e32247e130962cf87604029da9c6982",
+      "0x56d7e21a3dd131a46f7541b0d4fc85faf7996a325f090d5f18d53d099cade7b8",
+      "0x5bbb0a5a29213be7a45e008e31a64e4f3d5e5d84909c6e4bfc90cab43eb14e95",
+      "0x5d7f31e88057c2e06c44e817ebf4b9ec833971e5afa709e75fedf419a0e5d1fb",
+      "0x69e0f4c123a0a888f182a7780f53ad0f9d97d0492d005d205244e2e3b8e079c4",
+      "0x6b151e995a5743f834635c5535e2596ab20d88053454d64c86fb6a700add782b",
+      "0x6b273359fbc21c34f58a546c86a88b21c2bd307797e3c4959c5eccc8e326e4fd",
+      "0x6dd498f93b24ea9493acfed9a8e4069a5b3e6e7c3b426fe43de472010c2636a6",
+      "0x6fb8e9b6e2e57ad9a4da10357ad1cd81a21361382a29155a072abe265006c27c",
+      "0x70f7093200501942444ac597e61579d75d2a9185f51ddce457e0cc50d28dbf37",
+      "0x7a3dc84c82a0a2c7955ea5d6d4d7adef8a11fe4cddd2ba293752d71fd06ddf8f",
+      "0x7c7a189f987bf1e87a0598cac4f802fca3178613e8519ec390b880e401e4312c",
+      "0x7cf13e581c17179bf2c6152f7861b99c53fcd9b1dc646bfd9a9fad6f2031638e",
+      "0x7f12ef4506339e9ccc3c665a5ae8c1878fcf241b7dcbdc4209a95a164622e204",
+      "0x7f16d855c0e049505aa951db48ebd2427ee39ba812dd2e41a2e5492096673db5",
+      "0x7f5cf3453c81fc1b11767f9c3495712ff3962f3e6f1902c2e2768c679cb5eb01",
+      "0x7fc88c81e4f2a1c79eab4ac335d45cf6124be4cbf2350c4626bb6c23b43bad6f",
+      "0x882c7b9547f87eeb407f34b466c072265f4742e0cdb84bb990149fb0c16e4e9e",
+      "0x8b834c15a096e3e2ba8ecaea21627117e104bb37f844f69648c0fdf9406d3457",
+      "0x95c22c676296e4cca545427249c75a2cc99e4e3a43abd24869c9a09ca5960f8a",
+      "0x968abc5270909ae342e06322a85fa4a519f98dd16a87917621996aa5237691e2",
+      "0x988fa7e1fa02207cf5a75d04fa6c321ec78fc2cb862d85be151f71df224905ff",
+      "0xa15616486bba97e54b2e6d0b91523af26a969720324f5e9f820d716b7d4cd020",
+      "0xadbf95ffe328567a552743028b0f8b204fe6ca747fdbce42ede267a8eee7bf0e",
+      "0xae7e4b937e44eddb5693b29148b6bd03f65417f7a363b60829a562ca2370ec0d",
+      "0xafc587b3c960ca50ba824520a3370fda7756be5f60ef6e06500fecf1ece4beb9",
+      "0xb0135869a031d80d579dead0d010120b12fd1c334be85174e0474cd359bbdc95",
+      "0xb7bd8fb366c9ae47dab5fa448153dd537098743a48fe33af35de8ddd4d584c25",
+      "0xb96b34a0a5fa29b0c30f5f8ba1168629b2a8bf6bf75dace7c28321193d9b178c",
+      "0xcdab48977fb18d3c9c46d1e9405c6342cdc58a500013fe856ffb142d31cef6dc",
+      "0xd485462e33dfa28a96e4596012f5a5027443f2d7992490ddc9c2bb65e1f465f7",
+      "0xd58c15acfea8309d55d345531d501edf65f867e52a6cc20d50f364f311a68efd",
+      "0xde2db170b595fcceb0e584c552a47dedb701aa4fcd32f6d1e368a3419259d872",
+      "0xde37ad470f34709af38b247150babc6825575a6b954374f5941831a2b96796ec",
+      "0xe1b2c47ad2308dbc6456a0995ec9a7572964bb4650e9f7034c427b1e4185d620",
+      "0xe29887e5f8aea85d6b775ab8dc95df16a5a0ad2979ace2b539058a0040aca67d",
+      "0xf36f93da75d41f35844da6b6169ba99088ef0c8d3d1990beea4960a1b23c25db",
+      "0xf4362bafb766d5a5dfc78b0fcd91607544a4bb6a540ca076f55dd74643a453c2",
+      "0xf4bcfd7913601331aff2ff6f771f05806cd4983381a217fc02b7e4f2c497f788",
+      "0xf5a6f1d364517c39dd5f1d0fdbeeb0cfb7a73a26e5e17a17f91e7b7f16e0ef36",
+      "0xfb56077944020a3562a3dc2320e37b2149601b297ded3147c8c8c31dcd9b9179",
+      "0xfecd05a4e7f537281200ed720a095da2d5d4db14867a37d2627ebdaa2d2ad1e6"
+    ],
+    "version": "historical-art-seed-inventory-v1"
+  },
+  "identity_sha256": "e0c5a71c3661c9d08456cbaa835c4b188903094ea7ae74d97e95649b088f049e",
+  "numeric_contract": "Pinned native production exporter; cross-architecture identity requires separate verification.",
+  "projection": {
+    "aspect": 1.3333333333333333,
+    "fill": 0.78,
+    "rotation_degrees": 0.0
+  },
+  "seeds": [
+    "0xa709b7f63f68f9f92b92af3a3e8d4e578d3486296e165c7cba7d5b85dce8cb81",
+    "0x21eb3506af1b4588ff6f215ea6b3addb280056657e0263e0c1e27823b8e5018c",
+    "0x7c64b90932c87725a0a3eefbff9239900f4d91daf3f108d593a1c9ec0cd498c1",
+    "0xa4c9e168298657c97ae754b35aa34b5173799e219a02cc9a11a07048f386b2b2",
+    "0x00dbadbd782a9f2a7353d942595566f2045376f4d30a05298304b9646e2d1bed",
+    "0xaa9a0a63a684942220a6332d3e2e124dead7de2e58fa262ea24ca24cb4e741fd",
+    "0x94292c6a7754b03272585c08815ebb51cdde38a485927ed70cf07b9348c31896",
+    "0x6f79bc0c0b2e24c93e283b10cf640f250823a6e9c0cd112f5c371f579400557d",
+    "0x50cb30c7967de4a21edb63c7986a92e71e3a9729c711d43614f6c9bb10bdf7a2",
+    "0x7a8965a69e38d74eb98a770752738f220d117baf773ae363d10423f6f7da7e75"
+  ],
+  "selection_policy": "All ten derived seeds are retained. Production candidate search is fixed for every seed. No visual seed filtering or rerolling.",
+  "settings": {
+    "chaos_weight": null,
+    "equil_weight": null,
+    "generation_record": null,
+    "initial_conditions": null,
+    "sample_stride": 1,
+    "selection_height": 1242,
+    "selection_width": 1920,
+    "sims": 30000,
+    "steps": 1000000
+  },
+  "version": "fresh-filament-cohort-v1"
+}

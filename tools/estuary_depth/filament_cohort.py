@@ -344,19 +344,36 @@ def prepare_cohort(output, exporter, historical_inventory):
     output.mkdir(parents=True, exist_ok=True)
     if (output / "plan.json").exists():
         require(read(output / "plan.json") == plan, "Existing cohort has different inputs")
-        return plan
-    require(
-        all(path.name == "historical-seeds.json" for path in output.iterdir()),
-        "Use a new cohort archive",
-    )
+    else:
+        require(
+            all(path.name == "historical-seeds.json" for path in output.iterdir()),
+            "Use a new cohort archive",
+        )
+        # Establish ownership before creating any derived inputs. An interrupted
+        # preparation can then reconstruct missing files from this exact plan.
+        write(output / "plan.json", plan)
     for name in ("tools", "configs", "logs", "orbits", "sources"):
-        (output / name).mkdir()
-    shutil.copy2(exporter, output / generator["path"])
-    write(output / "historical-seeds.json", history)
-    write(output / "plan.json", plan)
-    write(output / "seeds.json", plan["seeds"])
+        (output / name).mkdir(exist_ok=True)
+    binary = output / generator["path"]
+    fingerprint = {key: generator[key] for key in ("sha256", "bytes")}
+    if not binary.exists():
+        temporary = binary.with_name(f"{binary.name}.partial-{time.time_ns()}")
+        shutil.copy2(exporter, temporary)
+        require(artifact(temporary) == fingerprint, "Exporter changed during archival")
+        temporary.replace(binary)
+    checked(output, generator["path"], fingerprint)
+
+    def ensure_input(name, value):
+        path = output / name
+        if path.exists():
+            require(read(path) == value, f"Archived cohort input differs: {name}")
+        else:
+            write(path, value)
+
+    ensure_input("historical-seeds.json", history)
+    ensure_input("seeds.json", plan["seeds"])
     for seed in plan["seeds"]:
-        write(output / f"configs/{seed}.json", {"seed": seed, **SETTINGS})
+        ensure_input(f"configs/{seed}.json", {"seed": seed, **SETTINGS})
     return plan
 
 
@@ -381,7 +398,7 @@ def generate_cohort(output):
         def manifest():
             value = {
                 "version": VERSION,
-                "complete": len(results) == COUNT and not failures,
+                "complete": False,
                 "plan": plan,
                 "seeds": plan["seeds"],
                 "sources": [results[seed] for seed in plan["seeds"] if seed in results],
@@ -469,9 +486,15 @@ def generate_cohort(output):
                 manifest()
         completed = manifest()
         require(
-            completed["complete"], "Some source exports failed; preserve all logs and seed choices"
+            len(results) == COUNT and not failures,
+            "Some source exports failed; preserve all logs and seed choices",
         )
-        verify_cohort(completed)
+        # Cached per-source receipts still require actual source/config/log
+        # verification. Publish completion only after that verification succeeds.
+        completed["complete"] = True
+        completed["identity_sha256"] = _identity(completed)
+        verify_cohort(completed, source_root=output)
+        write(output / "cohort.json", completed)
         return completed
 
 

@@ -8,10 +8,15 @@ Encoded image/movie bytes are fixtures; the codec suites verify real encoding.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
+import os
 import shutil
+import signal
+import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -27,7 +32,7 @@ from tools.estuary_depth import experiment, film
 from tools.estuary_depth import filament_film_batch as batch
 from tools.estuary_depth.filament_motion import FPS, MOTION_FRAMES, make_formation_recipe
 from tools.estuary_depth.filament_studies import REFERENCE_SEED
-from tools.estuary_depth.render import motion_angles
+from tools.estuary_depth.render import camera_pose, motion_angles
 from tools.estuary_studio.common import artifact, read, write
 
 
@@ -203,7 +208,16 @@ class FilmBatchTests(unittest.TestCase):
         camera = []
         for index in range(frames):
             tilt, azimuth = motion_angles(recipe["camera"], index, frames)
-            camera.append({"frame": index, "tilt_degrees": tilt, "azimuth_degrees": azimuth})
+            camera.append(
+                {
+                    "frame": index,
+                    "tilt_degrees": tilt,
+                    "azimuth_degrees": azimuth,
+                    "matrix_world": camera_pose(
+                        tilt, azimuth, [*recipe["camera"]["target"], 0.001]
+                    ).tolist(),
+                }
+            )
         write(target / "camera.json", camera)
         for name in ("render.png", "render.exr", "scene.blend"):
             (target / name).write_bytes(name.encode())
@@ -366,6 +380,66 @@ class FilmBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "paired photograph"):
             batch.verify_case(self.folder)
 
+    def test_all_motion_poses_are_checked_after_receipt_hashes_are_rebound(self):
+        target = self.folder / "motion/00-painting"
+        original = read(target / "camera.json")
+        bundle = read(self.material / "bundle/manifest.json")
+        for field in ("angle", "frame", "matrix", "target"):
+            camera = copy.deepcopy(original)
+            pose = camera[len(camera) // 2]
+            if field == "angle":
+                pose["tilt_degrees"] += 1
+            elif field == "frame":
+                pose["frame"] += 1
+            elif field == "matrix":
+                pose["matrix_world"][0][0] += 0.01
+            else:
+                pose["matrix_world"][2][3] += 0.001
+            write(target / "camera.json", camera)
+            receipt = read(target / "receipt.json")
+            receipt["artifacts"]["camera.json"] = artifact(target / "camera.json")
+            write(target / "receipt.json", receipt)
+            result = read(target / "experiment-result.json")
+            result["render_receipt_sha256"] = artifact(target / "receipt.json")["sha256"]
+            write(target / "experiment-result.json", result)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Camera"):
+                batch._verify_photograph(
+                    self.plan, self.plan["cases"][0], target, bundle, motion=True
+                )
+
+    def test_fixed_motion_target_must_match_the_paired_still(self):
+        target = self.folder / "motion/00-painting"
+        camera = read(target / "camera.json")
+        for pose in camera:
+            pose["matrix_world"][2][3] += 0.01
+        # This is a valid fixed-height camera path by itself. The independently
+        # certified still is what exposes its incorrect target height.
+        batch.validate_camera_ledger(
+            camera, self.plan["cases"][0]["motion_recipe"]["camera"], MOTION_FRAMES
+        )
+        write(target / "camera.json", camera)
+        receipt = read(target / "receipt.json")
+        receipt["artifacts"]["camera.json"] = artifact(target / "camera.json")
+        write(target / "receipt.json", receipt)
+        result = read(target / "experiment-result.json")
+        result["render_receipt_sha256"] = artifact(target / "receipt.json")["sha256"]
+        write(target / "experiment-result.json", result)
+        with self.assertRaisesRegex(ValueError, "paired photograph matrix"):
+            batch.verify_case(self.folder)
+
+    def test_pure_camera_verifier_rejects_nonfinite_and_allows_only_roundoff(self):
+        recipe = self.plan["cases"][0]["photo_recipe"]["camera"]
+        original = read(self.folder / "photographs/00-painting/camera.json")
+        rounded = copy.deepcopy(original)
+        rounded[0]["tilt_degrees"] += 1e-12
+        rounded[0]["matrix_world"][0][0] += 1e-12
+        batch.validate_camera_ledger(rounded, recipe, 1)
+        for invalid in (float("nan"), float("inf"), True, "0"):
+            altered = copy.deepcopy(original)
+            altered[0]["matrix_world"][0][0] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "matrix"):
+                batch.validate_camera_ledger(altered, recipe, 1)
+
     def test_changed_tool_fails_before_creating_a_batch(self):
         self.tools["blender"].write_bytes(b"Changed executable")
         target = self.root / "unstarted"
@@ -497,6 +571,56 @@ class FilmBatchTests(unittest.TestCase):
         old = list(self.material.glob("paint.incomplete-*"))
         self.assertEqual(len(old), 1)
         self.assertTrue((old[0] / "final-state.npy").exists())
+
+
+class OwnedProcessTests(unittest.TestCase):
+    def test_cancellation_allows_nested_detached_child_cleanup_to_finish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pidfile = root / "nested.pid"
+            nested = (
+                "import os,signal,time; from pathlib import Path; "
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                f"Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            )
+            wrapper = (
+                "import signal,sys; from tools.estuary_depth.experiment import capture; "
+                "signal.signal(signal.SIGTERM,lambda *_: "
+                "(_ for _ in ()).throw(KeyboardInterrupt())); "
+                f"capture([sys.executable,'-c',{nested!r}])"
+            )
+            processes, errors = batch._Processes(), []
+
+            def run():
+                try:
+                    processes.run([sys.executable, "-c", wrapper], root / "stage.log")
+                except Exception as error:
+                    errors.append(error)
+
+            worker = threading.Thread(target=run)
+            worker.start()
+            try:
+                deadline = time.monotonic() + 5
+                while not pidfile.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(pidfile.exists(), "Nested process did not start")
+                nested_pid = int(pidfile.read_text())
+                # Uses the real 8-second encoder shutdown path. Equal wrapper
+                # and child deadlines orphan this detached process.
+                processes.cancel()
+                worker.join(timeout=2)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], ValueError)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(nested_pid, 0)
+                self.assertEqual(processes.children, set())
+            finally:
+                processes.cancel()
+                worker.join(timeout=2)
+                if pidfile.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(int(pidfile.read_text()), signal.SIGKILL)
 
 
 if __name__ == "__main__":

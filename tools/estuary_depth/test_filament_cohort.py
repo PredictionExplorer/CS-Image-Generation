@@ -226,6 +226,84 @@ class CohortArchiveTests(unittest.TestCase):
         self.assertEqual(failed["seeds"], self.plan["seeds"])
         self.assertEqual({r["seed"] for r in failed["failures"]}, set(self.plan["seeds"]))
 
+    def test_interrupted_preparation_resumes_missing_configs_from_the_owned_plan(self):
+        output = self.root / "interrupted"
+        seed = self.plan["seeds"][4]
+        original_write = cohort.write
+
+        def interrupted(path, value):
+            if Path(path).resolve() == (output / f"configs/{seed}.json").resolve():
+                raise OSError("Interrupted input preparation")
+            original_write(path, value)
+
+        with (
+            patch.object(cohort, "write", side_effect=interrupted),
+            self.assertRaisesRegex(OSError, "Interrupted input preparation"),
+        ):
+            cohort.prepare_cohort(output, self.binary, self.history)
+        self.assertTrue((output / "plan.json").is_file())
+        self.assertFalse((output / f"configs/{seed}.json").exists())
+        before = artifact(output / f"configs/{self.plan['seeds'][0]}.json")
+        restored = cohort.prepare_cohort(output, self.binary, self.history)
+        self.assertEqual(restored, self.plan)
+        self.assertEqual(artifact(output / f"configs/{self.plan['seeds'][0]}.json"), before)
+        for seed in restored["seeds"]:
+            self.assertEqual(
+                read(output / f"configs/{seed}.json"), {"seed": seed, **cohort.SETTINGS}
+            )
+
+    def test_preparation_repairs_missing_inputs_but_preserves_changed_existing_inputs(self):
+        seed = self.plan["seeds"][0]
+        config = self.output / f"configs/{seed}.json"
+        binary = self.output / self.plan["generator"]["path"]
+        orbit_before = artifact(self.output / self.rows[0]["path"])
+        config.unlink()
+        binary.unlink()
+        (self.output / "seeds.json").unlink()
+        self.assertEqual(cohort.prepare_cohort(self.output, self.binary, self.history), self.plan)
+        self.assertEqual(read(config), {"seed": seed, **cohort.SETTINGS})
+        self.assertEqual(artifact(binary), artifact(self.binary))
+        self.assertEqual(artifact(self.output / self.rows[0]["path"]), orbit_before)
+        write(config, {"seed": seed, **cohort.SETTINGS, "steps": 123})
+        changed = artifact(config)
+        with self.assertRaisesRegex(ValueError, "Archived cohort input differs"):
+            cohort.prepare_cohort(self.output, self.binary, self.history)
+        self.assertEqual(artifact(config), changed)
+
+    def test_cached_exports_recheck_config_and_logs_before_publishing_completion(self):
+        for row in self.rows:
+            write(self.output / f"sources/{row['seed']}.json", row)
+        original_run = cohort.subprocess.run
+        binary = str((self.output / self.plan["generator"]["path"]).resolve())
+
+        def no_exports(command, *args, **kwargs):
+            self.assertNotEqual(command[0], binary, "Cached source must not be re-exported")
+            return original_run(command, *args, **kwargs)
+
+        for key in ("config_artifact", "log_artifact"):
+            path = self.output / self.rows[0][key]["path"]
+            original = path.read_bytes()
+            path.write_bytes(original + b"changed")
+            with (
+                self.subTest(artifact=key),
+                patch("tools.estuary.source.Source.read", side_effect=self.source),
+                patch.object(cohort.subprocess, "run", side_effect=no_exports),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(ValueError, "changed|differs"),
+            ):
+                cohort.generate_cohort(self.output)
+            self.assertFalse(read(self.output / "cohort.json")["complete"])
+            path.write_bytes(original)
+        with (
+            patch("tools.estuary.source.Source.read", side_effect=self.source) as reader,
+            patch.object(cohort.subprocess, "run", side_effect=no_exports),
+            redirect_stdout(io.StringIO()),
+        ):
+            completed = cohort.generate_cohort(self.output)
+        self.assertTrue(completed["complete"])
+        self.assertEqual(reader.call_count, 10)
+        self.assertEqual(read(self.output / "cohort.json"), completed)
+
 
 if __name__ == "__main__":
     unittest.main()
