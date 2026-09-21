@@ -13,7 +13,12 @@ from typing import Any
 from tools.estuary.initial_patterns import PATTERNS
 from tools.estuary.initial_patterns import VERSION as PATTERN_VERSION
 from tools.estuary.recipe import validate_recipe
-from tools.estuary_depth.filament_motion import FILM_RESOLUTION, FORMATION_FRAMES, FPS
+from tools.estuary_depth.filament_motion import (
+    FILM_RESOLUTION,
+    FORMATION_FRAMES,
+    FPS,
+    MOTION_SAMPLES,
+)
 from tools.estuary_depth.filament_studies import make_depth_recipe, make_paint_recipe
 from tools.estuary_depth.pattern_palette import make_palette
 from tools.estuary_depth.render import recipe as validate_depth_recipe
@@ -91,7 +96,7 @@ def make_photo_recipe(seed: str | int, option: str, *, master: bool = False) -> 
 
 def make_motion_recipe(seed: str | int, option: str) -> dict[str, Any]:
     result = make_photo_recipe(seed, option)
-    result["render"].update(resolution=list(FILM_RESOLUTION), samples=32)
+    result["render"].update(resolution=list(FILM_RESOLUTION), samples=MOTION_SAMPLES)
     camera = result["camera"]
     tilt, azimuth = camera["tilt_degrees"], camera["azimuth_degrees"]
     camera.update(orbit_start=[max(0, tilt - 4), azimuth - 4], orbit_end=[tilt, azimuth])

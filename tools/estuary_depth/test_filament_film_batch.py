@@ -355,6 +355,41 @@ class FilmBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Backfill final paint differs"):
             batch.verify_case(self.folder)
 
+    def test_master_quality_changes_only_static_photo_quality_and_preserves_default_identity(self):
+        for settings in (
+            {"options": ["control", "light-flat"]},
+            {"study_family": "pattern-studies-v1", "options": ["lacuna-banks", "folded-sash"]},
+        ):
+            with self.subTest(family=settings.get("study_family")):
+                original = self.make_plan(**settings)
+                self.assertEqual(original, self.make_plan(**settings, master_quality=False))
+                self.assertNotIn("master_quality", original)
+                expected = copy.deepcopy(original)
+                for case in expected["cases"]:
+                    case["master"] = True
+                    case["photo_recipe"]["render"].update(resolution=[3840, 2880], samples=256)
+                expected["identity_sha256"] = batch._sha(
+                    {key: value for key, value in expected.items() if key != "identity_sha256"}
+                )
+                self.assertEqual(self.make_plan(**settings, master_quality=True), expected)
+
+    def test_master_quality_rejects_conflicting_references_and_non_boolean_values(self):
+        case_id = self.plan["cases"][0]["id"]
+        reference = {case_id: {"final_state_sha256": "a" * 64, "master": False}}
+        with self.assertRaisesRegex(ValueError, "conflicts with the prior reference"):
+            self.make_plan(references=reference, master_quality=True)
+        reference[case_id]["master"] = True
+        for quality in (False, True):
+            result = self.make_plan(references=reference, master_quality=quality)
+            self.assertIs(result["cases"][0]["master"], True)
+            self.assertEqual(result["cases"][0]["reference"], reference[case_id])
+        for quality in (None, 0, 1, "true"):
+            with (
+                self.subTest(master_quality=quality),
+                self.assertRaisesRegex(ValueError, "boolean"),
+            ):
+                self.make_plan(options=["control"], master_quality=quality)
+
     def test_plan_tampering_and_unused_or_duplicate_selections_fail(self):
         plan = copy.deepcopy(self.plan)
         plan["cases"][0]["motion_recipe"]["render"]["samples"] = 1

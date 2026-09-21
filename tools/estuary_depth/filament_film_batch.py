@@ -242,8 +242,10 @@ def make_plan(
     case_ids=None,
     references=None,
     study_family=None,
+    master_quality=False,
 ):
     """Freeze a cross-product or explicit case selection; references constrain backfills."""
+    require(type(master_quality) is bool, "master_quality must be boolean")
     catalog = study_catalog(study_family)
     cohort = copy.deepcopy(cohort)
     rows = _sources(cohort, cohort_kind, source_root)
@@ -267,9 +269,13 @@ def make_plan(
         spec, case_id = catalog.options[option], f"{seed}-{option}"
         material_id = f"{seed}-{spec.material_variant}"
         reference = references.get(case_id)
-        master = reference.get("master", False) if reference else False
+        master = reference.get("master", False) if reference is not None else master_quality
         if reference is not None:
             reference.setdefault("master", False)
+            require(
+                not master_quality or master is True,
+                "Master quality conflicts with the prior reference's photo quality",
+            )
         material = materials.setdefault(
             material_id,
             {
