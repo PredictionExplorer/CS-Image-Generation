@@ -61,6 +61,7 @@ STAGE_TIMEOUT = 3 * 3600
 # grace. Give that cleanup time to finish before killing the wrapper itself.
 WRAPPER_STOP_GRACE = 20
 PATTERN_STUDY_FAMILY = "pattern-studies-v1"
+PATTERN_STUDY_FAMILY_V2 = "pattern-studies-v2"
 
 
 @dataclass(frozen=True)
@@ -78,8 +79,11 @@ def study_catalog(study_family=None):
     """Select an explicit versioned family without changing the legacy default."""
     if study_family is None:
         return StudyCatalog(OPTIONS, make_formation_recipe, make_photo_recipe, make_motion_recipe)
-    require(study_family == PATTERN_STUDY_FAMILY, "Unknown study family")
-    from tools.estuary_depth import pattern_studies
+    require(study_family in (PATTERN_STUDY_FAMILY, PATTERN_STUDY_FAMILY_V2), "Unknown study family")
+    if study_family == PATTERN_STUDY_FAMILY:
+        from tools.estuary_depth import pattern_studies
+    else:
+        from tools.estuary_depth import pattern_studies_v2 as pattern_studies
 
     return StudyCatalog(
         pattern_studies.OPTIONS,

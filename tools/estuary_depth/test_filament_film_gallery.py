@@ -25,7 +25,12 @@ from .render import camera_pose
 class FilmGalleryTests(unittest.TestCase):
     def setUp(self):
         if getattr(self, "study_family", None) is not None:
-            from . import pattern_studies
+            if self.study_family == "pattern-studies-v1":
+                from . import pattern_studies
+            elif self.study_family == "pattern-studies-v2":
+                from . import pattern_studies_v2 as pattern_studies
+            else:
+                raise ValueError("Unknown pattern fixture family")
 
             original = pattern_studies.make_formation_recipe
 
@@ -523,6 +528,23 @@ class PatternFilmGalleryTests(unittest.TestCase):
         other = self.root / "legacy"
         other.mkdir()
         write(other / "plan.json", self.fixture.make_plan(options=["control"]))
+        with self.assertRaisesRegex(ValueError, "Mixed study families"):
+            gallery.publish_review(self.output, [self.fixture.output, other])
+        self.assertFalse(self.output.exists())
+
+
+class PatternFilmGalleryV2Tests(PatternFilmGalleryTests):
+    study_family = "pattern-studies-v2"
+
+    def test_pattern_versions_require_separate_publications(self):
+        other = self.root / "version-one"
+        other.mkdir()
+        write(
+            other / "plan.json",
+            self.fixture.make_plan(
+                study_family="pattern-studies-v1", options=["lacuna-banks", "folded-sash"]
+            ),
+        )
         with self.assertRaisesRegex(ValueError, "Mixed study families"):
             gallery.publish_review(self.output, [self.fixture.output, other])
         self.assertFalse(self.output.exists())

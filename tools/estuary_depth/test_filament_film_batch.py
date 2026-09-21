@@ -359,6 +359,7 @@ class FilmBatchTests(unittest.TestCase):
         for settings in (
             {"options": ["control", "light-flat"]},
             {"study_family": "pattern-studies-v1", "options": ["lacuna-banks", "folded-sash"]},
+            {"study_family": "pattern-studies-v2", "options": ["lacuna-banks", "folded-sash"]},
         ):
             with self.subTest(family=settings.get("study_family")):
                 original = self.make_plan(**settings)
@@ -405,25 +406,27 @@ class FilmBatchTests(unittest.TestCase):
                 self.make_plan(options=options)
 
     def test_pattern_family_dispatch_is_opt_in_and_binds_its_initializer(self):
-        plan = self.make_plan(
-            study_family="pattern-studies-v1", options=["lacuna-banks", "folded-sash"]
-        )
         self.assertNotIn("study_family", self.plan)
         self.assertNotIn("paint_runtime_extensions", self.plan)
-        self.assertEqual(plan["study_family"], "pattern-studies-v1")
-        self.assertEqual(plan["paint_runtime_extensions"], ["initial_patterns.py"])
-        self.assertEqual(len(plan["materials"]), 2)
-        catalog = batch.resolve_catalog(plan)
-        self.assertEqual(catalog.reference_option, "lacuna-banks")
-        self.assertEqual(catalog.default_option, "folded-sash")
-        for material in plan["materials"].values():
-            recipe = material["recipe"]
-            self.assertEqual(recipe["simulation"]["initial_pattern"], "composition")
-            self.assertEqual(code_identity(recipe), batch._runtime_contract(plan)["paint"])
+        self.assertIs(batch.study_catalog().formation_recipe, batch.make_formation_recipe)
+        for family in ("pattern-studies-v1", "pattern-studies-v2"):
+            with self.subTest(family=family):
+                plan = self.make_plan(study_family=family, options=["lacuna-banks", "folded-sash"])
+                self.assertEqual(plan["study_family"], family)
+                self.assertEqual(plan["paint_runtime_extensions"], ["initial_patterns.py"])
+                self.assertEqual(len(plan["materials"]), 2)
+                catalog = batch.resolve_catalog(plan)
+                self.assertEqual(catalog.reference_option, "lacuna-banks")
+                self.assertEqual(catalog.default_option, "folded-sash")
+                for material in plan["materials"].values():
+                    recipe = material["recipe"]
+                    self.assertEqual(recipe["simulation"]["initial_pattern"], "composition")
+                    self.assertEqual(code_identity(recipe), batch._runtime_contract(plan)["paint"])
         for family, extensions in (
             (None, []),
             ("unknown-v1", ["initial_patterns.py"]),
             ("pattern-studies-v1", []),
+            ("pattern-studies-v1", ["initial_patterns.py"]),
         ):
             changed = copy.deepcopy(plan)
             changed.update(study_family=family, paint_runtime_extensions=extensions)

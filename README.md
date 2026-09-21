@@ -83,6 +83,10 @@ See [paired films and fresh seed cohorts](tools/estuary_depth/FILAMENT_FILMS.md)
 for the durable batch pipeline and [the fine-fold experiments](tools/estuary_depth/FINE_FOLDS.md)
 for the reference reconstruction.
 
+[Starting paint studies](tools/estuary_depth/PATTERN_STUDIES.md) compare ten motifs
+and distinct seeded palettes across the same ten trajectories, with paired 4K
+photographs and full-trajectory films.
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
