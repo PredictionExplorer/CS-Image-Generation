@@ -219,7 +219,10 @@ class FilmTests(unittest.TestCase):
                         "-filter_threads",
                         "1",
                         "-vf",
-                        "scale=1:1",
+                        # Decode tagged YUV at native dimensions before sampling
+                        # these uniform frames. Scaling YUV straight to one pixel
+                        # changes the color conversion on FFmpeg 6.1.
+                        "format=rgb24,crop=1:1:0:0",
                         "-pix_fmt",
                         "rgb24",
                         "-f",
