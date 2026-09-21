@@ -103,3 +103,54 @@ inspection. Its copied provenance binds the batch plan, source, paint state,
 prepared maps, exact Cycles recipe and published images. Lighting comparisons
 require the exact same Control bundle. Verification works after the original
 server directories are unavailable.
+
+## Completed reference study
+
+The first review contains **21 finished photographs across three seeds**:
+
+- `0xbc53af1cd380`: all eleven material settings and four lighting comparisons.
+- `0xb7f327f9f722`: original bands, finer bands and three broad pools.
+- `0x808861c25b6c`: original bands, finer bands and three broad pools.
+
+The BC53 broad-pool photograph is 3840 × 2880 at 256 samples. The other review
+photographs are 2048 × 1536 at 128 samples. Material evolves at 6144 × 4608
+except for the two explicitly labeled coarse-grid diagnostics. The broad-pool
+master reuses its verified completed paint; it changes only photographic quality.
+
+**Visual assessment is subjective.** BC53 with finer starting bands is the
+closest new variation to the supplied reference, without a clear improvement
+over the original. Three broad pools is the strongest distinct alternative:
+crisp nested ribbons, open dark space, and a warmer oxide edge, with a heavier
+ivory sweep at the lower right. Calmer current is a useful compositional departure
+but creates a more closed, busier center. Stronger folding is not necessary to
+obtain the fine lines. Removing the two fine starter bands is a useful causal
+test rather than a clear aesthetic improvement.
+
+The immutable experiment root on the rendering server is
+`/home/user/estuary-depth/filament-studies`. The batches are `pilot-v1`,
+`material-v1`, `seed-variants-v1`, `grid-probes-v1`, `lighting-v1` and
+`masters-v1`; each retains its actual frozen source/renderer identities.
+The final portable publication is `review-v3`, also copied locally to
+`output/filament-studies/review-v3`. Both review servers use loopback port 8803.
+These are still-image experiments; no film is represented as completed.
+
+The earlier immutable `review-v1` remains verifiable. The final review opens
+with original folds beside three broad pools.
+Final publication SHA-256:
+`c1be818ba90699f2ffb59a67441a2b17bc945373625ab5368526467f6441e007`.
+The initial/final toggle, all three seed selections, full-size image links,
+linked detail view and focus view were checked in the browser. The prior RC1
+and choreography galleries remain separate.
+
+The verifier binds each paint archive and photograph to the renderer hashes
+recorded in its frozen plan, and checks preparation resolution, history and
+pigment-specific volumes. It compares archived dependencies with their plan,
+rather than requiring an older experiment to use today's renderer. Explicit
+legacy presentation support keeps the first portable publication verifiable.
+
+Qualification: the base GPU suite passed 93 tests; the confluence suite passed
+with 703 tests run and 15 expected skips. The final depth suite ran 111 tests,
+with six native-Blender cases exercised successfully in the pinned Blender
+runtime instead of ordinary Python. Repository Ruff checks and configured Mypy
+checks passed. Test logs are retained under the server experiment root and the
+local `output/filament-studies/qualification` directory.
