@@ -13,6 +13,16 @@ from .review_page import MATERIALS, document
 
 
 class ReviewPageTests(unittest.TestCase):
+    def test_reference_identity_is_explicit_validated_and_defaults_to_rc1(self):
+        self.assertEqual(MATERIALS.reference_variant, "rc1")
+        for reference in ("rc1", "reference", "folded-tide"):
+            page = document("Review", presentation=replace(MATERIALS, reference_variant=reference))
+            settings = json.loads(re.search(r"const presentation = (.*?);", page).group(1))
+            self.assertEqual(settings["reference_variant"], reference)
+        for value in (None, True, 1, "", "RC1", "ref_one", "../reference", "a" * 81):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                document("Review", presentation=replace(MATERIALS, reference_variant=value))
+
     def test_film_only_setting_is_strict_and_legacy_default_is_false(self):
         self.assertFalse(MATERIALS.film_only_selection)
         for enabled in (False, True):
@@ -23,12 +33,21 @@ class ReviewPageTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "boolean"):
                 document("Review", presentation=replace(MATERIALS, film_only_selection=value))
 
-    def data(self):
+    def data(self, *, reference_variant="rc1"):
         rows = []
         for seed, variants in (
-            ("A", {"rc1": True, "ovals": False, "compact": True, "ribbons": True, "common": True}),
-            ("B", {"rc1": True, "ovals": False, "cross": True, "common": True}),
-            ("C", {"rc1": False, "ovals": False}),
+            (
+                "A",
+                {
+                    reference_variant: True,
+                    "ovals": False,
+                    "compact": True,
+                    "ribbons": True,
+                    "common": True,
+                },
+            ),
+            ("B", {reference_variant: True, "ovals": False, "cross": True, "common": True}),
+            ("C", {reference_variant: False, "ovals": False}),
         ):
             for variant, filmed in variants.items():
                 stem = f"assets/{seed}/{variant}"
@@ -66,8 +85,8 @@ class ReviewPageTests(unittest.TestCase):
             ],
         }
 
-    def run_page(self, assertions, *, enabled, data=None):
-        page = document("Films", presentation=replace(MATERIALS, film_only_selection=enabled))
+    def run_page(self, assertions, *, enabled, data=None, presentation=MATERIALS):
+        page = document("Films", presentation=replace(presentation, film_only_selection=enabled))
         ids = re.findall(r'\bid="([^"]+)"', page)
         script = re.findall(r"<script>([\s\S]*?)</script>", page)[0]
         harness = r"""
@@ -181,6 +200,59 @@ assert.deepEqual(options('seed'),['A','B','C']);
 """,
             enabled=True,
             data=data,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js for custom reference selection")
+    def test_non_rc1_reference_drives_fallback_chips_and_film_controls(self):
+        data = self.data(reference_variant="reference")
+        data["picks"] = []
+        # Put the baseline last to prove selection uses its identity, not order.
+        data["rows"].sort(key=lambda row: row["variant"] == "reference")
+        for row in data["rows"]:
+            if row["seed"] == "C" and row["variant"] == "ovals":
+                row["film"] = "assets/C/ovals.mp4"
+        self.run_page(
+            r"""
+assert.equal(get('status').className,undefined);
+assert.equal(get('left').value,'reference');assert.equal(get('right').value,'ovals');
+assert.deepEqual(options('right'),['ovals','compact','ribbons','common','reference']);
+const referenceCards=()=>get('grid').children.filter(card=>
+ card.children[1].children[1].children.some(chip=>chip.textContent==='Reference'));
+assert.equal(referenceCards().length,1);
+assert.equal(referenceCards()[0].children[1].firstChild.textContent,'reference');
+mode('film');assert.equal(get('left').value,'reference');
+assert.equal(get('right').value,'compact');assert.equal(get('zoom').disabled,true);
+assert.ok(videos().every(video=>video.controls===true&&video.playsInline===true&&
+ video.preload==='metadata'&&video.src&&video.plays===0));
+const previous=[...videos()];get('left').value='ribbons';emit('left','change');
+seed('B');assert.equal(get('left').value,'reference');assert.equal(get('right').value,'cross');
+assert.ok(previous.every(video=>video.src===undefined&&video.pauses>0&&video.loads>0));
+// A still-only reference must not enter film-only selections.
+seed('C');assert.deepEqual(options('left'),['ovals']);
+assert.equal(get('left').value,'ovals');assert.equal(get('right').value,'ovals');
+assert.equal(referenceCards().length,0);assert.equal(videos().length,2);
+mode('initial');assert.deepEqual(options('left'),['ovals','reference']);
+assert.equal(videos().length,0);assert.equal(get('zoom').disabled,false);
+assert.equal(referenceCards().length,1);
+assert.match(get('art-right').firstChild.src,/-initial\.png$/);
+""",
+            enabled=True,
+            data=data,
+            presentation=replace(
+                MATERIALS, reference_variant="reference", default_variant="absent"
+            ),
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "Requires Node.js for reference data validation")
+    def test_non_rc1_reference_is_required_even_if_rc1_exists(self):
+        self.run_page(
+            r"""
+assert.equal(get('status').className,'error');
+assert.equal(get('status').textContent,'Invalid gallery data.');
+assert.equal(videos().length,0);assert.equal(get('grid').children.length,0);
+""",
+            enabled=True,
+            presentation=replace(MATERIALS, reference_variant="reference"),
         )
 
 

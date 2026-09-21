@@ -645,7 +645,7 @@
             for (const [key, active] of Object.entries(row.features))
               if (active)
                 chips.append(element("span", featureNames[key], "chip"));
-            if (row.variant === "rc1")
+            if (row.variant === presentation.reference_variant)
               chips.append(element("span", "Reference", "chip"));
             if (row.film) chips.append(element("span", "Film", "chip"));
             text.append(chips);
@@ -680,8 +680,9 @@
         options(
           $("left"),
           rows,
-          $("left").value || "rc1",
-          rows.find((row) => row.variant === "rc1")?.variant || rows[0].variant,
+          $("left").value || presentation.reference_variant,
+          rows.find((row) => row.variant === presentation.reference_variant)
+            ?.variant || rows[0].variant,
         );
         const preferred =
           data.picks.find(
@@ -697,7 +698,9 @@
               (!filmsOnly() || row.variant !== $("left").value),
           )?.variant ||
           rows.find(
-            (row) => row.variant !== (filmsOnly() ? $("left").value : "rc1"),
+            (row) =>
+              row.variant !==
+              (filmsOnly() ? $("left").value : presentation.reference_variant),
           )?.variant ||
           rows[0].variant;
         options($("right"), rows, $("right").value || preferred, fallback);
@@ -818,7 +821,9 @@
             result.seeds.some(
               (seed) =>
                 !result.rows.some(
-                  (row) => row.seed === seed && row.variant === "rc1",
+                  (row) =>
+                    row.seed === seed &&
+                    row.variant === presentation.reference_variant,
                 ),
             )
           )

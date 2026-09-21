@@ -18,6 +18,13 @@ from typing import Any
 from .optics import Material
 
 MAX_RECIPE_BYTES = 64 * 1024
+STRATA_PROFILE_VERSION = "strata-profile-v1"
+STRATA_PROFILE_DEFAULTS = {
+    "version": STRATA_PROFILE_VERSION,
+    "main_width_scale": 1.0,
+    "fine_width_scale": 1.0,
+    "accent_width_scale": 1.0,
+}
 DEFAULTS: dict[str, Any] = {
     "schema_version": 1,
     "simulation": {
@@ -95,9 +102,32 @@ def _resolution(value: Any, name: str, maximum: int, max_pixels: int = 16_777_21
     return [width, height]
 
 
+def validate_strata_profile(value: Any) -> dict[str, Any] | None:
+    """Normalize opt-in band widths without adding keys to legacy recipes."""
+    if value is None:
+        return None
+    result = _merge(value, STRATA_PROFILE_DEFAULTS, "simulation.strata_profile")
+    _require(result["version"] == STRATA_PROFILE_VERSION, "Unsupported strata profile version")
+    for key, low in (
+        ("main_width_scale", 0.25),
+        ("fine_width_scale", 0),
+        ("accent_width_scale", 0.25),
+    ):
+        result[key] = _number(result[key], f"strata_profile.{key}", low, 2)
+    return None if result == STRATA_PROFILE_DEFAULTS else result
+
+
 def validate_recipe(value: Any) -> dict[str, Any]:
     """Resolve defaults and reject unsafe, misspelled or incompatible controls."""
-    recipe = _merge(value, DEFAULTS, "recipe")
+    supplied = copy.deepcopy(value)
+    profile_value, initial_image = None, False
+    if type(supplied) is dict:
+        if type(supplied.get("simulation")) is dict:
+            profile_value = supplied["simulation"].pop("strata_profile", None)
+        if type(supplied.get("render")) is dict and "initial_image" in supplied["render"]:
+            initial_image = supplied["render"].pop("initial_image")
+            _require(type(initial_image) is bool, "render.initial_image must be boolean")
+    recipe = _merge(supplied, DEFAULTS, "recipe")
     _integer(recipe["schema_version"], "schema_version", 1, 1)
     simulation, projection, optics, render = (
         recipe["simulation"],
@@ -127,6 +157,13 @@ def validate_recipe(value: Any) -> dict[str, Any]:
         and simulation["initial_pattern"] in ("pools", "strata"),
         "simulation.initial_pattern must be pools or strata",
     )
+    profile = validate_strata_profile(profile_value)
+    if profile is not None:
+        _require(
+            simulation["initial_pattern"] == "strata",
+            "strata_profile requires initial_pattern=strata",
+        )
+        simulation["strata_profile"] = profile
     simulation["pigment_weights"] = _vector(
         simulation["pigment_weights"], "simulation.pigment_weights", 3, 0, 10
     )
@@ -158,6 +195,8 @@ def validate_recipe(value: Any) -> dict[str, Any]:
     render["temporal_samples"] = _integer(
         render["temporal_samples"], "render.temporal_samples", 1, 8
     )
+    if initial_image:
+        render["initial_image"] = True
     _require(
         simulation["steps"] % (render["frames"] - 1) == 0,
         "simulation.steps must be divisible by render.frames - 1",

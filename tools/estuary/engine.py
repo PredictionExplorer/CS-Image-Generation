@@ -155,14 +155,31 @@ class Engine:
                     )
                     return 1 - ramp * ramp * (3 - 2 * ramp)
 
-                white = np.maximum.reduce(
-                    [
-                        band(0, radius),
-                        band(-radius * 1.65, radius * 0.075),
-                        band(radius * 2.15, radius * 0.045),
-                    ]
-                )
-                copper = band(radius * 1.45, radius * 0.09) * (1 - white)
+                profile = settings.get("strata_profile")
+                if profile is None:
+                    # Keep the released initializer's arithmetic verbatim.
+                    white = np.maximum.reduce(
+                        [
+                            band(0, radius),
+                            band(-radius * 1.65, radius * 0.075),
+                            band(radius * 2.15, radius * 0.045),
+                        ]
+                    )
+                    copper = band(radius * 1.45, radius * 0.09) * (1 - white)
+                else:
+                    white = band(0, radius * profile["main_width_scale"])
+                    fine = profile["fine_width_scale"]
+                    if fine > 0:
+                        white = np.maximum.reduce(
+                            [
+                                white,
+                                band(-radius * 1.65, radius * 0.075 * fine),
+                                band(radius * 2.15, radius * 0.045 * fine),
+                            ]
+                        )
+                    copper = band(radius * 1.45, radius * 0.09 * profile["accent_width_scale"]) * (
+                        1 - white
+                    )
                 state[:, :, 0] = settings["initial_load"] * (1 - white - copper)
                 state[:, :, 1] = settings["initial_load"] * white
                 state[:, :, 2] = settings["initial_load"] * copper

@@ -186,6 +186,10 @@ def completed(output, identity):
         return False
     records = receipt.get("artifacts", [])
     required = {"poster.png", "linear.npy", "final-state.npy", "recipe.json", "inputs/source.orbit"}
+    if (output / "request.json").exists():
+        request = read_json(output / "request.json")
+        if request.get("recipe", {}).get("render", {}).get("initial_image", False):
+            required.add("initial.png")
     if receipt.get("mode") == "film":
         required |= {"film.mp4", "movie.json"}
     if not required <= {item["path"] for item in records}:
@@ -360,7 +364,7 @@ def encode_movie(output, recipe, ffmpeg, ffprobe):
     return result
 
 
-def checkpoint(output, identity, engine, index, step, records):
+def checkpoint(output, identity, engine, index, step, records, *, initial_image=False):
     folder = output / "checkpoints"
     folder.mkdir(exist_ok=True)
     path = folder / f"state-{index:06d}.npy"
@@ -375,11 +379,14 @@ def checkpoint(output, identity, engine, index, step, records):
             "maximum_courant": engine.maximum_courant,
             "state": artifact(path, output),
             "frames": records,
+            **(
+                {"initial_image": artifact(output / "initial.png", output)} if initial_image else {}
+            ),
         },
     )
 
 
-def restore_checkpoint(output, identity, engine, plan):
+def restore_checkpoint(output, identity, engine, plan, *, initial_image=False):
     path = output / "checkpoint.json"
     if not path.exists():
         raise ValueError(
@@ -399,6 +406,11 @@ def restore_checkpoint(output, identity, engine, plan):
         if frame["path"] != f"frames/{index:06d}.png":
             raise ValueError("Checkpoint frame order differs")
         checked_artifact(output, frame)
+    if initial_image:
+        initial = record.get("initial_image", {})
+        if initial.get("path") != "initial.png":
+            raise ValueError("Checkpoint lacks its certified initial image")
+        checked_artifact(output, initial)
     state = np.load(checked_artifact(output, record["state"]), allow_pickle=False)
     if "internal_steps" not in record or "maximum_courant" not in record:
         raise ValueError("Checkpoint lacks cumulative transport diagnostics; archive preserved")
@@ -507,10 +519,20 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
         write_json(output / "receipt.json", receipt)
         try:
             records, first = [], 0
+            initial_image = recipe["render"].get("initial_image", False)
             if existing:
                 if args.still_only:
                     raise ValueError("Incomplete still preserved; use a new output directory")
-                first, records = restore_checkpoint(output, identity, engine, plan)
+                first, records = restore_checkpoint(
+                    output, identity, engine, plan, initial_image=initial_image
+                )
+            elif initial_image:
+                if engine.step != 0:
+                    raise ValueError("Initial image requires the untouched step-zero material")
+                write_png(
+                    output / "initial.png",
+                    np.asarray(engine.render(width, height), dtype=np.float32),
+                )
             if not args.still_only:
                 (output / "frames").mkdir(exist_ok=True)
                 for index in range(first, len(plan)):
@@ -519,7 +541,15 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
                     write_png(path, image, 8)
                     records.append(artifact(path, output))
                     if index % 30 == 0 or index == len(plan) - 1:
-                        checkpoint(output, identity, engine, index, plan[index], records)
+                        checkpoint(
+                            output,
+                            identity,
+                            engine,
+                            index,
+                            plan[index],
+                            records,
+                            initial_image=initial_image,
+                        )
                     write_json(
                         output / "progress.json",
                         {
@@ -562,6 +592,8 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
             ]
             if not args.still_only:
                 names += ["film.mp4", "movie.json"]
+            if initial_image:
+                names.append("initial.png")
             names += ["inputs/code/" + name for name in code]
             receipt.update(
                 complete=True,

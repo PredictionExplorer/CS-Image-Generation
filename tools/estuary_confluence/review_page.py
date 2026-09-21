@@ -21,6 +21,7 @@ class Presentation:
     legend: str
     default_variant: str
     film_only_selection: bool = False
+    reference_variant: str = "rc1"
 
 
 MATERIALS = Presentation(
@@ -46,7 +47,7 @@ def document(title, *, presentation=MATERIALS):
             require(type(value) is bool, "film_only_selection must be a boolean")
         else:
             require(type(value) is str and 0 < len(value) <= 1000, f"Invalid presentation {key}")
-    for key in ("version", "default_variant"):
+    for key in ("version", "default_variant", "reference_variant"):
         require(
             re.fullmatch(r"[a-z][a-z0-9-]{0,79}", getattr(presentation, key)),
             "Invalid review identifier",
@@ -56,6 +57,7 @@ def document(title, *, presentation=MATERIALS):
             "version": presentation.version,
             "default_variant": presentation.default_variant,
             "film_only_selection": presentation.film_only_selection,
+            "reference_variant": presentation.reference_variant,
         }
     )
     substitutions = {
