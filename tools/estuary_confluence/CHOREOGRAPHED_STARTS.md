@@ -107,3 +107,32 @@ Select only one archive for each seed/treatment in a publication, preferring its
 film archive when both still and film runs exist. Tests cover native mass budgets,
 component engagement, seed determinism, layer allocations, archive tampering,
 off-path RC1 compatibility and shared review controls.
+
+## Recorded experiment
+
+The [release manifest](releases/choreographed-starts-v1.json) records the source,
+recipe, material and media identities, qualification results and visual picks.
+
+The completed comparison contains 64 new image studies across ten seeds:
+all twelve treatments on three contrasting seeds, ten geometry treatments on
+the especially circular gold seed, and three selected treatments on the other
+six seeds. Ten selected studies also have complete films. Together with the ten
+preserved RC1 references, the review contains 74 paintings and 20 films.
+
+Every selected film must reproduce its corresponding still's complete material
+state, starting image and final image exactly on the experiment server. Films
+retain RC1's 937 frames at 24 fps, including the complete source interval and
+the closing camera sequence. Final images are native 2048 × 1536; films are
+1440 × 1080 with the original twofold frame supersampling.
+
+The clearest new visual gains were Crossing strokes for `0x6210d183445b5dd5`
+and Compact pools for `0xbc53af1cd380`. Facing banks opens the circular gold
+seed more substantially, but has less graceful upper tips. RC1 remains the
+overall preference for several seeds; there is no universal replacement.
+Layer-allocation changes were visually subtle. These are subjective judgments,
+recorded beside the artwork rather than inferred from the pilot scores.
+
+Use **Starting paint** to see the actual deposits, **Final paintings** for the
+complete image matrix, and **Films** for the available full movies. Film mode
+selects available movies when moving between seeds. Gold outlines identify the
+recorded visual picks, including RC1 where it remains stronger.

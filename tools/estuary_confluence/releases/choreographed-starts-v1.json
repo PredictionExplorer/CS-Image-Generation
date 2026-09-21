@@ -1,0 +1,2231 @@
+{
+  "branch": "codex/estuary-choreographed-starts",
+  "census": {
+    "new_films": 10,
+    "new_studies": 64,
+    "paintings": 74,
+    "rc1_references": 10,
+    "seeds": 10,
+    "total_films": 20
+  },
+  "comparison_sha256": "16ae79465c8ca698ccfda6277f6576689e8953241596ea5cf180a2403af993a1",
+  "interpretation": "Visual picks are subjective. No new preset consistently replaces RC1. Pilot participation and native diagnostics are not beauty scores; low-change footprint overlap cannot identify stationary material parcels.",
+  "native_initial_condition_preflights": {
+    "all_passed": true,
+    "configurations": 120,
+    "maximum_relative_pigment_mass_error": 5.4510890139965784e-8,
+    "resolution": [2048, 1536]
+  },
+  "reference_tag": "RC1",
+  "review_code_commit": "7be7073a7be1208012806d7ef47327e8828e670a",
+  "review_publication": {
+    "bytes": 1001,
+    "sha256": "5468aa6cd22709c4e2bc4a758636bad580e5576fa604e3ff5c9dd6524e2765ab"
+  },
+  "schema_version": 1,
+  "source_recordings": [
+    {
+      "samples": 1000000,
+      "seed": "0xb7f327f9f722",
+      "sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0xceddf97909f39cc2",
+      "sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0x808861c25b6c",
+      "sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0x5b26dc8faef2",
+      "sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0x6210d183445b5dd5",
+      "sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0xb08c219a243f",
+      "sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0xa0c78ebadfb75018",
+      "sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0x2d01093da35729b3",
+      "sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0xbc53af1cd380",
+      "sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    },
+    {
+      "samples": 1000000,
+      "seed": "0x5584badfb5d82790",
+      "sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "source_first_step": 0,
+      "source_last_step": 999999
+    }
+  ],
+  "studies": [
+    {
+      "film": {
+        "bytes": 3779633,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "dd490cc16f66264356affcadc10b883d1087cc5a2ff7b82f0c437f578f016361"
+      },
+      "image": {
+        "bytes": 2480709,
+        "resolution": [2048, 1536],
+        "sha256": "6a42d7b85bb5e7ed0a729a6d25011323766ced42378a7a28df17cb7c924285a8"
+      },
+      "initial_image": {
+        "bytes": 25099,
+        "resolution": [1440, 1080],
+        "sha256": "f05aa77295ee07f2aa4ef1846280433f1accd9bf8ffdd838a513b6dab98590f8"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8986,
+        "sha256": "83507d71ebeb83a15cf54d4ba7e4ebd12d5e09550342762236e258752c046109"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "f8c819de1880aeaf60128c869072ca71406e5015bc741319dd572b8ee324ac8a",
+      "recipe_sha256": "53331fe61a82a99e8d4285e6a45f1357666f2c01e369c767e3f911b5c1b0d3a8",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "cab1dd96a9773cc9e967d3a302cd5a730ba4ec6fed117d65cf181adc45bec75b",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 5117210,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "ade0ca4ed661204fe15d16699cd3df59b7f9b9797e80bea5ff9a55278dddaded"
+      },
+      "image": {
+        "bytes": 3597943,
+        "resolution": [2048, 1536],
+        "sha256": "f43aab1274c3f10c66a8c79e06186251622c121ae8ec7b6d0b4cafd1a5b175aa"
+      },
+      "initial_image": {
+        "bytes": 36456,
+        "resolution": [1440, 1080],
+        "sha256": "d7a845951c072039198f7ff49dc03a8d513694b2e3909cda47dffd9eefd15433"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8970,
+        "sha256": "dc610549cc015982a6613904659d2ec0b19df543737b63d9662c53ca0dfe93af"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "786015b088182aa5f8e09544d16c488fed32952e7289b4049980412bb4f5fe62",
+      "recipe_sha256": "e75f0e6af42f23242793b2692212037f2c68863cf5f2b5ab660da5f70a3caec1",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "8748e297e5c6ce398bdde68392a048250c71818f1543f590a5282a49947c3f8a",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 4605840,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "a353850bd2c45f0afe1b6574927e143fa85070869e8a964bbe69873de7fe7ac0"
+      },
+      "image": {
+        "bytes": 3385598,
+        "resolution": [2048, 1536],
+        "sha256": "21d49395140f829db61eb94571badf0842cc406170bee8b4efb2502a26550c07"
+      },
+      "initial_image": {
+        "bytes": 34870,
+        "resolution": [1440, 1080],
+        "sha256": "d7ff4162ee8f79c7ab947f718cc4340438d5691b1dfdf214e2997fffe00a5cf4"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8975,
+        "sha256": "8201f3d44ee1a13e635101b55bbe226c96051ec1f97d49d7a114dd295d64c307"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "c2d5d313af5cfcbe709969466149325ba5bac84c451c35f02c3f25ca292f2ef0",
+      "recipe_sha256": "ee7cd0b12f5377c3cf93b96cbe191535fca445d3f3d1a5d6aa7b57fddf97a056",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "80495adb558101bdd3e84c2daf67c3e839ed9594346f8f1df8aa86c88ec6016d",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 3822781,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "b19c8cdc307fc3c6785c460fb819fd9617c19315add64b8a9a537ca5cd9a45cf"
+      },
+      "image": {
+        "bytes": 2742776,
+        "resolution": [2048, 1536],
+        "sha256": "d33d0c4308457e69fe01486119e127e84c7dab1d322b1ca0b52bee0fc6480452"
+      },
+      "initial_image": {
+        "bytes": 35083,
+        "resolution": [1440, 1080],
+        "sha256": "43ea0f20cb708d49b450b69d7476026c0f894ae9554020aaa5b41b3cc5682144"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8975,
+        "sha256": "9458ed5d4b8e0bf7200e8ad86beb0aa8be8324c73b58094dded4a080f993b7ba"
+      },
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "179b68ff5b6235a8e7bcdb9f55dd5ebe9f48b8c9097d7a2cd72b3642c24c1550",
+      "recipe_sha256": "4e7887117a4f30bd663df3bfd27d1d1ec878f806dfdc1f84c167dfbb610508a7",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "cedf679e94564841935f2fc1385cfa47864aa527bae2474cdab36c282220f288",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 4183292,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "9eff881630087b7ca0bd79f48e56b20a59c3a5748d11238575b57113c54c5a45"
+      },
+      "image": {
+        "bytes": 3269245,
+        "resolution": [2048, 1536],
+        "sha256": "9155ea3bb443a0ec55f46d04ba993b4187e23c459880468ad9dcedb0b660ee94"
+      },
+      "initial_image": {
+        "bytes": 36189,
+        "resolution": [1440, 1080],
+        "sha256": "37ae9614298ff795c89ee339c9653e6a9688457985591a88fc2b157607d40584"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8965,
+        "sha256": "339b95c83fc65192227aaa490f02cb19b70fbb359abe2acf8c4af830f8f524e4"
+      },
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "c03f3704d336d7bc69b2b202e069e8d060d4a2de8a3b339e206559287b24ecd0",
+      "recipe_sha256": "64e640992e83548ead02305e6dcccf4198340e2a842b4c4b9196013e94a910d9",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "8b8e169960eb5d471d0a14c2b9901f0729d71615676420b95e9fe988ac0a08da",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 5077552,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "d76756016c0b99164a525aa296016aab1e726e19437b092b483b34d60c4eecbe"
+      },
+      "image": {
+        "bytes": 4212348,
+        "resolution": [2048, 1536],
+        "sha256": "aeb6d822e14f1305e10dd0b0c71b60e7db563fb6a3a1e1fe3b30fec0850e338b"
+      },
+      "initial_image": {
+        "bytes": 36102,
+        "resolution": [1440, 1080],
+        "sha256": "de6bdd96d769037e8c31d8e834cdbea011c13231beee8c23d932cde88a818959"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8952,
+        "sha256": "5e2160b6857ffd5a260f0881d831bf9144adc2f2db57a75a05d24be91fc06f12"
+      },
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "5248473a993cd45f158ba1678156363d17a425eadf53eba3479fce0d4149d422",
+      "recipe_sha256": "406ff083b5dac54007d4bedfd7f0ba1a76ad9221173c5ca509f16df686b2e39e",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "5640a12af32e4408c8afd9bac33c82ed052da45cac5f77c394123ba8b08f06ec",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 6288439,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "8106a143f598e7d679ecb049f51364f95327c465a17cc918788254ed0677d447"
+      },
+      "image": {
+        "bytes": 4901941,
+        "resolution": [2048, 1536],
+        "sha256": "f38d3f06b70f9680857b1d97b5ddd7afc4cedeb8344fba7897c362157c89adb7"
+      },
+      "initial_image": {
+        "bytes": 36871,
+        "resolution": [1440, 1080],
+        "sha256": "1de64d4a44bb350105a85b39a7b45b2786189468014f3824d30abbf2e6b228a5"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8993,
+        "sha256": "2043e14b472342cab6b8781cac7d05666e8b27af6d99fa8ad1622608d3ad2fe9"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "0f5266fed6261808bde04c43805811183b7d392abce2028cd116abd56592a2ac",
+      "recipe_sha256": "0cbee1d70ef8510a3e2aa258a9b432309c8d8c7504b4e1372c99d754db9d2975",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "b92ed53f1a5507874bd105c1687c98f601082047e000dc089854a8e98eb25cbd",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 4007958,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "dcad81246f8ab212b9ac8c96c1aa8753969c6c848e0d6e00ad92c2ee0c882bfd"
+      },
+      "image": {
+        "bytes": 2792877,
+        "resolution": [2048, 1536],
+        "sha256": "d98a98778a9e1b3c0fc0d9aa502bf0a705acadf2a750d92855b933a9411e4412"
+      },
+      "initial_image": {
+        "bytes": 36490,
+        "resolution": [1440, 1080],
+        "sha256": "9eb2b80aced696242bebcffcb0a2719b7e6a4a9ea10c16757727d7894ddf8cba"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8984,
+        "sha256": "16b16d1373ece4ff63ef061e771b4f1c9ad6ccf10e800a14217e1a0cc1b997a8"
+      },
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "4d4c4a835efea9791c76319d0c40587f8458593fb96f226df7d8fd81543252bf",
+      "recipe_sha256": "dc9e0801b2e0f73f96960f2f4dd9ba223381533a92392cbffe987735f015a760",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "1b3604c8e6c7cd276f55df83c769c65199655e672110128ed4d8a41e318445f4",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 4822085,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "fb249164e7519ceb6eeb3b2048ae0dbf60fce62d9ffd3a4785e92223365d7eb7"
+      },
+      "image": {
+        "bytes": 4047903,
+        "resolution": [2048, 1536],
+        "sha256": "aa5c7b3e89d2724396363aea6809f4cd4a1d8a93dbf348d4750d38d6ca45eea8"
+      },
+      "initial_image": {
+        "bytes": 36813,
+        "resolution": [1440, 1080],
+        "sha256": "68a61ee7f684ae3e886b4b2519cd1cd73be33f43f3efd07b50331621d35c65ed"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8970,
+        "sha256": "f5ee0a5ec4e9bc6d12dbd41e00210fa980d9d0f8f38d533c4e36cc617fd46a77"
+      },
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "a7289186fea65a03b105fc163e3c0f75374ceba7aa1e63960065c0533ecd21eb",
+      "recipe_sha256": "a83180f351acd3faa129c9a808017e9bcfcb240865061baed72b60b3209bc6ab",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "32a49bdb58bc95ffb4f4b3b80bc4ff3d0d1ad29a44c3d4125d372374726f0e69",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 5382823,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "e20a65a6de388a46cb3b4a1d1de45549856d13b522257b613b8635b6dbc055ea"
+      },
+      "image": {
+        "bytes": 4021304,
+        "resolution": [2048, 1536],
+        "sha256": "e1af22e8af123659c87d69291c4597cbb81e018bf37b8bb799f2de221cd7c397"
+      },
+      "initial_image": {
+        "bytes": 36870,
+        "resolution": [1440, 1080],
+        "sha256": "29cb0c55e8fe989407f7bd58d0fb4b2f3711cef67b28a6cc97a486dcfd3dd638"
+      },
+      "label": "RC1 reference",
+      "layout": {
+        "bytes": 8967,
+        "sha256": "c98af52418d312bc64616852b71abc0992bd721df525d5871d437894b41148e2"
+      },
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "e1d47f6aeb154e6a18610b1724b2a70179c1fbe2bd64be947f8eb5dda2da6d77",
+      "recipe_sha256": "bc6115df31e7bf53bce4d062dd826d1bafc4036eab26efe28f4dc6965a1487e9",
+      "renderer_code_sha256": "bf28eb90d965de7c3cec31d85546151585149392b583da25d6d076beb470f195",
+      "request_identity_sha256": "33bb2f59204a4a23f1bb6ac68410f936b0bd18dd41e9464d17650b62721b8857",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "variant": "rc1"
+    },
+    {
+      "film": {
+        "bytes": 4434117,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "264bd430e5a460f45f812ae2ad75c7035286ec969634cf014c51583ae537caa4"
+      },
+      "image": {
+        "bytes": 2900434,
+        "resolution": [2048, 1536],
+        "sha256": "bef8ec51304876fdac262d56b822266610bffb568d42c0551e480acf0d13050e"
+      },
+      "initial_image": {
+        "bytes": 31579,
+        "resolution": [1440, 1080],
+        "sha256": "66a9825e7b33600b8c34bbfc26b2f189d2641f0a9d09c0ff486c9306ec9506d2"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6619,
+        "sha256": "72ca9a0c0946e9cfa2a6fabfa384a7848f8a0fe86adf2125c857e7516774ee10"
+      },
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "6ebcb9bbcb45341bbd6bba2432da30d6fda13b25f9e552a85f1b35711b49d5c0",
+      "recipe_sha256": "009e53f9ef85e5f2c8c44802cae15715ccb2c5da306979aff195860d92ff1523",
+      "renderer_code_sha256": "5af6598b5f8df9f2d27caf7d5cffb8fea3567a6a50704c0cb5786bddc4d05d95",
+      "request_identity_sha256": "ef19342a2e0ce02211764ff81cfdfdef676a58df3c968b85823482aff09bb881",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3184181,
+        "resolution": [2048, 1536],
+        "sha256": "1aeb2b1335a37f286255597a63238cd3fb75683e333851490728d8c708241708"
+      },
+      "initial_image": {
+        "bytes": 44569,
+        "resolution": [1440, 1080],
+        "sha256": "0978f298e2b5f88b81271a99b23a1589ff935602ee6130c2bc0f323ebca4f025"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7322,
+        "sha256": "8ad44512f497724975f0a018dc1e7eea1d4f2a702212b8c5307473f8c93845f5"
+      },
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "cd9b3230c86d2a63bf8fa51c024f2a426372edd06c3920c15b9cf311e23e9bbd",
+      "recipe_sha256": "3ec35bd46edeb0b5b15806f11802e1f360636d1e2897a78602cc6218a2ad651c",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "06708aed91ecdffb15a7aec1bbaca7485318564ba3e887edc88ccfcdb2ad2c7e",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3259236,
+        "resolution": [2048, 1536],
+        "sha256": "989027a3d415160c56c0a38a247c1e8e18bb97ddc67c782812cfbf1f4afc236b"
+      },
+      "initial_image": {
+        "bytes": 43566,
+        "resolution": [1440, 1080],
+        "sha256": "f51bf006f966c45c689983656f8761eeea27b0093617242d8980adc154f34fe4"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22095,
+        "sha256": "f7f045839563efaf49081007a0412f6a060dab5cbf79b52c85bad8ecd3c28ec9"
+      },
+      "palette_identity_sha256": "27b2179079107319051b9189128860e55754a286bdac98ff6a323367d1b579e7",
+      "physical_state_sha256": "c0f5a9dff58ddde4a0e60bc86dd1ed35452f4c70ddced2990e65cff69829e4e4",
+      "recipe_sha256": "4d93c47e11771737159139abef1d989be4c67071c196d2d0890000cb07e1e46b",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "69cfe52e26a99dda63c63e3438f2b5311930f8d904becce54b775783a7a2ffdc",
+      "seed": "0x2d01093da35729b3",
+      "source_sha256": "e9f28150e2229eba9c801d191578fa96eb4eaa3a83f1a4dba2ee867702ce9243",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4004572,
+        "resolution": [2048, 1536],
+        "sha256": "d8790a6bde1d46a5639fa71bba881088f731c643d46ebd13a9e2acf296daa054"
+      },
+      "initial_image": {
+        "bytes": 31125,
+        "resolution": [1440, 1080],
+        "sha256": "640f64d0ab6942d7c62c4a9f52b3a9fe5ce21d9bf9858cb94e7b4a9c18859144"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6609,
+        "sha256": "a5a085c07d760f692d438d390147851652b101228ced9cd2cf7af905e88201fc"
+      },
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "74e94ae4174821c373e46c22e2a48a4aa4a4647cd1123bb2587c01636b8c60b7",
+      "recipe_sha256": "7a8da295b2f178f61ee3268d0dc75d48540261e651ff51c436a0b3ec7d619cf7",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "e8078a5b5e617435e056da233a2ce816a3fb21317baee84938ef4aa6fbe23b48",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "variant": "compact-pools"
+    },
+    {
+      "film": {
+        "bytes": 5499348,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "00e45ef7cf36a001a4e351e05c5826a03908291de8b6824f99a64f1f9c53df25"
+      },
+      "image": {
+        "bytes": 4007492,
+        "resolution": [2048, 1536],
+        "sha256": "ce6392bdc8af4941ee50feccf5757430a1300545659a7d14aa5319e2d1297a0c"
+      },
+      "initial_image": {
+        "bytes": 43200,
+        "resolution": [1440, 1080],
+        "sha256": "96bece27bdfd727fa162351f440d29034f44f885358763728b5ea30f8ee3e51d"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7284,
+        "sha256": "9ea1c2313ae9bab9336e9fed82d689e0329025e44070de55d9a16319475eb73b"
+      },
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "35a09685ecc31070f2a4903721113083afec449b13f6ffc8cf820ebc5de2fb7f",
+      "recipe_sha256": "fb69972e9327f99f72b3638e53271ffbf4a69bfea7a4df13137902ce25960f68",
+      "renderer_code_sha256": "5af6598b5f8df9f2d27caf7d5cffb8fea3567a6a50704c0cb5786bddc4d05d95",
+      "request_identity_sha256": "140bbb7d45f269c3054c21bad556305f1aebfc816ae3ae16961dc0a6be893846",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4126673,
+        "resolution": [2048, 1536],
+        "sha256": "68dba1c263495e45957f3d39076aab3564e18c97a893bfb2bc326f9f8b9c7dfc"
+      },
+      "initial_image": {
+        "bytes": 40846,
+        "resolution": [1440, 1080],
+        "sha256": "572ddd940ed8e55a2b604bed854130ab53c8715cd61c1b3e1e0ce62ff3d645c6"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22046,
+        "sha256": "730b039aa2a4350ef3f1145ee72ee47cd8a2adb296450ac7aeee1aa136c9f053"
+      },
+      "palette_identity_sha256": "d790e26a1ef99c7dcbe73e9a862e9fd7833a26c74f93a43b85723292f3bd6801",
+      "physical_state_sha256": "6f4e62b8a9ce61120e463cc3656cedf595bb99fef4059beb4ed5de40866280c0",
+      "recipe_sha256": "e7b235a6317ed6575c2453b3e573d6d99b37fe70e8ba0ffd644f303ac43b39f3",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "91eaba30c26fa3087d0562def6180c08c9734565c0d136c4493491304f890a45",
+      "seed": "0x5584badfb5d82790",
+      "source_sha256": "ff75bf4db35ef960b8529430dcc7cb6983b786c678682fb81a33a98085d91dd4",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2090313,
+        "resolution": [2048, 1536],
+        "sha256": "8d7bd46207a48f83083e26ffcabf7e0f9e9b4cb7c2bd7b2f87c89912f3a84f36"
+      },
+      "initial_image": {
+        "bytes": 30679,
+        "resolution": [1440, 1080],
+        "sha256": "c6e304bc84a527c6d10fea6a1768489609784cb08cf0af8c9f8481363e2c7f6b"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6623,
+        "sha256": "81210936b1f82479e44eccd46c21422c561a1dc5c23eb46a389e11aa12d52064"
+      },
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "91a233b35439fc215eae4e67fff6399f41b0e35d70edf048b5a083d3f37cab3c",
+      "recipe_sha256": "4d0dc56f7e9e97c7baf2ef12870c233a86d0cf9622fe737a9a4f5ec41af7645a",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "363b8442122008ddc0bda87959d1afd2ffc05093c1061114515970932fc78636",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "variant": "compact-pools"
+    },
+    {
+      "film": {
+        "bytes": 3488005,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "966d74f830fa3a0c4884c23bce5c3762a11f3ca679ab16eed57bf9d2594aa0a7"
+      },
+      "image": {
+        "bytes": 2407438,
+        "resolution": [2048, 1536],
+        "sha256": "1e7adaed841c254dbdf7c284cc54c10111a2368312d6e8d22d51db8e98328713"
+      },
+      "initial_image": {
+        "bytes": 39527,
+        "resolution": [1440, 1080],
+        "sha256": "84d1ecc5a57904175366adb138b5aa7a09e3697c50e22067abb678c2c0de1d21"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7259,
+        "sha256": "ae8f14004305a7e1bc575c29f742b043e2989b6635ba1f7bff3c96cec5038157"
+      },
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "e1d3b77fa5f940dc42c41fa55668307d675e388aa907d5df2b0f4d9ea39af322",
+      "recipe_sha256": "8599439030bb843b220fe8fc87f6007e3d1520dee68638fa641b832782bcdf5d",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "f6f143152ef4cc6fbadc09a3d56ca553f49d6e93901e648c7ec05f1425d21c4d",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3011651,
+        "resolution": [2048, 1536],
+        "sha256": "415a26e08bafb365849f39d850b7b06d64f511e7c256d241d33ef34b668006f7"
+      },
+      "initial_image": {
+        "bytes": 41284,
+        "resolution": [1440, 1080],
+        "sha256": "28f9278a41d2e90d2cfe46fdd1b70e86e21499952d3b6a6935ffad41623fd568"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22071,
+        "sha256": "db5956520fd28009d636af69655baf60ca3aea9a59d6556f15053408c9af5055"
+      },
+      "palette_identity_sha256": "2ebfc353ef38103f490d15b5b60dd09ec0b1ead8d87ff2512bbacd93533a45c0",
+      "physical_state_sha256": "0e1e0180dfe9b703b63b9050f7f22b99900e01c49b1bdd87c3d8f7e594eda462",
+      "recipe_sha256": "f1f99a34704fb9236cd3edabb4e256883e94e94e0339f8e998940264fb3841e1",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "67f3b41b3326e7c2defbb09371d7cf8207743ff90c1eabf341c1ea3d95aa106c",
+      "seed": "0x5b26dc8faef2",
+      "source_sha256": "547705fb0e293225ff9f09052a09e55d75e7ac4116d8406409eb40c2ede8d3b8",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2824706,
+        "resolution": [2048, 1536],
+        "sha256": "406ccc3f1f3e088b1a23a9581319ea4ec8f58c7eaaa479430721e9d3aedd1887"
+      },
+      "initial_image": {
+        "bytes": 30965,
+        "resolution": [1440, 1080],
+        "sha256": "040a17a45da1375dd635e2e60b14e44bbaa95944f018a2a0662b7aed92404c83"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6604,
+        "sha256": "b08335b1c80c4373c02548ddaa63c907804779d3472c7b133707c477451d6852"
+      },
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "c629af8c924f36861949dd29056a83abad5332aa4f854c49a8576253ad3143dc",
+      "recipe_sha256": "07248bc483c31aa19880d8e35e509c565a552f830c9b4263ce9d33fac6f72eca",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "980796366d20a20a0c6c8c4ecce5ef9f0f496c6e795bb8177b5161442c4e64c9",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "variant": "compact-pools"
+    },
+    {
+      "film": {
+        "bytes": 5169862,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "ae568991d4872f5799cd02d73a9db48913dfee762b518c6bcdc6e868781b9432"
+      },
+      "image": {
+        "bytes": 3094698,
+        "resolution": [2048, 1536],
+        "sha256": "4cfa17642039577dfa637228cc5b1710e24f1fdad8967a36c4f974f94034adaf"
+      },
+      "initial_image": {
+        "bytes": 46958,
+        "resolution": [1440, 1080],
+        "sha256": "68198b19254b475b5c7d60bc3d0e22b6c43b411450a03bff9311677c7225aa9c"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7282,
+        "sha256": "037b846a292987e6bbd767595b2a733ed3c81cbe8d335fe551fd9615c533a552"
+      },
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "8000c0a1c14dc99b33cef2e996c6091350f5d2367948b7624e3c6829e7f15d48",
+      "recipe_sha256": "f5d196a3e89129f2ace23527d9da84158418658593c9bfbfa6783e5ee86af087",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "ab8216df918d84db6dc51e821309a4ec933e52e14dd5e3c3e062d56ae99790bf",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2103435,
+        "resolution": [2048, 1536],
+        "sha256": "dde66a03b6fcc7837f5a04be4c1bb7b2c4bb2e4e8cbd945de315f2a9b663980e"
+      },
+      "initial_image": {
+        "bytes": 42087,
+        "resolution": [1440, 1080],
+        "sha256": "476522d7818ee724e95077016497fedfc62d70510b9ad7e91878effbad7e8051"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 21839,
+        "sha256": "3f20192b57c33ab523c5921ded6689af6dead6b3fe0a38014579cd6aaeee5e35"
+      },
+      "palette_identity_sha256": "8cc4c1ee93f87e1e1be7061dc306b6f096d3ac13615736e3d5cb5b23de3ca303",
+      "physical_state_sha256": "d5b0dfe36267d93659cd04e02b893917f71075318344046c038d5a8ca7731233",
+      "recipe_sha256": "63b2acb76b6daee201054b504ffb028695c0e8c14c15fcf64ce76c6f0ed7583e",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "4bd9fabd4c360c2b768744225627fd7682e6b017ab3aa67776e2997488ba3d77",
+      "seed": "0x6210d183445b5dd5",
+      "source_sha256": "4a21f21255528455c4c11602696968aeb08e3c2ae3a852b62b72b670498061e0",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3379202,
+        "resolution": [2048, 1536],
+        "sha256": "9de78913b0923f59ee17a288c0bb37252067d5ef075dd04964f7a9fb63b691a2"
+      },
+      "initial_image": {
+        "bytes": 36305,
+        "resolution": [1440, 1080],
+        "sha256": "e6755e723ffbcec986fcd93fdf5ab77e6f1bd5cbfbea7f2c590660d9769fea88"
+      },
+      "label": "Active pools",
+      "layout": {
+        "bytes": 6620,
+        "sha256": "13350569113f3bfa504fb2857ef5c1e5b19d4bcbdf8f8caad9aa0f305cf32caf"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "a8e98900b5547d6f15f15a1c78f447aab22262048e6a1fc0bed03928fe548410",
+      "recipe_sha256": "630503657fd39d6ef4f66d602f2deac5266c1ff23186d727dae625b545fdf353",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "76a00e38b16da1473011b24d83b26dd1cdd36cc5529b871c54204809773cdb60",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "active-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3620002,
+        "resolution": [2048, 1536],
+        "sha256": "6ba838ea63c4c5af51501a75233e07c97ab961375f938274421d17f5a6fbc004"
+      },
+      "initial_image": {
+        "bytes": 40899,
+        "resolution": [1440, 1080],
+        "sha256": "327605347ec6b9e6a50fdad96cfc0355acaac224bd07ec83280983b3c6b90039"
+      },
+      "label": "Broad pools",
+      "layout": {
+        "bytes": 6620,
+        "sha256": "c93f1cb066a7416034fa1558c3886278f17bcc3a698709108028480edcb3e3c6"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "4fb68de3b738523da8af73f56a96765c1247685446e67f52bfaa8d8b57a75071",
+      "recipe_sha256": "28be43a2a8db97200729c68ae4f1e206d63c11b513849c018d8da6c52ca81393",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "1fd190550116cc481c1b11f1ef3ac5513d5345619a8cb863c526bdaf45856274",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "broad-pools"
+    },
+    {
+      "film": {
+        "bytes": 4766807,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "cac1ba81ff83f049132d75c64f4232ff6d115c8ec3c81ec333ae8bdc48c74e2e"
+      },
+      "image": {
+        "bytes": 3158613,
+        "resolution": [2048, 1536],
+        "sha256": "99e9c9ab430f89ed628543ae9b64488aa8d81bbe6b78cf2dd53fe8e9ed860bd4"
+      },
+      "initial_image": {
+        "bytes": 30974,
+        "resolution": [1440, 1080],
+        "sha256": "8340abca4d759d50701de8c76b2d18dfa59dc608553b5016efc2cae2e37abed0"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6628,
+        "sha256": "2f1ab762b8b3d441be45250ab05d32f2d3242cc686895e2034e6c12706127bc1"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "d4bf3c5f0f95947cd7201b440999ad13ff8b46820805533906bdff801ea0962b",
+      "recipe_sha256": "d0a5b8e155dcf2d28dd7b6456341d0f70002b4c16317afba209ac6d0422d2772",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "cfd955eabb9ddd42a2c246373f0fe449b132df57e6971e1b9d2b45b268a44312",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3555232,
+        "resolution": [2048, 1536],
+        "sha256": "e711bcc3b688e929262468ebdf8c8d6f2f0986fd9e9cbbcafa3e794b343896bf"
+      },
+      "initial_image": {
+        "bytes": 45260,
+        "resolution": [1440, 1080],
+        "sha256": "ae2cd4a3d86238c37a76a7cac1ac4affdec154fe767e9786c8967930b06ad7e7"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7293,
+        "sha256": "aff3b4feefe17e95fd5e4b9a2fe5f8a57fe0d9148a43baf13086f713c2cfc2c6"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "4c4f45deaa50e74bf8fdfe7d4e1ab2dcf2531ad9ee61972fe68933dd9bbe7805",
+      "recipe_sha256": "42cad3ea8085a1d85af92ec8004a5752947762c945ed30be62b33755cf2bd604",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "0f74996e0650bc5c61a249824354bf732a863eb2ba6f44d98f85134ec7938119",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3693087,
+        "resolution": [2048, 1536],
+        "sha256": "036a471d4ce2a11e1ef81867389a1b0c2be0a5187341e6e8ebd76fcb6ef318f8"
+      },
+      "initial_image": {
+        "bytes": 40140,
+        "resolution": [1440, 1080],
+        "sha256": "327f374958b5e01a15b623682fc67205339f0c2b1cabf0176db7b2e6be927394"
+      },
+      "label": "Facing banks",
+      "layout": {
+        "bytes": 21970,
+        "sha256": "6b1d74c0cf8ac36bc2c7d74677b9e5207d66d783831a6fe470b4aff7cf77ae44"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "d3ca208aa2d33360268aed091a57719cb5543b13bebd639612803ee1114f9a2d",
+      "recipe_sha256": "f524ba66c0321e490997986bb33ea53f6fe6dede60fb8698c86e9611d0d3e60e",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "113028983cfa1d4f2a7a8c18cbe93f6cf016122c2e4a03e5a398da9ef0d39eff",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "facing-banks"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3769858,
+        "resolution": [2048, 1536],
+        "sha256": "1c06ce3834f428bf222b98bd992deefcb4caa83af9c81102b1e2e4a199136419"
+      },
+      "initial_image": {
+        "bytes": 58840,
+        "resolution": [1440, 1080],
+        "sha256": "17b7f87a8c2da1a93949e400ec607bb93eaf4a744c542e228b3588ac6a69e870"
+      },
+      "label": "Long ribbons",
+      "layout": {
+        "bytes": 7280,
+        "sha256": "4cea3a7bab5c9b4fdabd1d1808167c45b923f4028c76a0be7dbbc1fc6e0c17ee"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "3746bc0d4917683dc277ea44a0068d049a879676bc7de65614bd49b0998c4274",
+      "recipe_sha256": "eb61f91ecd80872402bf1e4b837c9ad97e48e7d7898b71d924ba30994f4c6f7d",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "ae05d6611d24341cbb79cd071844228ebea16a3910a8da9541a85e065c4d628f",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "long-ribbons"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3048685,
+        "resolution": [2048, 1536],
+        "sha256": "809fac2b9f2c3cf0c3885fad1380fde86f4495fc5452daa8e1dd447cd6893271"
+      },
+      "initial_image": {
+        "bytes": 38949,
+        "resolution": [1440, 1080],
+        "sha256": "222458d3bb39a327adcdbb035d94a8dff597ed8c77ce61c47533a6f3c19a74dc"
+      },
+      "label": "Ovals \u00b7 accent mobility",
+      "layout": {
+        "bytes": 22120,
+        "sha256": "b183cd908d8638448fd9a5ddd98c7f81269a7eadb75c03c9d9fbccb31f4cb710"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "84f1e4a6cbf65a1cae5b7be306c6be51b2672f35348ae9513cbc92254aa6dad3",
+      "recipe_sha256": "41067fcdfadc09609a04644302fd3358316cdd49ace6dd235f12455c177ee07c",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "fb7d9ed0bf1f93002ac2dea8314a904b3e48c48700b538ad6f50a050d76d0c58",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "ovals-accent-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3064470,
+        "resolution": [2048, 1536],
+        "sha256": "d1c014acc6777543de01d966f76650303369e744e52a3ac148b2a63cc2bc4f33"
+      },
+      "initial_image": {
+        "bytes": 39007,
+        "resolution": [1440, 1080],
+        "sha256": "3e1df7b8d0e28428b02f5bfbb419199591477633550414e1b26d9d87c48b9bab"
+      },
+      "label": "Ovals \u00b7 balanced layers",
+      "layout": {
+        "bytes": 22121,
+        "sha256": "06e76b4e1a961b87d4ef08c4642f6ecefc10c7087c2bf617a688723c0e0ce911"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "dbbc99fae9b5cfa1c03e11b48a581906fb3a8c0155dd8369895bc6faa94c5337",
+      "recipe_sha256": "5c905967a04d83049561d85b31cef1f9fc1cfc090797b253f01ef92288b067f5",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "8855eaf18fb744e7dadeae05a20190ec2ea0b562792b515246484a2434d31a65",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "ovals-balanced-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3441129,
+        "resolution": [2048, 1536],
+        "sha256": "4e2c5c0118d2a2250b57bd5c21dbfcef365f24c7dfd937e23a65253adbdcc747"
+      },
+      "initial_image": {
+        "bytes": 40215,
+        "resolution": [1440, 1080],
+        "sha256": "8edfb432a3b60250b0b655071345de059f846e6445903178a289ce73ba3fd74e"
+      },
+      "label": "Split lobes",
+      "layout": {
+        "bytes": 7333,
+        "sha256": "7c80ba59da3564c5a71efb46e03d5b2af4522a39070b3e28d2cd46a451120d67"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "11612a1e286ec1a93138444be4659f543e6cff078f268f59f612e2708e0ac79f",
+      "recipe_sha256": "7f1d5d316a533ceefb545f3dbce73fa1ac269b1606d29859aa2de06ae6260c50",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "250500add3364acc5a4ade9fe8c5eae2cb1247eff582de0250266b579559036f",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "split-lobes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3046735,
+        "resolution": [2048, 1536],
+        "sha256": "d1fa93be7ee4677b67a203d75d227b26c042ff73f19d34dc421a1148466e5aa3"
+      },
+      "initial_image": {
+        "bytes": 38985,
+        "resolution": [1440, 1080],
+        "sha256": "1ab4ad7ab58fd788ab20ad9039e7c8e27584f849d61a89fecbe7aea2abc67b0f"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22057,
+        "sha256": "21d2e0be1814f9532eaa5203adb14bcbb20440dc7a701f7cfff4ac49feee1763"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "4da34793066c4d861818ef0dfd70006736038126e3fd612faf6f31d719de0208",
+      "recipe_sha256": "1c73bb2b7a2554be62dfb7c7de9d01191aede8977196fcfbe7eb17880e4ada8d",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "d6a13ee818bfbde991118b1b2df473a71cbaf6193e299a6d8f6da59b404b8408",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3574989,
+        "resolution": [2048, 1536],
+        "sha256": "1c380b275207871f6ae7ec6787f195529401885147d7349b2bffa2a49b981f24"
+      },
+      "initial_image": {
+        "bytes": 50439,
+        "resolution": [1440, 1080],
+        "sha256": "e9858625592bd281562e0ac4483efd2c83946c0e05226ff26ee85921ab82839b"
+      },
+      "label": "Swept crescents",
+      "layout": {
+        "bytes": 17255,
+        "sha256": "2b4eb026d83753d55c2d5e3f9b8b66d9c8b8d54a8d4db941fb4be47d4b41f7ad"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "903f9ecedf2e0874e44787aa0ae43e483df3400a5167ef469a1032bc4cbe7d4e",
+      "recipe_sha256": "ee0fc735cfdbe4d716c763f737fb88a4ff9957bed403a5ab11bb859e29b8df9d",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "91f8fd700c3646423fbc95c257c593f8aca9e2d27bf0b83b20376dfccd857605",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "swept-crescents"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3413646,
+        "resolution": [2048, 1536],
+        "sha256": "e24a9c4709b4297870463452b844d716f8a320528fd1c49418fa821f869f3086"
+      },
+      "initial_image": {
+        "bytes": 35491,
+        "resolution": [1440, 1080],
+        "sha256": "3132c23e8aff75eac7f5ef8c084c138ee8c957b2ae230ef6be382e0197db4400"
+      },
+      "label": "Unequal pools",
+      "layout": {
+        "bytes": 6642,
+        "sha256": "27ab559d0f537fb2fbeb3ca29a7fe83b37ffc18ffb1f70fac95c0763f8f16bca"
+      },
+      "palette_identity_sha256": "62696b9263c664a745fbf93622cc00b77dfd68c1a75dedd8bac4febc43417790",
+      "physical_state_sha256": "9b4da4444139d3a91c4bfe17a70cca5ca7b88104458cb82b3b8e8af056f2b499",
+      "recipe_sha256": "6b3dc8438163995cf59403c803b29921b8dd044cbd1b8d9f9b238d84ed32f030",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "2f950b7763443aad81c5033532b8c57d4c8b69df6a4d63a91cbff5496745ab9f",
+      "seed": "0x808861c25b6c",
+      "source_sha256": "39a2ce9629b5d91627e8460d8f8f31c372841d5fc8cfe400182798d51fc62bd3",
+      "variant": "unequal-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4703085,
+        "resolution": [2048, 1536],
+        "sha256": "50b0801de7dc147f227a7850948170bd0ffbace35bc157b0f8c844201d364f9e"
+      },
+      "initial_image": {
+        "bytes": 37794,
+        "resolution": [1440, 1080],
+        "sha256": "7c679a14b48ee6b921c0df670930ecf32c24415a03ab45a926b7137021e1b2ff"
+      },
+      "label": "Active pools",
+      "layout": {
+        "bytes": 6651,
+        "sha256": "0993f9c9414b03386fecde7185d9b4ef3bb51e9c04dd4bdb671203d0e94a12e1"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "e2c4797ae9175dd723e72e2438ed8b8c6d71974b1d5449a7491e225303f688e7",
+      "recipe_sha256": "abec339adb74a43bc41ec0a7f2250ddf72e5ad306637ea142e4e909f00b4d5b3",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "68b4bb6a331768d65a0677c0b6e50aa1307746e3aa69a35540fd5f8d84e74e87",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "active-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4966574,
+        "resolution": [2048, 1536],
+        "sha256": "c3e812818f6a9743949d8909c26d4934924910931c42111b05e15e89427a694b"
+      },
+      "initial_image": {
+        "bytes": 41702,
+        "resolution": [1440, 1080],
+        "sha256": "95eebd2a5507c059dd983bb5b0a2c3403399d7e9d7912121f538ea2f5c06a055"
+      },
+      "label": "Broad pools",
+      "layout": {
+        "bytes": 6644,
+        "sha256": "5bb875f9c108aac979a51407f6b248780b26fa79091df6434438e500265bd41a"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "09e9022ed3a8d398fe72e9e6f3d6cf0f927eb1f69568c94dddda159d9016c9f9",
+      "recipe_sha256": "4d1c360dd338556c79b77ec918317e89cfca298f2ad9a68330ea63cd7d6e4b71",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "576b2dc3279536d3d02c1ad1cd64b40176a6f908741c95ce56eb1b5ea65d2c92",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "broad-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4274833,
+        "resolution": [2048, 1536],
+        "sha256": "3293426a082d22bc530a1ea97a63db4f612f6a4c88d13b9054a722b0dda2c93a"
+      },
+      "initial_image": {
+        "bytes": 31971,
+        "resolution": [1440, 1080],
+        "sha256": "d7a2b92fc8bb3e868713685cdccae040711654d08df5624fba47ff1ebf628754"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6619,
+        "sha256": "ad69a4aa3d6bc7eff23f246ed5ffeade294f4c5b402eeb6972a06eb396549d23"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "3a9de9756e1f11313e4a9720c581f5bfd14527d8bc9127808952ad2c9a4581ec",
+      "recipe_sha256": "0cb248541d7a9440c99b1d3383addcaae4dd26196763699559019d293e3b2946",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "aacaa8c374abc102c4d106beb6678b6c014e423b1d97c970e9fb51e722963f4c",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4866239,
+        "resolution": [2048, 1536],
+        "sha256": "da50a25c8c8d7feea5234c572aea51689896d802b26858deb71b87930d2d19a2"
+      },
+      "initial_image": {
+        "bytes": 49687,
+        "resolution": [1440, 1080],
+        "sha256": "781a77940451e35908d732ef0e7c6dbbceffc6725959c06fc93480d71182b374"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7280,
+        "sha256": "ca55a96724dd163587e380388e14ad4cc3d5ef60403e173ce9c108277ab3b992"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "fc82f982257bf6436f77f535763bc46ed6ad3bed0f424afbf896be72e148c3a0",
+      "recipe_sha256": "003a89d55557737b6bf2f384e073ad29a976961f7f51d6317047840a109bcf91",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "069bbe12f07c8da85cec47681faf595d44a9dc93b0168b356dafe16574f06812",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": {
+        "bytes": 6939137,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "c781c8ff3013e9222bb55d14029e9b6dcb9dbe08a32bffadf54910ca60e94f05"
+      },
+      "image": {
+        "bytes": 4390650,
+        "resolution": [2048, 1536],
+        "sha256": "27d54c2a2352a4a250ee3e0d5fe2234082bb348d82558d674168329ff3c90616"
+      },
+      "initial_image": {
+        "bytes": 42746,
+        "resolution": [1440, 1080],
+        "sha256": "edce9c3a04d0dccf665e3bb7e9366cf5a3754d182dcd930d6f59ca182f2b6a2a"
+      },
+      "label": "Facing banks",
+      "layout": {
+        "bytes": 21769,
+        "sha256": "9b604763b1fff79d51cab413f8564d562adff51196f6077a97b63c9d9b8e38f9"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "04281303a81320d683d27580dd4d4cd68b82e765ffdfcd60d921ce8cad911497",
+      "recipe_sha256": "eb1ea612f794a23072e0b5e11f2f70b371d74d5c3cf3e66f8f23b52375673c0e",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "ba43b639d94d36fad8f464e154d940bdb3d37ff6ea7533ec9c5846cbbdf3a3a4",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "facing-banks"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4982139,
+        "resolution": [2048, 1536],
+        "sha256": "61d65e39321695c30526e8222b98388b2c94f917059a6dbc60d535bdd702d0ba"
+      },
+      "initial_image": {
+        "bytes": 67453,
+        "resolution": [1440, 1080],
+        "sha256": "b2b4eba9aa62b3e140e435ea2be8493a909ee1e5e9d89545431a21ecef39fb0e"
+      },
+      "label": "Long ribbons",
+      "layout": {
+        "bytes": 7342,
+        "sha256": "43a44f6310780176e4ae6176f774c71103d8e090b64bcf8a25e0d8308d1e3d31"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "5d4dd666e65df86ba5fee896b97e06fbb4240c8a2a9703cf325b26760ba1bba5",
+      "recipe_sha256": "d46704a2654af41e7dafedef1d32c7d9f2df7440d2718d476211333c0189501e",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "b5c32e5f6e75d822e7ba9374bf81cd97d7cd8d7665830238ac21f182c627331f",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "long-ribbons"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4863427,
+        "resolution": [2048, 1536],
+        "sha256": "8d7e8de2fc0cbcfa4c365051322e8ef30c1766dfc1dac55187bc2ddc6c7ee02c"
+      },
+      "initial_image": {
+        "bytes": 42631,
+        "resolution": [1440, 1080],
+        "sha256": "1f1eee02e61c44efcc075e75df7409e9b12b15a3e75a7d3122c3530a1f9a2773"
+      },
+      "label": "Split lobes",
+      "layout": {
+        "bytes": 7390,
+        "sha256": "e6447b9453377ee948e6f1c60c2bc2b8be47b284ab797b99371963f3b913cdca"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "0c94b41804366d43c916eb47557a6925b7f7ce560f21ef0a1b13e999bde4067d",
+      "recipe_sha256": "1665b3599c0cf25df4228886722e3c730bcd6d5ab164efb296414976c11a3887",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "d28149f9fbdd3508fbfd67df8629506dd82a43c1400d239f9034a6f6b220dc5e",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "split-lobes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4938354,
+        "resolution": [2048, 1536],
+        "sha256": "3cc30cc5746af855cafb80b335f83a4d925ac11203c34a89bdc582fa2d8c4780"
+      },
+      "initial_image": {
+        "bytes": 43658,
+        "resolution": [1440, 1080],
+        "sha256": "001e5a48f44e6457b730b78b8d600b6fcfb8cad74710b2b6ad1383199a306f61"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22054,
+        "sha256": "2ccfc6d7c492c2b40f0a5339ca1788e5309e416f2acd48dae0b70425326890fa"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "b0040abe04119ec2efd0b51de03d55d44bb1f6ee44dd68a5ca6a06496de8d913",
+      "recipe_sha256": "f287fb5a0a49234af8e52bd9bf981a72081795b0ecc44d998d018035e3bd469f",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "fd5407ea0a420902354da5e2130dbd40e699839953565e10a5647472c6d17c10",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4842894,
+        "resolution": [2048, 1536],
+        "sha256": "25d77459ade5917f8b48175aa8175be7830dbdf1914fcb9e1274c07400400ad2"
+      },
+      "initial_image": {
+        "bytes": 53111,
+        "resolution": [1440, 1080],
+        "sha256": "61187f44d3a21926a8c2b40700dd391776ed015c8e0d7d981fec7e8600fe6a69"
+      },
+      "label": "Swept crescents",
+      "layout": {
+        "bytes": 17382,
+        "sha256": "9e118beb64f7a226d5641af689613e951efb0511acff729c9463abd183a313bd"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "6e78e377834584a578afe0d0b5210e0504df92c838dabbace84b91388049558d",
+      "recipe_sha256": "8518779b6561f691be746ec0c63415daec5877e49ea5905af1498547ba4dedc6",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "181ef36659ad8b1f6b01c96f41e2443ca9d8754be7b8065fe7b81c2188c377e5",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "swept-crescents"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4580655,
+        "resolution": [2048, 1536],
+        "sha256": "55250d33565860c71050dacf2b8eb802337568444df781780507759520282ab5"
+      },
+      "initial_image": {
+        "bytes": 37533,
+        "resolution": [1440, 1080],
+        "sha256": "f9d12b2209ca8cf912b7acaaf4f45193decbca812b2c51a70a83dffd90d55d58"
+      },
+      "label": "Unequal pools",
+      "layout": {
+        "bytes": 6655,
+        "sha256": "2522acbcd42077d3166de652b1288881df34ef867e37b4346a79ce773904952d"
+      },
+      "palette_identity_sha256": "8faa7a5a0b9e64670d3cd39ba2d38ef4770727ae5faa539967a9f49d8e91835b",
+      "physical_state_sha256": "343b9c012152e895247976804dc404c8c3e5000567d3c4fcc7aaf1c195e819cd",
+      "recipe_sha256": "6aa019182c42072b5b30ad267d6fa2490423a9a6498e211e3f59f65e75228e3d",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "c489e8f26295b0fdb3dae48b17f6b23d16a345eb1165fc1cb62147c10f874385",
+      "seed": "0xa0c78ebadfb75018",
+      "source_sha256": "3c2f6d1d6e6f078ce2650e44d1dc5daba6be9d38144b7dbd912579ae66bc8070",
+      "variant": "unequal-pools"
+    },
+    {
+      "film": {
+        "bytes": 5601981,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "ca5707449a992016ac6a5dc189b2b343cbc27156d25d7890648acd4275c62d30"
+      },
+      "image": {
+        "bytes": 4065697,
+        "resolution": [2048, 1536],
+        "sha256": "aab92fb7b8e3cffc1b7dcd3ac0dcf456e3298b50b21c97d0c88918c803e8a245"
+      },
+      "initial_image": {
+        "bytes": 31447,
+        "resolution": [1440, 1080],
+        "sha256": "eabb4a40b4b5ebadace824bbeec08c18dfd849f58006c520591242e86c7285c5"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6618,
+        "sha256": "2ff43f1f56f5d3e9f8ecb9d723dcca586fd2127dae96cc856d2aced99230468b"
+      },
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "8f912797032b27ed30c5f8eb5012aa2c377fde21649d1c4e8adf339e8e502aa4",
+      "recipe_sha256": "034e31ba450cc33ce8e3d35a288ba548227b71cff7c8949d5936371435f9ca24",
+      "renderer_code_sha256": "5af6598b5f8df9f2d27caf7d5cffb8fea3567a6a50704c0cb5786bddc4d05d95",
+      "request_identity_sha256": "de1eb2f88caf7580fc5167c7c82c3ca598d8854e9e53c095510ec522dadd8578",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4255272,
+        "resolution": [2048, 1536],
+        "sha256": "cdd472198a81824d4808af258219822d18e8527694356f9d9dcafb647f7b1ce5"
+      },
+      "initial_image": {
+        "bytes": 37798,
+        "resolution": [1440, 1080],
+        "sha256": "b2652afcffcc14cdd96f19219952dd6f0906abd7b8e5d964bee912e950ad2a98"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7294,
+        "sha256": "e2a84d39761194bae7b5b0ce20f90095a82e8d168fcc87711be01ec76165a79f"
+      },
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "58c6b865a1115a45dc2b293bae4f19ba65884fc33942d84e9377ffb7f495ab3b",
+      "recipe_sha256": "d306bfddd86739c8dce4142452cede050094b65cbcab0e842331f1d00651aca7",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "f8c75023d7313da371ba1324a449b33388f7883921470e25d721c329eafd7bac",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 4312220,
+        "resolution": [2048, 1536],
+        "sha256": "ed1aafdf182545306508728ece05eb3debdef73d5d923c151ed656d4ffb11d21"
+      },
+      "initial_image": {
+        "bytes": 40197,
+        "resolution": [1440, 1080],
+        "sha256": "948860216cdc7556e1ab0ba857b5df290d718ef0f16532a547a2738ec7ee57b3"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 21869,
+        "sha256": "a8bbe3eb699acd0d1a1274e242f804ae23f492149279196c84f985dfc2e3156e"
+      },
+      "palette_identity_sha256": "96c78ead19fb151f7bdc470fbd79d79fb01f20810dd16bd994e005ebcee57b72",
+      "physical_state_sha256": "ad2e3a402aa1818be115fd193c8e7704b7e273358fa60494571c4ad5b966c249",
+      "recipe_sha256": "c96bc0c8f7cc399bca921f2c7c93949ca904273a21735e2e23f2d8b776aa2b6b",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "b989abebbcb77d9fd9855e036fb919e23ebc46bea4bccb1dd1200a332a864d84",
+      "seed": "0xb08c219a243f",
+      "source_sha256": "97dc14ed7f624da6b1246d687a213fa849b4a1235a0d7ac66e7c0b4c927f4393",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2153624,
+        "resolution": [2048, 1536],
+        "sha256": "e341dd19e126b882cad14218d84f7fffe38a5d5e477f28a7e1e125bad09e8521"
+      },
+      "initial_image": {
+        "bytes": 25931,
+        "resolution": [1440, 1080],
+        "sha256": "32ba600e60aa408da3f3db2f645e479943a701f3f6ddceaaf69c6686eff77c92"
+      },
+      "label": "Active pools",
+      "layout": {
+        "bytes": 6653,
+        "sha256": "fc621ff3e81d701a33f4c3028066d80952137f7f3069f5b250ace68facc9c59f"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "31afc5b011f081ad6f507b59702d8ae0fe2cc7ccdb6b5481b84c50e1cfd9caa7",
+      "recipe_sha256": "4d1e914a9b17c2a4f3509dd49fe4c62ffe11bc97da35adfb8b7af1673534fe22",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "9e9dc4fd946b7f190ef142ccc93d23b41bf1154efba39a899a94b290c617771b",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "active-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2303146,
+        "resolution": [2048, 1536],
+        "sha256": "96a8f4fad9e15d7cec83d708d8114aedd0f862152949a34498bc03014bec6e01"
+      },
+      "initial_image": {
+        "bytes": 28751,
+        "resolution": [1440, 1080],
+        "sha256": "f97a0a704cf3664a054f9e68b27609929dcdef3a5b3918ab9ec8029ab7421475"
+      },
+      "label": "Broad pools",
+      "layout": {
+        "bytes": 6653,
+        "sha256": "7590d5aee41270b2ff12266819c889018d462d4de50d3587ecff936fab1e9e30"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "0ae4457e27143b26b7740eebc868c25c16c90b7d5b824e355828a8350393c15d",
+      "recipe_sha256": "b9d0131d692eec8c423ad130ebeb86057da0c9971b1ccb7c73460763e81eabaa",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "aad47505152f595271921615aa5f081256c79d92956592f2b10ecdfd764af140",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "broad-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2012176,
+        "resolution": [2048, 1536],
+        "sha256": "fea6dcbf54d22c31304c79f58a053f00765be4a479349d27d6d66028a663e71d"
+      },
+      "initial_image": {
+        "bytes": 22043,
+        "resolution": [1440, 1080],
+        "sha256": "8f1c0cc141bfd58c74a33395dd77953e76906d6afeef7926c2f9ca6ccf88832c"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6661,
+        "sha256": "d6a7aa7617b22da50de3d7a6e9a3738c3020c14cda87ef363f2131190422f565"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "e0496a59693f6169cc04ac4ac59efa00d5c67876286e16dffcc784cb9d818226",
+      "recipe_sha256": "02e106dcb49f382a604bfb4c7d2bf85d23dfcfa1cf901e9cc5da9c6771d9e0f3",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "2d6bdedec86e522de80b135913a00cdccc67f23e8f723dc563420f70f51db5e7",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 1965313,
+        "resolution": [2048, 1536],
+        "sha256": "a31d096111e9494abe1393645d7a4bb159a3c56b8dd56c3e6c47ab9cfcdaaa05"
+      },
+      "initial_image": {
+        "bytes": 29401,
+        "resolution": [1440, 1080],
+        "sha256": "2fc1daef52c3d4a318ab69794de9b94db6ed5db0f7f951430c2e30d77eb307a7"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7317,
+        "sha256": "66dcff2e9603f4eb830cab3feb2cec44427ecc4862a00e08d73980ac7898cb81"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "14ced1323d05d13d167bbfe2ddb5a03b10de76190296ddb2ccb61cec336a3aef",
+      "recipe_sha256": "f526ec64d6d8b716736c53e64e25ae7de6ec30a19e35717e0b513cf358884bfa",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "c4454d0cbfcf6c397a1fb1ec7b5e89e6a2d0246d3e55bac118ef4dff38032833",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 1859813,
+        "resolution": [2048, 1536],
+        "sha256": "89029818384f3f423caaac4c3d0f84a1984c68d59d59ba2542877e44f1d770c3"
+      },
+      "initial_image": {
+        "bytes": 27553,
+        "resolution": [1440, 1080],
+        "sha256": "deaf6708648b82b0f76cc3e37225c89c4aba8a15435512d3e97f0346c16f569c"
+      },
+      "label": "Facing banks",
+      "layout": {
+        "bytes": 21921,
+        "sha256": "f7dc746d1c00a78aa0c9130b22cdcf4f4f6f9b60b2b57364e6f761069d57cec5"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "c95d62eed0c679b984e65939edd93fd37cd75aa9eb079ee5c2073f22fd532d94",
+      "recipe_sha256": "b0caa850d64e6cadf2dc7b4a37876cec406e980ca435aac9aa4ef393dcaed698",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "29fd7bab7cdff1fa38b5dce859d4702833f4118137e1cdd33d195e427edfb7a1",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "facing-banks"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2317889,
+        "resolution": [2048, 1536],
+        "sha256": "55dd359a98a039f8e2aca98e8038872ce6779dcc7a0b8b40b9672d69381400b6"
+      },
+      "initial_image": {
+        "bytes": 37483,
+        "resolution": [1440, 1080],
+        "sha256": "5c94910ebceb48498ab8defbb65a02e84d6626dbebf50535ab42eff80018b0af"
+      },
+      "label": "Long ribbons",
+      "layout": {
+        "bytes": 7329,
+        "sha256": "9540fad56fd482077b759912195f483989a5aae0479903739b9681926b162039"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "b3a41f08911ed714367b95856134e011cf7a0f4bfb618fa853b44c8e899fdaed",
+      "recipe_sha256": "c938ff5b649402b9b66a608a9a978800f50e822755e8c77c33db3ef60ebe5c8d",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "af1feb970a2b011a44f85794c29c47f52775ea6fa9f192d9c932cab91d01ccaa",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "long-ribbons"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2057856,
+        "resolution": [2048, 1536],
+        "sha256": "d7116115386464b69e2c3ab65d79349d2ba49d6f99964afefb34e9dd298a528d"
+      },
+      "initial_image": {
+        "bytes": 28833,
+        "resolution": [1440, 1080],
+        "sha256": "71c6f93432763fe9c529638adb4eb75e007bb5159e8f8ed0dfeb83c55ce56b27"
+      },
+      "label": "Ovals \u00b7 accent mobility",
+      "layout": {
+        "bytes": 22084,
+        "sha256": "4c4106ef907bd058d4f700b70453ca83aed23a0c8979e5d8600a3809c3227f60"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "5aade2f6bb88363ad388fe806b6b0c5566e1c3310dac4475e71ac295282524e6",
+      "recipe_sha256": "a9779ac288b0a16ac076329859dc08d9921c7fbbc25aa3e956694728150a84cb",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "06eb3d17e9cbeb872cbb4509d4c98a31e49d30942720366aefbe45948b7c98f3",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "ovals-accent-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2108903,
+        "resolution": [2048, 1536],
+        "sha256": "af51b03fe48a4d0259a63ae7d066cb21fe79770e5ada6630b40e2f385ed40a6d"
+      },
+      "initial_image": {
+        "bytes": 28764,
+        "resolution": [1440, 1080],
+        "sha256": "beb549a3ffc8220b87105632d2e6f4d3795edc913d65768a6f8e94051d0b46cd"
+      },
+      "label": "Ovals \u00b7 balanced layers",
+      "layout": {
+        "bytes": 22084,
+        "sha256": "74f46451f1b3fe0793dc42f0e03e00e114d44d1ba9b5c2437fd076c9dbbf9668"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "3809a9e3f94ef875384a3169e8e5ed087b7695522cb58b44c8e55d96352c17c2",
+      "recipe_sha256": "2a3ec6e278adf3e4057152938e597ea628eb1fa8d46c7df7ab4451615dd1fd2c",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "53513c2646e94a56d011de914d019ea031662e096ef1d870ba50a44512acad6f",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "ovals-balanced-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2078267,
+        "resolution": [2048, 1536],
+        "sha256": "d2b69e2bfd10a03779084999dfacf3064d53f34c218e0c2fe484cb27e6174e45"
+      },
+      "initial_image": {
+        "bytes": 27954,
+        "resolution": [1440, 1080],
+        "sha256": "1fe21301335082470de44468bc008a6135a24e2238b0577ef1df64ef5c6ef972"
+      },
+      "label": "Split lobes",
+      "layout": {
+        "bytes": 7396,
+        "sha256": "9146019c1b7b6c32f62e29192d4d991a9fb88171e9bef5534ef518573885b8e9"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "e58d3030c3828c801e81b7a0c669ca292613e38221c676465573d422055c9480",
+      "recipe_sha256": "b834e98f2f017bcae7f42b2303422a8808e7da4c54295e93d209e258bb1df6a1",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "5e37ab175288f621d7fbdc7a5d2c8e5367bfb4f94223fea9d2034382d27b8730",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "split-lobes"
+    },
+    {
+      "film": {
+        "bytes": 3450047,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "ee7750fdecc6153b55fa24d2cd35f3d15e0c684ca42d3e1b43583e3c5e9eaa21"
+      },
+      "image": {
+        "bytes": 2060490,
+        "resolution": [2048, 1536],
+        "sha256": "e102543adc6ef28fe1c221718f0add39631236cd31113b51d3672f6ab5b4cf60"
+      },
+      "initial_image": {
+        "bytes": 28862,
+        "resolution": [1440, 1080],
+        "sha256": "707e4b8a5625fb014a0a3bece8ff27a5b04864b326edb86eaf92b488ccfc78bd"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22019,
+        "sha256": "5287bd563cdf3b0bb6190c349abe017f84660286f89a39ef96e36eb51d466d60"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "9a1d8c3517f465fc2d11642ff59ab48e09b7f2c5c529a714f77d4e2a6a4bb853",
+      "recipe_sha256": "8f42509b199e87a23b3e6b668222a6923465df8ebf5ca2c8764d217b42e4c02a",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "7ce3b454d1e551c17bd0848d57ab44002032aa867f35fcc387a62726bf2a4505",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2417117,
+        "resolution": [2048, 1536],
+        "sha256": "13d8d3392fa429be6d4d134ff0e6447f6bf966937529d15865850368f73b4820"
+      },
+      "initial_image": {
+        "bytes": 33656,
+        "resolution": [1440, 1080],
+        "sha256": "6af7ace3fcfd4634e46710c20c3c3c0fd750786e56006b9b073e926fdb88fe67"
+      },
+      "label": "Swept crescents",
+      "layout": {
+        "bytes": 17461,
+        "sha256": "fa6827aeeaa2bf10b5e98c7d7fb18d2e299f259137010f1deea2aa01308775c9"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "47dbcc7c63568c09100812a3471519f89630d4f859035e1b51874e77969a63db",
+      "recipe_sha256": "796ba6ebe06e3f8d0643f79757c4ed6f3c0acc0f786fa1153d3626654474d219",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "f5061d90617d69a6512035e9ad369d6e48909f10fb26c58410d71547e8bc5724",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "swept-crescents"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2467402,
+        "resolution": [2048, 1536],
+        "sha256": "39ff67aca3d4206fc2cca285a17eefffe1be3c3e8f1e09cc118b1cc0466308c5"
+      },
+      "initial_image": {
+        "bytes": 25700,
+        "resolution": [1440, 1080],
+        "sha256": "3ad54fe3084b8580c065951d26f94bcc7b9dd030262bb27e69eb2c9989574903"
+      },
+      "label": "Unequal pools",
+      "layout": {
+        "bytes": 6635,
+        "sha256": "34f21039f3c59c09e10d81f5679ad806f75f2e26ff0892495d16a31058f014b3"
+      },
+      "palette_identity_sha256": "e3ffe6416771e93fd6e4dc24679d3cff0629040818f65f86ad7044379344ece9",
+      "physical_state_sha256": "a431b4ba5004608318e9174fc89b0ef145d5bbd71bec8ec243e28bf3b127d35e",
+      "recipe_sha256": "2bcdb6245b6801fd64f7b4c118b86fe1c28e22c307a8d0964a65fb4083d71497",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "6c5d890bcfe8cf7a8cf3cdf849ccc0676f18303ec432e7617129b5670dc61504",
+      "seed": "0xb7f327f9f722",
+      "source_sha256": "a9864c974e31dce21aa80ff9edd6524b9d4f9141c5cf50de26b6fdc739cc1652",
+      "variant": "unequal-pools"
+    },
+    {
+      "film": {
+        "bytes": 4450993,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "d82771a66081a47364d38b4be1efd2297b6982d222a5d539d6f3c1372dfeb4be"
+      },
+      "image": {
+        "bytes": 3333542,
+        "resolution": [2048, 1536],
+        "sha256": "cef09d10c2fdc14bac7774053fc15decb0316ecfa6bcf2d9ad0659a1985e8ce7"
+      },
+      "initial_image": {
+        "bytes": 31690,
+        "resolution": [1440, 1080],
+        "sha256": "a9b088ab8e3963f8520ae69357fa8a5dc824a5e47b197044886b6fbfdf5b1709"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6612,
+        "sha256": "267e12a173362580e6448c83c2292180e048b87682ab12750c65df25c7f403ae"
+      },
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "558a2a3628fa630681940f93d556131f185f8aa00c6d3528d48a2fa1f512a441",
+      "recipe_sha256": "14af67bf82732cfd1668af6e75e3b85a822906f47c0da3f84a2f108439196de8",
+      "renderer_code_sha256": "5af6598b5f8df9f2d27caf7d5cffb8fea3567a6a50704c0cb5786bddc4d05d95",
+      "request_identity_sha256": "e848196c0c73cea3accc4005539899a8b59395a43d599f20d144fbe6cd7e0633",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "variant": "compact-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3178614,
+        "resolution": [2048, 1536],
+        "sha256": "6a623a9633bde9c8f3f1953294ac42d5014cbf0e05c566e479a54209d1fa7945"
+      },
+      "initial_image": {
+        "bytes": 43284,
+        "resolution": [1440, 1080],
+        "sha256": "5c58929c95413dd648fb1ee9fcfe1642b3d9ffc233b69da1bc7ccd937fef569b"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7305,
+        "sha256": "cecec44c60278a012c43a78ca6b35e930fd2e8ed2e7ad3911b056c2e0c168dd5"
+      },
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "1bf4b9fab75dd4678036e7d412f43276e005e53784659ac0782e236778e1d4c9",
+      "recipe_sha256": "7e8c5d03064997010b240adba0a2173bac310217b97417f810ab6ab085aadbad",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "38ba689f636ca472b49ef17090194fa8fd46f2d903a7ff9b195ac258f2ab9947",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3968010,
+        "resolution": [2048, 1536],
+        "sha256": "17cc450eb7f0969966c1e430d4e1012744e231528ebb604bfc5ee17471c81a2f"
+      },
+      "initial_image": {
+        "bytes": 41185,
+        "resolution": [1440, 1080],
+        "sha256": "c18b1bf0101989b9ce0cf27d1ad85fa6ecd3428200713a8412ad23c7a6302184"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 21981,
+        "sha256": "c339013b5500a4290d688fb3f4d92760d04cb98a771684e064f2f42675dd4c5f"
+      },
+      "palette_identity_sha256": "f58412f6e146577bd543565ba73b2cc92c32fb6a71537cf799dda948a6d6eaea",
+      "physical_state_sha256": "7c5d1703d158d4398626d32c715eba394689f1d4ba18a31ac65300e322b6d6e5",
+      "recipe_sha256": "8743860d53b11e9ce68736f143bebda812bce469525c26b443869d6c54ab675a",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "5b3509261fad355abc6f015433fe3ce6da310769eaa1f90284f2814b9e5319d8",
+      "seed": "0xbc53af1cd380",
+      "source_sha256": "23b85906885ea5aaaface235c1cafb56d1e770272cae97e332cbb143fd9cb749",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3170021,
+        "resolution": [2048, 1536],
+        "sha256": "b9deaf1e7e76ef6d6b1499669b2455a1d31f72965efba0283571d7cbfc18f853"
+      },
+      "initial_image": {
+        "bytes": 37186,
+        "resolution": [1440, 1080],
+        "sha256": "8eca2f94bb87f3ef6e77dc092d538fbe533ce92a5db886374d3f401722c88a86"
+      },
+      "label": "Active pools",
+      "layout": {
+        "bytes": 6611,
+        "sha256": "6d4910047995bfcdf5c722a3337f89f3a13657a6f8965f021860a89ce0af3dee"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "8c883f052d2457f77eb4bc781cf057e6dd107d0bd8690a7b701543a72a12c89b",
+      "recipe_sha256": "bdb049294b533f1c7b644a8be092b9a16994fba100f547b89dacfbe6475b8c7e",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "5812984568bec865b5da7b31737abbea3ceb7968303caa7332c903db5ac044a7",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "active-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3375131,
+        "resolution": [2048, 1536],
+        "sha256": "d1d3a4070351d83d4931df393ce4d130f6be06e55ef1bf3d718a14f7127126ba"
+      },
+      "initial_image": {
+        "bytes": 41384,
+        "resolution": [1440, 1080],
+        "sha256": "3a72b868991cf6926594020714ec0f6d224dac26ef56a6436d023d1dcfdf61f9"
+      },
+      "label": "Broad pools",
+      "layout": {
+        "bytes": 6591,
+        "sha256": "9930842497decbd111886d9b5525de9d6df1ed331c760d868cec372fa2c3d96f"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "c81c924658fc4bead4b6ab9cac176e1c6a5145396136cc7d73e928ecc33ae46b",
+      "recipe_sha256": "9495b495e035af2a8ab146ad0e6691acab9db9a0bb0e4f2cb1aa638ced6f2fb1",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "d1b13ebec73d03f13c79af6f50e880d021967d40be5b7ad2dde1aef2714b3815",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "broad-pools"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 2663159,
+        "resolution": [2048, 1536],
+        "sha256": "bca7c70a598e4858de2ed86ab9b32771dc3e929fa1029213bb566b2497cd326e"
+      },
+      "initial_image": {
+        "bytes": 31577,
+        "resolution": [1440, 1080],
+        "sha256": "35852445daf2f51a819a3e8861ada4165cbd80eda6a50124c523e665b62b45b1"
+      },
+      "label": "Compact pools",
+      "layout": {
+        "bytes": 6599,
+        "sha256": "c2d17bf224519974d087903e53541c56bb849c1a0cc897e790fc2ef94a166753"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "c697116dbe8e00ba2680fc4fdbc5baf10681d8c2a91b24d830f5251e5f0dea5e",
+      "recipe_sha256": "fa91f40930cf9acf4caa3dcba18fd7fc98d2593463ffa4a3f6c666713d32d701",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "3a4a740b789256435cef202cb301feb8139578d99f3a402c7652bc01f536578f",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "compact-pools"
+    },
+    {
+      "film": {
+        "bytes": 4463224,
+        "fps": 24,
+        "frames": 937,
+        "resolution": [1440, 1080],
+        "sha256": "6181130e3e808f46068463ce539b3ea6fab5368da066c621d9bd1dbc2207de2c"
+      },
+      "image": {
+        "bytes": 3108617,
+        "resolution": [2048, 1536],
+        "sha256": "297952f6c3f5a8087dddfe70423f6ddd05629f86c3a9e6cb1378bb593bb3c2a0"
+      },
+      "initial_image": {
+        "bytes": 48490,
+        "resolution": [1440, 1080],
+        "sha256": "8fe61d91e4d0d2831e4a034099d98f957f1e3b7ccfa1a7c304809788c337f078"
+      },
+      "label": "Crossing strokes",
+      "layout": {
+        "bytes": 7263,
+        "sha256": "d32eb666cb484f8e724540216505fe9e2a5ffb3b5b3ca47e87937cfb3ab3d569"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "08351a785ef2187b4aa5e5ec94b5a5a8c455bcd3787a529d3654873a43dd7b3e",
+      "recipe_sha256": "7cd43bc5cd07c0e4ffa09da5d8e55d85519c46c752ffc434bf49634053bfb2a2",
+      "renderer_code_sha256": "6706b6e5bbcce460a410d3bbb7335a203465e6df20f8adbef93d92d43905b2ad",
+      "request_identity_sha256": "4ade3194e187c1da4a099eaaf09f83443293093314b22c53082c3675c5a4e394",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "cross-strokes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3264621,
+        "resolution": [2048, 1536],
+        "sha256": "60dd9f5ab2b1623f586d291797f8a7a5fd1bc83e67b3faf1039ec1bad44c85e7"
+      },
+      "initial_image": {
+        "bytes": 36247,
+        "resolution": [1440, 1080],
+        "sha256": "37dc0e2daa246a069fe7fd3333efa86ef893b00244bae7f4303488ff6fc9d153"
+      },
+      "label": "Facing banks",
+      "layout": {
+        "bytes": 22068,
+        "sha256": "81030915c373c7bcddcd382ed6d147c34936a02cd9391eaba1a0aa568005447c"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "adfebc84a8c61251ef96e77865ba1c7487c1018660640e6cce640b405ba89f24",
+      "recipe_sha256": "be220fa73e9e3fd657ff85626fc8c95d71e22707ed96e4df21c077c612e210af",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "960d81a8bde3d364de7c5ee2b30bc7dba1b58bf72caa4348bf6b03d68048465a",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "facing-banks"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3407916,
+        "resolution": [2048, 1536],
+        "sha256": "a557bad4725b95169a74f833f3e76a1ee0e94d210e695ae3e579f685f847ecbd"
+      },
+      "initial_image": {
+        "bytes": 57469,
+        "resolution": [1440, 1080],
+        "sha256": "bbdeb5b074f1bc59015f01e5e6242d1af4ab86ebf4a0bfe4ae351dc7a67bace9"
+      },
+      "label": "Long ribbons",
+      "layout": {
+        "bytes": 7275,
+        "sha256": "c43ad44ac9edc2fdc4725d3a9cd8bdef9a10a31383e636a7a5b48b9f43e6d2f5"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "bcf5f188d39519cf384c13d2362fd3ce973660bbd513ca59e71778b239d169c0",
+      "recipe_sha256": "63f6d68745eecb629da93aafecda9707bcb1bcb5d2d1d224deb956e7c036fa09",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "9af8bbb16d62873432f850de87ee00641fd2585374318c458c4ca68bb0daf875",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "long-ribbons"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3266400,
+        "resolution": [2048, 1536],
+        "sha256": "b763dcbcacb919f5a28722a114930fa61fd0bc4f8e8fcb633fb51520a855054a"
+      },
+      "initial_image": {
+        "bytes": 38807,
+        "resolution": [1440, 1080],
+        "sha256": "30c89a464ddf75dbbed66f186c474d3c392884c5ccea2f9f1115b4a554e234b9"
+      },
+      "label": "Ovals \u00b7 accent mobility",
+      "layout": {
+        "bytes": 22121,
+        "sha256": "60f83023cdf91eefd083b94dbc8686cb5d37e2ca65b636006b80964e9e917026"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "939575b794d4b1615c5e04ce3a07ed93b5e19e57f1c2476f2aa103692aa6e105",
+      "recipe_sha256": "c48a926da764ad9c13af168ec267c0740f68fbcf824b579dca2ff751b321eafb",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "5cf427fda8a7d9e733c41856e33e339312ff410e99fd9762135a4efd864b9542",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "ovals-accent-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3307472,
+        "resolution": [2048, 1536],
+        "sha256": "32d841af467e5186dc7bf196a623a38e4730966bd029b1213e8d09e8d6a4c7de"
+      },
+      "initial_image": {
+        "bytes": 38956,
+        "resolution": [1440, 1080],
+        "sha256": "3a58ae52bcfc092aa766189a253babdb2b84b9d80f06f76989887778bc26b527"
+      },
+      "label": "Ovals \u00b7 balanced layers",
+      "layout": {
+        "bytes": 22122,
+        "sha256": "78cfa4b0267e27cc1e5d27e89377191c809e9cd96c7a489e4e05dc19a02d330f"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "b446a5e1f470767aa32882ffd5ae83a0c6ad53cd65f554d477b96ee433ea8095",
+      "recipe_sha256": "9675f504d2c9d6b6ccea873cd078c0e23e1e4c6b80aca70022f0b8b66e9b3355",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "f1915a6ac37ab0fa853448568cf7735e1cdfbde54f3d44b52671c4bb4ff56c3b",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "ovals-balanced-layers"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3213615,
+        "resolution": [2048, 1536],
+        "sha256": "e214df00299fb1e8fd754169b9574f88705e0fa0b1cec9543cdf453f01d7c053"
+      },
+      "initial_image": {
+        "bytes": 41170,
+        "resolution": [1440, 1080],
+        "sha256": "91f2abc7492c357c95b18729aaa47dec0fc689f382d1c34b552303bae090a4d0"
+      },
+      "label": "Split lobes",
+      "layout": {
+        "bytes": 7351,
+        "sha256": "a88142000e89c50c4691238a4c318fbd5e1ca5eb5612c660b39cd64a42b9309a"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "b6d4d87daa24064bc6562eb6ddc71383d65b31566e044ba018638cee25cca546",
+      "recipe_sha256": "95091127df41ee15876c038d7ea34b348e81dd43ec294d3238bda927d956cd78",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "31428a6090d5d99636409d5ead09e7cf9adb89780b44c1ebfdb2fae345a91dec",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "split-lobes"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3248479,
+        "resolution": [2048, 1536],
+        "sha256": "af0773fc189e08b0552469a10113ad2cd34362b239c5b18733b81e2db143ef87"
+      },
+      "initial_image": {
+        "bytes": 38728,
+        "resolution": [1440, 1080],
+        "sha256": "f680b58a5485f13d24ba3d2888c934fc83e23a299ea69078548f8c9e09a4f2ea"
+      },
+      "label": "Stretch ovals",
+      "layout": {
+        "bytes": 22057,
+        "sha256": "feb0f43960f5fa1182c585a16b5cd5d9eef8fe48cd5ce7921c8455df7a9a04c1"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "3c3b3905b9ac25780ba005f27124f580db9b35674160249e5d192085272f7c55",
+      "recipe_sha256": "4a0729fffd79fe7527cc336e49e112b82ceb0d8225eb8170560c1b5a0b97ced9",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "712f98eb0449b41752ca3f0289bd5ebf23d6de28cb10830b8262bdfb5577f460",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "stretch-ovals"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3509464,
+        "resolution": [2048, 1536],
+        "sha256": "2e3fea08d29738538e04475e9f75a00684394a2bd0d0fdedb1ded7d229281a7b"
+      },
+      "initial_image": {
+        "bytes": 51178,
+        "resolution": [1440, 1080],
+        "sha256": "74fd06815f3a6bc2228e64fd66ecda669ad99ac73bf5143647d55410fdb79650"
+      },
+      "label": "Swept crescents",
+      "layout": {
+        "bytes": 17270,
+        "sha256": "ebfd611789eeb8847d8626e8719fa5e68d61dd5c518c340a392a8469679327ad"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "e670228b3e7ed815021fd35224768d49cadd844319b4d9054a47b0591d8afe91",
+      "recipe_sha256": "9291f067d30f8ff4e226b40e93a73f36238637d3faf06f9a815984be0a187589",
+      "renderer_code_sha256": "3d42172704542b05c8229a44e0f73ef6a8d6a6e99fdecd48863b013f9dfe2bde",
+      "request_identity_sha256": "74c38d8562c70b4df799dd89b6de13efbf1efc68477cf5b99d40f0fff4afe46e",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "swept-crescents"
+    },
+    {
+      "film": null,
+      "image": {
+        "bytes": 3086062,
+        "resolution": [2048, 1536],
+        "sha256": "74072cd2cd1469fdaa43951893f82f9f4122461e5e6499bc3ea0c8efea2f0371"
+      },
+      "initial_image": {
+        "bytes": 36372,
+        "resolution": [1440, 1080],
+        "sha256": "21d518109a346e3322ccbcbfa63d2dc54aca9766697d19bd981f0d743fd9849d"
+      },
+      "label": "Unequal pools",
+      "layout": {
+        "bytes": 6598,
+        "sha256": "776f34f11f1e4c1c093ac6172fead333e0b73a7b6c8b8827faf4466ce7209f37"
+      },
+      "palette_identity_sha256": "33baa903d740dde403cd25af87f72786a7fc9be4d1d44b546ce580cc76927af8",
+      "physical_state_sha256": "7d371aded8c344916cca5a84c9e139dff76b017fcde8c1680afad543e224bd1d",
+      "recipe_sha256": "eb553bd7070d37a8dab1d8236486dbbdcb30544d5bc78c2f23d3d2735a7a1158",
+      "renderer_code_sha256": "9742c50256c7addbb4034832d77b3dfd327082e5fc7d90d4fe0e334aa5b33742",
+      "request_identity_sha256": "b9002bb8405c3abb1a362f89050560ed3bd4a635d093b253f30f99d066656687",
+      "seed": "0xceddf97909f39cc2",
+      "source_sha256": "a07ae19e8bc5c79308e54b581c46eba8d8e9fb51e6fe1c36d183f9f3ee94d8e8",
+      "variant": "unequal-pools"
+    }
+  ],
+  "title": "The Estuary \u00b7 Deliberate beginnings",
+  "verification": {
+    "browser_film_dimensions": [1440, 1080],
+    "browser_film_duration_seconds": 39.041667,
+    "browser_movies_ready_without_errors": 20,
+    "gpu_suite_log": {
+      "bytes": 1059,
+      "sha256": "875783788d2f8eb9c1b6bf7e89eab9b9630fb31fe772ac3c332a3c741824adec"
+    },
+    "gpu_suite_result": "passed",
+    "gpu_suite_skips": 13,
+    "gpu_suite_tests_run": 700,
+    "matched_film_still_states_and_images": 10
+  },
+  "version": "choreographed-starts-release-v1",
+  "visual_picks": [
+    {
+      "note": "The cyan fold becomes a distinct focal point, with deliberate open spaces. RC1 remains more unified overall.",
+      "seed": "0xb7f327f9f722",
+      "variant": "stretch-ovals"
+    },
+    {
+      "note": "Magenta takes part inside the main green folds, giving the composition a more connected color structure.",
+      "seed": "0x808861c25b6c",
+      "variant": "compact-pools"
+    },
+    {
+      "note": "A broad arch and generous central opening give the painting a clearer gesture, with all three colors woven through it.",
+      "seed": "0xceddf97909f39cc2",
+      "variant": "cross-strokes"
+    },
+    {
+      "note": "The most substantial opening of this seed's rounded silhouette. The two blunt upper tips are still less resolved than RC1.",
+      "seed": "0xa0c78ebadfb75018",
+      "variant": "facing-banks"
+    },
+    {
+      "note": "The cyan, pale paint and gold form one connected gesture, with a quieter outer sweep than the larger circular alternatives.",
+      "seed": "0x5b26dc8faef2",
+      "variant": "cross-strokes"
+    },
+    {
+      "note": "Violet is woven through the main green folds; the open interior and trailing green stroke give a clearer, more varied silhouette.",
+      "seed": "0x6210d183445b5dd5",
+      "variant": "cross-strokes"
+    },
+    {
+      "note": "The main folds stay connected, with clear openings and fewer distracting flat-colored tips than the other new arrangements.",
+      "seed": "0xb08c219a243f",
+      "variant": "compact-pools"
+    },
+    {
+      "note": "A more varied color balance inside the compact curl, without the large lower appendages of the elongated starts.",
+      "seed": "0x2d01093da35729b3",
+      "variant": "compact-pools"
+    },
+    {
+      "note": "Open channels give this formerly dense pink shape more internal rhythm while keeping one coherent mass.",
+      "seed": "0xbc53af1cd380",
+      "variant": "compact-pools"
+    },
+    {
+      "note": "A central opening and lighter left-hand arc break up the rounded mass. The upright tips make this a livelier alternative to RC1.",
+      "seed": "0x5584badfb5d82790",
+      "variant": "cross-strokes"
+    },
+    {
+      "note": "My overall preference for this seed: a more unified gesture than the new arrangements.",
+      "seed": "0xb7f327f9f722",
+      "variant": "rc1"
+    },
+    {
+      "note": "The rounded structure remains, but the original has the cleanest, most restrained finish.",
+      "seed": "0xa0c78ebadfb75018",
+      "variant": "rc1"
+    },
+    {
+      "note": "The original is more cohesive; its colors and outer sweep feel better resolved together.",
+      "seed": "0xb08c219a243f",
+      "variant": "rc1"
+    },
+    {
+      "note": "The original keeps a coherent compact form without the extra peripheral marks.",
+      "seed": "0x2d01093da35729b3",
+      "variant": "rc1"
+    }
+  ]
+}
