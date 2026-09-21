@@ -113,3 +113,70 @@ Run qualification with `python -m unittest discover -s tools/estuary_confluence
 transport, shading and ownership checks. Render from a frozen source checkout;
 the study plan and every completed case bind the runtime files. Preserve the
 original RC1 archives and never modify a completed case to adjust its appearance.
+
+## What the initial visual comparisons show
+
+The controls do not contribute equally. Structural resistance produces the largest
+changes in silhouette and spacing. Strength 1 retains more of RC1's connected
+ribbons than strengths 3 or 6. Stronger settings can introduce small openings,
+fragmented strands and repeated contour irregularities. More variation is not
+consistently more beautiful.
+
+Directional relief and material variation alone are very subtle on the tested
+RC1 material. The orientation and conservation tests demonstrate that the relief
+operator works, but they do not establish a perceptual improvement in a finished
+painting. Stronger surface-only probes on B7 also failed to reveal a convincing
+new fine texture. These remain experimental controls, not a claimed upgrade.
+
+The optional paint-amount gate changes the composition again; it does not
+reliably remove the contour irregularities. The wider response also changes its
+coarse grid and should not be described as a demonstrated numerical cure.
+
+`gentle-worked-paint` is the restrained combined study:
+
+| Control | Value |
+| --- | --- |
+| Displayed height | 63, compared with RC1's 60 |
+| Directional relief | Strength 0.3, anisotropy 0.8 |
+| Seeded property variation | Amplitude 0.10 |
+| Structural resistance | Strength 1 |
+| Paint-amount reference | 0.01 |
+| Roughness bias | +0.04 |
+
+“Gentle” describes the controls. The resulting shape can still change noticeably,
+and the best choice varies by seed. The gallery's marked picks are subjective
+comparisons with written reasons, not an automatic quality score. RC1 remains
+available without changing its recipe, material or saved images.
+
+The three native reference studies reproduce both RC1's complete material hashes
+and its final PNG bytes exactly. Every film uses 721 formation frames, 72 hold
+frames and 145 camera frames at 24 fps (39.0417 seconds). The entire recorded
+trajectory is traversed during formation; video duration is not a truncated
+source interval. Paint updates use the existing canonical/adaptive source clock,
+independent of frame capture. The first completed combined film also has 72
+identical hold-frame PNGs and passed browser playback and seeking checks.
+
+## Completed collection
+
+The published collection contains **95 native 2048×1536 images and 20 full films**:
+27 treatments across the three main study seeds, followed by a matched RC1/gentle
+comparison across all ten seeds. The 20 films cover RC1 and the gentle combination
+for every seed. Other parameter studies are explicitly labeled as image studies.
+
+The [release manifest](releases/paint-materials-v1.json) records every image and
+film identity, batch plans, source hashes, and the ten visual picks. All 88 new
+complete-source runs finished without a failed case. The review reuses the ten
+preserved RC1 films and omits duplicate newly rendered RC1 controls.
+
+My preferences are mixed: the gentle combination improves the openness and color
+lanes of CEDD, 8088 and 6210, while RC1 remains the cleaner choice for the other
+seven. These findings do not support replacing RC1 universally or claiming that
+fine texture is now substantially more convincing. Both versions stay available
+for the viewer's own judgment.
+
+Validation included the 647-test Confluence suite on the GPU server (10 expected
+skips), all 83 base-engine GPU tests, and ten publisher/browser-control tests
+including the local Node checks. The final portable gallery was verified on both
+hosts. All 95 image routes and 20 film routes responded correctly, including
+byte-range requests for every film. Browser checks covered playback, seeking,
+linked detail inspection, and the narrow app-panel layout.
