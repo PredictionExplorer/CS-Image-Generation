@@ -1,9 +1,9 @@
 # Starting paint studies
 
-**Release draft:** the active family is `pattern-studies-v2`. Version two addresses
-contrast lost in actual simulated thin folds, which the original pure-color
-separation checks did not predict. The deployment below is the planned v2 campaign;
-its final integration counts and rendering completion remain to be recorded.
+The active family is `pattern-studies-v2`. Version two addresses contrast lost in
+actual simulated thin folds, which the original pure-color separation checks did
+not predict. The gallery reports rendering progress separately from implementation
+and test completion.
 
 `pattern-studies-v2` compares ten starting compositions on the **same ten recorded
 three-body trajectories**: 100 image-and-film pairs. Each seed keeps one palette
@@ -247,7 +247,7 @@ original material and stage records, returning its certificate and artifact path
 
 ## Deployment and qualification
 
-The planned v2 frozen release directory is:
+The v2 campaign uses frozen source commit `7611c35` at:
 
 ```text
 /home/user/estuary-depth/pattern-studies/releases/pattern-atlas-v3
@@ -259,42 +259,34 @@ same [local port 8805](http://127.0.0.1:8805/). These are distinct archives;
 the earlier v1 pilot and publications are retained. Consult `campaign-v2-status.json`,
 the batch `progress.json` files and `publication-v2-health.json` for actual completion.
 
-V2 palette checks cover 4096 seeds and retain the original OKLab distance, hue and
-chroma thresholds while enforcing the new linear-reflectance floor. Full v2
-integration and render qualification counts will be recorded after the release
-is frozen. This section does not claim all 100 pairs have rendered.
-
-### Initial prototype evidence
-
-The initial qualified prototype used commit `93d79f3` at:
-
-```text
-/home/user/estuary-depth/pattern-studies/releases/pattern-atlas-v2
-```
-
-That prototype registered four pilot pairs in `pilot-v1` and 96 remaining pairs
-in `matrix-v1`, with progressive publication in `review-v2`. The pilot is retained
-for comparison while its optical response is assessed; the main campaign may use
-new versioned plans and release directories. These paths are historical prototype
-references, not a claim that the matrix has finished or that its settings are
-final. Read `campaign-status.json`, each batch's `progress.json`, and
-`publication-health.json` for current status; the gallery reports ready and pending
-counts. The local review is [port 8805](http://127.0.0.1:8805/) when its server
-tunnel is active.
-
-Recorded prototype qualification results, to be rerun for the final calibration:
+Recorded qualification of the frozen release:
 
 - **113 base server GPU tests passed**, with no skips.
-- **182 depth tests ran:** 174 passed and eight were skipped on the server.
+- **196 depth tests ran:** 188 passed and eight were skipped on the server.
   Those six native Blender tests and two Node tests also passed in their
   appropriate runtimes.
-- **4096 seeded palettes checked**, including pure colors and 50/50 mixtures
-  through the existing finite-layer pigment optics.
+- **4096 v2 palettes checked**, retaining the original hue, chroma and perceptual
+  separation thresholds while enforcing the new reflectance floor. Regression
+  fixtures include unequal mixtures from actual completed paint, including the
+  small amount of dark pigment that previously turned a mostly magenta region blue.
+- **Ten completed source states inspected** with both optical versions. The
+  v2 response restored readable folds across this cohort. These states used the
+  earlier Control composition: this is an optical preflight, not a substitute
+  for reviewing the new motifs and their finished relief films.
+- Palette records matched byte-for-byte on macOS and Linux for the ten cohort
+  seeds and two boundary seeds; this does not establish cross-GPU image identity.
 - **100 actual seed–motif spatial combinations checked.** The smallest pigment
   share in the central source corridor was **7.898%**. This was a spatial coverage
-  result, not a dynamic participation or aesthetic score.
-- The native **6144 × 4608 state budget** was checked. Ruff passed across 203
+  result, not a dynamic participation or aesthetic score. Geometry is unchanged
+  between v1 and v2, so the original spatial qualification still applies.
+- The native **6144 × 4608 state budget** was checked. Ruff passed across 207
   files, and the configured five-file strict Mypy target passed.
+
+The initial optical prototype remains at commit `93d79f3` in
+`releases/pattern-atlas-v2`, with `pilot-v1`, `matrix-v1` and `review-v2` archives.
+It was stopped after the first two paint simulations exposed the color-loss
+problem. Existing v1 recipes remain supported; these archives are not relabeled
+or silently regenerated as v2.
 
 These checks establish implementation and archive contracts. They do not certify
 artistic quality or imply that all 100 images and films have finished rendering.
