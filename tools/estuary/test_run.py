@@ -259,9 +259,11 @@ class RunnerTests(unittest.TestCase):
             for index in range(3):
                 renderer.checkpoint(folder, "identity", engine, index, index, [])
             previous = (folder / "checkpoint.json").read_bytes()
-            with patch.object(renderer, "write_json", side_effect=OSError("full disk")):
-                with self.assertRaises(OSError):
-                    renderer.checkpoint(folder, "identity", engine, 3, 3, [], retention=2)
+            with (
+                patch.object(renderer, "write_json", side_effect=OSError("full disk")),
+                self.assertRaises(OSError),
+            ):
+                renderer.checkpoint(folder, "identity", engine, 3, 3, [], retention=2)
             self.assertEqual((folder / "checkpoint.json").read_bytes(), previous)
             self.assertTrue((folder / "checkpoints/state-000000.npy").exists())
             self.assertTrue((folder / "checkpoints/state-000002.npy").exists())

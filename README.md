@@ -78,6 +78,11 @@ checkpoints and source/code/recipe provenance. See [the model, installation,
 rendering and verification guide](docs/estuary.md). Its pinned NumPy/ModernGL
 environment is separate from the standard-library helper scripts below.
 
+New fine-fold studies produce a **painting and full-trajectory film together**.
+See [paired films and fresh seed cohorts](tools/estuary_depth/FILAMENT_FILMS.md)
+for the durable batch pipeline and [the fine-fold experiments](tools/estuary_depth/FINE_FOLDS.md)
+for the reference reconstruction.
+
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
