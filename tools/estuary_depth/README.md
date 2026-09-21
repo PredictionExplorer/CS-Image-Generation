@@ -1,5 +1,8 @@
 # Estuary: Into depth
 
+[Fine-fold studies](FINE_FOLDS.md) reconstruct the original Folded Tide and
+compare starting bands, three paint pools, material resolution and relief light.
+
 This study photographs the **actual pigment fields from a completed Estuary
 painting** as relief, separated layers, or a combination of both. The color,
 concentration and recorded source history remain inspectable throughout.
