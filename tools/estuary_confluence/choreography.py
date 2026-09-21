@@ -13,6 +13,7 @@ import json
 import math
 import re
 from collections import OrderedDict
+from threading import Lock
 
 import numpy as np
 
@@ -51,6 +52,7 @@ GATES = {
 }
 _PREPARED = {}
 _LAYOUTS = OrderedDict()
+_CACHE_LOCK = Lock()
 
 
 def _number(value, label, low, high):
@@ -252,8 +254,10 @@ def _source_data(source, simulation):
     ]
     _json_finite(key_data)
     key = hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
-    if key in _PREPARED:
-        return _PREPARED[key]
+    with _CACHE_LOCK:
+        cached = _PREPARED.get(key)
+    if cached is not None:
+        return cached
     fractions = (np.arange(PILOT_STEPS) + 0.5) / PILOT_STEPS
     frames = source.sample(fractions)
     tools, pairs = engaged.conditioned_uniforms(frames, flow["stir_radius"])
@@ -308,9 +312,11 @@ def _source_data(source, simulation):
     if not chosen:
         raise ValueError("No active source anchors for choreography")
     result = flow, tools, pairs, strains, centers, chosen, key
-    if len(_PREPARED) >= 12:
-        _PREPARED.pop(next(iter(_PREPARED)))
-    _PREPARED[key] = result
+    with _CACHE_LOCK:
+        if key not in _PREPARED:
+            if len(_PREPARED) >= 12:
+                _PREPARED.pop(next(iter(_PREPARED)))
+            _PREPARED[key] = result
     return result
 
 
@@ -645,9 +651,12 @@ def plan_layout(source, simulation_config, palette):
             sort_keys=True,
         ).encode()
     ).hexdigest()
-    if cache_key in _LAYOUTS:
-        _LAYOUTS.move_to_end(cache_key)
-        result = copy.deepcopy(_LAYOUTS[cache_key])
+    with _CACHE_LOCK:
+        cached = _LAYOUTS.get(cache_key)
+        if cached is not None:
+            _LAYOUTS.move_to_end(cache_key)
+    if cached is not None:
+        result = copy.deepcopy(cached)
         result["config"] = config
         result["effective_layer_fractions"] = effective.tolist()
         validate_layout(result)
@@ -722,9 +731,11 @@ def plan_layout(source, simulation_config, palette):
     cached = copy.deepcopy(result)
     cached["config"] = geometric_config
     cached["effective_layer_fractions"] = baseline.tolist()
-    _LAYOUTS[cache_key] = cached
-    if len(_LAYOUTS) > 128:
-        _LAYOUTS.popitem(last=False)
+    with _CACHE_LOCK:
+        if cache_key not in _LAYOUTS:
+            _LAYOUTS[cache_key] = cached
+            if len(_LAYOUTS) > 128:
+                _LAYOUTS.popitem(last=False)
     return result
 
 
