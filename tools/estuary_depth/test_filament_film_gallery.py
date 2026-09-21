@@ -126,6 +126,83 @@ class FilmGalleryTests(unittest.TestCase):
         shutil.rmtree(self.fixture.output)
         self.assertEqual(gallery.verify_review(self.output), data)
 
+    def test_new_previews_are_deterministic_small_and_leave_full_images_unchanged(self):
+        original = artifact(self.fixture.folders[0] / "photographs/00-painting/render.png")
+        data = self.publish()
+        entry = read(self.output / data["provenance"]["entries"][0]["path"])
+        row = data["rows"][0]
+        self.assertEqual(gallery._fingerprint(entry["media"]["image"]), original)
+        self.assertEqual(row["image"], entry["media"]["image"]["path"])
+        self.assertNotEqual(row["preview"], row["image"])
+        self.assertEqual(row["preview_resolution"], [640, 480])
+        self.assertEqual(row["resolution"], [2048, 1536])
+        self.assertEqual(
+            entry["preview"], gallery._make_preview(self.output, entry["media"]["image"])
+        )
+        self.assertLess(entry["preview"]["artifact"]["bytes"], original["bytes"])
+        with Image.open(self.output / row["preview"]) as image:
+            self.assertEqual((image.size, image.mode), ((640, 480), "RGB"))
+        with patch.object(
+            gallery, "_preview_pixels", side_effect=AssertionError("preview regenerated")
+        ):
+            self.assertEqual(self.publish(), data)
+
+    def test_legacy_entries_and_rows_remain_byte_identical_on_refresh(self):
+        data = self.publish()
+        legacy = []
+        for descriptor in data["provenance"]["entries"]:
+            entry = read(self.output / descriptor["path"])
+            entry.pop("preview")
+            path = self.output / "entries" / (gallery._sha(entry) + ".json")
+            write(path, entry)
+            legacy.append({"path": str(path.relative_to(self.output)), **artifact(path)})
+        data["provenance"]["entries"] = legacy
+        for row in data["rows"]:
+            row["preview"] = row["image"]
+            row.pop("preview_resolution")
+        data["identity_sha256"] = gallery._sha(
+            {k: v for k, v in data.items() if k != "identity_sha256"}
+        )
+        write(self.output / "comparison.json", data)
+        before = (self.output / "comparison.json").read_bytes()
+        self.assertEqual(gallery.verify_review(self.output), data)
+        with patch.object(
+            gallery, "_make_preview", side_effect=AssertionError("old entry changed")
+        ):
+            self.assertEqual(self.publish(), data)
+        self.assertEqual((self.output / "comparison.json").read_bytes(), before)
+
+    def test_preview_byte_tampering_is_rejected(self):
+        data = self.publish()
+        path = self.output / data["rows"][0]["preview"]
+        content = path.read_bytes()
+        path.write_bytes(content[:-1] + bytes([content[-1] ^ 1]))
+        with self.assertRaises(ValueError):
+            gallery.verify_review(self.output)
+
+    def test_preview_source_version_and_dimensions_are_bound(self):
+        original = self.publish()
+        for field, value in (
+            ("source_image_sha256", "0" * 64),
+            ("version", "unknown"),
+            ("resolution", [320, 240]),
+        ):
+            write(self.output / "comparison.json", original)
+            self.replace_entry(
+                lambda entry, field=field, value=value: entry["preview"].update({field: value})
+            )
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Preview version"):
+                gallery.verify_review(self.output)
+
+    def test_rehashed_foreign_preview_pixels_are_rejected(self):
+        self.publish()
+        foreign = self.root / "foreign.png"
+        Image.new("RGB", (640, 480), (230, 40, 15)).save(foreign)
+        descriptor = gallery._copy(self.output, foreign, folder="assets")
+        self.replace_entry(lambda entry: entry["preview"].update(artifact=descriptor))
+        with self.assertRaisesRegex(ValueError, "Preview pixels differ"):
+            gallery.verify_review(self.output)
+
     def test_incremental_empty_partial_complete_reuses_certified_cases(self):
         saved = []
         for folder in self.fixture.folders:

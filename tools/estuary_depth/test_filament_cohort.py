@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
+
 from tools.estuary_studio.common import artifact, read, write
 
 from . import filament_cohort as cohort
@@ -170,6 +172,31 @@ class CohortArchiveTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "metadata"),
         ):
             cohort.verify_cohort(self.manifest, source_root=self.output)
+
+    def test_numpy_double_projection_scalars_match_archived_json_without_wider_tolerance(self):
+        def source_with_scale(value):
+            def source(path, **kwargs):
+                result = self.source(path, **kwargs)
+                result.metadata["projection"]["scale"] = np.float64(value)
+                return result
+
+            return source
+
+        for value in (1.0, 1.0 + 1e-13):
+            with (
+                self.subTest(scale=value),
+                patch("tools.estuary.source.Source.read", side_effect=source_with_scale(value)),
+            ):
+                self.assertEqual(
+                    len(cohort.verify_cohort(self.manifest, source_root=self.output)), 10
+                )
+        for value in (1.0 + 1e-4, np.inf, np.nan):
+            with (
+                self.subTest(scale=value),
+                patch("tools.estuary.source.Source.read", side_effect=source_with_scale(value)),
+                self.assertRaisesRegex(ValueError, "metadata"),
+            ):
+                cohort.verify_cohort(self.manifest, source_root=self.output)
 
     def test_partial_rerolled_or_reordered_sources_are_rejected_even_when_rehashed(self):
         for change in ("partial", "dropped", "reordered", "rerolled"):

@@ -77,3 +77,41 @@ Use `filament_film_gallery` for the portable progressive review. Published rows
 always have both verified media types. Content-addressed entries are immutable;
 the review's progress and comparison manifest are updated atomically as more
 pairs finish. Pending work is reported separately from completed films.
+New gallery entries include source-bound 640 × 480 previews for the small cards
+and film posters. Full-resolution image links remain unchanged. Portable
+verification checks both preview integrity and its source-derived pixels;
+earlier entries without previews retain their original identities.
+
+## The ten-new-seed campaign
+
+The campaign under `/home/user/estuary-depth/filament-films` plans **171 pairs**:
+150 treatments across ten new seeds, plus films for the 21 earlier study images.
+The exact fresh seed derivation, production settings and frozen exclusion
+inventory are in [the cohort plan](cohorts/filament-fresh-v1-plan.json).
+All ten recordings are certified in [the completed cohort](cohorts/filament-fresh-v1.json).
+
+- `new-cohort-v1/cohort.json` certifies the newly generated recordings.
+- `backfill-v1/plan.json` binds the 21 earlier paintings to their known material
+  hashes. `backfill-v1/progress.json` records their current stages.
+- `fresh-plan-v1.json` is created after all ten new recordings verify;
+  `fresh-v1/progress.json` records the 150-pair batch.
+- `review-v1/comparison.json` is the atomic, portable gallery snapshot.
+- `publication-health.json` records publication progress and any publisher error.
+- `campaign-complete.json` is written only after all 171 pairs and the complete
+  portable gallery verify. Its absence means completion is not yet certified.
+
+The review is served on loopback port 8804 on the experiment server, with a
+managed local SSH forward to the same port. Its “Check for completed films”
+button loads the latest certified pairs. Source generation, rendering and
+publication continue independently of the browser. The earlier still gallery
+on port 8803 remains separate.
+
+The pilot film reproduced the earlier broad-pool material hash exactly:
+`d794cd8ef4371888ad077ee7d39cda297b0191471689878b20490942f60dde5a`.
+Qualification includes 96 passing core GPU tests, the 155-test depth suite
+(its six native Blender and two Node viewer tests also exercised in their
+respective environments), and full playback of the reference and broad-pool
+films in the browser. Repository Ruff and configured Mypy checks passed.
+The source-derived preview and live/JSON double-precision compatibility checks
+add six further regression tests; source hashes, physical checks and projection
+tolerance remain unchanged.

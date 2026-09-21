@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import io
 import json
 from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from tools.estuary.run import exposure_plan, frame_plan
 from tools.estuary_confluence.review_page import Presentation
@@ -41,6 +43,8 @@ from .filament_motion import (
 
 VERSION = "filament-film-review-v1"
 ENTRY_VERSION = "filament-film-entry-v1"
+PREVIEW_VERSION = "filament-preview-v1"
+PREVIEW_RESOLUTION = (640, 480)
 PRESENTATION = Presentation(
     version=VERSION,
     eyebrow="Three bodies / Fine folds in motion",
@@ -120,6 +124,66 @@ def _copy(root, source, *, folder="records", expected=None):
     target = root / folder / (info["sha256"] + suffix)
     _copy_verified(source, target, info)
     return {"path": str(target.relative_to(root)), **info}
+
+
+def _preview_pixels(source):
+    """Version-one preview: display RGB8, full frame, Pillow Lanczos at 640x480."""
+    with Image.open(source) as image:
+        require(
+            image.format == "PNG"
+            and image.width * PREVIEW_RESOLUTION[1] == image.height * PREVIEW_RESOLUTION[0],
+            "Preview source must be a 4:3 PNG",
+        )
+        return image.convert("RGB").resize(PREVIEW_RESOLUTION, Image.Resampling.LANCZOS)
+
+
+def _make_preview(root, source):
+    path = _checked(root, source, folder="assets", suffix=".png")
+    image = _preview_pixels(path)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", compress_level=9, optimize=False)
+    payload = buffer.getvalue()
+    info = {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+    target = root / "assets" / (info["sha256"] + ".png")
+    if target.exists():
+        require(artifact(target) == info, "Immutable preview asset changed")
+    else:
+        partial = target.with_suffix(".png.partial")
+        partial.write_bytes(payload)
+        partial.replace(target)
+    return {
+        "version": PREVIEW_VERSION,
+        "source_image_sha256": source["sha256"],
+        "resolution": list(PREVIEW_RESOLUTION),
+        "artifact": {"path": str(target.relative_to(root)), **info},
+    }
+
+
+def _verify_preview(root, entry, *, compare_pixels):
+    preview = entry["preview"]
+    require(
+        type(preview) is dict
+        and set(preview) == {"version", "source_image_sha256", "resolution", "artifact"}
+        and preview["version"] == PREVIEW_VERSION
+        and preview["source_image_sha256"] == entry["media"]["image"]["sha256"]
+        and preview["resolution"] == list(PREVIEW_RESOLUTION),
+        "Preview version, dimensions or source image differ",
+    )
+    path = _checked(root, preview["artifact"], folder="assets", suffix=".png")
+    with Image.open(path) as image:
+        require(
+            image.format == "PNG" and image.mode == "RGB" and image.size == PREVIEW_RESOLUTION,
+            "Preview pixels have invalid dimensions or mode",
+        )
+        if compare_pixels:
+            expected = _preview_pixels(root / entry["media"]["image"]["path"])
+            require(
+                np.array_equal(np.asarray(image), np.asarray(expected)),
+                "Preview pixels differ from their source image",
+            )
+        else:
+            image.verify()
+    return preview["artifact"]["path"]
 
 
 def _json(root, descriptor):
@@ -355,7 +419,11 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
     entry_path = _checked(root, descriptor, folder="entries", suffix=".json")
     entry = read(entry_path)
     require(
-        set(entry) == {"version", "id", "plan", "records", "media"}
+        set(entry)
+        in (
+            {"version", "id", "plan", "records", "media"},
+            {"version", "id", "plan", "records", "media", "preview"},
+        )
         and entry["version"] == ENTRY_VERSION
         and entry["id"] in catalog,
         "Unknown paired entry",
@@ -625,6 +693,9 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
             ),
         },
     }
+    if "preview" in entry:
+        row["preview"] = _verify_preview(root, entry, compare_pixels=hash_media)
+        row["preview_resolution"] = list(PREVIEW_RESOLUTION)
     return entry, row
 
 
@@ -859,6 +930,7 @@ def publish_review(
                         ),
                     },
                 }
+                entry["preview"] = _make_preview(root, entry["media"]["image"])
                 target = root / "entries" / (_sha(entry) + ".json")
                 target.parent.mkdir(exist_ok=True)
                 if target.exists():

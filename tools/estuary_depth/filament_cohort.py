@@ -69,7 +69,9 @@ def _projection_equal(left, right):
         return len(left) == len(right) and all(
             _projection_equal(a, b) for a, b in zip(left, right, strict=True)
         )
-    if type(left) is float and type(right) is float:
+    # Source's PCA scale is a NumPy float64, a float subclass. JSON restores it
+    # as a built-in float; both carry the same double-precision numeric value.
+    if isinstance(left, float) and isinstance(right, float):
         return (
             math.isfinite(left)
             and math.isfinite(right)
