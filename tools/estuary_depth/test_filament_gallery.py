@@ -12,9 +12,12 @@ from unittest.mock import patch
 
 from PIL import Image
 
+from tools.estuary.run import HERE as PAINT_ROOT
+from tools.estuary.run import code_identity
 from tools.estuary_studio.common import artifact, encoded, read, write
 
 from . import filament_gallery as gallery
+from .filament_batch import SPECIFIC_VOLUMES, runtime_identity
 from .filament_studies import REFERENCE_SEED, VARIANTS, make_depth_recipe, make_paint_recipe
 
 
@@ -49,6 +52,7 @@ class FilamentGalleryTests(unittest.TestCase):
             "dt": 0.001,
         }
         self.blender = {"path": "/original/bin/blender", "sha256": "b" * 64, "bytes": 100}
+        self.runtime = runtime_identity()
         self.cases = [
             self.batch / "cases" / (REFERENCE_SEED + "-" + variant)
             for variant in ("control", "fine-bands")
@@ -57,6 +61,9 @@ class FilamentGalleryTests(unittest.TestCase):
             "version": gallery.STUDY_VERSION,
             "proof": True,
             "blender": self.blender,
+            "runtime": self.runtime,
+            "bundle_resolution": [4096, 3072],
+            "mesh_resolution": [1536, 1152],
             "cases": [
                 {
                     "id": folder.name,
@@ -103,7 +110,9 @@ class FilamentGalleryTests(unittest.TestCase):
             "recipe": expected,
             "bundle_sha256": manifest["bundle"]["sha256"],
             "bundle_manifest_sha256": artifact(bundle_path)["sha256"],
-            "renderer": {"render.py": "c" * 64, "materials.py": "d" * 64},
+            "renderer": {
+                name: self.runtime["estuary_depth"][name] for name in ("render.py", "materials.py")
+            },
             "motion": {"frames": 1, "fps": 24, "source_fraction": 1.0},
         }
         write(folder / "request.json", request)
@@ -168,7 +177,7 @@ class FilamentGalleryTests(unittest.TestCase):
             "schema_version": 1,
             "source": self.source,
             "recipe": recipe,
-            "code": {"engine.py": "e" * 64},
+            "code": code_identity(),
         }
         write(paint / "request.json", request)
         artifacts = {
@@ -182,6 +191,15 @@ class FilamentGalleryTests(unittest.TestCase):
             }
         )
         artifacts["inputs/source.orbit"]["sha256"] = self.source_hash
+        artifacts.update(
+            {
+                f"inputs/code/{name}": {
+                    "path": f"inputs/code/{name}",
+                    **artifact(PAINT_ROOT / name),
+                }
+                for name in request["code"]
+            }
+        )
         receipt = {
             "complete": True,
             "identity_sha256": sha(request),
@@ -208,10 +226,16 @@ class FilamentGalleryTests(unittest.TestCase):
         }
         bundle_request = {
             "inputs": inputs,
-            "parameters": {"history_fractions": []},
+            "parameters": {
+                "history_fractions": [],
+                "resolution": plan["bundle_resolution"],
+                "mesh_resolution": plan["mesh_resolution"],
+                "specific_volumes": list(SPECIFIC_VOLUMES),
+            },
             "geometry": geometry,
             "source": self.source,
-            "optics_sha256": "f" * 64,
+            "optics_sha256": self.runtime["estuary"]["optics.py"],
+            "prepare_sha256": self.runtime["estuary_depth"]["prepare.py"],
         }
         bundle = {
             "schema_version": 1,
@@ -269,6 +293,85 @@ class FilamentGalleryTests(unittest.TestCase):
         self.assertIn('"film_only_selection": true', (self.output / "index.html").read_text())
         shutil.rmtree(self.batch)
         self.assertEqual(gallery.verify_review(self.output), data)
+
+    def test_broad_pools_default_preserves_verification_of_original_published_page(self):
+        data = self.build()
+        self.assertIn(
+            '"default_variant": "three-broad-pools"', (self.output / "index.html").read_text()
+        )
+        (self.output / "index.html").write_text(
+            gallery.document(data["title"], presentation=gallery._LEGACY_PRESENTATION)
+        )
+        self.rehash()
+        self.assertEqual(gallery.verify_review(self.output), data)
+
+    def rebind_photo(self, entry):
+        paths = {key: self.output / value for key, value in entry["records"].items()}
+        shot = read(paths["photo_request"])
+        receipt = read(paths["photo_receipt"])
+        receipt["identity_sha256"] = sha(shot)
+        write(paths["photo_receipt"], receipt)
+        study = read(paths["study"])
+        study["photo_identity_sha256"] = sha(shot)
+        write(paths["study"], study)
+        experiment = read(paths["photo_experiment"])
+        experiment["files"]["bundle/manifest.json"]["sha256"] = shot["bundle_manifest_sha256"]
+        for name, value in shot["renderer"].items():
+            experiment["files"][name]["sha256"] = value
+        write(paths["photo_experiment"], experiment)
+        result = read(paths["photo_result"])
+        result["identity_sha256"] = sha(experiment)
+        result["render_receipt_sha256"] = artifact(paths["photo_receipt"])["sha256"]
+        write(paths["photo_result"], result)
+        self.rehash()
+
+    def test_rebound_paint_runtime_plan_cannot_certify_a_different_engine(self):
+        self.build()
+        entry = read(self.output / "publication.json")["entries"][0]
+        path = self.output / entry["records"]["batch_plan"]
+        plan = read(path)
+        plan["runtime"]["estuary"]["engine.py"] = "0" * 64
+        plan["identity_sha256"] = sha({k: v for k, v in plan.items() if k != "identity_sha256"})
+        write(path, plan)
+        study_path = self.output / entry["records"]["study"]
+        study = read(study_path)
+        study["plan_identity_sha256"] = plan["identity_sha256"]
+        write(study_path, study)
+        self.rehash()
+        with self.assertRaisesRegex(ValueError, "Paint runtime"):
+            gallery.verify_review(self.output)
+
+    def test_rebound_photograph_renderer_cannot_escape_the_frozen_plan(self):
+        self.build()
+        entry = read(self.output / "publication.json")["entries"][0]
+        path = self.output / entry["records"]["photo_request"]
+        request = read(path)
+        request["renderer"]["render.py"] = "0" * 64
+        write(path, request)
+        self.rebind_photo(entry)
+        with self.assertRaisesRegex(ValueError, "Photograph runtime"):
+            gallery.verify_review(self.output)
+
+    def test_rebound_bundle_cannot_change_specific_volumes_or_preparation_runtime(self):
+        self.build()
+        entry = read(self.output / "publication.json")["entries"][0]
+        path = self.output / entry["records"]["bundle"]
+        baseline = read(path)
+        for key in ("specific_volumes", "prepare_sha256", "optics_sha256"):
+            bundle = copy.deepcopy(baseline)
+            if key == "specific_volumes":
+                bundle["request"]["parameters"][key] = [1.0, 1.0, 1.0]
+            else:
+                bundle["request"][key] = "0" * 64
+            bundle["identity_sha256"] = sha(bundle["request"])
+            write(path, bundle)
+            shot_path = self.output / entry["records"]["photo_request"]
+            shot = read(shot_path)
+            shot["bundle_manifest_sha256"] = artifact(path)["sha256"]
+            write(shot_path, shot)
+            self.rebind_photo(entry)
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "preparation"):
+                gallery.verify_review(self.output)
 
     def test_requires_control_and_refuses_overwrite_or_archive_destination(self):
         with self.assertRaisesRegex(ValueError, "Control"):

@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image
@@ -16,7 +17,12 @@ from tools.estuary_studio.gallery import _copy_verified
 
 from .experiment import finished, verify_render
 from .filament_batch import VERSION as STUDY_VERSION
-from .filament_batch import _validated_plan, verify_case
+from .filament_batch import (
+    _validated_plan,
+    _verify_paint_preparation,
+    _verify_photo_runtime,
+    verify_case,
+)
 from .filament_studies import REFERENCE_SEED, VARIANTS, make_depth_recipe, make_paint_recipe
 
 VERSION = "filament-review-v1"
@@ -32,10 +38,11 @@ PRESENTATION = Presentation(
         "Every material study follows the full recording. Lighting studies reuse exactly "
         "the Control material. Gold outlines mark subjective visual picks."
     ),
-    default_variant="fine-bands",
+    default_variant="three-broad-pools",
     reference_variant="control",
     film_only_selection=True,
 )
+_LEGACY_PRESENTATION = replace(PRESENTATION, default_variant="fine-bands")
 LIGHTING = {
     "light-flat": ("00-flat", "Flat pigment", "relief_mm", 0),
     "light-shallow": ("01-shallow", "Shallow folds", "relief_mm", 6),
@@ -340,7 +347,9 @@ def _material(root, entry):
         "Material bundle uses a different paint domain",
     )
     photograph = make_depth_recipe(seed, VARIANTS[variant].label, proof=proof)
+    _verify_paint_preparation(plan, request, artifacts, bundle)
     photo_request, photo_receipt = _photo(root, entry, bundle, photograph)
+    _verify_photo_runtime(plan, photo_request)
     _experiment(root, entry, "00-painting", photo_request, plan=plan)
     require(
         study["photo_identity_sha256"] == photo_receipt["identity_sha256"],
@@ -356,7 +365,13 @@ def _material(root, entry):
         photograph,
         artifacts["final-state.npy"]["sha256"],
     )
-    return row, {"entry": entry, "request": request, "bundle": bundle, "artifacts": artifacts}
+    return row, {
+        "entry": entry,
+        "request": request,
+        "bundle": bundle,
+        "artifacts": artifacts,
+        "plan": plan,
+    }
 
 
 def _lighting(root, entry, control):
@@ -389,6 +404,8 @@ def _lighting(root, entry, control):
     else:
         expected["lighting"][parameter] = value
     request, _receipt = _photo(root, entry, bundle, expected)
+    _verify_paint_preparation(control["plan"], control["request"], control["artifacts"], bundle)
+    _verify_photo_runtime(control["plan"], request)
     _experiment(root, entry, case_id, request)
     return _row(
         REFERENCE_SEED,
@@ -614,7 +631,11 @@ def verify_review(output):
         "Comparison differs from its copied records",
     )
     require(
-        (root / "index.html").read_text() == document(data["title"], presentation=PRESENTATION),
+        (root / "index.html").read_text()
+        in {
+            document(data["title"], presentation=presentation)
+            for presentation in (PRESENTATION, _LEGACY_PRESENTATION)
+        },
         "Review page differs from the shared template",
     )
     return data

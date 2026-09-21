@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from tools.estuary.run import checked_artifact, completed
+from tools.estuary.run import RUNTIME_FILES, checked_artifact, completed
 from tools.estuary_confluence.run import runtime_identity
 from tools.estuary_depth.experiment import finished, verify_render
 from tools.estuary_depth.filament_studies import VARIANTS, make_depth_recipe, make_paint_recipe
@@ -20,6 +21,70 @@ from tools.estuary_studio.common import artifact, encoded, read, require, write
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = "fine-fold-study-v1"
+SPECIFIC_VOLUMES = (0.25, 1.0, 0.5)
+
+
+def _runtime_contract(plan):
+    """Select renderer dependencies from the archived plan, never today's files."""
+    runtime = plan.get("runtime")
+    require(type(runtime) is dict, "Study plan lacks its frozen runtime")
+    paint, depth = runtime.get("estuary"), runtime.get("estuary_depth")
+    require(type(paint) is dict and type(depth) is dict, "Incomplete frozen study runtime")
+    names = set(RUNTIME_FILES) | {
+        name for name in paint if name.startswith("shaders/") and name.endswith(".glsl")
+    }
+    require(names <= paint.keys(), "Frozen paint runtime is incomplete")
+    require(
+        {"prepare.py", "render.py", "materials.py"} <= depth.keys(),
+        "Frozen photograph runtime is incomplete",
+    )
+    hashes = [
+        *(paint[name] for name in names),
+        *(depth[name] for name in ("prepare.py", "render.py", "materials.py")),
+    ]
+    require(
+        all(type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes),
+        "Invalid frozen runtime fingerprint",
+    )
+    return {
+        "paint": {name: paint[name] for name in sorted(names)},
+        "prepare": depth["prepare.py"],
+        "optics": paint["optics.py"],
+        "photo": {name: depth[name] for name in ("render.py", "materials.py")},
+    }
+
+
+def _verify_paint_preparation(plan, request, artifacts, bundle):
+    contract = _runtime_contract(plan)
+    require(request.get("code") == contract["paint"], "Paint runtime differs from its frozen plan")
+    for name, sha in contract["paint"].items():
+        require(
+            artifacts.get(f"inputs/code/{name}", {}).get("sha256") == sha,
+            "Archived paint code differs from its frozen plan",
+        )
+    preparation = bundle["request"]
+    require(
+        preparation.get("prepare_sha256") == contract["prepare"]
+        and preparation.get("optics_sha256") == contract["optics"],
+        "Material preparation runtime differs from its frozen plan",
+    )
+    require(
+        preparation["parameters"]
+        == {
+            "resolution": plan["bundle_resolution"],
+            "mesh_resolution": plan["mesh_resolution"],
+            "history_fractions": [],
+            "specific_volumes": list(SPECIFIC_VOLUMES),
+        },
+        "Material preparation parameters differ from the study contract",
+    )
+
+
+def _verify_photo_runtime(plan, request):
+    require(
+        request.get("renderer") == _runtime_contract(plan)["photo"],
+        "Photograph runtime differs from its frozen plan",
+    )
 
 
 def _validated_plan(plan):
@@ -35,6 +100,7 @@ def _validated_plan(plan):
         ).hexdigest(),
         "Plan identity differs",
     )
+    _runtime_contract(plan)
     sources = {
         row["seed"]: row["sha256"]
         for row in read(ROOT / "tools/estuary_confluence/recipes/ten-seeds.json")["sources"]
@@ -108,12 +174,7 @@ def verify_case(folder):
         and bundle["source"] == request["source"],
         "Photograph bundle belongs to different paint",
     )
-    parameters = bundle["request"]["parameters"]
-    require(
-        parameters["resolution"] == plan["bundle_resolution"]
-        and parameters["mesh_resolution"] == plan["mesh_resolution"],
-        "Material preparation resolution differs from the study plan",
-    )
+    _verify_paint_preparation(plan, request, artifacts, bundle)
     checked_artifact(folder / "bundle", bundle["bundle"])
     photo = folder / "photographs/00-painting"
     experiment = read(photo.parent / "experiment-request.json")
@@ -127,6 +188,7 @@ def verify_case(folder):
     )
     receipt = verify_render(photo)
     shot = read(photo / "request.json")
+    _verify_photo_runtime(plan, shot)
     require(
         shot["recipe"] == make_depth_recipe(seed, VARIANTS[variant].label, proof=proof)
         and shot["bundle_sha256"] == bundle["bundle"]["sha256"]
@@ -234,6 +296,7 @@ def execute_plan(output, plan, *, workers=2):
             folder / "bundle",
             resolution=tuple(plan["bundle_resolution"]),
             mesh_resolution=tuple(plan["mesh_resolution"]),
+            specific_volumes=SPECIFIC_VOLUMES,
         )
         require(bundle["source"]["sha256"] == case["source_sha256"], "Prepared source differs")
         _check_blender(plan)

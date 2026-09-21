@@ -19,8 +19,9 @@ from unittest.mock import patch
 import numpy as np
 
 from tools.estuary.recipe import validate_recipe
+from tools.estuary.run import HERE as PAINT_ROOT
 from tools.estuary.run import artifact as paint_artifact
-from tools.estuary.run import write_png
+from tools.estuary.run import code_identity, write_png
 from tools.estuary.source import Source
 from tools.estuary.test_source import orbit_points, write_orbit
 from tools.estuary_depth import experiment
@@ -86,7 +87,12 @@ class FilamentBatchTests(unittest.TestCase):
         shutil.copyfile(self.source, paint / "inputs/source.orbit")
         recipe = self.plan["cases"][0]["paint_recipe"]
         source = Source.read(self.source, aspect=4 / 3, **recipe["projection"])
-        request = {"recipe": recipe, "source": source.metadata, "code": {"engine.py": "fixture"}}
+        code = code_identity()
+        request = {"recipe": recipe, "source": source.metadata, "code": code}
+        for name in code:
+            target = paint / "inputs/code" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PAINT_ROOT / name, target)
         write(paint / "request.json", request)
         write(paint / "recipe.json", recipe)
         np.save(paint / "final-state.npy", np.full((96, 128, 4), 0.1, np.float32))
@@ -110,6 +116,7 @@ class FilamentBatchTests(unittest.TestCase):
                         "linear.npy",
                         "recipe.json",
                         "inputs/source.orbit",
+                        *(f"inputs/code/{name}" for name in code),
                     )
                 ],
             },
@@ -271,6 +278,71 @@ class FilamentBatchTests(unittest.TestCase):
         write(manifest_path, manifest)
         with self.assertRaisesRegex(ValueError, "incorrectly identified material bundle"):
             batch.verify_case(self.folder)
+
+    def rebuild_photograph(self):
+        shutil.rmtree(self.folder / "photographs")
+        shutil.rmtree(self.folder / "depth-recipes")
+        self.build_photograph()
+        self.record["photo_identity_sha256"] = read(self.photo / "receipt.json")["identity_sha256"]
+        write(self.folder / "study.json", self.record)
+
+    def test_complete_recaptured_material_cannot_change_undeclared_specific_volumes(self):
+        shutil.rmtree(self.folder / "bundle")
+        batch.build_bundle(
+            self.folder / "paint",
+            self.folder / "bundle",
+            resolution=(64, 48),
+            mesh_resolution=(32, 24),
+            specific_volumes=(1, 1, 1),
+        )
+        self.rebuild_photograph()
+        self.assertTrue(
+            experiment.finished(
+                self.photo, identify(read(self.photo.parent / "experiment-request.json"))
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "preparation parameters"):
+            batch.verify_case(self.folder)
+
+    def test_self_consistent_alternate_paint_runtime_is_rejected(self):
+        paint = self.folder / "paint"
+        code_file = paint / "inputs/code/engine.py"
+        code_file.write_text("different numerical engine")
+        request = read(paint / "request.json")
+        request["code"]["engine.py"] = artifact(code_file)["sha256"]
+        write(paint / "request.json", request)
+        receipt = read(paint / "receipt.json")
+        receipt["identity_sha256"] = identify(request)
+        receipt["artifacts"] = [
+            paint_artifact(paint / row["path"], paint) for row in receipt["artifacts"]
+        ]
+        write(paint / "receipt.json", receipt)
+        self.record["paint_identity_sha256"] = identify(request)
+        shutil.rmtree(self.folder / "bundle")
+        batch.build_bundle(
+            paint, self.folder / "bundle", resolution=(64, 48), mesh_resolution=(32, 24)
+        )
+        self.rebuild_photograph()
+        with self.assertRaisesRegex(ValueError, "Paint runtime"):
+            batch.verify_case(self.folder)
+
+    def test_preparation_and_photo_hashes_bind_to_archived_plan_not_live_runtime(self):
+        with patch.object(batch, "runtime_identity", return_value={"different": "today"}):
+            batch.verify_case(self.folder)
+        request = read(self.folder / "paint/request.json")
+        artifacts = {
+            row["path"]: row for row in read(self.folder / "paint/receipt.json")["artifacts"]
+        }
+        bundle = read(self.folder / "bundle/manifest.json")
+        for key in ("prepare_sha256", "optics_sha256"):
+            changed = copy.deepcopy(bundle)
+            changed["request"][key] = "0" * 64
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "preparation runtime"):
+                batch._verify_paint_preparation(self.plan, request, artifacts, changed)
+        shot = read(self.photo / "request.json")
+        shot["renderer"]["materials.py"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "Photograph runtime"):
+            batch._verify_photo_runtime(self.plan, shot)
 
 
 if __name__ == "__main__":
