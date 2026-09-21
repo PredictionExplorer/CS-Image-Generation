@@ -108,10 +108,10 @@ on port 8803 remains separate.
 
 The pilot film reproduced the earlier broad-pool material hash exactly:
 `d794cd8ef4371888ad077ee7d39cda297b0191471689878b20490942f60dde5a`.
-Qualification includes 96 passing core GPU tests, the 155-test depth suite
+Qualification includes 96 passing core GPU tests, the 161-test depth suite
 (its six native Blender and two Node viewer tests also exercised in their
 respective environments), and full playback of the reference and broad-pool
 films in the browser. Repository Ruff and configured Mypy checks passed.
-The source-derived preview and live/JSON double-precision compatibility checks
-add six further regression tests; source hashes, physical checks and projection
-tolerance remain unchanged.
+Source-derived preview pixels were verified across the server and local Pillow
+environments. The live/JSON double-precision compatibility fix preserves source
+hashes, physical checks and projection tolerance.
