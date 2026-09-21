@@ -25,7 +25,7 @@ import numpy as np
 
 from tools.estuary.recipe import validate_recipe
 from tools.estuary.run import artifact as paint_artifact
-from tools.estuary.run import exposure_plan, frame_plan, write_png
+from tools.estuary.run import code_identity, exposure_plan, frame_plan, write_png
 from tools.estuary.source import Source
 from tools.estuary.test_source import orbit_points, write_orbit
 from tools.estuary_depth import experiment, film
@@ -80,11 +80,14 @@ class FilmBatchTests(unittest.TestCase):
         self.output = self.root / "batch"
         self.output.mkdir()
         write(self.output / "plan.json", self.plan)
-        self.material_id = next(iter(self.plan["materials"]))
-        self.material = self.output / "materials" / self.material_id
-        self.build_material()
+        for material_id in self.plan["materials"]:
+            self.material_id = material_id
+            self.material = self.output / "materials" / material_id
+            self.build_material()
         self.folders = []
         for case in self.plan["cases"]:
+            self.material_id = case["material_id"]
+            self.material = self.output / "materials" / self.material_id
             folder = self.output / "cases" / case["id"]
             self.folders.append(folder)
             self.build_photo(case, folder, motion=False)
@@ -93,14 +96,22 @@ class FilmBatchTests(unittest.TestCase):
             record, _ = batch._inspect_case(folder, self.plan, case)
             write(folder / "study.json", record)
         self.folder = self.folders[0]
+        self.material_id = next(iter(self.plan["materials"]))
+        self.material = self.output / "materials" / self.material_id
 
     def make_plan(self, **kwargs):
+        defaults = {"options": ["control", "light-flat"]}
+        if getattr(self, "study_family", None) is not None:
+            defaults = {
+                "study_family": self.study_family,
+                "options": ["lacuna-banks", "folded-sash"],
+            }
         return batch.make_plan(
             self.cohort,
             cohort_kind="legacy",
             source_root=self.root,
             **self.tools,
-            **(kwargs if kwargs else {"options": ["control", "light-flat"]}),
+            **(kwargs if kwargs else defaults),
         )
 
     def build_material(self):
@@ -357,6 +368,35 @@ class FilmBatchTests(unittest.TestCase):
         for options in (["control", "control"], ["unknown"], []):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.make_plan(options=options)
+
+    def test_pattern_family_dispatch_is_opt_in_and_binds_its_initializer(self):
+        plan = self.make_plan(
+            study_family="pattern-studies-v1", options=["lacuna-banks", "folded-sash"]
+        )
+        self.assertNotIn("study_family", self.plan)
+        self.assertNotIn("paint_runtime_extensions", self.plan)
+        self.assertEqual(plan["study_family"], "pattern-studies-v1")
+        self.assertEqual(plan["paint_runtime_extensions"], ["initial_patterns.py"])
+        self.assertEqual(len(plan["materials"]), 2)
+        catalog = batch.resolve_catalog(plan)
+        self.assertEqual(catalog.reference_option, "lacuna-banks")
+        self.assertEqual(catalog.default_option, "folded-sash")
+        for material in plan["materials"].values():
+            recipe = material["recipe"]
+            self.assertEqual(recipe["simulation"]["initial_pattern"], "composition")
+            self.assertEqual(code_identity(recipe), batch._runtime_contract(plan)["paint"])
+        for family, extensions in (
+            (None, []),
+            ("unknown-v1", ["initial_patterns.py"]),
+            ("pattern-studies-v1", []),
+        ):
+            changed = copy.deepcopy(plan)
+            changed.update(study_family=family, paint_runtime_extensions=extensions)
+            changed["identity_sha256"] = batch._sha(
+                {k: v for k, v in changed.items() if k != "identity_sha256"}
+            )
+            with self.subTest(family=family, extensions=extensions), self.assertRaises(ValueError):
+                batch.validate_plan(changed)
 
     def test_a_still_without_a_complete_edit_cannot_be_published(self):
         (self.folder / "film/film.mp4").unlink()

@@ -120,10 +120,11 @@ def validate_strata_profile(value: Any) -> dict[str, Any] | None:
 def validate_recipe(value: Any) -> dict[str, Any]:
     """Resolve defaults and reject unsafe, misspelled or incompatible controls."""
     supplied = copy.deepcopy(value)
-    profile_value, initial_image = None, False
+    profile_value, design_value, initial_image = None, None, False
     if type(supplied) is dict:
         if type(supplied.get("simulation")) is dict:
             profile_value = supplied["simulation"].pop("strata_profile", None)
+            design_value = supplied["simulation"].pop("initial_design", None)
         if type(supplied.get("render")) is dict and "initial_image" in supplied["render"]:
             initial_image = supplied["render"].pop("initial_image")
             _require(type(initial_image) is bool, "render.initial_image must be boolean")
@@ -154,8 +155,20 @@ def validate_recipe(value: Any) -> dict[str, Any]:
         simulation[key] = _number(simulation[key], f"simulation.{key}", low, high)
     _require(
         type(simulation["initial_pattern"]) is str
-        and simulation["initial_pattern"] in ("pools", "strata"),
-        "simulation.initial_pattern must be pools or strata",
+        and simulation["initial_pattern"] in ("pools", "strata", "composition"),
+        "simulation.initial_pattern must be pools, strata or composition",
+    )
+    if design_value is not None:
+        from .initial_patterns import validate_controls
+
+        _require(
+            simulation["initial_pattern"] == "composition",
+            "initial_design requires initial_pattern=composition",
+        )
+        simulation["initial_design"] = validate_controls(design_value)
+    _require(
+        simulation["initial_pattern"] != "composition" or "initial_design" in simulation,
+        "A composition requires an explicit versioned initial_design",
     )
     profile = validate_strata_profile(profile_value)
     if profile is not None:

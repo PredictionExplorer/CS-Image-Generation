@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import io
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -28,17 +29,19 @@ from . import film
 from .filament_batch import _verify_paint_preparation, _verify_photo_runtime
 from .filament_cohort import _validate_plan as validate_cohort_plan
 from .filament_film_batch import VERSION as BATCH_VERSION
-from .filament_film_batch import validate_camera_ledger, validate_plan, verify_case
+from .filament_film_batch import (
+    resolve_catalog,
+    study_catalog,
+    validate_camera_ledger,
+    validate_plan,
+    verify_case,
+)
 from .filament_gallery import _bundle, _fingerprint, _image, _matches, _paint_artifacts, _relative
 from .filament_motion import (
     FILM_RESOLUTION,
     FORMATION_FRAMES,
     FPS,
     MOTION_FRAMES,
-    OPTIONS,
-    make_formation_recipe,
-    make_motion_recipe,
-    make_photo_recipe,
 )
 
 VERSION = "filament-film-review-v1"
@@ -201,9 +204,24 @@ def _tools(plan, *names):
     return {name: {key: plan["tools"][name][key] for key in ("path", "sha256")} for name in names}
 
 
-def document(title):
+def document(title, *, study_family=None):
     """Use the shared viewer, adding progress and readable full-width seed labels."""
-    page = shared_document(title, presentation=PRESENTATION)
+    catalog = study_catalog(study_family)
+    presentation = PRESENTATION
+    if study_family is not None:
+        presentation = replace(
+            PRESENTATION,
+            eyebrow="Three bodies / Starting paint studies",
+            intro=(
+                "The same ten trajectory seeds are used across every starting pattern. "
+                "Each seed has its own separated-color palette, shared by its ten patterns. "
+                "Each pair shows the finished photograph, the complete paint formation, "
+                "and a short camera view ending at the photograph's pose."
+            ),
+            default_variant=catalog.default_option,
+            reference_variant=catalog.reference_option,
+        )
+    page = shared_document(title, presentation=presentation)
     additions = """
       <p id="pair-progress" class="note" role="status" aria-live="polite"></p>
       <button id="refresh-pairs" type="button">Check for completed films</button>
@@ -249,14 +267,34 @@ def document(title):
         page = page.replace(before, f'{variable} + 1 + " · " + shortSeed(seed)')
     page = page.replace("option.value = seed;", "option.value = seed; option.title = seed;")
     page = page.replace("o.value = seed;", "o.value = seed; o.title = seed;")
+    if study_family is not None:
+        page = (
+            page.replace(
+                'p.new_seed_count + " new seeds + " +\n'
+                '          p.reference_seed_count + " reference seeds"',
+                '(p.new_seed_count + p.reference_seed_count) + " shared trajectory seeds"',
+            )
+            .replace(
+                "Some pairs await their Control comparison",
+                "Some pairs await their reference pattern",
+            )
+            .replace(
+                "No verified Control and treatment pairs are ready yet.",
+                "No verified pattern image and film pairs are ready yet.",
+            )
+        )
     return page
 
 
-def _catalog(root, plan_descriptors, pending_cohorts=()):
+def _catalog(root, plan_descriptors, pending_cohorts=(), *, study_family=None):
+    family = study_catalog(study_family)
     plans, cases, order, seed_kind = {}, {}, [], {}
     for descriptor in plan_descriptors:
         plan = _json(root, descriptor)
         indexed = validate_plan(plan)
+        require(
+            plan.get("study_family") == study_family, "Mixed study families need separate reviews"
+        )
         identity = plan["identity_sha256"]
         require(identity not in plans, "Repeated batch plan")
         plans[identity] = (plan, descriptor)
@@ -296,15 +334,16 @@ def _catalog(root, plan_descriptors, pending_cohorts=()):
             seed_kind[seed] = "generated"
             if identity not in prepared_cohorts:
                 preparing.add(seed)
-            for option in OPTIONS:
+            for option in family.options:
                 case_id = f"{seed}-{option}"
                 if case_id not in expected_ids:
                     expected_ids.append(case_id)
     require(
-        all(f"{seed}-control" in expected_ids for seed in order), "Every planned seed needs Control"
+        all(f"{seed}-{family.reference_option}" in expected_ids for seed in order),
+        "Every planned seed needs its reference option",
     )
     order.sort(key=lambda seed: seed_kind[seed] != "generated")
-    option_order = list(OPTIONS)
+    option_order = list(family.options)
     expected_ids.sort(
         key=lambda key: (
             order.index(key.split("-", 1)[0]),
@@ -419,21 +458,25 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
     entry_path = _checked(root, descriptor, folder="entries", suffix=".json")
     entry = read(entry_path)
     require(
+        entry.get("version") == ENTRY_VERSION and entry.get("id") in catalog, "Unknown paired entry"
+    )
+    plan, case = catalog[entry["id"]]
+    family_fields = {"study_family"} if "study_family" in plan else set()
+    require(
         set(entry)
         in (
-            {"version", "id", "plan", "records", "media"},
-            {"version", "id", "plan", "records", "media", "preview"},
+            {"version", "id", "plan", "records", "media"} | family_fields,
+            {"version", "id", "plan", "records", "media", "preview"} | family_fields,
         )
-        and entry["version"] == ENTRY_VERSION
-        and entry["id"] in catalog,
-        "Unknown paired entry",
+        and entry.get("study_family") == plan.get("study_family"),
+        "Paired entry study family differs",
     )
     require(
         set(entry["records"]) == RECORD_KEYS
         and set(entry["media"]) == {"initial", "image", "film"},
         "Incomplete paired entry",
     )
-    plan, case = catalog[entry["id"]]
+    family = resolve_catalog(plan)
     require(_json(root, entry["plan"]) == plan, "Entry uses a different registered plan")
     records = {
         name: _json(root, value)
@@ -446,7 +489,7 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
     )
     material = plan["materials"][case["material_id"]]
     identity, source = _sha(request), request["source"]
-    recipe = make_formation_recipe(case["seed"], case["option"])
+    recipe = family.formation_recipe(case["seed"], case["option"])
     require(
         request["recipe"] == records["paint_recipe"] == material["recipe"] == recipe,
         "Formation recipe differs from its canonical option",
@@ -512,8 +555,8 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
     )
     require(
         case["photo_recipe"]
-        == make_photo_recipe(case["seed"], case["option"], master=case["master"])
-        and case["motion_recipe"] == make_motion_recipe(case["seed"], case["option"]),
+        == family.photo_recipe(case["seed"], case["option"], master=case["master"])
+        and case["motion_recipe"] == family.motion_recipe(case["seed"], case["option"]),
         "Pair recipes differ",
     )
     photo_request, photo, _ = _depth(root, entry["records"], records, "photo", plan, case, bundle)
@@ -636,6 +679,8 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
         "movie": output_movie,
         "timeline": expected_timeline,
     }
+    if "study_family" in plan:
+        expected_study["study_family"] = plan["study_family"]
     require(study == expected_study, "Paired study record differs from its copied certificates")
     for key, expected in (
         ("initial", artifacts["initial.png"]),
@@ -663,7 +708,7 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
         photo["artifacts"]["render.png"],
         case["photo_recipe"]["render"]["resolution"],
     )
-    spec = OPTIONS[case["option"]]
+    spec = family.options[case["option"]]
     row = {
         "seed": case["seed"],
         "variant": case["option"],
@@ -693,6 +738,8 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
             ),
         },
     }
+    if "study_family" in plan:
+        row["study_family"] = plan["study_family"]
     if "preview" in entry:
         row["preview"] = _verify_preview(root, entry, compare_pixels=hash_media)
         row["preview_resolution"] = list(PREVIEW_RESOLUTION)
@@ -701,10 +748,21 @@ def _verify_entry(root, descriptor, catalog, *, hash_media=True):
 
 def _manifest(root, provenance, title, picks, *, hash_media):
     require(
-        set(provenance) == {"plans", "entries", "pending_cohorts"}, "Unknown publication provenance"
+        set(provenance)
+        in (
+            {"plans", "entries", "pending_cohorts"},
+            {"plans", "entries", "pending_cohorts", "study_family"},
+        ),
+        "Unknown publication provenance",
     )
+    study_family = provenance.get("study_family")
+    require(
+        "study_family" not in provenance or type(study_family) is str,
+        "Invalid publication study family",
+    )
+    family = study_catalog(study_family)
     plans, catalog, seed_order, seed_kind, expected_ids, preparing = _catalog(
-        root, provenance["plans"], provenance["pending_cohorts"]
+        root, provenance["plans"], provenance["pending_cohorts"], study_family=study_family
     )
     rows, indexed = {}, {}
     for descriptor in provenance["entries"]:
@@ -715,9 +773,9 @@ def _manifest(root, provenance, title, picks, *, hash_media):
             "Entry plan descriptor differs",
         )
         rows[entry["id"]], indexed[entry["id"]] = row, entry
-    controls = {row["seed"] for row in rows.values() if row["variant"] == "control"}
+    controls = {row["seed"] for row in rows.values() if row["variant"] == family.reference_option}
     visible = [row for row in rows.values() if row["seed"] in controls]
-    option_order = list(OPTIONS)
+    option_order = list(family.options)
     visible.sort(
         key=lambda row: (seed_order.index(row["seed"]), option_order.index(row["variant"]))
     )
@@ -765,6 +823,8 @@ def _manifest(root, provenance, title, picks, *, hash_media):
         "progress": progress,
         "provenance": provenance,
     }
+    if study_family is not None:
+        data["study_family"] = study_family
     data["identity_sha256"] = _sha(data)
     return data, indexed
 
@@ -777,7 +837,11 @@ def verify_review(output):
         root, actual["provenance"], actual["title"], actual["picks"], hash_media=True
     )
     require(actual == expected, "Review rows, progress or identity differ from certified entries")
-    require((root / "index.html").read_text() == document(actual["title"]), "Paired viewer differs")
+    require(
+        (root / "index.html").read_text()
+        == document(actual["title"], study_family=actual.get("study_family")),
+        "Paired viewer differs",
+    )
     return actual
 
 
@@ -821,6 +885,7 @@ def publish_review(
     picks=None,
     pending_cohorts=None,
     title="The Estuary · Fine folds in motion",
+    study_family=None,
 ):
     root = Path(output).resolve()
     batches = [Path(path).resolve(strict=True) for path in batch_roots]
@@ -828,8 +893,21 @@ def publish_review(
     require(
         all(not root.is_relative_to(path) for path in batches), "Publish outside source archives"
     )
-    page = document(title)
+    registered = [(batch, read(batch / "plan.json")) for batch in batches]
+    for _, plan in registered:
+        validate_plan(plan)
+    families = {plan.get("study_family") for _, plan in registered}
+    require(len(families) == 1, "Mixed study families need separate reviews")
+    inferred_family = next(iter(families))
+    require(
+        study_family is None or study_family == inferred_family,
+        "Publication family differs from its batches",
+    )
+    study_family = inferred_family
+    page = document(title, study_family=study_family)
     owner = {"version": VERSION, "title": title}
+    if study_family is not None:
+        owner["study_family"] = study_family
     if root.exists():
         require(
             (root / ".review-owner.json").is_file() and read(root / ".review-owner.json") == owner,
@@ -844,7 +922,9 @@ def publish_review(
         entries, indexed = [], {}
         if previous is not None:
             require(
-                previous.get("version") == VERSION and previous["title"] == title,
+                previous.get("version") == VERSION
+                and previous["title"] == title
+                and previous.get("study_family") == study_family,
                 "Existing output belongs to a different review",
             )
             expected, indexed = _manifest(
@@ -857,8 +937,7 @@ def publish_review(
             entries = list(previous["provenance"]["entries"])
         plan_descriptors = []
         batch_plans = []
-        for batch in batches:
-            plan = read(batch / "plan.json")
+        for batch, plan in registered:
             cases = validate_plan(plan)
             plan_descriptors.append(_copy(root, batch / "plan.json"))
             batch_plans.append((batch, plan, cases, plan_descriptors[-1]))
@@ -877,7 +956,9 @@ def publish_review(
                 all(old in pending for old in previous["provenance"]["pending_cohorts"]),
                 "Pending cohort plans cannot change or disappear",
             )
-        _, catalog, _, _, _, _ = _catalog(root, plan_descriptors, pending)
+        _, catalog, _, _, _, _ = _catalog(
+            root, plan_descriptors, pending, study_family=study_family
+        )
         for batch, plan, cases, plan_descriptor in batch_plans:
             for case_id in cases:
                 folder = batch / "cases" / case_id
@@ -930,6 +1011,8 @@ def publish_review(
                         ),
                     },
                 }
+                if study_family is not None:
+                    entry["study_family"] = study_family
                 entry["preview"] = _make_preview(root, entry["media"]["image"])
                 target = root / "entries" / (_sha(entry) + ".json")
                 target.parent.mkdir(exist_ok=True)
@@ -940,9 +1023,12 @@ def publish_review(
                 descriptor = _description(target, root)
                 _verify_entry(root, descriptor, catalog)
                 entries.append(descriptor)
+        provenance = {"plans": plan_descriptors, "entries": entries, "pending_cohorts": pending}
+        if study_family is not None:
+            provenance["study_family"] = study_family
         data, _ = _manifest(
             root,
-            {"plans": plan_descriptors, "entries": entries, "pending_cohorts": pending},
+            provenance,
             title,
             previous["picks"] if picks is None and previous else ([] if picks is None else picks),
             hash_media=False,

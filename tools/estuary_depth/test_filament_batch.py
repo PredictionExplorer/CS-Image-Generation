@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from tools.estuary import run as paint_run
 from tools.estuary.recipe import validate_recipe
 from tools.estuary.run import HERE as PAINT_ROOT
 from tools.estuary.run import artifact as paint_artifact
@@ -343,6 +344,22 @@ class FilamentBatchTests(unittest.TestCase):
         shot["renderer"]["materials.py"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "Photograph runtime"):
             batch._verify_photo_runtime(self.plan, shot)
+
+    def test_archive_runtime_uses_frozen_core_and_explicit_optional_dependencies(self):
+        before = batch._runtime_contract(self.plan)
+        with patch.object(paint_run, "RUNTIME_FILES", (*paint_run.RUNTIME_FILES, "future.py")):
+            self.assertEqual(batch._runtime_contract(self.plan), before)
+            batch.verify_case(self.folder)
+        extended = copy.deepcopy(self.plan)
+        extended["runtime"]["estuary"]["initial_patterns.py"] = "a" * 64
+        self.assertEqual(batch._runtime_contract(extended), before)
+        extended["paint_runtime_extensions"] = ["initial_patterns.py"]
+        expected = {**before["paint"], "initial_patterns.py": "a" * 64}
+        self.assertEqual(batch._runtime_contract(extended)["paint"], expected)
+        for value in (["missing.py"], ["../outside.py"], ["initial_patterns.py"] * 2):
+            extended["paint_runtime_extensions"] = value
+            with self.subTest(extensions=value), self.assertRaises(ValueError):
+                batch._runtime_contract(extended)
 
 
 if __name__ == "__main__":

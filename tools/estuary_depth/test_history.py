@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from tools.estuary import run as paint_run
+from tools.estuary.recipe import validate_recipe
 from tools.estuary.run import artifact, digest, encoded, read_json, write_json
 from tools.estuary_depth import history
 
@@ -100,6 +102,64 @@ class ReplayTests(unittest.TestCase):
         count = len(self.instances)
         self.assertEqual(history.replay(self.run, self.output), result)
         self.assertEqual(len(self.instances), count)  # Reuse needs no GPU context.
+
+    def _composition_archive(self):
+        recipe = validate_recipe(
+            {
+                "simulation": {
+                    "steps": 360,
+                    "resolution": [128, 96],
+                    "initial_pattern": "composition",
+                    "initial_design": {
+                        "version": "starting-patterns-v1",
+                        "pattern": "folded-sash",
+                        "seed": "0x" + "0" * 63 + "1",
+                    },
+                },
+                "render": {"resolution": [128, 96], "frames": 31},
+            }
+        )
+        request = {**self.request, "recipe": recipe, "code": paint_run.code_identity(recipe)}
+        identity = hashlib.sha256(encoded(request)).hexdigest()
+        write_json(self.run / "request.json", request)
+        write_json(self.run / "receipt.json", {"identity_sha256": identity})
+        return request, identity, recipe, self.expected, self.records
+
+    def test_composition_replay_binds_the_optional_initializer_runtime(self):
+        archive = self._composition_archive()
+        self.assertIn("initial_patterns.py", archive[0]["code"])
+        self.assertNotIn("initial_patterns.py", paint_run.code_identity())
+        with (
+            patch.object(history, "verified_run", return_value=archive),
+            patch.object(history, "code_identity", side_effect=paint_run.code_identity),
+        ):
+            result = history.replay(self.run, self.output)
+            self.assertTrue(result["complete"])
+            self.assertEqual(result["code"], archive[0]["code"])
+            self.assertEqual(
+                result["final_state"]["sha256"], self.records["final-state.npy"]["sha256"]
+            )
+            self.assertEqual(history.replay(self.run, self.output), result)
+
+    def test_changed_optional_initializer_during_replay_prevents_publication(self):
+        archive = self._composition_archive()
+        original_digest = paint_run.digest
+
+        def changing_initializer(path):
+            if Path(path).name == "initial_patterns.py" and self.instances:
+                return "0" * 64
+            return original_digest(path)
+
+        with (
+            patch.object(history, "verified_run", return_value=archive),
+            patch.object(history, "code_identity", side_effect=paint_run.code_identity),
+            patch.object(paint_run, "digest", side_effect=changing_initializer),
+            self.assertRaisesRegex(ValueError, "runtime code changed during replay"),
+        ):
+            history.replay(self.run, self.output)
+        self.assertFalse((self.output / "history.json").exists())
+        self.assertFalse(read_json(self.output / "status.json")["complete"])
+        self.assertTrue(self.instances[0].closed)
 
     def test_corrupted_history_cannot_be_reused(self):
         history.replay(self.run, self.output)

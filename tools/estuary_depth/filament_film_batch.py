@@ -22,8 +22,11 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Mapping
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -57,6 +60,51 @@ STAGE_TIMEOUT = 3 * 3600
 # A stage wrapper first stops its own detached Blender/encoder with an 8-second
 # grace. Give that cleanup time to finish before killing the wrapper itself.
 WRAPPER_STOP_GRACE = 20
+PATTERN_STUDY_FAMILY = "pattern-studies-v1"
+
+
+@dataclass(frozen=True)
+class StudyCatalog:
+    options: Mapping[str, Any]
+    formation_recipe: Callable[..., dict]
+    photo_recipe: Callable[..., dict]
+    motion_recipe: Callable[..., dict]
+    runtime_extensions: tuple[str, ...] = ()
+    reference_option: str = "control"
+    default_option: str = "three-broad-pools"
+
+
+def study_catalog(study_family=None):
+    """Select an explicit versioned family without changing the legacy default."""
+    if study_family is None:
+        return StudyCatalog(OPTIONS, make_formation_recipe, make_photo_recipe, make_motion_recipe)
+    require(study_family == PATTERN_STUDY_FAMILY, "Unknown study family")
+    from tools.estuary_depth import pattern_studies
+
+    return StudyCatalog(
+        pattern_studies.OPTIONS,
+        pattern_studies.make_formation_recipe,
+        pattern_studies.make_photo_recipe,
+        pattern_studies.make_motion_recipe,
+        pattern_studies.PAINT_RUNTIME_EXTENSIONS,
+        pattern_studies.REFERENCE_OPTION,
+        pattern_studies.DEFAULT_OPTION,
+    )
+
+
+def resolve_catalog(plan):
+    if "study_family" in plan:
+        require(type(plan["study_family"]) is str, "Study family must be explicit when present")
+    catalog = study_catalog(plan.get("study_family"))
+    require(
+        plan.get("paint_runtime_extensions", []) == list(catalog.runtime_extensions),
+        "Paint runtime extensions differ from the study family",
+    )
+    require(
+        "study_family" in plan or "paint_runtime_extensions" not in plan,
+        "Legacy plans do not declare runtime extensions",
+    )
+    return catalog
 
 
 def _sha(value):
@@ -99,6 +147,8 @@ def validate_plan(plan):
         == _sha({k: v for k, v in plan.items() if k != "identity_sha256"}),
         "Film plan identity differs",
     )
+    catalog = resolve_catalog(plan)
+    options = catalog.options
     _runtime_contract(plan)
     _fingerprint(plan["runtime"]["estuary_depth"]["film.py"])
     rows = _sources(plan["cohort"], plan["cohort_kind"])
@@ -115,23 +165,23 @@ def validate_plan(plan):
         _fingerprint(tool["sha256"])
     cases, materials = plan["cases"], plan["materials"]
     require(
-        type(cases) is list and 1 <= len(cases) <= len(rows) * len(OPTIONS), "Invalid film cases"
+        type(cases) is list and 1 <= len(cases) <= len(rows) * len(options), "Invalid film cases"
     )
     require(type(materials) is dict and bool(materials), "Missing film materials")
     require(len({case["id"] for case in cases}) == len(cases), "Duplicate film cases")
     references = {}
     for case in cases:
         seed, option = case["seed"], case["option"]
-        require(seed in rows and type(option) is str and option in OPTIONS, "Unknown film case")
-        material_id = f"{seed}-{OPTIONS[option].material_variant}"
+        require(seed in rows and type(option) is str and option in options, "Unknown film case")
+        material_id = f"{seed}-{options[option].material_variant}"
         require(
             case["id"] == f"{seed}-{option}" and case["material_id"] == material_id,
             "Film case identifier differs from its controls",
         )
         require(type(case["master"]) is bool, "Master flag must be boolean")
         require(
-            case["photo_recipe"] == make_photo_recipe(seed, option, master=case["master"])
-            and case["motion_recipe"] == make_motion_recipe(seed, option),
+            case["photo_recipe"] == catalog.photo_recipe(seed, option, master=case["master"])
+            and case["motion_recipe"] == catalog.motion_recipe(seed, option),
             "Film case recipe differs from its canonical controls",
         )
         reference = case["reference"]
@@ -158,8 +208,8 @@ def validate_plan(plan):
         require(
             seed in rows
             and key == f"{seed}-{variant}"
-            and variant in OPTIONS
-            and OPTIONS[variant].material_variant == variant,
+            and variant in options
+            and options[variant].material_variant == variant,
             "Unknown material study",
         )
         require(
@@ -168,7 +218,8 @@ def validate_plan(plan):
             "Material source differs from its cohort",
         )
         require(
-            material["recipe"] == make_formation_recipe(seed, variant), "Formation recipe differs"
+            material["recipe"] == catalog.formation_recipe(seed, variant),
+            "Formation recipe differs",
         )
         require(
             material["expected_final_state_sha256"] == references.get(key),
@@ -190,8 +241,10 @@ def make_plan(
     selections=None,
     case_ids=None,
     references=None,
+    study_family=None,
 ):
     """Freeze a cross-product or explicit case selection; references constrain backfills."""
+    catalog = study_catalog(study_family)
     cohort = copy.deepcopy(cohort)
     rows = _sources(cohort, cohort_kind, source_root)
     references = copy.deepcopy(references or {})
@@ -204,14 +257,14 @@ def make_plan(
         selections = [case_id.split("-", 1) for case_id in case_ids]
     if selections is None:
         seeds = list(rows) if seeds is None else list(seeds)
-        options = list(OPTIONS) if options is None else list(options)
+        options = list(catalog.options) if options is None else list(options)
         selections = [(seed, option) for seed in seeds for option in options]
     else:
         require(seeds is None and options is None, "Use selections or seed/option lists")
     materials, cases = {}, []
     for seed, option in selections:
-        require(seed in rows and option in OPTIONS, "Unknown film selection")
-        spec, case_id = OPTIONS[option], f"{seed}-{option}"
+        require(seed in rows and option in catalog.options, "Unknown film selection")
+        spec, case_id = catalog.options[option], f"{seed}-{option}"
         material_id = f"{seed}-{spec.material_variant}"
         reference = references.get(case_id)
         master = reference.get("master", False) if reference else False
@@ -228,7 +281,7 @@ def make_plan(
                     )
                 ),
                 "source_sha256": rows[seed]["sha256"],
-                "recipe": make_formation_recipe(seed, spec.material_variant),
+                "recipe": catalog.formation_recipe(seed, spec.material_variant),
                 "expected_final_state_sha256": None,
             },
         )
@@ -246,8 +299,8 @@ def make_plan(
                 "material_id": material_id,
                 "master": master,
                 "reference": reference,
-                "photo_recipe": make_photo_recipe(seed, option, master=master),
-                "motion_recipe": make_motion_recipe(seed, option),
+                "photo_recipe": catalog.photo_recipe(seed, option, master=master),
+                "motion_recipe": catalog.motion_recipe(seed, option),
             }
         )
     require(set(references) <= {case["id"] for case in cases}, "Unused prior study references")
@@ -265,6 +318,10 @@ def make_plan(
         "bundle_resolution": list(BUNDLE_RESOLUTION),
         "mesh_resolution": list(MESH_RESOLUTION),
     }
+    if study_family is not None:
+        plan.update(
+            study_family=study_family, paint_runtime_extensions=list(catalog.runtime_extensions)
+        )
     plan["identity_sha256"] = _sha(plan)
     validate_plan(plan)
     return plan
@@ -499,6 +556,8 @@ def _inspect_case(folder, plan, case):
         "movie": edited["movie"],
         "timeline": timeline,
     }
+    if "study_family" in plan:
+        record["study_family"] = plan["study_family"]
     return record, {key: str(value.resolve()) for key, value in paths.items()}
 
 

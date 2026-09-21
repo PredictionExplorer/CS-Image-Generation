@@ -11,6 +11,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
+from tools.estuary.recipe import validate_recipe
 from tools.estuary.run import artifact as paint_artifact
 from tools.estuary_confluence import test_review_page as page_tests
 from tools.estuary_studio.common import artifact, read, write
@@ -23,6 +24,20 @@ from .render import camera_pose
 
 class FilmGalleryTests(unittest.TestCase):
     def setUp(self):
+        if getattr(self, "study_family", None) is not None:
+            from . import pattern_studies
+
+            original = pattern_studies.make_formation_recipe
+
+            def small_pattern(seed, option):
+                result = original(seed, option)
+                result["simulation"]["resolution"] = [128, 96]
+                result["render"]["resolution"] = [128, 96]
+                return validate_recipe(result)
+
+            factory = patch.object(pattern_studies, "make_formation_recipe", small_pattern)
+            factory.start()
+            self.addCleanup(factory.stop)
         fixture_type = batch_tests.FilmBatchTests
         original_material = fixture_type.build_material
         original_photo = fixture_type.build_photo
@@ -99,6 +114,7 @@ class FilmGalleryTests(unittest.TestCase):
             write(target / "receipt.json", receipt)
 
         self.fixture = fixture_type("runTest")
+        self.fixture.study_family = getattr(self, "study_family", None)
         with (
             patch.object(fixture_type, "build_material", material),
             patch.object(fixture_type, "build_photo", photo),
@@ -108,9 +124,6 @@ class FilmGalleryTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.root = self.fixture.root
         self.output = self.root / "review"
-        recipe_patch = patch.object(gallery, "make_formation_recipe", batch_tests.small_formation)
-        recipe_patch.start()
-        self.addCleanup(recipe_patch.stop)
 
     def publish(self, **kwargs):
         return gallery.publish_review(self.output, [self.fixture.output], **kwargs)
@@ -456,6 +469,63 @@ assert.equal(videos().length,0);assert.equal(get('grid').children.length,0);
 """,
             data,
         )
+
+
+class PatternFilmGalleryTests(unittest.TestCase):
+    study_family = "pattern-studies-v1"
+    setUp = FilmGalleryTests.setUp
+    publish = FilmGalleryTests.publish
+
+    def test_pattern_pairs_are_portable_and_keep_their_versioned_family(self):
+        data = self.publish(title="Starting paint studies")
+        self.assertEqual(data["study_family"], self.study_family)
+        self.assertEqual(data["provenance"]["study_family"], self.study_family)
+        self.assertEqual([row["variant"] for row in data["rows"]], ["lacuna-banks", "folded-sash"])
+        self.assertTrue(all(row["study_family"] == self.study_family for row in data["rows"]))
+        self.assertTrue(data["progress"]["complete"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("same ten trajectory seeds", page)
+        self.assertIn("shared trajectory seeds", page)
+        self.assertNotIn('" new seeds + "', page)
+        for descriptor in data["provenance"]["entries"]:
+            entry = read(self.output / descriptor["path"])
+            self.assertEqual(entry["study_family"], self.study_family)
+        shutil.rmtree(self.fixture.output)
+        self.assertEqual(gallery.verify_review(self.output), data)
+
+    def test_seed_visibility_waits_for_its_reference_pattern_instead_of_control(self):
+        certificate = self.fixture.folders[0] / "study.json"
+        record = read(certificate)
+        certificate.unlink()
+        partial = self.publish()
+        self.assertEqual(partial["progress"]["ready_pairs"], 1)
+        self.assertEqual(partial["progress"]["visible_pairs"], 0)
+        self.assertEqual(
+            partial["progress"]["awaiting_control_case_ids"], [self.fixture.folders[1].name]
+        )
+        write(certificate, record)
+        completed = self.publish()
+        self.assertEqual(completed["progress"]["visible_pairs"], 2)
+        self.assertEqual(gallery.verify_review(self.output), completed)
+
+    def test_family_cannot_be_removed_from_a_portable_publication(self):
+        data = self.publish()
+        altered = copy.deepcopy(data)
+        altered["provenance"].pop("study_family")
+        altered["identity_sha256"] = gallery._sha(
+            {k: v for k, v in altered.items() if k != "identity_sha256"}
+        )
+        write(self.output / "comparison.json", altered)
+        with self.assertRaisesRegex(ValueError, "Mixed study families"):
+            gallery.verify_review(self.output)
+
+    def test_pattern_and_legacy_families_require_separate_publications(self):
+        other = self.root / "legacy"
+        other.mkdir()
+        write(other / "plan.json", self.fixture.make_plan(options=["control"]))
+        with self.assertRaisesRegex(ValueError, "Mixed study families"):
+            gallery.publish_review(self.output, [self.fixture.output, other])
+        self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

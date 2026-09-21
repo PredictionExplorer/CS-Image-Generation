@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from tools.estuary.run import RUNTIME_FILES, checked_artifact, completed
+from tools.estuary.run import checked_artifact, completed
 from tools.estuary_confluence.run import runtime_identity
 from tools.estuary_depth.experiment import finished, verify_render
 from tools.estuary_depth.filament_studies import VARIANTS, make_depth_recipe, make_paint_recipe
@@ -22,6 +22,23 @@ from tools.estuary_studio.common import artifact, encoded, read, require, write
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = "fine-fold-study-v1"
 SPECIFIC_VOLUMES = (0.25, 1.0, 0.5)
+# This is the version-one archive contract, not the live renderer's dependency
+# list. Optional initializers declare their extra dependencies in their plan.
+V1_PAINT_RUNTIME_FILES = frozenset(
+    {
+        "__init__.py",
+        "source.py",
+        "recipe.py",
+        "optics.py",
+        "engine.py",
+        "run.py",
+        "optics.glsl",
+        "requirements.txt",
+        "shaders/flow.glsl",
+        "shaders/advect.glsl",
+        "shaders/correct.glsl",
+    }
+)
 
 
 def _runtime_contract(plan):
@@ -30,9 +47,23 @@ def _runtime_contract(plan):
     require(type(runtime) is dict, "Study plan lacks its frozen runtime")
     paint, depth = runtime.get("estuary"), runtime.get("estuary_depth")
     require(type(paint) is dict and type(depth) is dict, "Incomplete frozen study runtime")
-    names = set(RUNTIME_FILES) | {
-        name for name in paint if name.startswith("shaders/") and name.endswith(".glsl")
-    }
+    extensions = plan.get("paint_runtime_extensions", [])
+    require(
+        type(extensions) is list
+        and all(type(name) is str and name.endswith(".py") for name in extensions)
+        and len(extensions) == len(set(extensions))
+        and not set(extensions) & V1_PAINT_RUNTIME_FILES,
+        "Invalid supplemental paint runtime",
+    )
+    names = (
+        V1_PAINT_RUNTIME_FILES
+        | set(extensions)
+        | {name for name in paint if name.startswith("shaders/") and name.endswith(".glsl")}
+    )
+    require(
+        all(not Path(name).is_absolute() and ".." not in Path(name).parts for name in names),
+        "Paint runtime path escapes its archive",
+    )
     require(names <= paint.keys(), "Frozen paint runtime is incomplete")
     require(
         {"prepare.py", "render.py", "materials.py"} <= depth.keys(),

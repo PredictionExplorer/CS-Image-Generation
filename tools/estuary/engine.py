@@ -139,7 +139,15 @@ class Engine:
             ) * self.domain
             y = ((np.arange(self.height) + 0.5) / self.height * 2 - 1) * self.domain
             initial = self.source.frame(0).positions
-            if settings["initial_pattern"] == "strata":
+            if settings.get("initial_design") is not None:
+                from .initial_patterns import fill_pattern
+
+                support = self.source.sample(np.linspace(0.0, 1.0, 65)).positions
+                fill_pattern(
+                    state, x, y, initial, settings["initial_design"], support_positions=support
+                )
+                state[:, :, :3] *= settings["initial_load"]
+            elif settings["initial_pattern"] == "strata":
                 edge = initial[1] - initial[0]
                 length = float(np.linalg.norm(edge))
                 direction = edge / length if length > 1e-10 else np.array([1.0, 0.0])

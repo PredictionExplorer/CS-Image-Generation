@@ -199,12 +199,15 @@ def completed(output, identity):
     return True
 
 
-def code_identity():
-    """Fingerprint the rendering runtime, independently of gallery and test code."""
-    for name in RUNTIME_FILES:
+def code_identity(recipe=None):
+    """Fingerprint active dependencies without adding optional modules to old runs."""
+    required = set(RUNTIME_FILES)
+    if recipe is not None and recipe["simulation"].get("initial_design") is not None:
+        required.add("initial_patterns.py")
+    for name in required:
         if not (HERE / name).is_file():
             raise ValueError(f"Required renderer runtime file is missing: {name}")
-    names = set(RUNTIME_FILES) | {
+    names = required | {
         str(path.relative_to(HERE)) for path in (HERE / "shaders").glob("*.glsl") if path.is_file()
     }
     return {name: digest(HERE / name) for name in sorted(names)}
@@ -450,8 +453,9 @@ def run(args):
     retention = getattr(args, "checkpoint_retention", None)
     if retention is not None and (type(retention) is not int or retention < 2):
         raise ValueError("Retain at least two checkpoints, or omit retention")
-    started, code = time.monotonic(), code_identity()
+    started = time.monotonic()
     recipe = read_recipe(args.recipe)
+    code = code_identity(recipe)
     grid = recipe["simulation"]["resolution"]
     source = Source.read(args.orbit, aspect=grid[0] / grid[1], **recipe["projection"])
     steps = recipe["simulation"]["steps"]
@@ -601,7 +605,7 @@ def _render_archive(args, engine, source, recipe, plan, code, started):
                 or digest(output / "inputs" / "source.orbit") != source.sha256
             ):
                 raise ValueError("Source changed during rendering or archival")
-            if code_identity() != code or any(
+            if code_identity(recipe) != code or any(
                 digest(output / "inputs" / "code" / name) != sha for name, sha in code.items()
             ):
                 raise ValueError("Renderer code changed during rendering or archival")

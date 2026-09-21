@@ -103,13 +103,14 @@ def stop_children(active):
 
 
 def request_for(args):
+    recipe = read_recipe(args.recipe)
     return {
         "schema_version": 1,
         "seeds": args.seeds,
         "recipe": {
             "path": str(args.recipe),
             "sha256": digest(args.recipe),
-            "resolved": read_recipe(args.recipe),
+            "resolved": recipe,
         },
         "sources": {
             seed: {
@@ -118,7 +119,7 @@ def request_for(args):
             }
             for seed in args.seeds
         },
-        "runtime_code": code_identity(),
+        "runtime_code": code_identity(recipe),
         "tools": {
             name: None
             if getattr(args, name) is None

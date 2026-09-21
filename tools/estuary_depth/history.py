@@ -59,7 +59,8 @@ def replay(run_path, output_path, fractions=(0.35, 0.65)):
     folder, output = Path(run_path).resolve(strict=True), Path(output_path).resolve()
     request, identity, recipe, _state, records = verified_run(folder)
     require(
-        code_identity() == request["code"], "Installed Estuary runtime differs from the original"
+        code_identity(recipe) == request["code"],
+        "Installed Estuary runtime differs from the original",
     )
     runtime = {
         "python": platform.python_version(),
@@ -145,7 +146,7 @@ def replay(run_path, output_path, fractions=(0.35, 0.65)):
                 "Original state changed",
             )
             require(
-                digest(source.path) == source.sha256 and code_identity() == request["code"],
+                digest(source.path) == source.sha256 and code_identity(recipe) == request["code"],
                 "Source or runtime code changed during replay",
             )
             require(
