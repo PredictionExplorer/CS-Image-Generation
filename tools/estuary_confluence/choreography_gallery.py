@@ -34,6 +34,7 @@ PRESENTATION = Presentation(
         "Gold outlines mark subjective visual picks."
     ),
     default_variant="stretch-ovals",
+    film_only_selection=True,
 )
 DOCUMENTS = (
     "index.html",

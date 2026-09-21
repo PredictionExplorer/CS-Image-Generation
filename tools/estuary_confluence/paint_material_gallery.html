@@ -399,7 +399,7 @@
             <pre id="settings"></pre>
           </details>
           <div class="section-head">
-            <h2>All treatments for this seed</h2>
+            <h2 id="grid-title">All treatments for this seed</h2>
             <span class="note" id="count"></span>
           </div>
           <p class="note">__LEGEND__</p>
@@ -442,8 +442,31 @@
           (p) => p.seed === row.seed && p.variant === row.variant,
         );
       }
+      const filmsOnly = () =>
+        presentation.film_only_selection === true && mode === "film";
+      function availableSeeds() {
+        return filmsOnly()
+          ? data.seeds.filter((seed) =>
+              data.rows.some((row) => row.seed === seed && row.film),
+            )
+          : data.seeds;
+      }
+      function refreshSeeds() {
+        const previous = $("seed").value,
+          seeds = availableSeeds();
+        $("seed").replaceChildren(
+          ...seeds.map((seed, index) => {
+            const option = element("option", index + 1 + " · " + seed);
+            option.value = seed;
+            return option;
+          }),
+        );
+        $("seed").value = seeds.includes(previous) ? previous : seeds[0];
+      }
       function cohort() {
-        return data.rows.filter((r) => r.seed === $("seed").value);
+        return data.rows.filter(
+          (r) => r.seed === $("seed").value && (!filmsOnly() || r.film),
+        );
       }
       function selected(side) {
         return cohort().find((r) => r.variant === $(side).value);
@@ -590,11 +613,16 @@
         const rows = cohort().filter(
           (r) => !$("only-picks").checked || pickFor(r),
         );
-        $("count").textContent =
-          rows.length +
-          (rows.length === 1 ? " treatment · " : " treatments · ") +
-          cohort().filter((r) => r.film).length +
-          (cohort().filter((r) => r.film).length === 1 ? " film" : " films");
+        $("grid-title").textContent = filmsOnly()
+          ? "Available films for this seed"
+          : "All treatments for this seed";
+        $("count").textContent = filmsOnly()
+          ? rows.length +
+            (rows.length === 1 ? " available film" : " available films")
+          : rows.length +
+            (rows.length === 1 ? " treatment · " : " treatments · ") +
+            cohort().filter((r) => r.film).length +
+            (cohort().filter((r) => r.film).length === 1 ? " film" : " films");
         $("grid").replaceChildren(
           ...rows.map((row) => {
             const button = element(
@@ -640,33 +668,57 @@
           $("grid").append(
             element(
               "p",
-              "No visual picks recorded for this seed. Turn off the filter to see every treatment.",
+              filmsOnly()
+                ? "No filmed visual picks for this seed. Turn off the filter to see every available film."
+                : "No visual picks recorded for this seed. Turn off the filter to see every treatment.",
             ),
           );
       }
       function chooseSeed() {
         if (!data) return;
         const rows = cohort();
-        options($("left"), rows, $("left").value || "rc1", "rc1");
+        options(
+          $("left"),
+          rows,
+          $("left").value || "rc1",
+          rows.find((row) => row.variant === "rc1")?.variant || rows[0].variant,
+        );
         const preferred =
           data.picks.find(
-            (p) => p.seed === $("seed").value && p.variant !== $("left").value,
+            (p) =>
+              p.seed === $("seed").value &&
+              p.variant !== $("left").value &&
+              rows.some((row) => row.variant === p.variant),
           )?.variant || presentation.default_variant;
         const fallback =
-          rows.find((row) => row.variant === preferred)?.variant ||
-          rows.find((row) => row.variant !== "rc1")?.variant ||
-          "rc1";
+          rows.find(
+            (row) =>
+              row.variant === preferred &&
+              (!filmsOnly() || row.variant !== $("left").value),
+          )?.variant ||
+          rows.find(
+            (row) => row.variant !== (filmsOnly() ? $("left").value : "rc1"),
+          )?.variant ||
+          rows[0].variant;
         options($("right"), rows, $("right").value || preferred, fallback);
         renderPair();
         renderGrid();
-        $("status").textContent =
-          data.rows.length +
-          (data.rows.length === 1
-            ? " painting across "
-            : " paintings across ") +
-          data.seeds.length +
-          (data.seeds.length === 1 ? " seed · " : " seeds · ") +
-          "full trajectory in every image";
+        const shown = filmsOnly()
+          ? data.rows.filter((row) => row.film).length
+          : data.rows.length;
+        const seeds = availableSeeds();
+        $("status").textContent = filmsOnly()
+          ? shown +
+            (shown === 1 ? " film across " : " films across ") +
+            seeds.length +
+            (seeds.length === 1 ? " seed" : " seeds")
+          : data.rows.length +
+            (data.rows.length === 1
+              ? " painting across "
+              : " paintings across ") +
+            data.seeds.length +
+            (data.seeds.length === 1 ? " seed · " : " seeds · ") +
+            "full trajectory in every image";
         const url = new URL(location);
         url.searchParams.set("seed", $("seed").value);
         history.replaceState(null, "", url);
@@ -709,21 +761,30 @@
       ])
         $(id).addEventListener("click", () => {
           if (!data) return;
+          const seeds = availableSeeds();
           $("seed").selectedIndex =
-            ($("seed").selectedIndex + direction + data.seeds.length) %
-            data.seeds.length;
+            ($("seed").selectedIndex + direction + seeds.length) % seeds.length;
           chooseSeed();
         });
       document.querySelectorAll("[data-mode]").forEach((button) =>
         button.addEventListener("click", () => {
           if (!data) return;
+          if (
+            presentation.film_only_selection &&
+            button.dataset.mode === "film" &&
+            !data.rows.some((row) => row.film)
+          )
+            return;
           mode = button.dataset.mode;
           document
             .querySelectorAll("[data-mode]")
             .forEach((b) =>
               b.setAttribute("aria-pressed", String(b === button)),
             );
-          renderPair();
+          if (presentation.film_only_selection) {
+            refreshSeeds();
+            chooseSeed();
+          } else renderPair();
         }),
       );
       $("zoom").addEventListener("click", () => {
@@ -763,6 +824,13 @@
           )
             throw new Error("Invalid gallery data.");
           data = result;
+          if (
+            presentation.film_only_selection &&
+            !data.rows.some((row) => row.film)
+          )
+            document.querySelectorAll("[data-mode]").forEach((button) => {
+              if (button.dataset.mode === "film") button.disabled = true;
+            });
           $("seed").replaceChildren(
             ...data.seeds.map((seed, i) => {
               const o = element("option", i + 1 + " · " + seed);

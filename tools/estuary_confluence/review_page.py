@@ -20,6 +20,7 @@ class Presentation:
     intro: str
     legend: str
     default_variant: str
+    film_only_selection: bool = False
 
 
 MATERIALS = Presentation(
@@ -41,14 +42,21 @@ def document(title, *, presentation=MATERIALS):
     require(type(title) is str and 0 < len(title) <= 120, "Use a short gallery title")
     require(type(presentation) is Presentation, "Use explicit review presentation")
     for key, value in vars(presentation).items():
-        require(type(value) is str and 0 < len(value) <= 1000, f"Invalid presentation {key}")
+        if key == "film_only_selection":
+            require(type(value) is bool, "film_only_selection must be a boolean")
+        else:
+            require(type(value) is str and 0 < len(value) <= 1000, f"Invalid presentation {key}")
     for key in ("version", "default_variant"):
         require(
             re.fullmatch(r"[a-z][a-z0-9-]{0,79}", getattr(presentation, key)),
             "Invalid review identifier",
         )
     settings = json.dumps(
-        {"version": presentation.version, "default_variant": presentation.default_variant}
+        {
+            "version": presentation.version,
+            "default_variant": presentation.default_variant,
+            "film_only_selection": presentation.film_only_selection,
+        }
     )
     substitutions = {
         "__TITLE__": html.escape(title),
