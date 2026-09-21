@@ -53,7 +53,10 @@ def prepared():
         None,
         np.array([[-0.27, 0], [0, 0], [0.27, 0]]),
         [
-            (1.0, np.array([x, y]), 0.0, math.pi / 2)
+            # Include the saddle's vertical branches. Labeling every anchor
+            # horizontal placed facing banks across the expanding y axis and
+            # left qualification dependent on a marginal symmetric candidate.
+            (1.0, np.array([x, y]), math.copysign(math.pi / 2, y) if y else 0.0, math.pi / 2)
             for x, y in [(0, 0), (0.1, 0), (-0.1, 0), (0, 0.1), (0, -0.1)]
         ],
         "b" * 64,
