@@ -55,8 +55,8 @@ class ChoreographyStudyTests(unittest.TestCase):
 
     def test_plan_covers_complete_source_and_pins_pigments_without_pinning_geometry(self):
         plan = make_plan(source_root="/tmp/immutable-orbits")
-        self.assertEqual(len(plan["cases"]), 30)
-        self.assertEqual(len({c["id"] for c in plan["cases"]}), 30)
+        self.assertEqual(len(plan["cases"]), len(VARIANTS) * 3)
+        self.assertEqual(len({c["id"] for c in plan["cases"]}), len(VARIANTS) * 3)
         self.assertEqual(encoded(plan), encoded(make_plan(source_root="/tmp/immutable-orbits")))
         for case in plan["cases"]:
             self.assertEqual(case["mode"], "still")

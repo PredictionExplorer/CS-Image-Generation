@@ -98,7 +98,7 @@ class ChoreographyContracts(unittest.TestCase):
     def plan(self, setup="active-pools", settings=None):
         return planner.plan_layout(source(), settings or config(setup), self.palette)
 
-    def test_all_eight_geometry_families_qualify_every_actual_component(self):
+    def test_all_geometry_families_qualify_every_actual_component(self):
         for setup in planner.SETUPS:
             with self.subTest(setup=setup):
                 layout = self.plan(setup)
@@ -188,6 +188,50 @@ class ChoreographyContracts(unittest.TestCase):
         deformed = points * [2, 0.5]
         stretch, _ = planner._stretch(deformed, weights, covariance, points)
         self.assertAlmostEqual(float(stretch), 2, places=12)
+
+    def test_long_ribbon_has_a_materially_longer_narrower_footprint(self):
+        radius = 0.12
+        ribbon = planner._primitive(np.zeros(2), radius, 0, "long-ribbons", 0)
+        cross = planner._primitive(np.zeros(2), radius, 0, "cross-strokes", 0)
+        extent = np.ptp(np.asarray(ribbon["points"]), axis=0)[0]
+        self.assertAlmostEqual(extent / radius, 5.6)
+        self.assertGreater(extent, 1.7 * np.ptp(np.asarray(cross["points"]), axis=0)[0])
+        self.assertLess(max(ribbon["radii"]), max(cross["radii"]))
+        samples, _ = planner._samples(ribbon)
+        covariance = np.cov(samples.T, bias=True)
+        eigen = np.linalg.eigvalsh(covariance)
+        self.assertGreater(math.sqrt(eigen[-1] / eigen[0]), 4)
+
+    def test_crescent_quadrature_does_not_fill_its_convex_hull(self):
+        radius = 0.12
+        crescent = planner._primitive(np.zeros(2), radius, 0, "swept-crescents", 0)
+        points = np.asarray(crescent["points"])
+        # Independently recover the arc center from its constant-radius curve.
+        matrix = np.column_stack([2 * points, np.ones(len(points))])
+        center = np.linalg.lstsq(matrix, np.sum(points**2, axis=1), rcond=None)[0][:2]
+        np.testing.assert_allclose(np.linalg.norm(points - center, axis=1), 1.2 * radius)
+        theta = np.unwrap(np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0]))
+        self.assertAlmostEqual(abs(theta[-1] - theta[0]), math.radians(200))
+        samples, _ = planner._samples(crescent)
+        self.assertGreater(float(np.linalg.norm(samples - center, axis=1).min()), 0.85 * radius)
+        self.assertGreater(min(crescent["radii"]), 0)
+
+    def test_new_native_shapes_remain_separated_and_crescent_bowls_empty(self):
+        width, height, domain = 1024, 768, 1.6
+        for setup in ("long-ribbons", "swept-crescents"):
+            with self.subTest(setup=setup):
+                layout = self.plan(setup)
+                image = planner.rasterize(layout, [width, height], domain)
+                self.assertFalse(np.any(np.count_nonzero(image > 0, axis=-1) > 1))
+                if setup != "swept-crescents":
+                    continue
+                for p in layout["primitives"]:
+                    points = np.asarray(p["points"])
+                    matrix = np.column_stack([2 * points, np.ones(len(points))])
+                    center = np.linalg.lstsq(matrix, np.sum(points**2, axis=1), rcond=None)[0][:2]
+                    x = int((center[0] / (layout["aspect"] * domain) + 1) * width / 2)
+                    y = int((center[1] / domain + 1) * height / 2)
+                    self.assertEqual(float(image[y, x, p["pigment_index"]]), 0)
 
     def test_stationary_and_rigid_translation_fail_honestly(self):
         for field in (

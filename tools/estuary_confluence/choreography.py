@@ -34,6 +34,8 @@ SETUPS = (
     "cross-strokes",
     "facing-banks",
     "split-lobes",
+    "long-ribbons",
+    "swept-crescents",
 )
 CANDIDATE_LIMIT = 36
 PILOT_STEPS = 1024
@@ -208,6 +210,27 @@ def _primitive(center, radius, angle, setup, index):
             "points": (center + np.array([-1.55, 0, 1.55])[:, None] * radius * axis).tolist(),
             "radii": (radius * np.array([0.23, 0.55, 0.23])).tolist(),
         }
+    if setup == "long-ribbons":
+        axis = np.array([math.cos(angle), math.sin(angle)])
+        return {
+            "kind": "stroke",
+            "points": (center + np.array([-2.8, 0, 2.8])[:, None] * radius * axis).tolist(),
+            "radii": (radius * np.array([0.08, 0.32, 0.08])).tolist(),
+        }
+    if setup == "swept-crescents":
+        t = np.linspace(0, 1, 33)
+        theta = angle + (t - 0.5) * math.radians(200)
+        widths = radius * (0.10 + 0.22 * np.sin(math.pi * t) ** 0.85)
+        points = 1.2 * radius * np.stack([np.cos(theta), np.sin(theta)], axis=1)
+        # Keep the approximate painted centroid at the activity anchor. The
+        # open side faces upstream; the conservative convex hull is used only
+        # for separation, never as the paint mask or tracer support.
+        points -= np.average(points, axis=0, weights=widths)
+        return {
+            "kind": "stroke",
+            "points": (points + center).tolist(),
+            "radii": widths.tolist(),
+        }
     factor = {"compact-pools": 0.75, "broad-pools": 1.2}.get(setup, 1.0)
     if setup == "unequal-pools":
         factor = (0.72, 1.0, 1.28)[index]
@@ -368,7 +391,7 @@ def _candidates(config, prepared):
         primitives = []
         for index in range(3):
             heading = float(directions[proposal_index, index]) if directions is not None else angle
-            if setup == "cross-strokes":
+            if setup in {"cross-strokes", "long-ribbons"}:
                 heading += math.pi / 2
             parts = [(centers[index], 1.0)]
             if setup == "split-lobes" and index == dominant:

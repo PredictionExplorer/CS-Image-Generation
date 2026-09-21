@@ -64,6 +64,16 @@ VARIANTS = {
         "The dominant pigment starts in two substantial deposits, both checked for motion.",
         "split-lobes",
     ),
+    "long-ribbons": StudySpec(
+        "Long ribbons",
+        "Longer tapered deposits span a wider part of the active currents.",
+        "long-ribbons",
+    ),
+    "swept-crescents": StudySpec(
+        "Swept crescents",
+        "Open curved deposits introduce empty space inside each starting gesture.",
+        "swept-crescents",
+    ),
     "ovals-balanced-layers": StudySpec(
         "Ovals · balanced layers",
         "The same ovals; 12% of the first pigment shifts to the slower layer and 12% "

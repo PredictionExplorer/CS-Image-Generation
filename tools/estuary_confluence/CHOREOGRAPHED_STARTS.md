@@ -12,20 +12,23 @@ the source recording, projection, colors, per-pigment amounts, three-body flow,
 material evolution, surface finish, camera and complete timeline. Paint evolves
 on the native 2048 × 1536 grid, and final images retain that resolution.
 
-The first matrix has ten treatments:
+The first matrix has ten treatments, with two stronger shape studies added after
+visual review:
 
-| Treatment               | Initial change                                                        |
-| ----------------------- | --------------------------------------------------------------------- |
-| Active pools            | Select three pools together using their predicted movement            |
-| Compact pools           | Smaller footprints, unchanged pigment amounts                         |
-| Broad pools             | Wider, shallower footprints                                           |
-| Unequal pools           | Restrained small, medium and large hierarchy                          |
-| Stretch ovals           | Elongated deposits oriented around measured currents                  |
-| Crossing strokes        | Short tapered strokes across active currents                          |
-| Facing banks            | Two banks and a third deposit sharing an active corridor              |
-| Split lobes             | Divide the dominant pigment into two substantial deposits             |
-| Ovals · balanced layers | Ovals with the first and second pigments redistributed between layers |
-| Ovals · accent mobility | Ovals with the first and third pigments redistributed between layers  |
+| Treatment               | Initial change                                                         |
+| ----------------------- | ---------------------------------------------------------------------- |
+| Active pools            | Select three pools together using their predicted movement             |
+| Compact pools           | Smaller footprints, unchanged pigment amounts                          |
+| Broad pools             | Wider, shallower footprints                                            |
+| Unequal pools           | Restrained small, medium and large hierarchy                           |
+| Stretch ovals           | Elongated deposits oriented around measured currents                   |
+| Crossing strokes        | Short tapered strokes across active currents                           |
+| Facing banks            | Two banks and a third deposit sharing an active corridor               |
+| Split lobes             | Divide the dominant pigment into two substantial deposits              |
+| Long ribbons            | Longer tapered deposits spanning the active currents                   |
+| Swept crescents         | Open curved deposits with negative space inside their starting outline |
+| Ovals · balanced layers | Ovals with the first and second pigments redistributed between layers  |
+| Ovals · accent mobility | Ovals with the first and third pigments redistributed between layers   |
 
 RC1 already transports its upper and lower paint layers at different rates. The
 last two treatments change only how much of each color **starts** in those
@@ -83,7 +86,7 @@ Use a frozen source checkout for every batch; runtime identities include the
 renderer, runner and gallery source files.
 
 ```sh
-# Ten treatments on three contrasting seeds, complete-source native-grid stills.
+# All treatments on three contrasting seeds, complete-source native-grid stills.
 python -m tools.estuary_confluence.choreography_studies \
   --source-root /path/to/orbits --output /path/to/new-still-batch
 
