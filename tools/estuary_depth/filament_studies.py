@@ -80,7 +80,7 @@ VARIANTS = MappingProxyType(
         ),
         "coarse-three-pools": StudySpec(
             "Broad pools · coarser paint grid",
-            "The same broad pools on a 2048 x 1536 material grid; identical final image size.",
+            "The same broad pools and current on a reduced 2048 x 1536 material grid.",
             pool_radius=0.5,
             resolution=(2048, 1536),
         ),
