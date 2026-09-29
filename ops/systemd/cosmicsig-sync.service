@@ -1,0 +1,57 @@
+# CosmicSignature asset sync: one run of run.py (generate and upload incomplete packages).
+#
+# A TEMPLATE for a systemd USER unit. ops/deploy/cosmicsig_deploy.py renders it (the REPO
+# placeholder becomes the production checkout, PYTHON its Python interpreter) into
+# ~/.config/systemd/user/ on `install` and on every deploy, so edit this file, never the
+# installed copy: the next deploy would overwrite it. See docs/deployment.md.
+#
+# Started by cosmicsig-sync.timer, and by the deploy agent right after each deploy. A oneshot
+# service never overlaps itself; run.py also holds run.lock in the checkout for the whole run,
+# which keeps a run.py started by hand from overlapping it, and which the deploy agent waits
+# for before it switches the checkout.
+
+[Unit]
+Description=CosmicSignature NFT asset package sync (generate + upload incomplete packages)
+Documentation=file://@REPO@/docs/deployment.md
+# No After=/Wants=network-online.target: a user manager cannot order against system targets.
+# The timer's 2-minute boot delay and run.py's own retries (seed sources, ssh, scp) cover a
+# network that is still coming up.
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+
+# Deployment config (.env holds the remote host, user and directory; see .env.example). It is
+# not optional: without it run.py cannot know where to upload, so the unit fails to start.
+EnvironmentFile=@REPO@/.env
+# ffmpeg (the generator's encoder), ssh and scp. Set explicitly so the run does not depend on
+# the user manager's environment.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=@PYTHON@ @REPO@/run.py
+
+# 24-hour ceiling for one run. A Type=oneshot service is "starting" until run.py exits, so
+# TimeoutStartSec is the setting that bounds it (RuntimeMaxSec has no effect on oneshot units).
+# At the limit systemd stops the run as described below. A normal run is much shorter: every new
+# mint, then at most --max-backfill ember backfill packages (about an hour each). A render that
+# hangs hits run.py's per-seed --timeout (4 hours by default) long before this ceiling.
+TimeoutStartSec=86400
+
+# On stop (or at the ceiling) systemd sends SIGTERM to the whole control group: run.py, the
+# generator and its encoders, or scp. The seed in flight is lost (a run that is shutting down
+# counts no failure) and a later run generates it again; an interrupted upload leaves the remote
+# package incomplete, so it is retried too. run.py uses this time to log a summary and exit;
+# after it systemd sends SIGKILL. The deploy agent never stops this service: it waits for the
+# run to finish.
+TimeoutStopSec=60
+
+# Nothing in the sync needs to gain privileges (no setuid helpers).
+NoNewPrivileges=yes
+
+# stdout/stderr go to the user journal: journalctl --user -u cosmicsig-sync
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cosmicsig-sync
+
+# No [Install] section: the timer starts this service; only the timer is enabled.

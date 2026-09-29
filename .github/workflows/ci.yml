@@ -1,147 +1,543 @@
+# Continuous integration for the generator (Rust) and the sync and deployment scripts (Python).
+#
+# The last job, `CI passed`, succeeds only when every other job succeeded. It is the one check
+# the `main` ruleset requires before a pull request can merge, and the check the production deploy
+# agent (ops/deploy/cosmicsig_deploy.py) waits for before it deploys a commit on main. A new job
+# therefore becomes a merge and deploy gate once it is listed in `ci-passed.needs`.
+#
+# Supply-chain rules, enforced by actionlint and zizmor in the lint job:
+# - every action is pinned to a full commit SHA, with its release in a comment; Dependabot
+#   updates both together (.github/dependabot.yml);
+# - the token is read-only (`contents: read`) and a job adds only the permissions it needs;
+# - checkouts never persist the token in .git/config;
+# - no `${{ }}` expression is expanded inside a `run:` script: values go through `env:`.
+#
+# ci/README.md describes each job and how to run the same checks locally.
+
 name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+  schedule:
+    # Weekly, to catch breakage that no commit causes: a new RustSec advisory against Cargo.lock,
+    # a yanked crate, a runner image or Homebrew change that breaks the FFmpeg install.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  # One run per pull request: a new push cancels the run it supersedes. Every other event gets a
+  # group of its own (the run id), so runs on main are never cancelled or queued behind each
+  # other, and every commit on main gets its own `CI passed` result for the deploy agent.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # An explicit `bash` runs scripts with `-e -o pipefail`; the implicit default lacks pipefail.
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  # Setting RUSTFLAGS replaces the per-target rustflags in .cargo/config.toml
+  # (`-C target-cpu=native`), so CI builds for each architecture's baseline: the builds are
+  # portable across runner CPUs, rust-cache can restore them on any runner, and the scalar
+  # (x86-64) and NEON (aarch64) spectral paths are the ones tested. The AVX2 kernel that
+  # production x86 builds use has its own test entry below.
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  python:
-    name: Python (ruff + mypy + unittest)
-    runs-on: ubuntu-latest
+  # All the file-level checks, run by the same pre-commit configuration developers install
+  # locally (.pre-commit-config.yaml): trailing whitespace and line endings, YAML/TOML/JSON
+  # syntax, large files and private keys, ruff (lint and format), strict mypy, rustfmt,
+  # shellcheck, actionlint, zizmor, JSON Schema validation of the workflows, Dependabot config
+  # and issue forms, and typos. A fixer hook that would change a file fails here and prints the
+  # diff.
+  lint:
+    name: Lint (pre-commit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # check out the repository
+      pull-requests: read # the pull request title check reads the current title
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The production server's Python.
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: Install dev tools
-        run: pip install ".[dev]"
-      - name: Ruff format
-        run: ruff format --check .
-      - name: Ruff lint
-        run: ruff check .
-      - name: Mypy
-        run: mypy
-      # run.py's sync policy (backfill modes, retry cap, failure ledger, exit-status handling),
-      # with stub generator, ssh and scp; stdlib unittest only.
-      - name: Unit tests
-        run: python -m unittest discover -s tests/python -v
 
-  fmt:
-    name: Formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo fmt --all -- --check
+      # pre-commit is pinned in pyproject.toml's `dev` extra, next to ruff and mypy, so the
+      # version CI runs is the version `just setup` installs, and Dependabot updates it.
+      - name: Install pre-commit
+        id: install
+        run: python -m pip install ".[dev]"
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
+      # For the cargo-fmt hook: rustfmt from the toolchain rust-toolchain.toml pins.
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
 
-  # The tests that render a package or encode the ember videos need FFmpeg (with ffprobe) and,
-  # because GitHub sets CI=true, fail instead of skipping when it is missing, so every job that
-  # runs the test suite installs it.
-  test:
-    name: Tests (${{ matrix.os }})
+      - name: Cache the pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-v1-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # clippy has its own job (and an AVX2 variant in the test matrix). The zizmor hook here is
+      # the commit-time one, which runs offline (--offline); the next step adds the online audits.
+      - name: Run every pre-commit hook on every file
+        env:
+          SKIP: cargo-clippy
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
+
+      # With a token, zizmor adds its online audits: that each pinned SHA really is a commit of
+      # the action's repository (not of a fork), that the version comment next to it matches the
+      # SHA, and that no pinned release has a known vulnerability. `zizmor-online` is the
+      # manual-stage alias of the zizmor hook without --offline (.pre-commit-config.yaml), so
+      # commits never need the network. The token is this run's read-only one, and only the
+      # steps that call the API (this one and the title check) see it; every other hook runs
+      # without it.
+      #
+      # This step and the title check below also run when a hook above failed (`!cancelled()`),
+      # so one run reports every problem instead of one per push.
+      - name: Audit the workflows with zizmor (online audits included)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pre-commit run --hook-stage manual zizmor-online --all-files --color=always
+
+      # Squash merges use the pull request title as the commit subject on main, so it must be a
+      # Conventional Commit like every other commit (the commit-msg hook checks local commits).
+      # The title is read from the API rather than the event payload, so re-running this job
+      # after editing the title checks the new title.
+      - name: Check the pull request title
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          title="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .title)"
+          # Printed after a prefix: a line that starts with `::` would be a workflow command.
+          printf 'Pull request title: %s\n' "$title"
+          # GitHub starts no push run for a commit whose message holds one of these skip
+          # instructions, so the squash commit on main would never get the `CI passed` check the
+          # deploy agent waits for. Matched in any letter case (nocasematch), to be safe.
+          skip='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]'
+          shopt -s nocasematch
+          if [[ $title =~ $skip ]]; then
+            echo "::error title=Pull request title::The title contains '${BASH_REMATCH[0]}', which would stop CI from running on the commit this pull request makes on main, and the deploy agent from ever deploying it. Remove it, then re-run this job."
+            exit 1
+          fi
+          shopt -u nocasematch
+          # The types the commit-msg hook accepts (.pre-commit-config.yaml), an optional scope,
+          # an optional `!` for a breaking change. `Revert "..."` is what GitHub's revert button
+          # and `git revert` produce.
+          types='feat|fix|docs|ci|build|chore|refactor|perf|test|style|revert|deps'
+          conventional="^(${types})(\([^()]+\))?!?: [^[:space:]]"
+          revert='^Revert ".+"$'
+          if [[ $title =~ $conventional || $title =~ $revert ]]; then
+            echo "The title is a Conventional Commit subject."
+          else
+            echo "::error title=Pull request title::The title must be a Conventional Commit subject, e.g. 'fix(ember): clamp the ink density' (types: ${types//|/, }). Edit the title, then re-run this job."
+            exit 1
+          fi
+
+  # run.py's sync policy and the deploy agent, with fake generator, ssh, scp, cargo and
+  # systemctl commands on PATH and a fake GitHub API: stdlib unittest only, no network. On the
+  # floor pyproject.toml declares (3.10), the production server's version (3.12) and 3.13.
+  python:
+    name: Python tests (${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        python: ["3.10", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No cache and no install: the scripts and their tests use the standard library only.
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Run the unit tests
+        run: python -m unittest discover -s tests/python -v
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      # Caches are saved from main only; pull requests restore main's (a branch cannot restore
+      # another branch's caches, so saving per branch would only evict main's).
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  # The full Rust test suite, including the golden digests of the ember edition
+  # (tests/ember_determinism.rs), which must come out bit-identical on every architecture, and
+  # the tests that render a package or encode the web images and videos with FFmpeg. GitHub
+  # sets CI=true, under which those FFmpeg tests fail instead of skipping, so every entry
+  # installs FFmpeg and first checks that it has the encoders the generator uses.
+  #
+  # The entries run the command the deploy agent runs on the production server before it
+  # switches to a commit (`cargo test --release --locked`), except the coverage entry, which runs
+  # the same tests under cargo-llvm-cov.
+  test:
+    name: Tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Baseline x86-64: the scalar spectral fallback.
+          - name: Linux x86-64, coverage
+            os: ubuntu-24.04
+            coverage: true
+          # The AVX2 + FMA kernel in src/spectrum_simd.rs, which production x86 builds use
+          # (`target-cpu=native` in .cargo/config.toml). x86-64-v3 stands in for `native`: it
+          # enables the same kernel but stays valid when rust-cache restores the build on a
+          # runner with a different CPU. The ember goldens then also check that AVX2/FMA code
+          # generation renders the same bits.
+          - name: Linux x86-64, AVX2 + FMA
+            os: ubuntu-24.04
+            avx2: true
+            rustflags: "-D warnings -C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma"
+          # Cross-architecture coverage of the ember goldens (NEON) on Linux.
+          - name: Linux aarch64
+            os: ubuntu-24.04-arm
+          - name: macOS aarch64
+            os: macos-26
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags || '-D warnings' }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Ubuntu's ffmpeg is built with libwebp, libx264 and libx265 on both architectures. The
+      # retries ride out a mirror that is briefly unreachable or mid-sync.
       - name: Install FFmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --release
-
-  # The workflow-level RUSTFLAGS replaces the target rustflags in
-  # .cargo/config.toml, so every other job builds for baseline x86-64 and never
-  # compiles the AVX2 kernel in src/spectrum_simd.rs that production x86 builds
-  # use. x86-64-v3 (AVX2 + FMA) stands in for config.toml's target-cpu=native:
-  # it enables the same kernel but stays valid when rust-cache restores build
-  # artifacts on a runner with a different CPU. The full test run includes the
-  # ember golden digests (tests/ember_determinism.rs), so it also checks that the
-  # ember edition renders the same bits under AVX2/FMA code generation.
-  test-x86-avx2:
-    name: Clippy + Tests (x86-64 AVX2)
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-D warnings -C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - name: Check the AVX2 + FMA kernel is enabled
         run: |
-          rustc --print cfg $RUSTFLAGS | grep -qx 'target_feature="avx2"'
-          rustc --print cfg $RUSTFLAGS | grep -qx 'target_feature="fma"'
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo nextest run --release
+          sudo apt-get -o Acquire::Retries=3 update -qq
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --release --lcov --output-path lcov.info
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+      # Homebrew's own ffmpeg formula no longer links libwebp, which the web images and the ember
+      # edition are encoded with, so macOS builds FFmpeg from the homebrew-ffmpeg tap with
+      # --with-webp (its default options already include libx264 and libx265). That build takes
+      # about ten minutes, so the finished keg is cached. The cache key names the tap's formula
+      # and the versions of the formulae the keg links against (its runtime dependency closure,
+      # not everything installed on the runner image). When the key has no exact match, the most
+      # recent keg for the same image and architecture is restored instead and used if it still
+      # runs with every encoder. Most dependency updates leave the keg working, and then neither
+      # cost a rebuild nor fail while the tap does not build against the new version; only a
+      # keg that does not work (a library it links was replaced by an incompatible one) is
+      # rebuilt from the current formula. A change to the formula alone is handled the same
+      # way, so macOS CI keeps the FFmpeg release it has until that keg stops working, much as
+      # Ubuntu's FFmpeg stays at its release's version.
+      #
+      # Homebrew updates itself at most once, in `brew tap` or the first install below, so the
+      # core formulae match the freshly cloned tap; HOMEBREW_NO_AUTO_UPDATE then keeps them from
+      # moving while the key is computed and the keg is built, so the key describes the
+      # dependencies the keg was built and checked with.
+      - name: Prepare the FFmpeg build (macOS)
+        id: ffmpeg-prep
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install --only-dependencies homebrew-ffmpeg/ffmpeg/ffmpeg --with-webp
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          formula="$(brew --repository homebrew-ffmpeg/ffmpeg)/Formula/ffmpeg.rb"
+          # The runtime dependency closure: the formula's default dependencies, plus webp and
+          # its own, which --with-webp adds (`brew deps` lists default dependencies only, and
+          # --include-optional would add all forty optional ones).
+          closure="$(brew deps --union homebrew-ffmpeg/ffmpeg/ffmpeg webp)"
+          read -ra formulae <<<"${closure//$'\n'/ }"
+          # `brew list` exits 1 when one of them is not installed; that one is then simply not
+          # part of the key.
+          versions="$(brew list --formula --versions webp "${formulae[@]}" | LC_ALL=C sort -u)" || true
+          printf 'FFmpeg dependencies:\n%s\n' "$versions"
+          fingerprint="$(
+            { shasum -a 256 <"$formula"; printf '%s\n' "$versions"; } | shasum -a 256 | cut -c1-16
+          )"
+          prefix="ffmpeg-webp-${ImageOS:-macos}-${RUNNER_ARCH}-"
+          {
+            echo "prefix=${prefix}"
+            echo "key=${prefix}${fingerprint}"
+            echo "keg=$(brew --cellar)/ffmpeg"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the cached FFmpeg build (macOS)
+        id: ffmpeg-cache
+        if: runner.os == 'macOS'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: coverage-report
+          path: ${{ steps.ffmpeg-prep.outputs.keg }}
+          key: ${{ steps.ffmpeg-prep.outputs.key }}
+          # No exact match: the most recently saved keg of this image and architecture.
+          restore-keys: ${{ steps.ffmpeg-prep.outputs.prefix }}
+
+      - name: Install FFmpeg with libwebp (macOS)
+        id: ffmpeg-build
+        if: runner.os == 'macOS'
+        env:
+          CACHE_HIT: ${{ steps.ffmpeg-cache.outputs.cache-hit }}
+          MATCHED_KEY: ${{ steps.ffmpeg-cache.outputs.cache-matched-key }}
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          # Whether the linked ffmpeg runs and lists every encoder the generator uses (the same
+          # three the check below requires). The listing is captured first: `grep -q` in a pipe
+          # would exit early and fail the pipe with SIGPIPE.
+          has_encoders() {
+            local encoders encoder
+            encoders="$(ffmpeg -hide_banner -encoders 2>/dev/null)" || return 1
+            for encoder in libwebp libx264 libx265; do
+              awk -v want="$encoder" '$2 == want { found = 1 } END { exit !found }' \
+                <<<"$encoders" || return 1
+            done
+          }
+          # `save` tells the save step below whether this run's key needs the keg: after a
+          # build, and after reusing a keg restored under an older key (so later runs hit the
+          # new key exactly), but not after an exact hit.
+          if [[ -n $MATCHED_KEY ]]; then
+            if brew link --overwrite ffmpeg && has_encoders; then
+              if [[ $CACHE_HIT == true ]]; then
+                echo "Using the cached FFmpeg build."
+                echo "save=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "Using the FFmpeg build cached under ${MATCHED_KEY}: it still works with this run's dependencies."
+                echo "save=true" >> "$GITHUB_OUTPUT"
+              fi
+              exit 0
+            fi
+            echo "::warning title=FFmpeg cache::The FFmpeg build cached under ${MATCHED_KEY} does not work here; building it again."
+            brew unlink ffmpeg || true
+            rm -rf "$(brew --cellar)/ffmpeg"
+          fi
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-webp
+          echo "save=true" >> "$GITHUB_OUTPUT"
+
+      # Fail here, with a clear message, rather than deep inside a render test.
+      - name: Check FFmpeg has the encoders the generator uses
+        run: |
+          version="$(ffmpeg -hide_banner -version)"
+          echo "${version%%$'\n'*}"
+          ffprobe -hide_banner -version > /dev/null
+          encoders="$(ffmpeg -hide_banner -encoders)"
+          missing=()
+          for encoder in libwebp libx264 libx265; do
+            # Each row of the listing is ` <six flag characters> <name> <description>`.
+            if ! awk -v want="$encoder" '$2 == want { found = 1 } END { exit !found }' <<<"$encoders"; then
+              missing+=("$encoder")
+            fi
+          done
+          if ((${#missing[@]})); then
+            printf -v list '%s, ' "${missing[@]}"
+            echo "::error title=FFmpeg lacks encoders::This ffmpeg has no ${list%, } encoder. The generator encodes the web images with libwebp (src/app.rs) and the videos with libx264 and libx265 (src/render/video.rs)."
+            exit 1
+          fi
+          echo "FFmpeg has the libwebp, libx264 and libx265 encoders."
+
+      # Only a keg that passed the check above is cached, so a bad build is never restored.
+      # From main (and scheduled runs) only, like the Rust caches: pull requests restore it.
+      - name: Save the FFmpeg build (macOS)
+        if: runner.os == 'macOS' && steps.ffmpeg-build.outputs.save == 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.ffmpeg-prep.outputs.keg }}
+          key: ${{ steps.ffmpeg-prep.outputs.key }}
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Install the LLVM tools (coverage)
+        if: matrix.coverage
+        run: rustup component add llvm-tools
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check the AVX2 + FMA kernel is enabled
+        if: matrix.avx2
+        run: |
+          read -ra flags <<<"$RUSTFLAGS"
+          cfg="$(rustc --print cfg "${flags[@]}")"
+          for feature in avx2 fma; do
+            if ! grep -qx "target_feature=\"${feature}\"" <<<"$cfg"; then
+              echo "::error title=AVX2 kernel::RUSTFLAGS do not enable target feature ${feature}."
+              exit 1
+            fi
+          done
+
+      # Lints the code paths behind `cfg(target_feature = "avx2")`, which the Clippy job's
+      # baseline build does not compile.
+      - name: Run clippy with the AVX2 + FMA kernel
+        if: matrix.avx2
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Install cargo-llvm-cov
+        if: matrix.coverage
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          # The version is the one this install-action release lists, verified by checksum.
+          tool: cargo-llvm-cov
+          fallback: none
+
+      - name: Run the tests
+        if: ${{ !matrix.coverage }}
+        run: cargo test --release --locked
+
+      - name: Run the tests with coverage
+        if: matrix.coverage
+        run: cargo llvm-cov --release --locked --lcov --output-path lcov.info
+
+      - name: Upload the coverage report
+        if: matrix.coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-lcov
           path: lcov.info
+          if-no-files-found: error
+          retention-days: 14
 
-  bench-compile:
-    name: Benchmarks (compile check)
-    runs-on: ubuntu-latest
+  # Criterion benchmarks: build them (the release profile's fat LTO included) without running.
+  bench:
+    name: Benchmarks (build only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --no-run
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the benchmarks
+        run: cargo bench --no-run --locked
+
+  # Rustdoc with warnings denied: a broken intra-doc link (private items included), an invalid
+  # code block attribute or any other rustdoc lint fails the build.
   doc:
     name: Documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps --document-private-items
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-  # Audits the committed Cargo.lock against the RustSec advisory database: fails on any
-  # vulnerability; unmaintained/unsound notices are reported as warnings. A prebuilt cargo-audit
-  # needs neither a compile under the pinned toolchain nor the checks: write permission that
-  # rustsec/audit-check's check run required (its job failed with "Resource not accessible by
-  # integration" under this workflow's read-only token).
-  audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the documentation
+        run: cargo doc --no-deps --document-private-items --locked
+
+  # cargo-deny against the committed Cargo.lock, which release builds use (`--locked`): RustSec
+  # advisories (vulnerable, unsound, unmaintained and yanked crates), licenses, wildcard
+  # requirements and prebuilt binaries in build-time crates, and crate sources. The policy and
+  # the reasons behind it are in deny.toml.
+  deny:
+    name: Supply chain (cargo-deny)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@cargo-audit
-      - run: cargo audit
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          # The version is the one this install-action release lists, verified by checksum.
+          tool: cargo-deny
+          fallback: none
+
+      - name: Check advisories, bans, licenses and sources
+        run: cargo deny --locked check
+
+  # The single required status check (see the header): it runs even when a job it needs failed
+  # or the run was cancelled, and fails unless every one of them succeeded. A skipped required
+  # check would count as passing, so this job never skips itself.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [lint, python, clippy, test, bench, doc, deny]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          if ! jq -e 'all(.[]; .result == "success")' <<<"$NEEDS" > /dev/null; then
+            failed="$(jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")' <<<"$NEEDS")"
+            echo "::error title=CI failed::These jobs did not succeed: ${failed}"
+            exit 1
+          fi
+          echo "Every job succeeded."

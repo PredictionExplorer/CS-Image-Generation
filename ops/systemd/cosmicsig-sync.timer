@@ -1,0 +1,27 @@
+# Schedules cosmicsig-sync.service: 5 minutes after each run finishes.
+#
+# A TEMPLATE for a systemd USER unit, installed by ops/deploy/cosmicsig_deploy.py (see
+# cosmicsig-sync.service and docs/deployment.md). The deploy agent enables it after the first
+# successful deploy, stops it while it switches the checkout, and starts it again afterwards. If
+# a switch can neither finish nor be undone, the agent disables it: a human enables it again.
+
+[Unit]
+Description=Run the CosmicSignature asset sync 5 minutes after each run
+Documentation=file://@REPO@/docs/deployment.md
+
+[Timer]
+# First run 2 minutes after boot. A timer first started later than that fires at once, because
+# an OnBootSec= time that has already passed elapses immediately (once: afterwards the schedule
+# below applies; after each deploy the agent also starts a sync run itself).
+OnBootSec=2min
+
+# Each later run starts 5 minutes after the previous run finished. OnUnitInactiveSec counts
+# from when the service last became inactive (or failed); OnUnitActiveSec would count from when
+# it started, so after an hour-long backfill run the next run would start at once.
+OnUnitInactiveSec=5min
+
+# Allow up to 10s scheduling jitter
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

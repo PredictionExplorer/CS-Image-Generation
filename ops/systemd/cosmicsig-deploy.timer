@@ -1,0 +1,24 @@
+# Schedules cosmicsig-deploy.service: 2 minutes after each tick finishes.
+#
+# A TEMPLATE for a systemd USER unit, installed and enabled by
+# `python3 ops/deploy/cosmicsig_deploy.py install` (see docs/deployment.md).
+
+[Unit]
+Description=Check GitHub main for a new CI-passed commit to deploy
+Documentation=file://@REPO@/docs/deployment.md
+
+[Timer]
+# First tick 3 minutes after boot, after the sync timer's first run has started (a boot-time
+# deploy then waits for that run). A timer first started later than that (by `install`) fires
+# at once, because an OnBootSec= time that has already passed elapses immediately.
+OnBootSec=3min
+
+# Each later tick starts 2 minutes after the previous one finished (counted from its end, so a
+# tick that waited hours for a sync run is not followed by an immediate one).
+OnUnitInactiveSec=2min
+
+# Allow up to 10s scheduling jitter
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

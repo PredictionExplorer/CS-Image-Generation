@@ -1,0 +1,42 @@
+# Editor defaults (https://editorconfig.org), matching the formatters and the pre-commit hygiene
+# hooks so files are written the way the hooks and CI expect: UTF-8, LF, a final newline, no
+# trailing whitespace; rustfmt's and ruff's 4-space indent and 100-column limit.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# rustfmt.toml (max_width = 100, tab_spaces = 4) and pyproject.toml's ruff (line-length = 100).
+[*.{rs,py}]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{toml,sh}]
+indent_style = space
+indent_size = 4
+
+# just requires recipe bodies to be indented consistently; the justfile uses 4 spaces.
+[justfile]
+indent_style = space
+indent_size = 4
+
+# GitHub workflows, Dependabot, issue forms, the pre-commit config; the JSON schema and
+# fixtures (serde_json's pretty printer also indents by 2).
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+# Written by ci/reference/generate_reference.sh, whose template indents by 4.
+[ci/reference/*.json]
+indent_size = 4
+
+# Verbatim generator output, kept byte for byte (the whitespace hooks exclude it too): serde_json
+# writes no final newline, so an editor must not add one.
+[docs/fixtures/**]
+insert_final_newline = false
+
+# Markdown sets no indent style: fenced Go snippets in docs/ are gofmt-formatted with tabs.

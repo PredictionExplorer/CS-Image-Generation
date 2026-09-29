@@ -1,0 +1,52 @@
+# CosmicSignature continuous deployment: one tick of ops/deploy/cosmicsig_deploy.py.
+#
+# A TEMPLATE for a systemd USER unit. The deploy agent renders it (the REPO placeholder
+# becomes the production checkout, PYTHON its Python interpreter) into ~/.config/systemd/user/
+# on `install` and on every deploy, so changes to this file deploy themselves. Edit this file,
+# never the installed copy. See docs/deployment.md.
+#
+# A tick fetches origin/main; if a new commit passed CI on GitHub, it builds and tests it in a
+# staging worktree, waits for any running sync to finish, switches the checkout and the binary
+# atomically, and starts a sync run. A tick with nothing to do takes about a second.
+
+[Unit]
+Description=CosmicSignature continuous deployment (fetch main, gate on CI, build, test, switch)
+Documentation=file://@REPO@/docs/deployment.md
+
+[Service]
+Type=oneshot
+
+# Optional settings, for example a read-only GitHub token that raises the API rate limit:
+#   COSMICSIG_DEPLOY_GITHUB_TOKEN=github_pat_...
+# The leading "-" makes the file optional. Keep it mode 600.
+EnvironmentFile=-%h/.config/cosmicsig-deploy.env
+# cargo and rustup live in ~/.cargo/bin (rustup installs the toolchain rust-toolchain.toml pins).
+Environment=PATH=%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=@PYTHON@ @REPO@/ops/deploy/cosmicsig_deploy.py run
+
+# A tick may wait hours for a sync run to finish (a sync run is never interrupted), and a build
+# runs niced beside a render; the agent bounds each of its own commands instead.
+TimeoutStartSec=infinity
+
+# On stop, SIGTERM goes to the agent alone. It stops a wait or a build at the next poll, but it
+# always finishes (or rolls back) a switch in progress first, which takes seconds; a git command
+# in flight is never killed by the stop. Whatever is left after TimeoutStopSec gets SIGKILL.
+KillMode=mixed
+TimeoutStopSec=5min
+
+# Builds and tests yield to the render. The agent also runs them under `nice -n 10`.
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+# Nothing in a deploy needs to gain privileges (no setuid helpers).
+NoNewPrivileges=yes
+
+# journalctl --user -u cosmicsig-deploy
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cosmicsig-deploy
+
+# No [Install] section: cosmicsig-deploy.timer starts this service.

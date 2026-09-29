@@ -55,4 +55,4 @@ EOF
 
 echo "Reference image generated successfully!"
 echo "Location: ci/reference/baseline_${WIDTH}x${HEIGHT}.png"
-echo "Metadata: ci/reference/baseline_${WIDTH}x${HEIGHT}.json" 
+echo "Metadata: ci/reference/baseline_${WIDTH}x${HEIGHT}.json"

@@ -1,0 +1,67 @@
+# OpenSSF Scorecard (https://scorecard.dev): scores the repository's security practices
+# (pinned dependencies, token permissions, branch protection, dangerous workflow patterns,
+# known-vulnerable dependencies, ...). Findings appear under Security > Code scanning, and the
+# published results feed the public Scorecard API and badge.
+#
+# Publishing results imposes rules on this file, which the Scorecard API verifies before it
+# accepts them (ossf/scorecard-action's README, "Workflow Restrictions"): no top-level `env` or
+# `defaults` and no write permission at the top level; only the analysis job holds
+# `id-token: write`; that job runs on one GitHub-hosted Ubuntu label (22.04 or newer), has no job
+# `env`, `defaults`, container or services, and every step `uses:` one of checkout,
+# scorecard-action, upload-artifact or codeql-action/upload-sarif (no `run:` steps), pinned to a
+# commit of the action's own repository. Keep it that way, or publishing fails.
+
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so the score follows changes made outside commits (repository settings, rulesets,
+    # new advisories).
+    - cron: "41 5 * * 2"
+  # A change to classic branch protection (repository rulesets do not trigger workflows).
+  branch_protection_rule:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository
+      security-events: write # upload the SARIF results to code scanning
+      id-token: write # publish_results: sign the published results with the run's OIDC token
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the Scorecard analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      # Anyone can read the raw results for a few days, including people without access to the
+      # code scanning alerts.
+      - name: Upload the results as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload the results to code scanning
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results.sarif

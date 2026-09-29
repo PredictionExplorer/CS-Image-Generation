@@ -177,9 +177,9 @@ size and modification time). When the binary changes, every count resets, so a r
 generator retries every seed it gave up on. Deleting a seed's entry, or the file, retries
 sooner.
 
-**Upgrading.** Pushing to `main` deploys nothing: the generation host runs a prebuilt binary and
-never pulls or builds. To roll out a new version, follow
-[README, Upgrading a deployment](../README.md#upgrading-a-deployment). `run.py` probes the
+**Upgrading.** Merging to `main` deploys automatically once `CI passed` succeeds (see
+[docs/deployment.md](deployment.md) and
+[README, Upgrading a deployment](../README.md#upgrading-a-deployment)). `run.py` probes the
 generator with `--help` on every run, and `--preflight` does too. A binary that does not list
 `--no-ember` predates the edition. `run.py` then logs an ERROR, checks packages against the core
 files only, so new mints are still uploaded, and pauses the backfill until the generator is

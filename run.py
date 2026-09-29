@@ -6,8 +6,10 @@ Fetches all tokens from the CosmicGame API, determines which per-seed asset
 packages are incomplete on the destination server, generates missing packages
 via the Rust binary, and uploads them via SCP.
 
-Designed to run under a systemd timer (5 minutes after each run). The systemd service
-unit prevents overlapping runs.
+Designed to run under a systemd user timer (5 minutes after each run; see
+docs/deployment.md). Runs never overlap: each holds an exclusive lock on run.lock in the working
+directory for its whole duration (RUN_LOCK), so a run started by hand while another runs exits
+at once, and the deploy agent takes the same lock before it switches the checkout.
 
 Configuration is read from (in increasing priority):
     1. .env file in the working directory
@@ -52,9 +54,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import decimal
 import enum
+import fcntl
 import json
 import logging
 import logging.handlers
@@ -97,6 +101,10 @@ LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 LOG_BACKUP_COUNT = 5
 SEED_MISMATCH_REPORT = Path("seed_source_mismatch.json")
 BACKFILL_FAILURES = Path("backfill_failures.json")
+# The single-instance lock, held (flock, exclusive) for the whole run. It holds the pid of its
+# holder, for the error message of a run that finds it taken. ops/deploy/cosmicsig_deploy.py
+# takes it too while it switches the checkout and the generator binary between runs.
+RUN_LOCK = Path("run.lock")
 
 SSH_BASE_OPTS = [
     "-o",
@@ -299,6 +307,46 @@ def setup_logging() -> None:
         )
     )
     log.addHandler(ch)
+
+
+# ---------------------------------------------------------------------------
+# Single-instance lock
+# ---------------------------------------------------------------------------
+
+
+def acquire_run_lock(path: Path = RUN_LOCK) -> int | None:
+    """Take the exclusive single-instance lock on `path` without waiting; its descriptor.
+
+    Returns None if another process holds it. The lock is released when the descriptor is
+    closed, at the latest when the process exits, however it exits (a flock dies with its
+    holder, so a crash never leaves a stale lock). Python opens the file non-inheritable
+    (PEP 446), so the generator, ssh and scp never hold it: once run.py is gone, the lock is
+    free even if a child it started is still being killed. Raises OSError if the file cannot be
+    opened or locked for another reason.
+    """
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    # The pid is only for messages: a full disk must not stop the run.
+    with contextlib.suppress(OSError):
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+    return fd
+
+
+def run_lock_holder(path: Path = RUN_LOCK) -> str:
+    """The pid the lock's holder wrote into it, for messages ("unknown" if unreadable)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return "unknown"
+    return text if text.isdigit() else "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -2164,17 +2212,41 @@ def validate_config(args: argparse.Namespace) -> list[str]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """One sync run under the single-instance lock; the exit status.
+
+    Returns 1 without doing anything if another run holds the lock (RUN_LOCK), else sync()'s
+    status. --help exits during argument parsing, before the lock is taken.
+    """
+    load_dotenv()
+    args = parse_args(argv)
+    setup_logging()
+    try:
+        lock_fd = acquire_run_lock()
+    except OSError as exc:
+        log.error("Cannot take the single-instance lock %s: %s", RUN_LOCK.resolve(), exc)
+        return 1
+    if lock_fd is None:
+        log.error(
+            "Another run holds the single-instance lock %s (pid %s): exiting without doing "
+            "anything",
+            RUN_LOCK.resolve(),
+            run_lock_holder(),
+        )
+        return 1
+    try:
+        install_signal_handlers()
+        return sync(args)
+    finally:
+        os.close(lock_fd)
+
+
+def sync(args: argparse.Namespace) -> int:
     """One sync run: plan the incomplete packages, generate and upload them; the exit status.
 
     Returns 0 if every planned seed succeeded (an urgent package uploaded without its ember
     edition counts as a success) and 1 on a configuration error, a failed seed list or remote
     listing, or any failed seed (a failed ember backfill included).
     """
-    load_dotenv()
-    args = parse_args(argv)
-    setup_logging()
-    install_signal_handlers()
-
     missing_cfg = validate_config(args)
     if missing_cfg:
         log.error("Missing required configuration:\n%s", "\n".join(missing_cfg))

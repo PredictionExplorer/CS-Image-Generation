@@ -1,0 +1,265 @@
+# Local quality gates, run by the pre-commit framework (https://pre-commit.com).
+#
+# One file drives three places, so a change that passes locally passes CI and vice versa:
+#   * `git commit`: the pre-commit hooks below (formatters, linters, validators) and the
+#     commit-msg hook (Conventional Commits);
+#   * `git push`: the pre-push hooks at the end (the Rust and Python test suites);
+#   * CI's lint job: `pre-commit run --all-files --show-diff-on-failure`, minus cargo-clippy
+#     (clippy has its own jobs, with and without the AVX2 kernel), then the manual-stage
+#     zizmor-online hook (zizmor's online audits, with the run's token).
+# `just setup`, run in the main checkout, installs all three git hooks (CONTRIBUTING.md);
+# `just lint` runs everything on every file.
+#
+# Every `rev` is frozen to a commit SHA, with its release in the `# frozen:` comment: a tag can be
+# moved or deleted upstream, a SHA cannot, so the code these hooks run is exactly the code that
+# was reviewed. `just hooks-update` (`pre-commit autoupdate --freeze`) and Dependabot's
+# pre-commit ecosystem both rewrite the SHA and the comment together.
+#
+# The ruff and mypy revs MUST equal the `ruff==` and `mypy==` pins in pyproject.toml's `dev`
+# extra, which editors and `just py-check` use: two versions of a formatter disagree about
+# formatting. tests/python/test_tooling.py fails CI until both sides move together.
+
+# `just setup` (or a bare `pre-commit install`) installs every hook type the repository uses.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# A hook runs at commit time (and in CI's `pre-commit run`) unless it names its stages. Besides
+# the test suites at the end, a few cheap upstream checks (whitespace, large files, executable
+# bits, spelling) name pre-push too: there they re-check only the files of the pushed commits,
+# which catches a commit made with `--no-verify`.
+default_stages: [pre-commit]
+# 4.4.0 introduced `language: unsupported`, the current name of `language: system` (which will be
+# deprecated), for the local cargo hooks below; 4.5.1 fixed local `language: python` hooks
+# without additional_dependencies, like the Python test hook. pyproject.toml pins a newer one.
+minimum_pre_commit_version: "4.5.1"
+
+repos:
+  # -------------------------------------------------------------------------------------------
+  # Config hygiene: every hook must match at least one file and every exclude must exclude
+  # something, so the config cannot silently rot as files move.
+  # -------------------------------------------------------------------------------------------
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+      - id: check-useless-excludes
+
+  # -------------------------------------------------------------------------------------------
+  # Repository hygiene. Binary files (the PNG baselines, any image) are skipped automatically:
+  # the text hooks only receive files `identify` classifies as text.
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
+    hooks:
+      # Fixers: they rewrite the file and fail the hook, so the fix is reviewed and staged by a
+      # human (locally) or shown as a diff (CI's --show-diff-on-failure). docs/fixtures/ holds
+      # real generator output kept byte for byte (docs/augur-explorer-integration.md): the
+      # generator writes nft_traits.json without a final newline, and so does the fixture.
+      - id: trailing-whitespace
+        exclude: ^docs/fixtures/
+      - id: end-of-file-fixer
+        exclude: ^docs/fixtures/
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: fix-byte-order-marker
+      # Syntax checks for every data format in the tree.
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      # Mistakes git itself lets through.
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-illegal-windows-names
+      # The tree has no symlinks today, and check-hooks-apply rejects a hook that matches no
+      # file; always_run keeps this one armed for the first symlink without tripping it.
+      - id: check-symlinks
+        always_run: true
+      - id: destroyed-symlinks
+      - id: forbid-submodules
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      # 1 MiB is ~14x the largest file in the tree (the 72 KB reference PNG). Rendered output
+      # (tens of MB per package) belongs in output/, which .gitignore excludes. --enforce-all
+      # checks every file it is given, not only newly staged ones, so CI enforces the limit too.
+      - id: check-added-large-files
+        args: [--maxkb=1024, --enforce-all]
+      # Secrets: run.py's deployment settings live in the untracked .env (see .env.example).
+      - id: detect-private-key
+      # Python: no forgotten breakpoint()/pdb in a script that runs unattended on the server.
+      - id: debug-statements
+
+  # -------------------------------------------------------------------------------------------
+  # Python: ruff (lint + format) and strict mypy, configured in pyproject.toml.
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: b831c3dc5d27d9da294ae4e915773b99aa24a7c5  # frozen: v0.15.10
+    hooks:
+      # --fix applies safe autofixes locally; like any fixer it still fails the hook, so CI never
+      # passes on a fix it made itself (the diff is printed instead). Lint runs before format,
+      # as ruff recommends, because a fix can leave code the formatter then tidies.
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: 0f369d245750787ce34997d464ed9605391a5283  # frozen: v1.20.1
+    hooks:
+      # `args: []` drops the mirror's default flags (--ignore-missing-imports would hide a
+      # misspelled import), and pass_filenames: false makes mypy check the `files` list in
+      # pyproject.toml as one program (strict, Python 3.10 semantics), exactly as
+      # `just py-check` does. The scripts import only the standard library, so the hook needs no
+      # additional_dependencies. `toml` is in types_or so an edit to the mypy settings in
+      # pyproject.toml re-runs it.
+      - id: mypy
+        args: []
+        pass_filenames: false
+        types_or: [python, pyi, toml]
+
+  # -------------------------------------------------------------------------------------------
+  # Rust: the same commands CI runs. `unsupported` = cargo comes from the developer's rustup,
+  # and rust-toolchain.toml pins the toolchain (so the rustfmt and clippy versions) it runs.
+  # -------------------------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --all -- --check
+        language: unsupported
+        files: (\.rs|^rustfmt\.toml|^rust-toolchain\.toml)$
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --locked -- -D warnings
+        language: unsupported
+        # Lint levels live in Cargo.toml ([lints]) and clippy.toml, target flags in
+        # .cargo/config.toml. CI skips this hook: it has dedicated clippy jobs.
+        files: (\.rs|^Cargo\.(toml|lock)|^clippy\.toml|^rust-toolchain\.toml|^\.cargo/config\.toml)$
+        pass_filenames: false
+
+  # -------------------------------------------------------------------------------------------
+  # Shell scripts and GitHub Actions workflows.
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: a6564f5d57444e123433a5c9af733e3975c77229  # frozen: v0.11.0.1-1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
+    rev: 357f7eec6dec49bf7693dc0dbec30212226d5492  # frozen: v1.7.12.25
+    hooks:
+      # actionlint runs shellcheck over every `run:` block when a shellcheck binary is on its
+      # PATH and silently skips those checks otherwise, so the hook's environment gets the same
+      # shellcheck release as the shellcheck hook above (test_tooling.py keeps the two equal).
+      - id: actionlint
+        additional_dependencies: [shellcheck-py==0.11.0.1]
+
+  # Security audit of the workflows (template injection, persisted credentials, unpinned or
+  # over-privileged actions, ...), of dependabot.yml and of this file; its configuration, if
+  # any, is .github/zizmor.yml.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: fa412071e4f5d44d44f9e365f4676f9df92456a2  # frozen: v1.30.1
+    hooks:
+      # At commit time, offline audits only, even when GH_TOKEN or GITHUB_TOKEN is exported:
+      # zizmor would otherwise go online and fail the commit while GitHub is unreachable. `args`
+      # replaces the hook's own, so its --no-progress is repeated.
+      - id: zizmor
+        args: [--no-progress, --offline]
+      # The online audits too (a pinned SHA belongs to the action's repository and matches its
+      # version comment; no pinned release has a known vulnerability). Manual stage only: CI's
+      # lint job runs it with the run's token, and so can anyone, with
+      # `GH_TOKEN=$(gh auth token) pre-commit run --hook-stage manual zizmor-online --all-files`.
+      - id: zizmor
+        alias: zizmor-online
+        name: zizmor (online audits)
+        stages: [manual]
+
+  # -------------------------------------------------------------------------------------------
+  # JSON Schema validation against schemas vendored in the hook (no network).
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 4f85d46a92dc17713078e5de73f8a13190edf6fc  # frozen: 0.38.2
+    hooks:
+      - id: check-github-workflows
+      # Every job needs `timeout-minutes`: the 6-hour default would let a hung FFmpeg encode or
+      # test hold a runner, and the `CI passed` check the deploy agent waits for, for hours.
+      - id: check-github-workflows-require-timeout
+      - id: check-dependabot
+      - id: check-github-issue-forms
+      - id: check-github-issue-config
+      # The published nft_traits.json contract (docs/augur-explorer-integration.md): the schema
+      # must be a valid JSON Schema, and the example that consumers vendor must satisfy it.
+      - id: check-metaschema
+        files: ^docs/nft_traits\.schema\.json$
+      # A change to either file re-validates the example: a schema edit that the example no
+      # longer satisfies fails at commit time, not only in CI. The example is named in `args`
+      # (pass_filenames: false) so the schema is never validated against itself.
+      - id: check-jsonschema
+        name: Validate the nft_traits example against its schema
+        args:
+          - --schemafile
+          - docs/nft_traits.schema.json
+          - docs/fixtures/nft_traits.example.json
+        files: ^docs/(nft_traits\.schema|fixtures/nft_traits\.example)\.json$
+        pass_filenames: false
+
+  # -------------------------------------------------------------------------------------------
+  # Spelling. typos flags known misspellings only (so no dictionary of every domain word is
+  # needed); _typos.toml allows the few intentional ones.
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/crate-ci/typos
+    rev: 4141ff14cb566df76c473c786332c186a4fd71d1  # frozen: v1.50.3
+    hooks:
+      # No --write-changes: a correction can be wrong (it would rename an identifier or a
+      # published metadata key), so a human applies it.
+      - id: typos
+        args: [--force-exclude]
+
+  # -------------------------------------------------------------------------------------------
+  # Commit messages: Conventional Commits (`type(scope)!: subject`), the style of this history
+  # and of Dependabot's PRs. fixup!/squash! commits (git commit --fixup) and merges pass. CI's
+  # pull request title check (.github/workflows/ci.yml) accepts the same types: a squash merge
+  # turns the title into the commit subject. test_tooling.py keeps the two lists equal.
+  # -------------------------------------------------------------------------------------------
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: 3db014c16a9d31997ab8c07a4d61fcce936c8f0d  # frozen: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        args:
+          - --verbose
+          - feat
+          - fix
+          - docs
+          - ci
+          - build
+          - chore
+          - refactor
+          - perf
+          - test
+          - style
+          - revert
+          - deps
+
+  # -------------------------------------------------------------------------------------------
+  # Pre-push: the test suites, so a branch does not reach GitHub red. CI runs them again on every
+  # platform; locally the FFmpeg-dependent tests skip when ffmpeg is missing (CONTRIBUTING.md).
+  # In an emergency `git push --no-verify` bypasses them; CI still gates every merge.
+  # -------------------------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      # First: it needs no build, while the cargo suite starts with an optimized (fat LTO) build.
+      # `language: python` (an empty environment: the tests are stdlib-only) runs them on the
+      # interpreter pre-commit itself runs on, the Python 3.10+ of .venv, rather than whatever
+      # `python3` a git GUI or an old system PATH resolves to. run_parallel.py runs each test
+      # module in its own `unittest` process, all at once, which about halves the wait (the
+      # suite mostly waits on subprocesses); CI runs plain `unittest discover`.
+      - id: python-unittest
+        name: python unittest (tests/python, modules in parallel)
+        entry: python tests/python/run_parallel.py
+        language: python
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: cargo-test
+        name: cargo test --release
+        entry: cargo test --release --locked
+        language: unsupported
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

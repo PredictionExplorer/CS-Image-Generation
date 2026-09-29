@@ -1,25 +1,105 @@
+# Dependabot version updates
+# (https://docs.github.com/code-security/reference/supply-chain-security/dependabot-options-reference).
+#
+# Security updates are separate: GitHub opens those as soon as an advisory affects a dependency,
+# without the cooldown or the grouping below (they are enabled in the repository settings, see
+# ops/github/).
+#
+# Policy for every ecosystem:
+# - Weekly, on Monday morning (UTC).
+# - A 7-day cooldown: a release is proposed only once it is a week old. A broken or malicious
+#   release is usually yanked within days, and a week costs nothing for version updates.
+# - Minor and patch updates arrive together, in one pull request per ecosystem; each major
+#   update gets a pull request of its own. The Python developer tools are the exception: every
+#   update to them arrives in one pull request (`python-tooling`, below).
+# - Conventional Commit subjects, like the rest of the history: `build(deps)` (or
+#   `build(deps-dev)`) for the code's dependencies and toolchains, `ci(deps)` for actions.
+# - Every pull request runs CI. Merging one deploys it to production once CI passes
+#   (docs/deployment.md), so review each like any other change.
+
 version: 2
-updates:
-  - package-ecosystem: cargo
-    directory: "/"
+
+multi-ecosystem-groups:
+  # The Python developer tools are pinned twice: in pyproject.toml's `dev` extra (pip) and as hook
+  # revisions in .pre-commit-config.yaml (pre-commit). Ruff and mypy must have the same version
+  # on both sides (tests/python/test_tooling.py fails CI otherwise), so both ecosystems update
+  # in a single pull request.
+  python-tooling:
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
     commit-message:
-      prefix: "deps"
-    labels:
-      - dependencies
-    open-pull-requests-limit: 10
+      prefix: build
+      include: scope
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
     ignore:
       # Pinned exactly (`libm = "=0.2.16"`) for determinism: the ember edition's frames are
       # bit-identical across CPU architectures only for a fixed libm, and any bump may change
-      # results in the last bit. Upgrade by hand and re-bless the ember golden hashes.
-      - dependency-name: "libm"
+      # results in the last bit. Upgrade by hand, re-bless the ember golden hashes and bump
+      # `ember::certificate::ALGORITHM_VERSION` (docs/ember-design.md §0.2).
+      - dependency-name: libm
 
-  - package-ecosystem: github-actions
-    directory: "/"
+  # rust-toolchain.toml pins the compiler that CI, the pre-commit hooks and the production build
+  # use. A new Rust release can bring new clippy lints (the crate enables clippy::pedantic): fix
+  # them in the same pull request. The ember golden digests in CI confirm that the new compiler
+  # still renders the same bits.
+  - package-ecosystem: rust-toolchain
+    directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
     commit-message:
-      prefix: "ci"
-    labels:
-      - ci
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /
+    multi-ecosystem-group: python-tooling
+    patterns: ["*"]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: pre-commit
+    directory: /
+    multi-ecosystem-group: python-tooling
+    patterns: ["*"]
+    cooldown:
+      default-days: 7
