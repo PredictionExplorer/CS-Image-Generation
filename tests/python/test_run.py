@@ -12,6 +12,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -134,6 +135,28 @@ def _log_call(entry: list[object]) -> None:
             fh.write(json.dumps(entry) + "\n")
 
 
+def _probe_lock(path: str) -> list[bool]:
+    """[whether the lock at `path` is free, whether this process holds a descriptor of it]."""
+    lock_stat = Path(path).stat()
+    inherited = False
+    for fd in range(256):
+        try:
+            fd_stat = os.fstat(fd)
+        except OSError:
+            continue
+        if (fd_stat.st_dev, fd_stat.st_ino) == (lock_stat.st_dev, lock_stat.st_ino):
+            inherited = True
+    probe = os.open(path, os.O_RDWR)
+    try:
+        fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        free = True
+    except BlockingIOError:
+        free = False
+    finally:
+        os.close(probe)
+    return [free, inherited]
+
+
 def fake_generator(argv: list[str]) -> int:
     """three_body_problem: writes output/<name>/ as FAKE_GEN_MODE[_<seed>] says.
 
@@ -141,7 +164,8 @@ def fake_generator(argv: list[str]) -> int:
     (exit 0 without the ember edition), no_ember_files (exit 0, ember entries but no ember
     files), fail (exit 1), sleep (30 s), signal (killed by SIGTERM). With FAKE_GEN_STALE=1 its
     --help does not list --no-ember. FAKE_GEN_CORRUPT names a file it overwrites with invalid
-    JSON while rendering (a live file that changes during the render).
+    JSON while rendering (a live file that changes during the render). FAKE_GEN_LOCK_PROBE names
+    run.py's lock file: each render logs whether it is free and whether the generator holds it.
     """
     if "--help" in argv:
         print("Usage: three_body_problem [OPTIONS]\n      --image-only")
@@ -152,6 +176,9 @@ def fake_generator(argv: list[str]) -> int:
     name = argv[argv.index("--output") + 1]
     mode = os.environ.get(f"FAKE_GEN_MODE_{seed}", os.environ.get("FAKE_GEN_MODE", "complete"))
     _log_call(["generate", seed])
+    lock_probe = os.environ.get("FAKE_GEN_LOCK_PROBE")
+    if lock_probe:
+        _log_call(["lock_probe", *_probe_lock(lock_probe)])
     corrupt = os.environ.get("FAKE_GEN_CORRUPT")
     if corrupt:
         Path(corrupt).write_text(CORRUPT_JSON, encoding="utf-8")
@@ -470,6 +497,13 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(run.plan_seed_queue([], ["b1", "b2"], 5, ledger, 4), ["b2", "b1"])
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 4), [])
 
+    def test_an_orbit_mismatch_gives_a_seed_up_at_once(self) -> None:
+        ledger = run.BackfillLedger(ember_failures={"b1": 1}, orbit_mismatches={"b1"})
+        self.assertEqual(run.plan_seed_queue(["u1"], ["b1", "b2"], 5, ledger), ["u1", "b2"])
+        self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 3), ["b1"])
+        # A higher attempt cap does not bring it back: this binary regenerates the same orbit.
+        self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 100), ["b1"])
+
     def test_other_failures_never_give_a_seed_up(self) -> None:
         ledger = run.BackfillLedger(other_failures={"b1": 10})
         self.assertEqual(run.plan_seed_queue([], ["b1"], 1, ledger), ["b1"])
@@ -508,6 +542,24 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(list(data["ember_failures"]), [SEED_A, SEED_B])
         self.assertEqual(data["other_failures"], {SEED_C: 4})
         self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists())
+
+    def test_orbit_mismatches_round_trip_and_older_files_have_none(self) -> None:
+        ledger = run.BackfillLedger({SEED_A: 1, SEED_B: 1}, {}, {SEED_B, SEED_A})
+        run.save_backfill_ledger(ledger, self.identity, self.path)
+        self.assertEqual(self.load(), ledger)
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["orbit_mismatches"], [SEED_A, SEED_B])
+
+        del data["orbit_mismatches"]  # a file written before the field existed
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load(), run.BackfillLedger({SEED_A: 1, SEED_B: 1}))
+
+        data["orbit_mismatches"] = [SEED_A, 7, None]  # malformed entries are dropped
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().orbit_mismatches, {SEED_A})
+        data["orbit_mismatches"] = {"not": "a list"}
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().orbit_mismatches, set())
 
     def test_counts_reset_when_the_generator_changes(self) -> None:
         run.save_backfill_ledger(
@@ -573,10 +625,24 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
         self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1}))
 
+        # An orbit mismatch counts one attempt and gives the seed up; COMPLETE forgets it.
+        self.assertTrue(ledger.record(SEED_C, run.Outcome.ORBIT_MISMATCH, backfill=True))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1, SEED_C: 1}, {}, {SEED_C}))
+        self.assertTrue(ledger.given_up(SEED_C, 3))
+        with self.assertLogs(run.log, level="INFO"):
+            self.assertFalse(
+                ledger.record(SEED_D, run.Outcome.ORBIT_MISMATCH, backfill=True, interrupted=True)
+            )
+        self.assertFalse(ledger.given_up(SEED_D, 3))
+        self.assertTrue(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1}))
+
     def test_retain_keeps_only_the_waiting_seeds(self) -> None:
-        ledger = run.BackfillLedger({SEED_A: 1, SEED_B: 2}, {SEED_B: 1, SEED_C: 3})
+        ledger = run.BackfillLedger(
+            {SEED_A: 1, SEED_B: 2}, {SEED_B: 1, SEED_C: 3}, {SEED_A, SEED_B}
+        )
         ledger.retain({SEED_B})
-        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 2}, {SEED_B: 1}))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 2}, {SEED_B: 1}, {SEED_B}))
 
 
 # ---------------------------------------------------------------------------
@@ -796,12 +862,13 @@ class ProcessSeedTests(SyncTestCase):
         os.environ[f"FAKE_GEN_MASSES_{SEED_A}"] = "[150.25, 200.5, 180.12500000000003]"
         with self.assertLogs(run.log, level="ERROR") as logs:
             outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
-        self.assertIs(outcome, run.Outcome.EMBER_FAILED)
+        self.assertIs(outcome, run.Outcome.ORBIT_MISMATCH)
         self.assertEqual(self.calls("scp"), [])
         self.assertEqual(self.remote_snapshot(), live)
         message = "\n".join(logs.output)
         self.assertIn(f"0x{SEED_A}", message)
         self.assertIn("DIFFERENT ORBIT", message)
+        self.assertIn("ORBIT MISMATCH", message)
         self.assertIn("simulation.masses", message)
         self.assertNotIn("selected_index", message)
 
@@ -1124,14 +1191,29 @@ class MainTests(SyncTestCase):
         assert remote is not None
         self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B, SEED_C], remote), ([], [SEED_B]))
 
-    def test_a_different_orbit_is_recorded_as_a_failed_attempt(self) -> None:
+    def test_a_different_orbit_gives_the_seed_up_at_once(self) -> None:
         self.remote_package(SEED_A)
         live = self.remote_snapshot()
         os.environ[f"FAKE_GEN_MASSES_{SEED_A}"] = "[1.0, 2.0, 3.0]"
         with self.assertLogs(run.log, level="ERROR"):
             self.assertEqual(self.main([SEED_A]), 1)
         self.assertEqual(self.remote_snapshot(), live)
-        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1}))
+        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1}, {}, {SEED_A}))
+
+        # No second render with this binary, whatever the attempt cap; a WARNING every run.
+        for extra in ((), ("--max-backfill-attempts", "100")):
+            with self.assertLogs(run.log, level="WARNING") as logs:
+                self.assertEqual(self.main([SEED_A], *extra), 0)
+            self.assertIn("regenerates a different orbit", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A])
+
+        # A rebuilt generator tries it again (and here renders the live orbit this time).
+        del os.environ[f"FAKE_GEN_MASSES_{SEED_A}"]
+        stat = Path(self.generator).stat()
+        os.utime(self.generator, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(self.main([SEED_A]), 0)
+        self.assertEqual(self.generated(), [SEED_A, SEED_A])
+        self.assertEqual(self.ledger(), run.BackfillLedger())
 
     def test_a_given_up_seed_is_skipped_and_logged_every_run(self) -> None:
         self.remote_package(SEED_A)
@@ -1239,6 +1321,58 @@ class MainTests(SyncTestCase):
         self.assertEqual(self.generated(), [])
         self.assertEqual(self.calls("scp"), [])
         self.assertFalse(run.BACKFILL_FAILURES.exists())
+
+    def hold_run_lock(self) -> None:
+        """Hold run.py's single-instance lock like another run would (pid 4242)."""
+        holder = os.open(run.RUN_LOCK, os.O_RDWR | os.O_CREAT)
+        self.addCleanup(os.close, holder)
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(holder, b"4242\n")
+
+    def test_a_held_run_lock_stops_the_run_before_it_does_anything(self) -> None:
+        self.remote_package(SEED_A)
+        live = self.remote_snapshot()
+        self.hold_run_lock()
+        for extra in ((), ("--dry-run",)):
+            with self.subTest(extra=extra):
+                with (
+                    mock.patch.object(run, "resolve_generator") as resolve_generator,
+                    self.assertLogs(run.log, level="ERROR") as logs,
+                ):
+                    self.assertEqual(self.main([SEED_A, SEED_B], *extra), 1)
+                resolve_generator.assert_not_called()
+                self.assertIn(f"{self.work / 'run.lock'} (pid 4242)", "\n".join(logs.output))
+        self.assertEqual(self.call_log(), [])  # no listing, render or upload
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertFalse(run.LOCAL_OUTPUT_DIR.exists())
+
+    def test_help_does_not_need_the_run_lock(self) -> None:
+        self.hold_run_lock()
+        with mock.patch("sys.stdout"), self.assertRaises(SystemExit) as raised:
+            self.main([], "--help")
+        self.assertEqual(raised.exception.code, 0)
+
+    def test_the_run_lock_is_held_for_the_run_and_released_at_exit(self) -> None:
+        os.environ["FAKE_GEN_LOCK_PROBE"] = str(self.work / "run.lock")
+        self.assertEqual(self.main([SEED_A]), 0)
+        # During the render the lock was taken, and the generator (a child) held no descriptor
+        # of it: the lock is run.py's alone.
+        self.assertEqual(self.calls("lock_probe"), [[False, False]])
+        self.assertEqual(run.run_lock_holder(), str(os.getpid()))
+        fd = run.acquire_run_lock()  # released at exit
+        self.assertIsNotNone(fd)
+        assert fd is not None
+        os.close(fd)
+
+        with (
+            mock.patch.object(run, "sync", side_effect=RuntimeError("boom")),
+            self.assertRaises(RuntimeError),
+        ):
+            self.main([SEED_A])
+        fd = run.acquire_run_lock()  # released when the run fails, too
+        self.assertIsNotNone(fd)
+        assert fd is not None
+        os.close(fd)
 
     def test_invalid_backfill_settings_are_rejected(self) -> None:
         for extra in (["--backfill-mode", "partial"], ["--max-backfill-attempts", "0"]):

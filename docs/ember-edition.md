@@ -165,8 +165,11 @@ deterministic (a full disk, an encoder crash), so read a given-up seed's log bef
 is broken, and delete its ledger entry (see below) to retry it. These count as failed attempts:
 
 - generator exit status 3;
-- in `ember` mode, an orbit mismatch, or regenerated metadata that cannot show its orbit or
-  give its ember entries;
+- in `ember` mode, regenerated metadata that cannot show its orbit or give its ember entries;
+- in `ember` mode, an orbit mismatch. It also gives the seed up at once, whatever the cap: the
+  same binary would regenerate the same orbit on every retry. The seed is listed under
+  `orbit_mismatches` in `backfill_failures.json`, and every run logs `ember backfill given up:
+  this generator binary regenerates a different orbit than the live package`;
 - a regenerated package whose ember files are incomplete.
 
 Upload and ssh failures, timeouts, a generator killed by a signal (such as SIGTERM), a live
@@ -177,9 +180,9 @@ size and modification time). When the binary changes, every count resets, so a r
 generator retries every seed it gave up on. Deleting a seed's entry, or the file, retries
 sooner.
 
-**Upgrading.** Pushing to `main` deploys nothing: the generation host runs a prebuilt binary and
-never pulls or builds. To roll out a new version, follow
-[README, Upgrading a deployment](../README.md#upgrading-a-deployment). `run.py` probes the
+**Upgrading.** Merging to `main` deploys automatically once `CI passed` succeeds (see
+[docs/deployment.md](deployment.md) and
+[README, Upgrading a deployment](../README.md#upgrading-a-deployment)). `run.py` probes the
 generator with `--help` on every run, and `--preflight` does too. A binary that does not list
 `--no-ember` predates the edition. `run.py` then logs an ERROR, checks packages against the core
 files only, so new mints are still uploaded, and pauses the backfill until the generator is

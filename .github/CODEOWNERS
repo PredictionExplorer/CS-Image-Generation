@@ -1,0 +1,12 @@
+# Code owners are requested for review automatically when a pull request touches their files.
+#
+# Every path, including the workflows, the deployment agent (ops/) and this file, belongs to the
+# maintainer. Merging into `main` deploys to production once CI passes (docs/deployment.md).
+#
+# The `main` ruleset (ops/github/ruleset-main.json) deliberately does NOT require code-owner
+# approval: with a single maintainer that rule would block the maintainer's own pull requests.
+# Keep `require_code_owner_review` false unless a second owner is added below.
+#
+# Syntax: https://docs.github.com/articles/about-code-owners
+
+* @tarasbob

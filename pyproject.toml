@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,12 +7,15 @@ name = "cs-image-generation-scripts"
 version = "0.0.0"
 description = "Development tooling config for CosmicSignature sync scripts (stdlib-only)."
 readme = "README.md"
+license = "CC0-1.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "mypy==1.20.1",
+    "pre-commit==4.6.2",
     "ruff==0.15.10",
 ]
 
@@ -64,4 +67,9 @@ files = [
     "run-test-images.py",
     "ci/verify_reference.py",
     "tests/python/test_run.py",
+    "tests/python/test_tooling.py",
+    "tests/python/run_parallel.py",
+    "tests/python/test_github_settings.py",
+    "ops/deploy/cosmicsig_deploy.py",
+    "tests/python/test_deploy.py",
 ]

@@ -562,7 +562,7 @@ fn stream_to_encoders(
 ///
 /// # Arguments
 /// * `width` - Frame width in pixels
-/// * `height` - Frame height in pixels  
+/// * `height` - Frame height in pixels
 /// * `frame_rate` - Output video framerate (fps)
 /// * `frames_iter` - Closure that writes raw RGB frame data to the provided writer
 /// * `output_file` - Path to the output video file

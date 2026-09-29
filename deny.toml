@@ -1,30 +1,100 @@
+# cargo-deny policy for the dependency graph (https://embarkstudios.github.io/cargo-deny/).
+#
+# CI runs `cargo deny --locked check` (the "Supply chain (cargo-deny)" job in
+# .github/workflows/ci.yml) on every pull request, every push to main and weekly, so a new
+# RustSec advisory against the committed Cargo.lock turns CI red even when no code changed.
+# Locally: `cargo install cargo-deny --locked`, then `cargo deny --locked check` (or `just deny`).
+#
+# The advisories and licenses sections use cargo-deny's version 2 format, which dropped the old
+# per-category switches: every vulnerability is an error, and a license is denied unless it is
+# allowed here. cargo-deny 0.16 and later only know this format and ignore the `version = 2`
+# keys; 0.14.12 to 0.15 need them to opt in to it.
+
+[graph]
+# Only the platforms this crate is built for. Target-specific dependencies of other platforms
+# (the Windows API crates, WASM shims) never reach a binary we ship, so their licenses,
+# advisories and duplicate versions are noise. Production runs x86-64 Linux (Ubuntu 24.04);
+# CI also tests aarch64 Linux and macOS; developers build on macOS.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+version = 2
+# Every vulnerability is an error. So are unmaintained and unsound crates anywhere in the graph,
+# and yanked versions in Cargo.lock (their authors pulled them for a reason: refresh the
+# lockfile). Accepting an advisory takes an `[[advisories.ignore]]` entry with the reason,
+# reviewed like any other change. An entry that no longer matches any crate is reported as a
+# warning: remove it then.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+unused-ignored-advisory = "warn"
+
+[[advisories.ignore]]
+id = "RUSTSEC-2024-0436"
+reason = """\
+    paste is unmaintained (archived by its author) but complete, with no known vulnerability. \
+    It is a proc macro, so it runs only at compile time, and only nalgebra -> simba uses it. \
+    Remove this entry once simba drops it."""
 
 [licenses]
-unlicensed = "deny"
+version = 2
+# The permissive licenses we accept for normal and build dependencies (dev-dependencies never
+# reach a shipped binary and are not checked). This is a policy, not an inventory: some entries
+# may match no crate today. A copyleft license (GPL, LGPL, MPL, ...) needs a deliberate,
+# per-crate `exceptions` entry. This crate itself is CC0-1.0 (Cargo.toml `license`) and is
+# checked too, so a missing or malformed `license` field fails CI.
 allow = [
-    "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
     "ISC",
+    "MIT",
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
-    "BSL-1.0",
-    "CC0-1.0",
 ]
-confidence-threshold = 0.8
+# askalono's minimum confidence when it has to read a license file instead of the SPDX
+# expression in a crate's manifest.
+confidence-threshold = 0.93
+exceptions = []
+unused-allowed-license = "allow"
 
 [bans]
+# Two semver-incompatible versions of one crate cost compile time and binary size; warn so they
+# are visible without blocking an otherwise sound dependency update.
 multiple-versions = "warn"
-wildcards = "allow"
+highlight = "all"
+# `*` version requirements make builds unreproducible once Cargo.lock is refreshed.
+wildcards = "deny"
+allow-wildcard-paths = true
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = []
+skip = []
+skip-tree = []
+
+[bans.build]
+# Crates that run code at build time (build scripts, proc macros) and their dependencies must not
+# ship prebuilt native executables: such a blob would run on developer machines and on the
+# production build host, and nobody reviews it. Interpreted helper scripts (CI shell scripts
+# left in published crates) are common and harmless, so they are not reported.
+executables = "deny"
+interpreted = "allow"
+include-dependencies = true
+include-workspace = false
+include-archives = false
+enable-builtin-globs = false
 
 [sources]
+# Everything comes from crates.io; a git or third-party registry dependency must be added here
+# deliberately.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]

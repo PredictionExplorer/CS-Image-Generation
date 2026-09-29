@@ -1,0 +1,28 @@
+# Spell-check settings for typos (https://github.com/crate-ci/typos), run by the `typos` hook in
+# .pre-commit-config.yaml and by `typos` from the repository root.
+#
+# typos only reports words on its list of known misspellings, so domain vocabulary (sumi, kozo,
+# nikawa, Saunderson, Borda, OKLab, ...) needs no entry here. This file lists the intentional
+# spellings typos would otherwise "correct"; each entry says why it is right. Prefer fixing a
+# genuine typo over adding it here.
+
+[files]
+extend-exclude = [
+    # Maintained by cargo: crate names and checksums, none of them ours to spell.
+    "Cargo.lock",
+]
+
+# Whole identifiers, matched before typos splits them into words.
+[default.extend-identifiers]
+# The plural of PNG. typos splits the identifier at the case change into "PN" + "Gs" and would
+# suggest "ON".
+PNGs = "PNGs"
+
+# Single words, matched after identifiers are split (snake_case, camelCase, kebab-case).
+[default.extend-words]
+# Short for equilateralness, the Borda selection weight: `--equil-weight` on the CLI and
+# `equil_weight` in generation logs and in the published nft_traits.json, whose keys consumers
+# depend on (docs/nft_traits.schema.json).
+equil = "equil"
+# The blue and alpha channels of an RGBA sample, as in `(br, bg, bb, ba)`.
+ba = "ba"

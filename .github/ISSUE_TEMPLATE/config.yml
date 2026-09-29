@@ -1,0 +1,11 @@
+# Issue template chooser: https://docs.github.com/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository#configuring-the-template-chooser
+# Blank issues are disabled so every report goes through a form (bug_report.yml,
+# feature_request.yml) that asks for the details needed to act on it.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/PredictionExplorer/CS-Image-Generation/security/advisories/new
+    about: Report vulnerabilities privately, never in a public issue. See SECURITY.md.
+  - name: Operator guide (deployment, status, rollback, troubleshooting)
+    url: https://github.com/PredictionExplorer/CS-Image-Generation/blob/main/docs/deployment.md
+    about: How the production server deploys main, and what to do when a deploy fails.

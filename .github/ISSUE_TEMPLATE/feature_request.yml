@@ -1,0 +1,75 @@
+# Issue form: https://docs.github.com/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms
+# The labels are created and kept in sync by ops/github/apply-settings.sh.
+name: Feature request
+description: Suggest a new look, trait, output, script behaviour or tooling improvement.
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Describe the problem first: a clear problem statement makes it
+        easier to find the right solution, even if it is not the one proposed here.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the project would change?
+      options:
+        - Generator (simulation, orbit selection, rendering, video)
+        - Ember edition
+        - Package output or NFT trait metadata
+        - Sync script (run.py)
+        - Deployment agent or systemd units (ops/)
+        - CI, hooks or developer tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What is missing or painful today, and who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead? Sketches, example seeds or reference images help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, and why the proposal is better.
+
+  - type: dropdown
+    id: output-impact
+    attributes:
+      label: Impact on published tokens
+      description: >-
+        Merged changes deploy to production automatically and run.py renders every token's
+        package, so say whether this would change the art or metadata of tokens that already
+        have a published package.
+      options:
+        - "No: it does not change rendered output or metadata"
+        - "New tokens only: existing packages stay as they are"
+        - "Existing tokens too: packages would be regenerated or backfilled"
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this has not been requested yet.
+          required: true

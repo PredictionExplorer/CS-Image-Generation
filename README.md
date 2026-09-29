@@ -1,5 +1,8 @@
 # Three Body Problem
 
+[![CI](https://github.com/PredictionExplorer/CS-Image-Generation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PredictionExplorer/CS-Image-Generation/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PredictionExplorer/CS-Image-Generation/badge)](https://scorecard.dev/viewer/?uri=github.com/PredictionExplorer/CS-Image-Generation)
+
 Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 MP4 from a single run, plus the **ember edition**: the same orbit drawn in sumi ink by the fluid it stirs.
 
 The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`). Your checkout directory may use a different name (for example `CS-Image-Generation`).
@@ -50,8 +53,10 @@ the package is still written and the run exits with status `3` (see [Exit status
 ## Requirements
 
 - Rust 1.94.1+ (see `rust-version` in `Cargo.toml`)
-- FFmpeg (for video encoding)
-- Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `contact_sheet.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. Separate optional dev packages (Ruff, Mypy) apply when you run Python quality checks or CI; see [Development](#development).
+- FFmpeg with the `libx264`, `libx265` and `libwebp` encoders (videos and WebP images). Ubuntu's
+  `ffmpeg` package has all three; Homebrew's `ffmpeg` has no `libwebp` (see
+  [CONTRIBUTING.md](CONTRIBUTING.md))
+- Python 3.10+ for the helper scripts (`run.py`, `run-test-images.py`, `contact_sheet.py`, `ci/verify_reference.py`). The scripts use only the standard library at runtime. The pinned development tools (Ruff, Mypy, pre-commit) are only needed to work on the code; see [Development](#development).
 - Git
 
 ### Installing on Ubuntu
@@ -183,6 +188,10 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 
 It also supports `--dry-run` (report what's missing without generating or uploading) and `--preflight` (test all external dependencies before committing to real runs).
 
+Runs never overlap: `run.py` holds an exclusive lock on `run.lock` in its working directory for its whole run (every mode, `--dry-run` and `--preflight` included; `--help` needs none). A second `run.py` started meanwhile logs `Another run holds the single-instance lock …/run.lock (pid N): exiting without doing anything` and exits with `1`.
+
+On the generator host, `run.py` runs from the systemd user timer `cosmicsig-sync.timer` (5 minutes after each run), and every commit merged to `main` is deployed there automatically once CI passes: see [docs/deployment.md](docs/deployment.md).
+
 At startup `run.py` runs `<generator> --help` and checks that it lists `--no-ember`. A binary
 without it predates the ember edition (for example, the checkout was pulled but not rebuilt): every
 run then logs an ERROR telling you to rebuild the generator, checks packages against the core
@@ -236,7 +245,7 @@ Packages uploaded before the ember edition existed, or after their ember edition
 
 | Mode | What is uploaded |
 |------|------------------|
-| `ember` (default) | Only the ember edition. The package is still generated in full locally, but before uploading `run.py` fetches the live `metadata/nft_traits.json` and `metadata/assets.json` over SSH and checks that the local render shows the **same orbit**: equal `simulation.masses` (compared as exact JSON numbers), `generation.borda.selected_index` and `generation.borda.retry_count`. If they match, it uploads the five ember media files, then a merged `metadata/assets.json` (the live manifest's other entries kept verbatim, the local `ember_*` entries added or replaced, `generated_at` from the local manifest), and `metadata/ember.json` last. The published main art, spectral files, `generation.json` and `nft_traits.json` are never touched. If the orbit differs, nothing is uploaded: an ERROR names the seed and the differing fields, and the seed counts one failed attempt. |
+| `ember` (default) | Only the ember edition. The package is still generated in full locally, but before uploading `run.py` fetches the live `metadata/nft_traits.json` and `metadata/assets.json` over SSH and checks that the local render shows the **same orbit**: equal `simulation.masses` (compared as exact JSON numbers), `generation.borda.selected_index` and `generation.borda.retry_count`. If they match, it uploads the five ember media files, then a merged `metadata/assets.json` (the live manifest's other entries kept verbatim, the local `ember_*` entries added or replaced, `generated_at` from the local manifest), and `metadata/ember.json` last. The published main art, spectral files, `generation.json` and `nft_traits.json` are never touched. If the orbit differs, nothing is uploaded: an ERROR names the seed and the differing fields, and the seed is given up at once with this generator binary (it would regenerate the same orbit on every retry; see the retry cap below). |
 | `full` | The whole regenerated package replaces the remote one, main art and metadata included, in the upload order above. Its remote `metadata/assets.json` is deleted when the upload starts, so the package reads as incomplete until the new manifest has landed. Use it only to re-render published packages deliberately. |
 
 In both modes, a backfill seed whose generator exits `3` uploads nothing (its core package is already live) and counts one failed attempt.
@@ -245,7 +254,7 @@ In `ember` mode, `run.py` also reads and checks the live `nft_traits.json` and `
 
 **Versions of backfilled tokens.** An `ember` backfill leaves the published `metadata/nft_traits.json` untouched, so a backfilled token keeps `pipeline_version` `1.0.0`, while its new `metadata/ember.json` records `crate_version` `1.1.0`. Only its `metadata/assets.json` changes: it gains the `ember_*` entries and a new `generated_at`. Consumers should detect the ember edition from the `ember_*` roles in `metadata/assets.json` (or from `metadata/ember.json`), never from `pipeline_version`.
 
-**Retry cap.** A failed ember attempt is a generator exit `3`, an orbit that differs from the live package's (or regenerated metadata that cannot show its orbit), or a local package whose ember files are incomplete. After `--max-backfill-attempts` failed attempts (default 3, env `COSMICSIG_MAX_BACKFILL_ATTEMPTS`), a seed is left out of the plan, and every run logs the WARNING `0x<seed>: ember backfill given up after N attempts …`.
+**Retry cap.** A failed ember attempt is a generator exit `3`, regenerated metadata that cannot show its orbit, or a local package whose ember files are incomplete. After `--max-backfill-attempts` failed attempts (default 3, env `COSMICSIG_MAX_BACKFILL_ATTEMPTS`), a seed is left out of the plan, and every run logs the WARNING `0x<seed>: ember backfill given up after N attempts …`. An orbit that differs from the live package's does not wait for the cap: the generator is deterministic, so the same binary would render the same wrong orbit every time. The seed is given up after that one render (it is listed under `orbit_mismatches` in `backfill_failures.json`), whatever `--max-backfill-attempts` says, and every run logs `0x<seed>: ember backfill given up: this generator binary regenerates a different orbit than the live package …`.
 
 Any other failure of a backfill seed (the generator exits `1` or is killed by a signal, a timeout, an SSH or upload failure, a live package that cannot be used) is not an ember attempt: it never gives the seed up. It does move the seed back in the queue, because backfill seeds go in order of their failed runs of any kind, fewest first. A seed that always fails is therefore retried only once every other waiting seed has failed as often or is done: it costs one run per pass over the backlog and cannot stall the backfill. Nothing is counted in a run that is shutting down (for example after `systemctl stop`).
 
@@ -350,115 +359,53 @@ See what `run.py` would generate and upload without actually doing it:
 python3 run.py --dry-run
 ```
 
-**7. Edit the systemd service file**
+**7. Install continuous deployment**
 
-Open `cosmicsig-sync.service` and update the three values under `# --- Adjust these to match your deployment ---`:
-
-```ini
-User=ubuntu
-WorkingDirectory=/home/ubuntu/CS-Image-Generation
-EnvironmentFile=/home/ubuntu/CS-Image-Generation/.env
-```
-
-- `User=` — the Linux user on the generator machine that has the SSH key. This is the local user, not the remote one.
-- `WorkingDirectory=` — absolute path to this repository on the generator machine.
-- `EnvironmentFile=` — absolute path to the `.env` file you created in step 4. systemd's `%h` (the user's home directory) also works here, for example `%h/CS-Image-Generation/.env`.
-
-**8. Install the systemd units**
+The sync runs from systemd *user* units that the deploy agent installs and keeps up to date. The only root step is a one-time bootstrap that enables lingering (and retires the legacy system units of older setups):
 
 ```bash
-sudo cp cosmicsig-sync.service cosmicsig-sync.timer /etc/systemd/system/
-sudo systemctl daemon-reload
+sudo ops/server/bootstrap-root.sh "$USER" "$PWD"
+python3 ops/deploy/cosmicsig_deploy.py install
 ```
 
-**9. Enable and start the timer**
+The first deploy tick builds and tests `origin/main`, installs the binary, enables `cosmicsig-sync.timer` and starts the first sync run. From then on, every commit merged to `main` is deployed automatically once CI passes. [docs/deployment.md](docs/deployment.md) covers how a deploy works, the CI gate, status, logs, pause and resume, rollback and troubleshooting.
+
+**8. Verify it's running**
 
 ```bash
-sudo systemctl enable --now cosmicsig-sync.timer
-```
-
-This starts the timer immediately and ensures it survives reboots. The first run fires 2 minutes after boot; subsequent runs trigger every 5 minutes after the previous run finishes.
-
-**10. Verify it's running**
-
-```bash
-# Timer schedule and next trigger time
-systemctl status cosmicsig-sync.timer
-
-# Logs from the most recent run
-journalctl -u cosmicsig-sync.service -e
-
-# Detailed run.py log (rotated, up to 5 x 10 MB)
-cat imgcheck.log
+python3 ops/deploy/cosmicsig_deploy.py status
+systemctl --user list-timers 'cosmicsig-*'
+journalctl --user -u cosmicsig-deploy -u cosmicsig-sync -f
+tail -f imgcheck.log     # run.py's detailed log (rotated, up to 5 x 10 MB)
 ```
 
 **Trigger a manual run** outside the timer schedule:
 
 ```bash
-sudo systemctl start cosmicsig-sync.service
+systemctl --user start cosmicsig-sync.service
 ```
 
-**Disable the timer** when no longer needed:
+**Stop syncing and deploying** (for maintenance). Pause first: every successful deploy enables the sync timer again.
 
 ```bash
-sudo systemctl disable --now cosmicsig-sync.timer
+python3 ops/deploy/cosmicsig_deploy.py pause --reason "maintenance"
+systemctl --user disable --now cosmicsig-sync.timer
 ```
+
+Undo with `systemctl --user enable --now cosmicsig-sync.timer` and `python3 ops/deploy/cosmicsig_deploy.py resume`.
 
 ### Upgrading a deployment
 
-**Pushing to `main` deploys nothing.** The service runs `python3 run.py` and the prebuilt `./target/release/three_body_problem` in its working directory; it never pulls or builds. A new version reaches the generator machine only when you update the checkout and rebuild there. Do it in this order, so that no timer run starts between the pull and the end of the build:
+**Merging to `main` deploys.** Once the `CI passed` check of a commit on `main` succeeds, the generator host picks it up within about two minutes. It builds and tests the commit natively, waits for a running sync to finish (a render is never interrupted), switches the checkout and the generator binary atomically, and starts a sync run, which regenerates whatever the new version needs. Nothing is done by hand. [docs/deployment.md](docs/deployment.md) explains each step, the safety checks, and how to pause, retry or roll back a deploy. To follow a deploy:
 
-1. Stop the timer, and wait for a running sync to finish. `systemctl is-active cosmicsig-sync.service` prints `activating` while a run is in progress; anything else (`inactive`, or `failed` after a run that exited with `1`) means no run is in progress. (`sudo systemctl stop cosmicsig-sync.service` aborts the run instead: the seed in flight is lost and is generated again later.)
+```bash
+journalctl --user -u cosmicsig-deploy -u cosmicsig-sync -f
+python3 ops/deploy/cosmicsig_deploy.py status
+```
 
-   ```bash
-   sudo systemctl stop cosmicsig-sync.timer
-   systemctl is-active cosmicsig-sync.service
-   ```
+**Migrating a legacy deployment** (the system units `/etc/systemd/system/cosmicsig-sync.{service,timer}` and a checkout pulled and built by hand): follow [First-time setup](docs/deployment.md#first-time-setup). The bootstrap waits for a running sync to finish before it retires the legacy units.
 
-2. Update the checkout and rebuild. The build needs network access the first time, because the ember edition added the `libm` crate. If you edited the tracked `cosmicsig-sync.service` in setup step 7, `git pull` refuses to overwrite it: run `git checkout -- cosmicsig-sync.service cosmicsig-sync.timer` first (the installed copies in `/etc/systemd/system` keep your values) and re-apply your values in step 6.
-
-   ```bash
-   git pull --ff-only
-   cargo build --release --locked
-   ```
-
-3. Confirm that the new binary has the ember edition:
-
-   ```bash
-   ./target/release/three_body_problem --help | grep -- --no-ember
-   ```
-
-4. Optionally, check the host's FFmpeg colour conversion for the ember videos. The test is ignored by default because it needs FFmpeg:
-
-   ```bash
-   cargo test --release --lib srgb_variants_round_trip -- --ignored
-   ```
-
-5. Run the preflight and a dry run:
-
-   ```bash
-   python3 run.py --preflight
-   python3 run.py --dry-run
-   ```
-
-   For the upgrade to the ember edition, expect every existing token to be missing only the ember edition, for example `Found 48 seeds with incomplete asset packages (out of 48 total): 0 new or incomplete, 48 missing only the ember edition`, followed by `This run generates 1 of them; 47 ember backfill seeds wait for later runs`.
-
-6. If `cosmicsig-sync.service` or `cosmicsig-sync.timer` changed, reinstall them (the upgrade to the ember edition changes both: the service's run ceiling is now `TimeoutStartSec`, and the timer now waits 5 minutes after each run finishes). Re-apply your `User=`, `WorkingDirectory=` and `EnvironmentFile=` values first.
-
-   ```bash
-   sudo cp cosmicsig-sync.service cosmicsig-sync.timer /etc/systemd/system/
-   sudo systemctl daemon-reload
-   ```
-
-7. Start the timer:
-
-   ```bash
-   sudo systemctl start cosmicsig-sync.timer
-   ```
-
-8. Check the first backfilled package, about an hour later. The log shows `same orbit as the live package; uploading only its ember edition`, then a line of the form `OK  seed=0x…  (total …)  ember edition uploaded` (search for `ember edition uploaded`). On the asset host, the package's `metadata/assets.json` lists the five `ember_*` roles, `metadata/ember.json` exists, and `images/source/master.png` is unchanged: its `sha256sum` equals the `sha256` of the manifest's `source_master` entry.
-
-The ember backfill then runs on its own for about 2 days (see [The ember backfill](#the-ember-backfill)). Make sure the asset host has about 20 GB free for it. If `run.py` is ever updated without rebuilding the binary, it logs `… predates the ember edition … rebuild the generator …` on every run, keeps uploading new mints without the ember edition, and pauses the backfill until the rebuild.
+After the upgrade to the ember edition, check the first backfilled package about an hour later. The log shows `same orbit as the live package; uploading only its ember edition`, then a line of the form `OK  seed=0x…  (total …)  ember edition uploaded` (search for `ember edition uploaded`). On the asset host, the package's `metadata/assets.json` lists the five `ember_*` roles, `metadata/ember.json` exists, and `images/source/master.png` is unchanged: its `sha256sum` equals the `sha256` of the manifest's `source_master` entry. The ember backfill then runs on its own for about 2 days (see [The ember backfill](#the-ember-backfill)). Make sure the asset host has about 20 GB free for it.
 
 ## Batch Testing
 
@@ -502,7 +449,17 @@ Pass a second path if your reference image or JSON lives elsewhere. Run with no 
 
 ## Development
 
-This section covers local checks before you push. **Continuous integration** on GitHub runs the same ideas in automated jobs; see [`ci/README.md`](ci/README.md) for the full job list (Rust fmt, Clippy, tests, benchmarks, docs, audit, coverage, and Python).
+[CONTRIBUTING.md](CONTRIBUTING.md) is the contributor guide: setup, the git hooks, commit messages, the pull-request flow (every merge into `main` deploys to production once CI passes), tests and the determinism rules. **Continuous integration** runs the same checks on every pull request and every push to `main`, and its final `CI passed` check gates both merging and the automatic production deploy. [`ci/README.md`](ci/README.md) lists the jobs (pre-commit lint, Clippy, the Rust tests on Linux x86-64 with and without the AVX2 kernel, Linux aarch64 and macOS, coverage, benchmarks, docs, cargo-deny, and the Python tests on 3.10, 3.12 and 3.13) and how to run each one locally.
+
+```bash
+just setup   # .venv with the pinned dev tools (Ruff, Mypy, pre-commit) and the git hooks
+just ci      # what CI gates a merge on: every hook, the Rust and Python tests, docs, benchmark build
+just         # list every recipe
+```
+
+### Quality gates
+
+The [pre-commit](https://pre-commit.com) framework runs the checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). On every commit: formatting (rustfmt, Ruff), linting (Clippy, Ruff, ShellCheck, actionlint), strict Mypy, workflow security (zizmor), JSON Schema validation (workflows, Dependabot, issue forms, and `docs/nft_traits.schema.json` with its example), spelling (typos) and repository hygiene. On every commit message: [Conventional Commits](https://www.conventionalcommits.org/). Before every push: the Rust and Python test suites. CI's lint job runs the same hooks on every file (so does `just lint`), so a change that passes locally passes there. Every hook revision is frozen to a commit SHA.
 
 ### Rust
 
@@ -510,13 +467,13 @@ Formatting and lint settings match CI (see [`.github/workflows/ci.yml`](.github/
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --release --locked
 ```
 
 Formatting rules live in [`rustfmt.toml`](rustfmt.toml) (100-character lines, 4-space indentation). The crate denies Rust warnings and missing public docs (`[lints.rust]` in [`Cargo.toml`](Cargo.toml): `warnings = "deny"`, `missing_docs = "deny"`).
 
-If you use [just](https://github.com/casey/just): `just check` runs `fmt` + `clippy`; `just test` runs the release test suite; `just all` runs `check` then `test`.
+With [just](https://just.systems): `just check` runs fmt + Clippy, `just test` the release test suite, `just doc` builds and opens the API docs, `just deny` runs cargo-deny.
 
 ### Python scripts (runtime)
 
@@ -525,6 +482,7 @@ These files are **stdlib-only**; you do not install anything from PyPI to execut
 | Script | Role |
 |--------|------|
 | [`run.py`](run.py) | Sync CosmicSignature assets with a remote host (SSH/SCP + API). |
+| [`ops/deploy/cosmicsig_deploy.py`](ops/deploy/cosmicsig_deploy.py) | Continuous deployment of `main` to the generator host (see [docs/deployment.md](docs/deployment.md)). |
 | [`run-test-images.py`](run-test-images.py) | Long-running random-seed generator for QA. |
 | [`ci/verify_reference.py`](ci/verify_reference.py) | Compare a PNG to the CI reference hash. |
 
@@ -539,9 +497,9 @@ Separate from *running* the scripts, the repo pins **developer** tools so format
 | [Ruff](https://docs.astral.sh/ruff/) | Lints and formats the repository Python scripts (replaces a pile of flake8/isort/black-style checks in one fast binary). |
 | [Mypy](https://mypy.readthedocs.io/) | Strict type-checking for the same files. |
 
-Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on `_utils.py`, `contact_sheet.py`, `run.py`, `run-test-images.py`, `ci/verify_reference.py`, and `tests/python/test_run.py`.
+Configuration is entirely in [`pyproject.toml`](pyproject.toml): Ruff target Python 3.10, line length **100** (same as Rust), rule sets **E, F, I, UP, B, SIM, PTH, RUF**; Mypy **`strict = true`** on every file listed under `[tool.mypy] files`.
 
-**Install the dev tools** (recommended: virtual environment so you do not fight [PEP 668](https://peps.python.org/pep-0668/) on Homebrew or Debian `externally-managed-environment`):
+`just setup` installs the pinned Ruff, Mypy and pre-commit versions from the `[dev]` extra into `.venv` (`just setup python3.12` picks the interpreter; macOS's `/usr/bin/python3` is too old). Using a virtual environment means you do not fight [PEP 668](https://peps.python.org/pep-0668/) (`externally-managed-environment`) on Homebrew or Debian. By hand:
 
 ```bash
 python3 -m venv .venv
@@ -549,25 +507,21 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-The `[dev]` extra installs pinned **Ruff** and **Mypy** versions declared in `pyproject.toml`. The editable install also exposes the small `_utils` module the same way `run.py` expects when run from the repo root.
+The editable install also exposes the small `_utils` module the same way `run.py` expects when run from the repo root. The Ruff and Mypy versions pinned there must equal the hook revisions in `.pre-commit-config.yaml`: [`tests/python/test_tooling.py`](tests/python/test_tooling.py) fails until both move together.
 
-**Run checks** (same three steps as CI):
+**Run checks:** `just py-check` runs `ruff format --check .`, `ruff check .` and `mypy`; `just py-fmt` applies Ruff's formatter.
 
-```bash
-just py-check
-```
-
-That runs, in order: `ruff format --check .`, `ruff check .`, and `mypy`. To apply Ruff’s formatter without checking: `just py-fmt` (equivalent to `ruff format .`).
-
-**Unit tests** for `run.py` live in [`tests/python/test_run.py`](tests/python/test_run.py). They use only the standard library (`unittest`) and no network: fake generator, `ssh` and `scp` scripts on `PATH` run against a temporary "remote" directory. From the repository root:
+**Unit tests** live in [`tests/python/`](tests/python/). They use only the standard library (`unittest`) and no network: fake generator, `ssh`, `scp` and other commands on `PATH`. The deploy agent and the root bootstrap are tested in [`tests/python/test_deploy.py`](tests/python/test_deploy.py) with real git, fake `cargo`, `systemctl` and `systemd-analyze` on `PATH` and a local fake GitHub API, and `ops/github/apply-settings.sh` in [`tests/python/test_github_settings.py`](tests/python/test_github_settings.py) with a fake `gh`. From the repository root:
 
 ```bash
-python3 -m unittest discover -s tests/python -v
+python3 -m unittest discover -s tests/python -v    # or: just py-test
 ```
 
-**Git hook:** If you use [`.githooks/pre-commit`](.githooks/pre-commit) (`git config core.hooksPath .githooks`), each commit runs **Rust** fmt + Clippy, then **Python** Ruff + Mypy. The hook calls `ruff` and `mypy` on your `PATH`, so activate the venv (above) in terminals where you commit, or install the tools into an environment that is always on your `PATH`.
+**CI:** the lint job runs the pre-commit hooks (Ruff and Mypy included), and the unit tests run on Python 3.10, 3.12 and 3.13. Mypy is configured with `python_version = "3.10"` in `pyproject.toml`, so types stay compatible with the stated minimum interpreter.
 
-**CI:** The workflow's Python job uses Ubuntu, **Python 3.12**, `pip install ".[dev]"`, then the same three commands as `just py-check`, and then the unit tests. Mypy is configured with `python_version = "3.10"` in `pyproject.toml`, so types stay compatible with the stated minimum interpreter.
+### Repository settings
+
+The GitHub settings that protect `main` (pull requests only, the `CI passed` check, linear history, squash or rebase merges) and the security features (Dependabot, secret scanning with push protection, CodeQL, private vulnerability reporting, a read-only default workflow token, SHA-pinned actions) are kept as code in [`ops/github/`](ops/github/README.md). A repository admin previews changes with `ops/github/apply-settings.sh --dry-run`, applies them with `ops/github/apply-settings.sh`, and checks for drift with `ops/github/apply-settings.sh --verify`.
 
 ## Algorithm
 
@@ -575,9 +529,13 @@ For a detailed description of the spectral pipeline (SPD buffer, accumulation, g
 
 For the ember edition (fluid, ink, look, spectral shading, the determinism contract and its certificate), see [docs/ember-edition.md](docs/ember-edition.md).
 
+## Security
+
+Report vulnerabilities privately through [GitHub's private vulnerability reporting](https://github.com/PredictionExplorer/CS-Image-Generation/security/advisories/new), never in a public issue. [SECURITY.md](SECURITY.md) lists what is in scope, what to include and the response targets.
+
 ## License
 
-This repository does not ship an SPDX `LICENSE` file. Before redistributing or pinning a build to IPFS for others to reuse, add a license you are comfortable with (for example MIT or Apache-2.0) so terms are explicit.
+To the extent possible under law, the authors have waived all copyright and related or neighboring rights to this repository under [CC0 1.0 Universal](LICENSE) (SPDX: `CC0-1.0`): anyone may copy, modify, distribute and use it, even commercially, without asking permission. CC0 does not waive trademark or patent rights (section 4a of the legal code), and third-party dependencies keep their own licenses, which CI checks with cargo-deny ([`deny.toml`](deny.toml)).
 
 ## Project Layout
 
@@ -594,14 +552,24 @@ src/oklab.rs             OKLab utilities
 _utils.py                Shared helpers imported by `run.py` / `run-test-images.py`
 run.py                   Automated generation and upload
 run-test-images.py       Batch random-seed test runner
-tests/                   Rust integration tests; tests/python/ holds run.py's unit tests
+tests/                   Rust integration tests; tests/python/ holds the Python unit tests
 contact_sheet.py         Visual contact sheet and golden gallery generator
-pyproject.toml           Python dev tooling (Ruff, Mypy) and optional `[dev]` deps
-justfile                 `just` recipes (`check`, `test`, `py-check`, …)
-ci/                      Reference-image verification tooling
-docs/                    Long-form algorithm documentation
+pyproject.toml           Python dev tooling (Ruff, Mypy, pre-commit) and optional `[dev]` deps
+justfile                 `just` recipes (`setup`, `lint`, `ci`, `test`, …)
+.pre-commit-config.yaml  Commit, commit-msg and pre-push hooks (CI's lint job runs them too)
+CONTRIBUTING.md          Contributor guide: setup, workflow, hooks, determinism rules
+.editorconfig            Editor defaults matching rustfmt and Ruff
+_typos.toml              Intentional spellings for the typos spell checker
+ci/                      CI and supply-chain docs (ci/README.md), reference-image tooling
+deny.toml                cargo-deny dependency policy (advisories, licenses, bans, sources)
+docs/                    Long-form algorithm and operations documentation
 .cargo/config.toml       Native CPU flags and SIMD features
-cosmicsig-sync.service   Systemd service unit for run.py
-cosmicsig-sync.timer     Systemd timer (5 minutes after each run)
+ops/deploy/              Continuous-deployment agent (cosmicsig_deploy.py; see docs/deployment.md)
+ops/systemd/             systemd user unit templates (sync and deploy services and timers)
+ops/server/              One-time root bootstrap of the generator host
+ops/github/              Repository settings and the `main` branch ruleset, as code
+.github/                 Workflows, Dependabot, CODEOWNERS, pull request and issue templates
 .env.example             Template for deployment secrets
+LICENSE                  CC0 1.0 Universal legal code
+SECURITY.md              How to report a vulnerability privately
 ```

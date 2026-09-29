@@ -8,7 +8,7 @@ use crate::spectrum::NUM_BINS;
 /// Start of visible spectrum in nanometers
 pub const LAMBDA_START: f64 = 380.0;
 
-/// End of visible spectrum in nanometers  
+/// End of visible spectrum in nanometers
 pub const LAMBDA_END: f64 = 700.0;
 
 /// Total range of visible spectrum

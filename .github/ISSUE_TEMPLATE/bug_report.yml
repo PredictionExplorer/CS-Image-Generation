@@ -1,0 +1,107 @@
+# Issue form: https://docs.github.com/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms
+# The labels are created and kept in sync by ops/github/apply-settings.sh.
+name: Bug report
+description: Something in the generator, the sync script, the deployment agent or CI misbehaves.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. The more exact the reproduction (seed,
+        flags, commit, platform), the faster it gets fixed.
+
+        **Security vulnerabilities do not belong here.** Report them privately instead:
+        see [SECURITY.md](https://github.com/PredictionExplorer/CS-Image-Generation/blob/main/SECURITY.md).
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where does the problem show up?
+      options:
+        - Generator (simulation, orbit selection, rendering, video)
+        - Ember edition (fluid, ink, still, video)
+        - Ember determinism (digests or certificate differ between machines)
+        - Package output or NFT trait metadata
+        - Sync script (run.py)
+        - Deployment agent or systemd units (ops/)
+        - CI, hooks or developer tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The commit you ran, from `git rev-parse --short HEAD` in your checkout.
+      placeholder: 56c4844
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, including error messages and exit status.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        The exact command lines, including the seed and every flag, and any input files or
+        settings they need. Say whether it happens every time.
+      placeholder: |
+        1. cargo build --release --locked
+        2. ./target/release/three_body_problem --seed 0xABCD --no-ember
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        Copy the relevant lines (for example from the terminal, `imgcheck.log`, or
+        `journalctl --user -u cosmicsig-sync -u cosmicsig-deploy`). Remove secrets such as
+        `.env` values, host names and RPC URLs first. This is rendered as code automatically.
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Run the commands below and paste their output.
+      value: |
+        - OS and version:
+        - CPU architecture (`uname -m`; x86_64 with or without AVX2, or aarch64):
+        - `rustc --version`:
+        - `ffmpeg -version | head -n 1`:
+        - `python3 --version`:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go to private reporting, see SECURITY.md).
+          required: true
+        - label: I removed secrets and private host names from everything above.
+          required: true

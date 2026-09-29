@@ -1,0 +1,21 @@
+# Line endings: git stores every text file with LF and checks it out with LF on every platform,
+# whatever core.autocrlf says, so a Windows checkout cannot introduce CRLF into the scripts the
+# Linux server runs (a CRLF shebang line fails with "bad interpreter"). The mixed-line-ending
+# pre-commit hook enforces the same rule on commit.
+* text=auto eol=lf
+
+# Binary media: never normalised, never text-diffed or merged. The PNG baselines under
+# ci/reference/ are hashed byte for byte.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.mp4  binary
+
+# Language-aware diff hunk headers (the enclosing fn/def/heading) in `git diff` and `git log -p`.
+*.rs   diff=rust
+*.py   diff=python
+*.md   diff=markdown
+
+# Written by cargo, never by hand: collapsed in GitHub diffs and left out of language statistics.
+Cargo.lock linguist-generated=true

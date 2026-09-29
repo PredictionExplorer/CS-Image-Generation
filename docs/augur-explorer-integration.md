@@ -478,8 +478,8 @@ depends on it.
    bytes matched too, so the earlier caveat about ffmpeg container metadata
    did not materialise on this toolchain.
 4. **Ember edition** (**pending deployment**, generator 1.1.0): once the
-   generation host is upgraded (pushing to `main` deploys nothing; see
-   [Upgrading a deployment](../README.md#upgrading-a-deployment)), new mints get complete
+   generation host is upgraded (merging to `main` deploys automatically once CI passes; see
+   [docs/deployment.md](deployment.md)), new mints get complete
    packages with the ember edition. The ember backfill then adds the edition
    to the 48 existing tokens at one package per sync run: about 66 min each,
    about 2 days in all. In its default `ember` mode it uploads, for each
