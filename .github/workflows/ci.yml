@@ -60,6 +60,28 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --release
 
+  # The workflow-level RUSTFLAGS replaces the target rustflags in
+  # .cargo/config.toml, so every other job builds for baseline x86-64 and never
+  # compiles the AVX2 kernel in src/spectrum_simd.rs that production x86 builds
+  # use. x86-64-v3 (AVX2 + FMA) stands in for config.toml's target-cpu=native:
+  # it enables the same kernel but stays valid when rust-cache restores build
+  # artifacts on a runner with a different CPU.
+  test-x86-avx2:
+    name: Clippy + Tests (x86-64 AVX2)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-D warnings -C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - name: Check the AVX2 + FMA kernel is enabled
+        run: |
+          rustc --print cfg $RUSTFLAGS | grep -qx 'target_feature="avx2"'
+          rustc --print cfg $RUSTFLAGS | grep -qx 'target_feature="fma"'
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo nextest run --release
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

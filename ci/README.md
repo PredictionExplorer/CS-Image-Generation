@@ -29,6 +29,8 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) performs:
 2. **Formatting** — `cargo fmt --all -- --check`
 3. **Linting** — `cargo clippy --all-targets -- -D warnings`
 4. **Tests** — `cargo nextest run --release` on Ubuntu and macOS
+   - The workflow-level `RUSTFLAGS="-D warnings"` overrides `.cargo/config.toml`, so these builds target baseline x86-64 (the scalar spectral fallback on Linux, NEON on Apple Silicon)
+   - A separate **x86-64 AVX2** job runs clippy and the tests with `-C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma` so the AVX2 kernel used by production x86 builds is compiled and tested
 5. **Benchmarks** — compile-check benchmark targets with `cargo bench --no-run`
 6. **Documentation** — `cargo doc` with `-D warnings` to catch broken links
 7. **Security Audit** — `rustsec/audit-check` against the RustSec advisory database
