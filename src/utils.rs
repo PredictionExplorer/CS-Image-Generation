@@ -1,10 +1,14 @@
-//! Utility functions: float comparison, Fourier transforms, bounding boxes, and Gaussian kernels.
+//! Utility functions: float comparison, Fourier transforms, bounding boxes, Gaussian kernels,
+//! and JSON file output.
 
 use crate::render::constants;
 use nalgebra::Vector3;
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
+use serde::Serialize;
 use smallvec::SmallVec;
+use std::fs::File;
+use std::io::{self, BufWriter, Write as _};
 
 /// Standard epsilon for float comparisons
 pub const FLOAT_EPSILON: f64 = 1e-10;
@@ -133,6 +137,22 @@ pub fn build_gaussian_kernel(radius: usize) -> SmallVec<[f64; 32]> {
         *v /= sum;
     }
     kernel
+}
+
+/// Write `value` to `path` as pretty-printed JSON.
+///
+/// Flushes the buffer and syncs the file explicitly, so that a write error that surfaces only
+/// when the buffer is flushed or the data reaches the disk (a full disk, say) is returned instead
+/// of being lost when the writer is dropped. After an error the file may be partial.
+///
+/// # Errors
+///
+/// Returns the I/O error of creating, writing, flushing or syncing the file.
+pub fn write_json_pretty<T: Serialize + ?Sized>(path: &str, value: &T) -> io::Result<()> {
+    let mut writer = BufWriter::new(File::create(path)?);
+    serde_json::to_writer_pretty(&mut writer, value).map_err(io::Error::other)?;
+    writer.flush()?;
+    writer.into_inner().map_err(io::IntoInnerError::into_error)?.sync_all()
 }
 
 #[cfg(test)]
@@ -334,5 +354,27 @@ mod tests {
         assert_eq!(max_x, 0.0);
         assert_eq!(min_y, 0.0);
         assert_eq!(max_y, 0.0);
+    }
+
+    #[test]
+    fn test_write_json_pretty_round_trips() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("value.json");
+        let path = path.to_str().expect("UTF-8 path");
+        let value = serde_json::json!({ "role": "ember_web", "size": [1920, 1080] });
+        write_json_pretty(path, &value).expect("write");
+        let text = std::fs::read_to_string(path).expect("read back");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).expect("JSON"), value);
+    }
+
+    /// A write error that surfaces only when the buffer is flushed (`/dev/full` answers every
+    /// write with ENOSPC, and the value is far smaller than the buffer) is returned, not lost when
+    /// the writer is dropped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_write_json_pretty_reports_a_full_disk() {
+        let error = write_json_pretty("/dev/full", &serde_json::json!({ "a": 1 }))
+            .expect_err("a full disk must be an error");
+        assert_eq!(error.kind(), io::ErrorKind::StorageFull, "{error}");
     }
 }

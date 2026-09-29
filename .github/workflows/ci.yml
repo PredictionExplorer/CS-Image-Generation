@@ -14,7 +14,7 @@ env:
 
 jobs:
   python:
-    name: Python (ruff + mypy)
+    name: Python (ruff + mypy + unittest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +31,10 @@ jobs:
         run: ruff check .
       - name: Mypy
         run: mypy
+      # run.py's sync policy (backfill modes, retry cap, failure ledger, exit-status handling),
+      # with stub generator, ssh and scp; stdlib unittest only.
+      - name: Unit tests
+        run: python -m unittest discover -s tests/python -v
 
   fmt:
     name: Formatting
@@ -47,6 +51,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
 
+  # The tests that render a package or encode the ember videos need FFmpeg (with ffprobe) and,
+  # because GitHub sets CI=true, fail instead of skipping when it is missing, so every job that
+  # runs the test suite installs it.
   test:
     name: Tests (${{ matrix.os }})
     strategy:
@@ -56,6 +63,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --release
@@ -65,7 +78,9 @@ jobs:
   # compiles the AVX2 kernel in src/spectrum_simd.rs that production x86 builds
   # use. x86-64-v3 (AVX2 + FMA) stands in for config.toml's target-cpu=native:
   # it enables the same kernel but stays valid when rust-cache restores build
-  # artifacts on a runner with a different CPU.
+  # artifacts on a runner with a different CPU. The full test run includes the
+  # ember golden digests (tests/ember_determinism.rs), so it also checks that the
+  # ember edition renders the same bits under AVX2/FMA code generation.
   test-x86-avx2:
     name: Clippy + Tests (x86-64 AVX2)
     runs-on: ubuntu-latest
@@ -73,6 +88,8 @@ jobs:
       RUSTFLAGS: "-D warnings -C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma"
     steps:
       - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - name: Check the AVX2 + FMA kernel is enabled
@@ -87,6 +104,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --release --lcov --output-path lcov.info
@@ -114,11 +133,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --document-private-items
 
+  # Audits the committed Cargo.lock against the RustSec advisory database: fails on any
+  # vulnerability; unmaintained/unsound notices are reported as warnings. A prebuilt cargo-audit
+  # needs neither a compile under the pinned toolchain nor the checks: write permission that
+  # rustsec/audit-check's check run required (its job failed with "Resource not accessible by
+  # integration" under this workflow's read-only token).
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit

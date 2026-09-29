@@ -9,6 +9,8 @@
 //! - [`app`] -- high-level generation pipeline (seed parsing, orchestration).
 //! - [`drift`] -- body drift transforms (Brownian, linear, elliptical).
 //! - [`drift_config`] -- drift parameter resolution and validation.
+//! - [`ember`] -- the ember edition: the orbit drawn in sumi ink by the fluid it stirs
+//!   (CPU-only, bit-identical across architectures).
 //! - [`error`] -- error types and the crate-wide [`Result`] alias.
 //! - [`generation_log`] -- persistent JSON generation log.
 //! - [`nft_traits`] -- public NFT trait metadata (`metadata/nft_traits.json`).
@@ -32,6 +34,9 @@ pub mod app;
 pub mod drift;
 /// Drift parameter resolution and validation.
 pub mod drift_config;
+// Documented by its own inner doc comment (outer and inner docs would be merged and resolved in
+// this scope, breaking the module's intra-doc links).
+pub mod ember;
 /// Error types and the crate-wide [`Result`] alias.
 pub mod error;
 /// Persistent JSON generation log for tracking produced seeds.

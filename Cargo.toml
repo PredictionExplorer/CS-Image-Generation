@@ -1,6 +1,6 @@
 [package]
 name         = "three_body_problem"
-version      = "1.0.0"
+version      = "1.1.0"
 edition      = "2024"
 rust-version = "1.94.1"
 
@@ -45,12 +45,20 @@ chrono   = "0.4.44"
 clap     = { version = "4.6.0", features = ["derive"] }
 hex      = "0.4.3"
 image    = { version = "0.25.10", default-features = false, features = ["png"] }
+# Pure-Rust transcendental functions for the ember edition's cross-architecture bit-identical
+# output. Pinned exactly: a bump may change results in the last bit, so it must re-bless every
+# ember golden hash (the unit goldens in `src/ember/*.rs` and `tests/ember_determinism.rs`) and
+# bump `ember::certificate::ALGORITHM_VERSION` (docs/ember-design.md §0.2).
+libm     = "=0.2.16"
 nalgebra = { version = "0.34.2", default-features = false, features = ["std"] }
 png = "0.18.1"
 rayon    = "1.12.0"
 rustfft  = "6.4.1"
 serde    = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+# `float_roundtrip`: parse every float exactly (without it a 17-digit decimal may read back one
+# unit in the last place off), so that the ember certificate reads back exactly what it wrote.
+# It changes parsing only, never a written byte.
+serde_json = { version = "1.0.149", features = ["float_roundtrip"] }
 sha2 = "0.11.0"
 sha3     = "0.11.0"
 smallvec = "1.15.1"
@@ -65,6 +73,10 @@ tempfile = "3.27.0"
 
 [[bench]]
 name    = "spectral"
+harness = false
+
+[[bench]]
+name    = "ember_fft"
 harness = false
 
 [profile.release]

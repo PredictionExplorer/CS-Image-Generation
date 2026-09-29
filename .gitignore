@@ -13,6 +13,8 @@ run.log
 generation_log.json
 generation_log.json.lock
 seed_source_mismatch.json
+backfill_failures.json
+backfill_failures.json.tmp
 lcov.info
 
 # macOS

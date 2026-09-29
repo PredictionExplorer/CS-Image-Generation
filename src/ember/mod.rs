@@ -1,0 +1,60 @@
+//! The ember edition: the selected orbit drawn in sumi ink by the fluid it stirs.
+//!
+//! The three bodies of the selected orbit are projected onto the plane of their principal motion and
+//! dragged, as small Brinkman-penalised discs, through a doubly periodic two-dimensional
+//! Navier–Stokes fluid (Re = 300). Whenever a parcel of water brushes past a body where the body's
+//! boundary layer is spinning (|ω| above a gate), it picks up ink. Ink is carried by the flow, dilutes
+//! with age, and turns vermilion where the fresh waters of *two* bodies meet; the vermilion then
+//! glows on in the water as an ember that cools with an e-folding time of one fluid time unit
+//! (ember memory).
+//! The result is shaded spectrally (36 bands, Kubelka–Munk with a Saunderson surface) as
+//! pine-soot sumi and cinnabar on a mottled kozo sheet under a warm gallery light.
+//!
+//! # Pipeline
+//!
+//! 1. `orbit` — PCA projection of the recorded orbit and the orbit-to-fluid time map (the median
+//!    body speed is the fluid's reference speed).
+//! 2. `fluid` — pseudo-spectral vorticity solver (Lawson IF-RK4, 2/3 dealiasing, hyperviscosity,
+//!    sponge) built on the deterministic `fft`.
+//! 3. `trace` and `ink` — every frame, each ink node is traced back along exact characteristics
+//!    to the previous frame, recording gated soak-zone contacts; older ink and embers are carried
+//!    by clamped Catmull-Rom semi-Lagrangian interpolation.
+//! 4. `look`, `optics` and `paper` — tone law, vermilion accent, spectral shading and encoding.
+//! 5. [`pipeline`] — orchestration: one frame per main-video checkpoint; the last frame is the still.
+//! 6. [`certificate`] — the per-package determinism certificate `metadata/ember.json`, written and
+//!    read back.
+//!
+//! The design (equations, conventions, determinism rules, defaults) is documented for
+//! maintainers in `docs/ember-design.md`, the product view in `docs/ember-edition.md`.
+//!
+//! # Determinism
+//!
+//! The frame stream and the still are a pure function of the orbit, the output size, the paper
+//! seed and [`EmberConfig`]: bit-identical on every IEEE-754 CPU architecture. The module uses only
+//! exactly rounded arithmetic, the pure-Rust [`libm`](https://docs.rs/libm) crate for
+//! transcendental functions (through `math`), its own FFT, fixed-order reductions, and parallelism
+//! only over independent outputs. See `metadata/ember.json` for the per-package certificate.
+
+pub mod certificate;
+pub mod config;
+pub mod error;
+pub(crate) mod fft;
+pub(crate) mod fluid;
+pub(crate) mod ink;
+pub(crate) mod look;
+pub(crate) mod math;
+pub(crate) mod optics;
+pub(crate) mod orbit;
+pub(crate) mod paper;
+pub mod pipeline;
+pub(crate) mod trace;
+
+pub use certificate::{CertificateError, EmberCertificate};
+pub use config::EmberConfig;
+pub use error::{EmberError, EmberResult};
+#[doc(hidden)]
+pub use fft::bench as fft_bench;
+pub use pipeline::{
+    EmberFrame, EmberMode, EmberPlan, EmberProjection, EmberRequest, EmberStats, EmberSummary,
+    EmberTimings, plan_ember, render_ember,
+};

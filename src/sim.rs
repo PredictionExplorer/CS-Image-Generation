@@ -141,7 +141,12 @@ impl Body {
         let dir = self.position - *op;
         let d = dir.norm();
         if d > crate::utils::FLOAT_EPSILON {
-            self.acceleration += -G * om * dir / d.powi(3);
+            // `d * d * d` rather than `powi(3)`: std leaves `powi`'s precision unspecified, while
+            // two correctly rounded multiplications are exact IEEE-754 on every CPU. Both lowerings
+            // of `powi(3)` in use (LLVM's expansion and compiler-rt's `__powidf2`) compute
+            // `d * (d * d)`, which multiplication's commutativity makes bit-identical to this, so
+            // every orbit (and the ember edition fed by it) is unchanged.
+            self.acceleration += -G * om * dir / (d * d * d);
         }
     }
 }
@@ -780,5 +785,24 @@ mod tests {
         let dbg = format!("{sim:?}");
         assert!(dbg.contains("num_bodies"));
         assert!(dbg.contains("num_steps"));
+    }
+
+    /// The gravity kernel cubes distances as `d * d * d`; that must reproduce the previous
+    /// `d.powi(3)` bit for bit (debug builds call compiler-rt, release builds expand the constant
+    /// exponent), so no recorded orbit changes.
+    #[test]
+    fn test_cube_by_multiplication_matches_powi() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        for _ in 0..100_000 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            // Distances between bodies span many decades: sweep exponents 2^-40 ..= 2^40.
+            let mantissa = 1.0 + (state >> 11) as f64 / (1u64 << 53) as f64;
+            let exponent = ((state >> 3) % 81) as i32 - 40;
+            let d = std::hint::black_box(mantissa * 2f64.powi(exponent));
+            let cubed = d * d * d;
+            assert_eq!(cubed.to_bits(), d.powi(3).to_bits(), "d = {d:e}");
+        }
     }
 }

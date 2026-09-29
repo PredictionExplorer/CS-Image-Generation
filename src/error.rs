@@ -30,6 +30,10 @@ pub enum AppError {
     /// Render-module internal errors
     #[error("{0}")]
     RenderInternal(#[from] crate::render::error::RenderError),
+
+    /// Ember-edition errors
+    #[error("Ember edition error: {0}")]
+    Ember(#[from] crate::ember::EmberError),
 }
 
 /// Errors that can occur during physics simulation

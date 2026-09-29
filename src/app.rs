@@ -6,7 +6,11 @@
 
 use crate::drift::parse_drift_mode;
 use crate::drift_config::{ResolvedDriftConfig, resolve_drift_config};
-use crate::error::{ConfigError, Result};
+use crate::ember::certificate::{CertificateContext, EmberCertificate};
+use crate::ember::{
+    self, EmberConfig, EmberError, EmberFrame, EmberMode, EmberRequest, EmberResult, EmberSummary,
+};
+use crate::error::{AppError, ConfigError, Result};
 use crate::generation_log::{
     DriftConfig, GenerationLogger, GenerationRecord, LoggedRenderConfig, OrbitInfo,
     SimulationConfig,
@@ -15,7 +19,7 @@ use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     VideoEncodingOptions, VideoOutputSpec, constants, create_videos_from_frames_singlepass,
     generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    save_image_as_png_16bit,
+    save_image_as_png_16bit, save_image_as_srgb_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use chrono::Local;
@@ -23,14 +27,43 @@ use image::{ImageBuffer, Rgb};
 use nalgebra::{Matrix3, Vector3};
 use serde::Serialize;
 use std::fs::{self, File};
-use std::io::BufWriter;
 use std::process::Command;
+use std::time::Instant;
 use tracing::{info, warn};
 
 /// RNG fork domain for the seeded viewing orientation.
 const VIEW_RNG_DOMAIN: &[u8] = b"cosmic-view/v1";
 /// Maximum width of the lightweight WebP preview image.
 pub const WEB_PREVIEW_MAX_WIDTH: u32 = 640;
+
+/// Package-relative path of the ember edition's 16-bit sRGB still.
+pub const EMBER_STILL_PATH: &str = "images/source/ember.png";
+/// Package-relative path of the ember still's full-resolution WebP.
+pub const EMBER_FULL_WEBP_PATH: &str = "images/web/ember_full.webp";
+/// Package-relative path of the ember still's preview WebP.
+pub const EMBER_PREVIEW_WEBP_PATH: &str = "images/web/ember_preview.webp";
+/// Package-relative path of the ember edition's browser-compatible H.264 video.
+pub const EMBER_WEB_VIDEO_PATH: &str = "videos/web/ember.mp4";
+/// Package-relative path of the ember edition's archival HEVC video.
+pub const EMBER_HQ_VIDEO_PATH: &str = "videos/hq/ember.mp4";
+/// Package-relative path of the ember edition's determinism certificate.
+pub const EMBER_CERTIFICATE_PATH: &str = "metadata/ember.json";
+/// Package-relative paths of every file the ember edition writes, in [`EmberOutputPaths`] field
+/// order: still, full WebP, preview WebP, web video, HQ video, certificate. `run.py` requires
+/// each of them in a complete package (`EMBER_PACKAGE_FILES`).
+pub const EMBER_OUTPUT_PATHS: [&str; 6] = [
+    EMBER_STILL_PATH,
+    EMBER_FULL_WEBP_PATH,
+    EMBER_PREVIEW_WEBP_PATH,
+    EMBER_WEB_VIDEO_PATH,
+    EMBER_HQ_VIDEO_PATH,
+    EMBER_CERTIFICATE_PATH,
+];
+
+/// Appended to the package seed bytes to seed the ember edition's kozo sheet: a separate,
+/// versioned domain, so the paper texture never correlates with any other seeded choice and
+/// changes only if this string does.
+const EMBER_PAPER_SEED_DOMAIN: &[u8] = b"\0cosmic-ember/kozo-sheet/v1";
 
 /// Core `CosmicSignature` enhancement flags.
 #[derive(Clone, Debug)]
@@ -206,12 +239,111 @@ struct AssetEntry {
     codec: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pixel_format: Option<String>,
+    /// Colour encoding, where it is not the main renderer's (the ember entries are `srgb`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color_space: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sha256: Option<String>,
+}
+
+/// Codec facts of a video entry.
+struct VideoFacts<'a> {
+    /// Playback duration.
+    duration_seconds: f64,
+    /// Frames per second.
+    frame_rate: u32,
+    /// Codec name as the manifest spells it (`h264`, `hevc`).
+    codec: &'a str,
+    /// `FFmpeg` pixel format of the encoded stream.
+    pixel_format: &'a str,
+}
+
+impl AssetEntry {
+    /// One file of the package with its size and SHA-256 (both absent when the file is missing,
+    /// e.g. a video of an image-only run).
+    fn file(seed_dir: &str, path: &str, kind: &str, role: &str, format: &str) -> Self {
+        Self {
+            path: path.to_string(),
+            kind: kind.to_string(),
+            role: role.to_string(),
+            format: format.to_string(),
+            width: None,
+            height: None,
+            duration_seconds: None,
+            frame_rate: None,
+            codec: None,
+            pixel_format: None,
+            color_space: None,
+            file_count: None,
+            bytes: file_size(seed_dir, path),
+            sha256: file_sha256(seed_dir, path),
+        }
+    }
+
+    /// An image file of `size` (`width`, `height`) pixels.
+    fn image(seed_dir: &str, path: &str, role: &str, format: &str, size: (u32, u32)) -> Self {
+        Self {
+            width: Some(size.0),
+            height: Some(size.1),
+            ..Self::file(seed_dir, path, "image", role, format)
+        }
+    }
+
+    /// An MP4 video of `size` pixels.
+    fn video(
+        seed_dir: &str,
+        path: &str,
+        role: &str,
+        size: (u32, u32),
+        facts: &VideoFacts<'_>,
+    ) -> Self {
+        Self {
+            width: Some(size.0),
+            height: Some(size.1),
+            duration_seconds: Some(facts.duration_seconds),
+            frame_rate: Some(facts.frame_rate),
+            codec: Some(facts.codec.to_string()),
+            pixel_format: Some(facts.pixel_format.to_string()),
+            ..Self::file(seed_dir, path, "video", role, "mp4")
+        }
+    }
+
+    fn with_pixel_format(self, pixel_format: &str) -> Self {
+        Self { pixel_format: Some(pixel_format.to_string()), ..self }
+    }
+
+    fn with_color_space(self, color_space: &str) -> Self {
+        Self { color_space: Some(color_space.to_string()), ..self }
+    }
+}
+
+/// What the ember stage produced, as recorded in `metadata/assets.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmberManifest {
+    /// Frames in each ember video (`0` when no video was encoded).
+    pub frames_emitted: usize,
+    /// Frames per second of the ember videos.
+    pub frame_rate: u32,
+    /// Whether `videos/{web,hq}/ember.mp4` were encoded (not under `--image-only`).
+    pub has_video: bool,
+    /// Whether the HQ slot holds the software fast encode (`--fast-encode`) instead of HEVC.
+    pub fast_encode: bool,
+}
+
+impl EmberManifest {
+    /// Manifest facts of a finished ember render encoded at the product frame rate.
+    pub fn from_summary(summary: &EmberSummary, fast_encode: bool) -> Self {
+        Self {
+            frames_emitted: summary.frames_emitted,
+            frame_rate: constants::DEFAULT_VIDEO_FPS,
+            has_video: summary.frames_emitted > 0,
+            fast_encode,
+        }
+    }
 }
 
 fn file_size(seed_dir: &str, relative_path: &str) -> Option<u64> {
@@ -286,157 +418,142 @@ pub fn generate_webp_images(paths: ImageOutputPaths<'_>) -> Result<()> {
 }
 
 /// Write a website-oriented asset manifest for the generated package.
+///
+/// `steps` is the number of recorded orbit steps (`--steps`): `main.mp4` has one frame per
+/// entry of `render::main_video_checkpoints(steps)`, so its duration is that count over the frame
+/// rate.
+///
+/// `ember` describes the ember edition's outputs (`None` when it was skipped with `--no-ember`
+/// or failed); its entries are appended after the main renderer's with their own roles
+/// (`ember_source_master`, `ember_web_full`, `ember_web_preview`, `ember_web`, `ember_hq`), so
+/// the manifest stays at `schema_version` 2 for existing readers.
 pub fn write_asset_manifest(
     seed_dir: &str,
     width: u32,
     height: u32,
+    steps: usize,
     image_only: bool,
+    ember: Option<&EmberManifest>,
 ) -> Result<()> {
-    let (preview_width, preview_height) = preview_dimensions(width, height);
-    let mut assets = vec![
-        AssetEntry {
-            path: "images/source/master.png".to_string(),
-            kind: "image".to_string(),
-            role: "source_master".to_string(),
-            format: "png".to_string(),
-            width: Some(width),
-            height: Some(height),
-            duration_seconds: None,
-            frame_rate: None,
-            codec: None,
-            pixel_format: Some("rgb48".to_string()),
-            file_count: None,
-            bytes: file_size(seed_dir, "images/source/master.png"),
-            sha256: file_sha256(seed_dir, "images/source/master.png"),
-        },
-        AssetEntry {
-            path: "images/web/full.webp".to_string(),
-            kind: "image".to_string(),
-            role: "web_full".to_string(),
-            format: "webp".to_string(),
-            width: Some(width),
-            height: Some(height),
-            duration_seconds: None,
-            frame_rate: None,
-            codec: None,
-            pixel_format: None,
-            file_count: None,
-            bytes: file_size(seed_dir, "images/web/full.webp"),
-            sha256: file_sha256(seed_dir, "images/web/full.webp"),
-        },
-        AssetEntry {
-            path: "images/web/preview.webp".to_string(),
-            kind: "image".to_string(),
-            role: "web_preview".to_string(),
-            format: "webp".to_string(),
-            width: Some(preview_width),
-            height: Some(preview_height),
-            duration_seconds: None,
-            frame_rate: None,
-            codec: None,
-            pixel_format: None,
-            file_count: None,
-            bytes: file_size(seed_dir, "images/web/preview.webp"),
-            sha256: file_sha256(seed_dir, "images/web/preview.webp"),
-        },
-    ];
-
+    let size = (width, height);
+    let mut assets = main_image_entries(seed_dir, size);
     if !image_only {
-        let main_duration = f64::from(render::constants::DEFAULT_TARGET_FRAMES)
-            / f64::from(render::constants::DEFAULT_VIDEO_FPS);
-        let sweep_duration = f64::from(render::constants::CYCLE_TOTAL_FRAMES)
-            / f64::from(render::constants::DEFAULT_VIDEO_FPS);
-        assets.extend([
-            AssetEntry {
-                path: "videos/web/main.mp4".to_string(),
-                kind: "video".to_string(),
-                role: "main_web".to_string(),
-                format: "mp4".to_string(),
-                width: Some(width),
-                height: Some(height),
-                duration_seconds: Some(main_duration),
-                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
-                codec: Some("h264".to_string()),
-                pixel_format: Some("yuv420p".to_string()),
-                file_count: None,
-                bytes: file_size(seed_dir, "videos/web/main.mp4"),
-                sha256: file_sha256(seed_dir, "videos/web/main.mp4"),
-            },
-            AssetEntry {
-                path: "videos/hq/main.mp4".to_string(),
-                kind: "video".to_string(),
-                role: "main_hq".to_string(),
-                format: "mp4".to_string(),
-                width: Some(width),
-                height: Some(height),
-                duration_seconds: Some(main_duration),
-                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
-                codec: Some("hevc".to_string()),
-                pixel_format: Some("yuv422p10le".to_string()),
-                file_count: None,
-                bytes: file_size(seed_dir, "videos/hq/main.mp4"),
-                sha256: file_sha256(seed_dir, "videos/hq/main.mp4"),
-            },
-            AssetEntry {
-                path: "videos/web/spectral_sweep.mp4".to_string(),
-                kind: "video".to_string(),
-                role: "spectral_sweep_web".to_string(),
-                format: "mp4".to_string(),
-                width: Some(width),
-                height: Some(height),
-                duration_seconds: Some(sweep_duration),
-                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
-                codec: Some("h264".to_string()),
-                pixel_format: Some("yuv420p".to_string()),
-                file_count: None,
-                bytes: file_size(seed_dir, "videos/web/spectral_sweep.mp4"),
-                sha256: file_sha256(seed_dir, "videos/web/spectral_sweep.mp4"),
-            },
-            AssetEntry {
-                path: "videos/hq/spectral_sweep.mp4".to_string(),
-                kind: "video".to_string(),
-                role: "spectral_sweep_hq".to_string(),
-                format: "mp4".to_string(),
-                width: Some(width),
-                height: Some(height),
-                duration_seconds: Some(sweep_duration),
-                frame_rate: Some(render::constants::DEFAULT_VIDEO_FPS),
-                codec: Some("hevc".to_string()),
-                pixel_format: Some("yuv422p10le".to_string()),
-                file_count: None,
-                bytes: file_size(seed_dir, "videos/hq/spectral_sweep.mp4"),
-                sha256: file_sha256(seed_dir, "videos/hq/spectral_sweep.mp4"),
-            },
-            AssetEntry {
-                path: "spectral/".to_string(),
-                kind: "image_set".to_string(),
-                role: "spectral_bins".to_string(),
-                format: "png".to_string(),
-                width: Some(width),
-                height: Some(height),
-                duration_seconds: None,
-                frame_rate: None,
-                codec: None,
-                pixel_format: Some("rgb48".to_string()),
-                file_count: Some(crate::spectrum::NUM_BINS),
-                bytes: None,
-                sha256: None,
-            },
-        ]);
+        assets.extend(main_video_entries(seed_dir, size, steps));
+    }
+    if let Some(ember) = ember {
+        assets.extend(ember_entries(seed_dir, size, ember));
     }
 
     let manifest =
         AssetManifest { schema_version: 2, generated_at: Local::now().to_rfc3339(), assets };
     let path = format!("{seed_dir}/metadata/assets.json");
-    let file = File::create(&path)?;
-    serde_json::to_writer_pretty(BufWriter::new(file), &manifest).map_err(std::io::Error::other)?;
+    crate::utils::write_json_pretty(&path, &manifest)?;
     info!("   Saved asset metadata => {path}");
     Ok(())
 }
 
+/// The main renderer's master still and its WebP derivatives.
+fn main_image_entries(seed_dir: &str, size: (u32, u32)) -> Vec<AssetEntry> {
+    let preview = preview_dimensions(size.0, size.1);
+    vec![
+        AssetEntry::image(seed_dir, "images/source/master.png", "source_master", "png", size)
+            .with_pixel_format("rgb48"),
+        AssetEntry::image(seed_dir, "images/web/full.webp", "web_full", "webp", size),
+        AssetEntry::image(seed_dir, "images/web/preview.webp", "web_preview", "webp", preview),
+    ]
+}
+
+/// The main renderer's videos (of an orbit of `steps` recorded steps) and the spectral gallery.
+fn main_video_entries(seed_dir: &str, size: (u32, u32), steps: usize) -> Vec<AssetEntry> {
+    let fps = constants::DEFAULT_VIDEO_FPS;
+    let seconds = |frames: usize| frames as f64 / f64::from(fps);
+    // The frames `render_video` actually encodes (1,802 at the default 1,000,000 steps), not the
+    // nominal target: the ember videos, frame-locked to `main.mp4`, get the same duration.
+    let main_duration = seconds(render::main_video_checkpoints(steps).len());
+    let sweep_duration = seconds(constants::CYCLE_TOTAL_FRAMES as usize);
+    let facts = |duration_seconds, codec, pixel_format| VideoFacts {
+        duration_seconds,
+        frame_rate: fps,
+        codec,
+        pixel_format,
+    };
+    let (web, hq) = (("h264", "yuv420p"), ("hevc", "yuv422p10le"));
+    vec![
+        AssetEntry::video(
+            seed_dir,
+            "videos/web/main.mp4",
+            "main_web",
+            size,
+            &facts(main_duration, web.0, web.1),
+        ),
+        AssetEntry::video(
+            seed_dir,
+            "videos/hq/main.mp4",
+            "main_hq",
+            size,
+            &facts(main_duration, hq.0, hq.1),
+        ),
+        AssetEntry::video(
+            seed_dir,
+            "videos/web/spectral_sweep.mp4",
+            "spectral_sweep_web",
+            size,
+            &facts(sweep_duration, web.0, web.1),
+        ),
+        AssetEntry::video(
+            seed_dir,
+            "videos/hq/spectral_sweep.mp4",
+            "spectral_sweep_hq",
+            size,
+            &facts(sweep_duration, hq.0, hq.1),
+        ),
+        AssetEntry {
+            width: Some(size.0),
+            height: Some(size.1),
+            pixel_format: Some("rgb48".to_string()),
+            file_count: Some(crate::spectrum::NUM_BINS),
+            // A directory: no single size or digest.
+            bytes: None,
+            sha256: None,
+            ..AssetEntry::file(seed_dir, "spectral/", "image_set", "spectral_bins", "png")
+        },
+    ]
+}
+
+/// The ember edition's still, its WebP derivatives and (when encoded) its videos, all sRGB.
+fn ember_entries(seed_dir: &str, size: (u32, u32), ember: &EmberManifest) -> Vec<AssetEntry> {
+    let preview = preview_dimensions(size.0, size.1);
+    let mut entries = vec![
+        AssetEntry::image(seed_dir, EMBER_STILL_PATH, "ember_source_master", "png", size)
+            .with_pixel_format("rgb48"),
+        AssetEntry::image(seed_dir, EMBER_FULL_WEBP_PATH, "ember_web_full", "webp", size),
+        AssetEntry::image(seed_dir, EMBER_PREVIEW_WEBP_PATH, "ember_web_preview", "webp", preview),
+    ];
+    if ember.has_video {
+        let duration_seconds = ember.frames_emitted as f64 / f64::from(ember.frame_rate);
+        let [web, hq] = ember_video_options(ember.fast_encode);
+        for (path, role, options) in
+            [(EMBER_WEB_VIDEO_PATH, "ember_web", web), (EMBER_HQ_VIDEO_PATH, "ember_hq", hq)]
+        {
+            let facts = VideoFacts {
+                duration_seconds,
+                frame_rate: ember.frame_rate,
+                codec: manifest_codec(&options.codec),
+                pixel_format: &options.pixel_format,
+            };
+            entries.push(AssetEntry::video(seed_dir, path, role, size, &facts));
+        }
+    }
+    entries.into_iter().map(|entry| entry.with_color_space("srgb")).collect()
+}
+
+/// Codec name the manifest uses for an `FFmpeg` encoder.
+fn manifest_codec(encoder: &str) -> &'static str {
+    if encoder.contains("265") || encoder.contains("hevc") { "hevc" } else { "h264" }
+}
+
 fn write_generation_record(path: &str, record: &GenerationRecord) -> Result<()> {
-    let file = File::create(path)?;
-    serde_json::to_writer_pretty(BufWriter::new(file), record).map_err(std::io::Error::other)?;
+    crate::utils::write_json_pretty(path, record)?;
     info!("   Saved generation metadata => {path}");
     Ok(())
 }
@@ -1049,8 +1166,8 @@ pub fn render_video(
     }
 
     let frame_rate = constants::DEFAULT_VIDEO_FPS;
-    let target_frames = constants::DEFAULT_TARGET_FRAMES;
-    let frame_interval = (scene.step_count() / target_frames as usize).max(1);
+    // The ember edition renders the same checkpoints (`render::main_video_checkpoints`).
+    let frame_interval = render::main_video_frame_interval(scene.step_count());
 
     let mut last_frame_png: Option<ImageBuffer<Rgb<u16>, Vec<u16>>> = None;
     let video_options = if fast_encode {
@@ -1150,6 +1267,357 @@ pub fn generate_spectral_sweep_video(
         output_videos.high_quality,
         fast_encode,
     )?)
+}
+
+/// Output files of the ember edition (see the `EMBER_*_PATH` constants for their package paths).
+#[derive(Clone, Copy, Debug)]
+pub struct EmberOutputPaths<'a> {
+    /// 16-bit sRGB PNG of the still (the final frame, orbit step `steps - 1`).
+    pub still_png: &'a str,
+    /// Full-resolution WebP of the still.
+    pub full_webp: &'a str,
+    /// Preview WebP of the still (at most [`WEB_PREVIEW_MAX_WIDTH`] wide).
+    pub preview_webp: &'a str,
+    /// Browser-compatible H.264 video (not written for image-only renders).
+    pub web_video: &'a str,
+    /// Archival HEVC video, or the software fast encode (not written for image-only renders).
+    pub hq_video: &'a str,
+    /// Determinism certificate (`metadata/ember.json`).
+    pub certificate: &'a str,
+}
+
+/// Inputs of [`render_ember_edition`].
+#[derive(Clone, Copy, Debug)]
+pub struct EmberEditionRequest<'a> {
+    /// Package seed as hex (recorded in the certificate).
+    pub seed_hex: &'a str,
+    /// Package seed bytes (the kozo sheet's seed is derived from them).
+    pub seed_bytes: &'a [u8],
+    /// Initial conditions of the selected orbit, before the centre-of-mass shift.
+    pub bodies: &'a [Body],
+    /// Recorded orbit steps (the main renderer's `--steps`).
+    pub steps: usize,
+    /// Output width in pixels.
+    pub width: u32,
+    /// Output height in pixels.
+    pub height: u32,
+    /// Render only the still (with its WebP derivatives and certificate); no videos.
+    pub image_only: bool,
+    /// Encode the HQ slot with the software fast encoder instead of archival HEVC.
+    pub fast_encode: bool,
+    /// Look and simulation parameters (the product renders [`EmberConfig::default`]); recorded
+    /// in the certificate.
+    pub config: &'a EmberConfig,
+    /// Where to write the outputs.
+    pub paths: EmberOutputPaths<'a>,
+}
+
+/// Seed of the ember edition's kozo sheet: the package seed bytes followed by
+/// `"\0cosmic-ember/kozo-sheet/v1"`. Public so that a package can be re-rendered and verified
+/// from its certificate (`examples/ember_render.rs`).
+pub fn ember_paper_seed(seed_bytes: &[u8]) -> Vec<u8> {
+    [seed_bytes, EMBER_PAPER_SEED_DOMAIN].concat()
+}
+
+/// The ember video's frame schedule: exactly `main.mp4`'s checkpoints
+/// (`render::main_video_checkpoints`, the schedule `render_video` encodes), so frame `i` of
+/// both videos shows the same orbit step (and the last frame shows step `steps - 1`).
+pub fn ember_frame_schedule(steps: usize) -> Vec<usize> {
+    render::main_video_checkpoints(steps)
+}
+
+/// What [`preflight_ember_edition`] established about the selected orbit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EmberPreflight {
+    /// Orbit duration `T` in fluid time units (the median body speed is the reference speed).
+    pub duration: f64,
+    /// Fluid time at which the bodies stop inking (`T - valve_lead`).
+    pub valve_time: f64,
+    /// Frames of the ember video; the last one is the still.
+    pub frames: usize,
+}
+
+/// Checks, in a fraction of a second, that the ember edition can render the selected orbit at
+/// this output size with `config`, so that an orbit it would reject is known before the main
+/// render rather than in the ember stage, which runs last.
+///
+/// Re-simulates the raw orbit exactly as [`render_ember_edition`] does and plans the render with
+/// [`ember::plan_ember`] — the checks [`ember::render_ember`] itself makes before its fluid
+/// starts: the configuration, the output size, the frame schedule (at least 2 recorded steps),
+/// the orbit's projection (it must span a plane) and its duration against the pre-roll and the
+/// valve, and the fluid and ink grids. Failures that only show while simulating (e.g. a
+/// non-finite flow) cannot be predicted.
+pub fn preflight_ember_edition(
+    bodies: &[Body],
+    steps: usize,
+    width: u32,
+    height: u32,
+    config: &EmberConfig,
+) -> Result<EmberPreflight> {
+    let positions = sim::get_positions(bodies.to_vec(), steps).positions;
+    let frame_steps = ember_frame_schedule(steps);
+    let preflight = check_ember_request(&EmberRequest {
+        positions: &positions,
+        frame_steps: &frame_steps,
+        width,
+        height,
+        paper_seed: &[],
+        config,
+        mode: EmberMode::StillOnly,
+    })?;
+    info!(
+        "   => Ember preflight: orbit lasts {:.3} fluid time units (inking {:.3}..{:.3}), {} frames",
+        preflight.duration, config.contact.pre_roll, preflight.valve_time, preflight.frames
+    );
+    Ok(preflight)
+}
+
+/// Plans an ember request ([`ember::plan_ember`]): the checks [`ember::render_ember`] makes
+/// before its fluid starts. Cost: one projection of the orbit (about 50 ms for a million steps),
+/// no allocation proportional to the output size.
+fn check_ember_request(request: &EmberRequest<'_>) -> Result<EmberPreflight> {
+    let plan = ember::plan_ember(request)?;
+    Ok(EmberPreflight {
+        duration: plan.duration(),
+        valve_time: plan.valve_time(),
+        frames: plan.frames(),
+    })
+}
+
+/// Constant rate factor of the ember edition's web H.264.
+///
+/// Unlike `main.mp4`'s mostly black field, every ember frame is textured paper under a slowly
+/// drifting ink wash, which is expensive to encode. Measured on a production package (3456 ×
+/// 2234, 1802 frames): CRF 18 gave 141 MB (≈ 38 Mbit/s), CRF 22 84 MB and CRF 26 52 MB. CRF 22
+/// is indistinguishable from CRF 18 in 1:1 crops, whereas CRF 26 starts to soften the kozo grain
+/// and a 12 Mbit/s cap bands the wash. The archival HEVC copy keeps its CRF.
+pub const EMBER_WEB_CRF: u32 = 22;
+
+/// The ember edition's `[web, hq]` encodes: sRGB H.264 for the web (at [`EMBER_WEB_CRF`]) and
+/// sRGB archival HEVC, or the software fast encode under `--fast-encode` (never a hardware
+/// encoder: the ember edition is CPU-only).
+fn ember_video_options(fast_encode: bool) -> [VideoEncodingOptions; 2] {
+    let hq = if fast_encode {
+        VideoEncodingOptions::software_fast_srgb()
+    } else {
+        VideoEncodingOptions::high_quality_srgb()
+    };
+    let web =
+        VideoEncodingOptions { crf: EMBER_WEB_CRF, ..VideoEncodingOptions::web_compatible_srgb() };
+    [web, hq]
+}
+
+/// Renders the ember edition of the selected orbit and writes its package files.
+///
+/// The orbit is re-simulated raw with [`sim::get_positions`]: the selection's trajectory has
+/// already been through the seed's projection, view rotation and drift, whereas the ember
+/// edition needs the physical orbit. Frames follow `main.mp4`'s schedule at
+/// [`constants::DEFAULT_VIDEO_FPS`]; they are streamed to the two encoders as they are shaded
+/// (unless `image_only`), the final frame is saved as a 16-bit sRGB PNG with two WebP
+/// derivatives, and `metadata/ember.json` certifies the SHA-256 digests of the raw frames and of
+/// the still, which every CPU architecture reproduces bit for bit.
+///
+/// An error can leave some outputs behind (partial videos, the PNG of a still whose WebP
+/// derivatives failed, a truncated certificate); [`remove_ember_outputs`] deletes them.
+pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSummary> {
+    let started = Instant::now();
+    let mode = if request.image_only { EmberMode::StillOnly } else { EmberMode::Video };
+    info!(
+        "STAGE EMBER: ember edition ({}) — re-simulating the raw orbit ({} steps)...",
+        if request.image_only { "still only" } else { "still + videos" },
+        request.steps
+    );
+    let positions = sim::get_positions(request.bodies.to_vec(), request.steps).positions;
+    let frame_steps = ember_frame_schedule(request.steps);
+    let paper_seed = ember_paper_seed(request.seed_bytes);
+    let ember_request = EmberRequest {
+        positions: &positions,
+        frame_steps: &frame_steps,
+        width: request.width,
+        height: request.height,
+        paper_seed: &paper_seed,
+        config: request.config,
+        mode,
+    };
+    // Cheap, and it must pass before the encoders are spawned (`main` has already run it).
+    check_ember_request(&ember_request)?;
+
+    let summary = match mode {
+        EmberMode::StillOnly => ember::render_ember(&ember_request, &mut |_| Ok(()))?,
+        EmberMode::Video => encode_ember_videos(
+            &ember_request,
+            request.paths,
+            ember_video_options(request.fast_encode),
+        )?,
+    };
+    drop(positions);
+
+    let paths = request.paths;
+    save_image_as_srgb_png_16bit(&summary.still_image(), paths.still_png)?;
+    generate_webp_images(ImageOutputPaths {
+        master_png: paths.still_png,
+        full_webp: paths.full_webp,
+        preview_webp: paths.preview_webp,
+    })?;
+
+    let context = CertificateContext {
+        seed: request.seed_hex,
+        steps: request.steps,
+        dt: constants::DEFAULT_DT,
+        bodies: request.bodies,
+        frame_steps: &frame_steps,
+        frame_rate: constants::DEFAULT_VIDEO_FPS,
+        paper_seed: &paper_seed,
+        config: request.config,
+    };
+    EmberCertificate::new(&context, &summary)
+        .write_json(std::path::Path::new(paths.certificate))?;
+    info!("   Saved ember certificate => {}", paths.certificate);
+
+    log_ember_summary(&summary, started.elapsed().as_secs_f64());
+    Ok(summary)
+}
+
+/// Renders every frame straight into the two encoders (one `rgb48le` stream, no temporary
+/// files) and returns the render's summary.
+///
+/// Errors:
+/// - a render failure (e.g. [`EmberError::NonFinite`]) is returned as such; the encoders are
+///   killed and no video is finalised;
+/// - an encoder that dies mid-stream breaks the frame pipe: the video module's error is
+///   returned, naming the encoder and its exit status followed by the pipe error;
+/// - an encoder that fails after the last frame is reported by the video module with its exit
+///   status.
+fn encode_ember_videos(
+    request: &EmberRequest<'_>,
+    paths: EmberOutputPaths<'_>,
+    [web, hq]: [VideoEncodingOptions; 2],
+) -> Result<EmberSummary> {
+    let outputs = [
+        VideoOutputSpec { output_file: paths.web_video.to_string(), options: web },
+        VideoOutputSpec { output_file: paths.hq_video.to_string(), options: hq },
+    ];
+    let mut outcome: Option<EmberResult<EmberSummary>> = None;
+    let encoded = create_videos_from_frames_singlepass(
+        request.width,
+        request.height,
+        constants::DEFAULT_VIDEO_FPS,
+        |out| {
+            let mut sink = |frame: &EmberFrame<'_>| -> EmberResult<()> {
+                out.write_all(frame.rgb48le)
+                    .map_err(|e| EmberError::Sink(format!("video encoder pipe: {e}")))
+            };
+            let result = ember::render_ember(request, &mut sink);
+            let stream = match &result {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("ember render: {e}").into()),
+            };
+            outcome = Some(result);
+            stream
+        },
+        &outputs,
+    );
+    ember_encode_outcome(outcome, encoded)
+}
+
+/// Deletes every ember edition file ([`EMBER_OUTPUT_PATHS`]) from the package at `seed_dir`:
+/// whatever a failed ember stage left behind (a partial PNG, WebP or video, a truncated
+/// certificate) and any stale ember file of an earlier run into the same directory, so that the
+/// package holds no ember file its asset manifest does not list. Files that do not exist are
+/// skipped.
+///
+/// Every file is attempted; the first deletion error (with its path) is returned after the rest
+/// have been tried.
+pub fn remove_ember_outputs(seed_dir: &str) -> Result<()> {
+    let mut first_error = None;
+    for relative_path in EMBER_OUTPUT_PATHS {
+        let path = format!("{seed_dir}/{relative_path}");
+        match fs::remove_file(&path) {
+            Ok(()) => info!("   Removed ember output => {path}"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                warn!("   Could not remove ember output {path}: {error}");
+                if first_error.is_none() {
+                    first_error =
+                        Some(ConfigError::FileSystem { operation: "remove".into(), path, error });
+                }
+            }
+        }
+    }
+    first_error.map_or(Ok(()), |error| Err(error.into()))
+}
+
+/// Combines the ember render's result with the encoders' (see [`encode_ember_videos`]).
+fn ember_encode_outcome(
+    rendered: Option<EmberResult<EmberSummary>>,
+    encoded: std::result::Result<(), render::error::RenderError>,
+) -> Result<EmberSummary> {
+    match (rendered, encoded) {
+        (Some(Ok(summary)), Ok(())) => Ok(summary),
+        // The frame pipe broke: the video module's error names the encoder that quit and its
+        // exit status, and ends with the pipe error.
+        (Some(Err(EmberError::Sink(_))), Err(encode_error)) => Err(encode_error.into()),
+        (Some(Err(render_error)), _) => Err(render_error.into()),
+        (_, Err(encode_error)) => Err(encode_error.into()),
+        (None, Ok(())) => Err(AppError::Ember(EmberError::Sink(
+            "the video encoders finished without requesting any frames".into(),
+        ))),
+    }
+}
+
+/// Logs what the ember stage produced and where the time went.
+fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
+    let stats = &summary.stats;
+    let timings = &summary.timings;
+    let video_seconds = summary.frames_emitted as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+    info!(
+        "   => Ember edition: orbit {:.3} fluid time units (valve at {:.3}), fluid {}x{}, ink \
+         nodes {}x{}, {} frames ({video_seconds:.2}s of video)",
+        summary.duration,
+        summary.valve_time,
+        summary.fluid_grid[0],
+        summary.fluid_grid[1],
+        summary.ink_grid[0],
+        summary.ink_grid[1],
+        summary.frames_emitted,
+    );
+    info!(
+        "   => Ember still: sha256 {} — ink on {:.1}% of nodes, cinnabar on {:.2}%, {} \
+         gamut-mapped pixels",
+        summary.still_sha256,
+        100.0 * stats.still_ink_fraction,
+        100.0 * stats.still_cinnabar_fraction,
+        stats.still_gamut_mapped_pixels,
+    );
+    if let Some(frames_sha256) = &summary.frames_sha256 {
+        info!("   => Ember frames: sha256 {frames_sha256} (rgb48le stream)");
+    }
+    // Still-only renders shade (and count) only the still.
+    let shaded_frames = summary.frames_emitted.max(1);
+    info!(
+        "   => Ember cinnabar: in {} of {shaded_frames} shaded frame(s), peak {:.2}% of nodes",
+        stats.frames_with_cinnabar,
+        100.0 * stats.peak_frame_cinnabar_fraction,
+    );
+    info!(
+        "   => Ember work: {} fluid steps (dt {:.2e}..{:.2e}, max flow speed {:.2}), {} \
+         snapshots, {} contact events",
+        stats.fluid_steps,
+        stats.min_dt,
+        stats.max_dt,
+        stats.max_flow_speed,
+        stats.snapshots,
+        stats.contact_events,
+    );
+    info!(
+        "   => Ember timings: fluid {:.1}s, ink {:.1}s, shading {:.1}s, sink {:.1}s, render \
+         {:.1}s; stage total {stage_seconds:.1}s (with orbit, PNG, WebP and certificate)",
+        timings.fluid_seconds,
+        timings.ink_seconds,
+        timings.shade_seconds,
+        timings.sink_seconds,
+        timings.total_seconds,
+    );
 }
 
 /// Log generation parameters for reproducibility.
@@ -1701,5 +2169,784 @@ mod tests {
                 &format!("parallel_vs_serial_reference/{seed:02X?}"),
             );
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Ember edition plumbing and the asset manifest
+    // ---------------------------------------------------------------------------------------
+
+    #[test]
+    fn test_ember_paper_seed_is_the_package_seed_in_its_own_domain() {
+        let seed = [0x10, 0x00, 0x33];
+        let paper = ember_paper_seed(&seed);
+        assert_eq!(paper, b"\x10\x00\x33\0cosmic-ember/kozo-sheet/v1");
+        assert_ne!(ember_paper_seed(&[0x10, 0x00, 0x34]), paper, "seeds must not share a sheet");
+        assert_eq!(ember_paper_seed(&seed), paper, "deterministic");
+    }
+
+    #[test]
+    fn test_ember_schedule_is_the_main_video_schedule() {
+        let production = ember_frame_schedule(1_000_000);
+        assert_eq!(production.len(), 1_802);
+        assert_eq!(production.first(), Some(&555));
+        assert_eq!(production.last(), Some(&999_999), "the last frame is the still");
+        for steps in [2, 17, 1_800, 1_801, 3_600, 123_457] {
+            // `render_video` encodes `main.mp4` at `render::main_video_frame_interval`, whose
+            // pass-2 frames are exactly `main_video_checkpoints` (tested in `render`).
+            let schedule = ember_frame_schedule(steps);
+            assert_eq!(schedule, render::main_video_checkpoints(steps), "{steps} steps");
+            assert_eq!(schedule.last(), Some(&(steps - 1)), "{steps} steps");
+            assert!(schedule.windows(2).all(|pair| pair[0] < pair[1]), "{steps} steps");
+        }
+    }
+
+    /// Three bodies of an ordinary (non-degenerate) configuration.
+    fn preflight_bodies() -> Vec<Body> {
+        vec![
+            Body::new(150.0, Vector3::new(120.0, -40.0, 30.0), Vector3::new(0.1, 0.8, -0.2)),
+            Body::new(220.0, Vector3::new(-90.0, 60.0, -20.0), Vector3::new(-0.5, -0.2, 0.3)),
+            Body::new(180.0, Vector3::new(-30.0, -110.0, 50.0), Vector3::new(0.4, -0.4, 0.1)),
+        ]
+    }
+
+    #[test]
+    fn test_ember_preflight_rejects_what_the_renderer_rejects_before_projecting() {
+        // These fail before the orbit is projected (so before any real work).
+        let bodies = preflight_bodies();
+        let config = EmberConfig::default();
+        for (steps, width, height) in [(1, 64, 40), (0, 64, 40), (100, 0, 40), (100, 16_385, 40)] {
+            let result = preflight_ember_edition(&bodies, steps, width, height, &config);
+            assert!(result.is_err(), "{steps} steps at {width}x{height} must be rejected");
+        }
+        assert!(matches!(
+            preflight_ember_edition(&bodies, 1, 64, 40, &config),
+            Err(AppError::Ember(EmberError::InvalidSchedule { .. }))
+        ));
+        // The configuration under test is the one checked.
+        let mut invalid = EmberConfig::default();
+        invalid.fluid.cfl = 0.0;
+        assert!(matches!(
+            preflight_ember_edition(&figure_eight_bodies(), 20_000, 64, 40, &invalid),
+            Err(AppError::Ember(EmberError::InvalidConfig { .. }))
+        ));
+    }
+
+    /// The figure-eight choreography (Chenciner–Montgomery), unit masses, rescaled from `G = 1`
+    /// to the simulator's `G` (velocities × √G, so the period is 6.3259/√G ≈ 2.02 time units).
+    fn figure_eight_bodies() -> Vec<Body> {
+        let speed = sim::G.sqrt();
+        let (x, y) = (0.970_004_36, -0.243_087_53);
+        let (vx, vy) = (-0.932_407_37 * speed, -0.864_731_46 * speed);
+        vec![
+            Body::new(1.0, Vector3::new(x, y, 0.0), Vector3::new(-vx / 2.0, -vy / 2.0, 0.0)),
+            Body::new(1.0, Vector3::new(-x, -y, 0.0), Vector3::new(-vx / 2.0, -vy / 2.0, 0.0)),
+            Body::new(1.0, Vector3::zeros(), Vector3::new(vx, vy, 0.0)),
+        ]
+    }
+
+    #[test]
+    fn test_ember_preflight_accepts_a_long_enough_orbit_and_rejects_a_short_one() {
+        let config = EmberConfig::default();
+        let contact = &config.contact;
+        // About 10 periods: the bodies travel far across the canvas.
+        let steps = 20_000;
+        let preflight =
+            preflight_ember_edition(&figure_eight_bodies(), steps, 64, 40, &config).expect("ok");
+        assert!(preflight.duration > contact.pre_roll + contact.valve_lead, "{preflight:?}");
+        assert_eq!(preflight.valve_time, preflight.duration - contact.valve_lead);
+        assert_eq!(preflight.frames, render::main_video_checkpoints(steps).len());
+        // A sliver of a slow orbit lasts far too little fluid time.
+        assert!(matches!(
+            preflight_ember_edition(&preflight_bodies(), 100, 64, 40, &config),
+            Err(AppError::Ember(EmberError::OrbitTooShort { .. }))
+        ));
+    }
+
+    fn encode_failure(message: &str) -> render::error::RenderError {
+        render::error::RenderError::VideoEncoding(std::io::Error::other(message.to_string()))
+    }
+
+    #[test]
+    fn test_ember_encode_outcome_reports_the_cause() {
+        let quit = "FFmpeg for web/ember.mp4 exited early with exit status: 1; the frame stream \
+                    then failed: ember render: frame sink failed: video encoder pipe: Broken pipe";
+        let pipe = || Some(Err(EmberError::Sink("video encoder pipe: Broken pipe".into())));
+
+        // An encoder that died mid-stream: the video module's error, which names it.
+        match ember_encode_outcome(pipe(), Err(encode_failure(quit))) {
+            Err(AppError::RenderInternal(error)) => {
+                let source = std::error::Error::source(&error).expect("I/O source").to_string();
+                assert_eq!(source, quit);
+            }
+            other => panic!("expected the encoder's error, got {other:?}"),
+        }
+        // A render failure is reported as such, even though it also stopped the encoders.
+        let non_finite = Some(Err(EmberError::NonFinite { stage: "fluid", time: 1.5 }));
+        assert!(matches!(
+            ember_encode_outcome(non_finite, Err(encode_failure("ember render: non-finite"))),
+            Err(AppError::Ember(EmberError::NonFinite { .. }))
+        ));
+        // An encoder failing after the last frame.
+        assert!(matches!(
+            ember_encode_outcome(Some(Ok(summary_with_frames(3))), Err(encode_failure("late"))),
+            Err(AppError::RenderInternal(_))
+        ));
+        assert_eq!(
+            ember_encode_outcome(Some(Ok(summary_with_frames(3))), Ok(()))
+                .expect("both succeeded")
+                .frames_emitted,
+            3
+        );
+        assert!(matches!(
+            ember_encode_outcome(None, Ok(())),
+            Err(AppError::Ember(EmberError::Sink(_)))
+        ));
+        assert!(matches!(
+            ember_encode_outcome(None, Err(encode_failure("spawn"))),
+            Err(AppError::RenderInternal(_))
+        ));
+    }
+
+    #[test]
+    fn test_ember_video_options_are_srgb_and_software_only() {
+        for fast_encode in [false, true] {
+            let [web, hq] = ember_video_options(fast_encode);
+            let expected_web = VideoEncodingOptions::web_compatible_srgb();
+            let expected_hq = if fast_encode {
+                VideoEncodingOptions::software_fast_srgb()
+            } else {
+                VideoEncodingOptions::high_quality_srgb()
+            };
+            for (options, expected) in [(&web, &expected_web), (&hq, &expected_hq)] {
+                assert_eq!(options.codec, expected.codec);
+                assert_eq!(options.pixel_format, expected.pixel_format);
+                assert_eq!(options.extra_args, expected.extra_args);
+                assert!(options.codec.starts_with("lib"), "software encoder: {}", options.codec);
+                assert!(
+                    options.extra_args.iter().any(|arg| arg.contains("out_color_matrix=bt709")),
+                    "explicit BT.709 conversion"
+                );
+            }
+            assert_eq!(web.crf, EMBER_WEB_CRF, "the ember web encode has its own rate factor");
+            assert_eq!(hq.crf, expected_hq.crf, "the HQ encode keeps its rate factor");
+        }
+    }
+
+    fn summary_with_frames(frames_emitted: usize) -> EmberSummary {
+        EmberSummary {
+            width: 2,
+            height: 1,
+            still: vec![0; 6],
+            still_sha256: String::new(),
+            frames_emitted,
+            frames_sha256: None,
+            duration: 10.0,
+            valve_time: 9.75,
+            fluid_grid: [16, 16],
+            fluid_dx: 0.1,
+            ink_grid: [8, 4],
+            projection: ember::pipeline::EmberProjection {
+                origin: [0.0; 3],
+                extent: 1.0,
+                axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                scale: 1.0,
+                variances: [2.0, 1.0, 0.5],
+            },
+            stats: ember::pipeline::EmberStats::default(),
+            timings: ember::pipeline::EmberTimings::default(),
+        }
+    }
+
+    #[test]
+    fn test_ember_manifest_from_summary() {
+        let video = EmberManifest::from_summary(&summary_with_frames(1_802), true);
+        assert_eq!(
+            video,
+            EmberManifest {
+                frames_emitted: 1_802,
+                frame_rate: constants::DEFAULT_VIDEO_FPS,
+                has_video: true,
+                fast_encode: true,
+            }
+        );
+        let still = EmberManifest::from_summary(&summary_with_frames(0), false);
+        assert!(!still.has_video);
+        assert_eq!(still.frames_emitted, 0);
+    }
+
+    /// A package directory holding `files` (each containing its own path) and `metadata/`.
+    fn package_fixture(files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("metadata")).expect("metadata dir");
+        for file in files {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().expect("parent dir")).expect("package dir");
+            fs::write(&path, file.as_bytes()).expect("fixture file");
+        }
+        dir
+    }
+
+    /// Recorded steps of the manifest tests' orbit: the production default, for which `main.mp4`
+    /// has 1,802 frames.
+    const MANIFEST_STEPS: usize = 1_000_000;
+
+    fn written_manifest(
+        dir: &tempfile::TempDir,
+        image_only: bool,
+        ember: Option<&EmberManifest>,
+    ) -> serde_json::Value {
+        written_manifest_of(dir, MANIFEST_STEPS, image_only, ember)
+    }
+
+    fn written_manifest_of(
+        dir: &tempfile::TempDir,
+        steps: usize,
+        image_only: bool,
+        ember: Option<&EmberManifest>,
+    ) -> serde_json::Value {
+        let seed_dir = dir.path().to_str().expect("UTF-8 temp path");
+        write_asset_manifest(seed_dir, 3456, 2234, steps, image_only, ember).expect("manifest");
+        let bytes = fs::read(dir.path().join("metadata/assets.json")).expect("assets.json");
+        serde_json::from_slice(&bytes).expect("valid JSON")
+    }
+
+    fn roles(manifest: &serde_json::Value) -> Vec<&str> {
+        manifest["assets"]
+            .as_array()
+            .expect("assets array")
+            .iter()
+            .map(|entry| entry["role"].as_str().expect("role"))
+            .collect()
+    }
+
+    fn entry<'a>(manifest: &'a serde_json::Value, role: &str) -> &'a serde_json::Value {
+        manifest["assets"]
+            .as_array()
+            .expect("assets array")
+            .iter()
+            .find(|entry| entry["role"] == role)
+            .unwrap_or_else(|| panic!("no {role} entry"))
+    }
+
+    /// Hex SHA-256 of a fixture file (whose content is its own path).
+    fn fixture_sha256(path: &str) -> String {
+        use sha2::{Digest as _, Sha256};
+        hex::encode(Sha256::digest(path.as_bytes()))
+    }
+
+    const MAIN_STILL_ROLES: [&str; 3] = ["source_master", "web_full", "web_preview"];
+    const MAIN_VIDEO_ROLES: [&str; 5] =
+        ["main_web", "main_hq", "spectral_sweep_web", "spectral_sweep_hq", "spectral_bins"];
+    const EMBER_STILL_ROLES: [&str; 3] =
+        ["ember_source_master", "ember_web_full", "ember_web_preview"];
+    const EMBER_VIDEO_ROLES: [&str; 2] = ["ember_web", "ember_hq"];
+
+    #[test]
+    fn test_manifest_without_ember_keeps_the_legacy_entries() {
+        let master = "images/source/master.png";
+        let main_web = "videos/web/main.mp4";
+        let dir = package_fixture(&[master, main_web]);
+        let manifest = written_manifest(&dir, false, None);
+
+        assert_eq!(manifest["schema_version"], 2);
+        assert_eq!(roles(&manifest), [&MAIN_STILL_ROLES[..], &MAIN_VIDEO_ROLES[..]].concat());
+        assert_eq!(
+            *entry(&manifest, "source_master"),
+            serde_json::json!({
+                "path": master, "kind": "image", "role": "source_master", "format": "png",
+                "width": 3456, "height": 2234, "pixel_format": "rgb48",
+                "bytes": master.len(), "sha256": fixture_sha256(master),
+            })
+        );
+        assert_eq!(
+            *entry(&manifest, "web_preview"),
+            serde_json::json!({
+                "path": "images/web/preview.webp", "kind": "image", "role": "web_preview",
+                "format": "webp", "width": 640, "height": 414,
+            }),
+            "missing files carry neither size nor digest"
+        );
+        assert_eq!(
+            *entry(&manifest, "main_web"),
+            serde_json::json!({
+                "path": main_web, "kind": "video", "role": "main_web", "format": "mp4",
+                "width": 3456, "height": 2234, "duration_seconds": 1_802.0 / 60.0,
+                "frame_rate": 60,
+                "codec": "h264", "pixel_format": "yuv420p",
+                "bytes": main_web.len(), "sha256": fixture_sha256(main_web),
+            })
+        );
+        assert_eq!(entry(&manifest, "main_hq")["codec"], "hevc");
+        assert_eq!(entry(&manifest, "main_hq")["pixel_format"], "yuv422p10le");
+        assert_eq!(entry(&manifest, "main_hq")["duration_seconds"], 1_802.0 / 60.0);
+        assert_eq!(entry(&manifest, "spectral_sweep_hq")["duration_seconds"], 10.0);
+        assert_eq!(
+            *entry(&manifest, "spectral_bins"),
+            serde_json::json!({
+                "path": "spectral/", "kind": "image_set", "role": "spectral_bins",
+                "format": "png", "width": 3456, "height": 2234, "pixel_format": "rgb48",
+                "file_count": 64,
+            })
+        );
+        for asset in manifest["assets"].as_array().expect("assets") {
+            assert!(asset.get("color_space").is_none(), "legacy entries gain no fields");
+        }
+    }
+
+    #[test]
+    fn test_manifest_appends_the_ember_edition() {
+        let dir = package_fixture(&[EMBER_STILL_PATH, EMBER_WEB_VIDEO_PATH, EMBER_HQ_VIDEO_PATH]);
+        let ember = EmberManifest {
+            frames_emitted: 1_802,
+            frame_rate: 60,
+            has_video: true,
+            fast_encode: false,
+        };
+        let manifest = written_manifest(&dir, false, Some(&ember));
+
+        assert_eq!(manifest["schema_version"], 2, "ember entries are additive");
+        let expected: Vec<&str> =
+            [&MAIN_STILL_ROLES[..], &MAIN_VIDEO_ROLES[..], &EMBER_STILL_ROLES, &EMBER_VIDEO_ROLES]
+                .concat();
+        assert_eq!(roles(&manifest), expected);
+        assert_eq!(
+            *entry(&manifest, "ember_source_master"),
+            serde_json::json!({
+                "path": "images/source/ember.png", "kind": "image", "role": "ember_source_master",
+                "format": "png", "width": 3456, "height": 2234, "pixel_format": "rgb48",
+                "color_space": "srgb",
+                "bytes": EMBER_STILL_PATH.len(), "sha256": fixture_sha256(EMBER_STILL_PATH),
+            })
+        );
+        assert_eq!(
+            *entry(&manifest, "ember_web_full"),
+            serde_json::json!({
+                "path": "images/web/ember_full.webp", "kind": "image", "role": "ember_web_full",
+                "format": "webp", "width": 3456, "height": 2234, "color_space": "srgb",
+            })
+        );
+        let preview = entry(&manifest, "ember_web_preview");
+        assert_eq!(preview["path"], "images/web/ember_preview.webp");
+        assert_eq!((&preview["width"], &preview["height"]), (&640.into(), &414.into()));
+        assert_eq!(
+            *entry(&manifest, "ember_web"),
+            serde_json::json!({
+                "path": "videos/web/ember.mp4", "kind": "video", "role": "ember_web",
+                "format": "mp4", "width": 3456, "height": 2234,
+                "duration_seconds": 1_802.0 / 60.0, "frame_rate": 60,
+                "codec": "h264", "pixel_format": "yuv420p", "color_space": "srgb",
+                "bytes": EMBER_WEB_VIDEO_PATH.len(),
+                "sha256": fixture_sha256(EMBER_WEB_VIDEO_PATH),
+            })
+        );
+        let hq = entry(&manifest, "ember_hq");
+        assert_eq!(hq["path"], "videos/hq/ember.mp4");
+        assert_eq!((&hq["codec"], &hq["pixel_format"]), (&"hevc".into(), &"yuv422p10le".into()));
+        assert_eq!(hq["duration_seconds"], 1_802.0 / 60.0);
+        assert_eq!(hq["sha256"], fixture_sha256(EMBER_HQ_VIDEO_PATH).as_str());
+    }
+
+    #[test]
+    fn test_manifest_main_video_duration_counts_the_encoded_frames() {
+        let dir = package_fixture(&[]);
+        // 100,000 steps: every 55th step up to 99,990, then the final step 99,999.
+        assert_eq!(ember_frame_schedule(100_000).len(), 1_819);
+        for steps in [100_000, 1_000_000, 1_234_567] {
+            // The ember videos are frame-locked to `main.mp4`: same frames, same duration.
+            let frames = ember_frame_schedule(steps).len();
+            let ember = EmberManifest {
+                frames_emitted: frames,
+                frame_rate: constants::DEFAULT_VIDEO_FPS,
+                has_video: true,
+                fast_encode: false,
+            };
+            let manifest = written_manifest_of(&dir, steps, false, Some(&ember));
+            let duration = |role| entry(&manifest, role)["duration_seconds"].clone();
+            // Written from the same f64, the four entries carry the same text.
+            for role in ["main_hq", "ember_web", "ember_hq"] {
+                assert_eq!(duration(role), duration("main_web"), "{role} at {steps} steps");
+            }
+            // `serde_json` parses floats exactly (`float_roundtrip`), so the value is the one
+            // written, bit for bit.
+            let seconds = frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+            let main = duration("main_web").as_f64().expect("duration");
+            assert_eq!(main.to_bits(), seconds.to_bits(), "{main} s for {frames} frames");
+            assert_eq!(duration("spectral_sweep_web"), 10.0, "the sweep is unchanged");
+        }
+    }
+
+    #[test]
+    fn test_manifest_records_the_fast_ember_encode() {
+        let dir = package_fixture(&[]);
+        let ember = EmberManifest {
+            frames_emitted: 120,
+            frame_rate: 60,
+            has_video: true,
+            fast_encode: true,
+        };
+        let manifest = written_manifest(&dir, false, Some(&ember));
+        let hq = entry(&manifest, "ember_hq");
+        assert_eq!((&hq["codec"], &hq["pixel_format"]), (&"h264".into(), &"yuv420p10le".into()));
+        assert_eq!(hq["duration_seconds"], 2.0);
+    }
+
+    #[test]
+    fn test_manifest_image_only_lists_only_stills() {
+        let dir = package_fixture(&[]);
+        assert_eq!(roles(&written_manifest(&dir, true, None)), MAIN_STILL_ROLES);
+
+        let still_only = EmberManifest {
+            frames_emitted: 0,
+            frame_rate: 60,
+            has_video: false,
+            fast_encode: false,
+        };
+        assert_eq!(
+            roles(&written_manifest(&dir, true, Some(&still_only))),
+            [MAIN_STILL_ROLES, EMBER_STILL_ROLES].concat()
+        );
+    }
+
+    #[test]
+    fn test_ember_package_paths_are_the_required_package_files() {
+        // `run.py` requires exactly these files as EMBER_PACKAGE_FILES (and removes them from a
+        // package whose ember edition failed); keep the two lists in sync.
+        let run_py = include_str!("../run.py");
+        let listed = run_py
+            .split_once("\nEMBER_PACKAGE_FILES = (\n")
+            .and_then(|(_, rest)| rest.split_once("\n)"))
+            .map(|(list, _)| list)
+            .expect("run.py defines EMBER_PACKAGE_FILES");
+        let listed: Vec<&str> = listed
+            .lines()
+            .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
+            .collect();
+        assert_eq!(listed, EMBER_OUTPUT_PATHS, "run.py must require exactly the ember outputs");
+    }
+
+    #[test]
+    fn test_remove_ember_outputs_keeps_the_rest_of_the_package() {
+        let master = "images/source/master.png";
+        let traits = "metadata/nft_traits.json";
+        let partial = [EMBER_STILL_PATH, EMBER_HQ_VIDEO_PATH, EMBER_CERTIFICATE_PATH];
+        let dir = package_fixture(&[&[master, traits][..], &partial[..]].concat());
+        let seed_dir = dir.path().to_str().expect("UTF-8 temp path");
+
+        remove_ember_outputs(seed_dir).expect("partial outputs removed");
+        for path in EMBER_OUTPUT_PATHS {
+            assert!(!dir.path().join(path).exists(), "{path} must be gone");
+        }
+        assert!(dir.path().join(master).is_file() && dir.path().join(traits).is_file());
+        remove_ember_outputs(seed_dir).expect("nothing left to remove is fine");
+
+        // A path that cannot be removed as a file is reported, after the others are removed.
+        fs::create_dir_all(dir.path().join(EMBER_STILL_PATH)).expect("blocking directory");
+        fs::write(dir.path().join(EMBER_CERTIFICATE_PATH), b"{").expect("truncated certificate");
+        match remove_ember_outputs(seed_dir) {
+            Err(AppError::Config(ConfigError::FileSystem { operation, path, .. })) => {
+                assert_eq!(operation, "remove");
+                assert!(path.ends_with(EMBER_STILL_PATH), "{path}");
+            }
+            other => panic!("expected the removal error, got {other:?}"),
+        }
+        assert!(!dir.path().join(EMBER_CERTIFICATE_PATH).exists(), "the others are still removed");
+    }
+
+    /// The coarse but complete configuration of the golden test (`tests/ember_determinism.rs`),
+    /// with a longer fresh-ink memory: a 96×64 render of the tilted figure-eight takes seconds.
+    fn tiny_ember_config() -> EmberConfig {
+        let mut config = EmberConfig::default();
+        config.fluid.rows = 64;
+        config.fluid.body_radius = 0.08;
+        config.fluid.mask_width = 0.02;
+        config.fluid.max_dt = 0.01;
+        config.fluid.max_snapshot_interval = 0.01;
+        config.contact.vorticity_gate = 1.0;
+        config.contact.soak_depth = 0.12;
+        config.contact.pre_roll = 1.0;
+        config.contact.valve_lead = 0.2;
+        config.look.hold = 3.0;
+        config.look.fresh_tau = 0.25;
+        config.paper.formation_modes = 64;
+        config
+    }
+
+    /// The golden test's orbit: [`figure_eight_bodies`] slightly tilted out of its plane.
+    fn tilted_figure_eight_bodies() -> Vec<Body> {
+        let mut bodies = figure_eight_bodies();
+        bodies[0].position.z = 0.05;
+        bodies[1].position.z = -0.05;
+        bodies
+    }
+
+    /// Whether every one of `tools` (`ffmpeg`, `ffprobe`) runs here. When one does not, the
+    /// calling test `test` should return early: locally it is skipped with a message; under CI
+    /// (the `CI` environment variable is set) this panics instead, so that a runner without the
+    /// tools fails rather than passes without testing.
+    fn media_tools_available(test: &str, tools: &[&str]) -> bool {
+        let missing: Vec<&str> = tools
+            .iter()
+            .copied()
+            .filter(|tool| {
+                !Command::new(tool)
+                    .arg("-version")
+                    .output()
+                    .is_ok_and(|output| output.status.success())
+            })
+            .collect();
+        if missing.is_empty() {
+            return true;
+        }
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "{test} needs {missing:?} on PATH, and CI is set: install FFmpeg in this job"
+        );
+        eprintln!("skipping {test}: {missing:?} not on PATH");
+        false
+    }
+
+    /// Recorded steps of the tiny video render: the fewest for which the preflight accepts the
+    /// orbit of [`tilted_figure_eight_bodies`] under [`tiny_ember_config`] at 96×64 (it lasts
+    /// 1.2024 fluid time units, just over `pre_roll + valve_lead = 1.2`; 403 steps last 1.1959),
+    /// so the render and both encodes of its 403 frames take a few seconds.
+    const TINY_VIDEO_STEPS: usize = 404;
+
+    /// A package directory with the ember edition's output paths, each built from its named
+    /// constant.
+    struct TinyEmberPackage {
+        dir: tempfile::TempDir,
+        still_png: String,
+        full_webp: String,
+        preview_webp: String,
+        web_video: String,
+        hq_video: String,
+        certificate: String,
+    }
+
+    impl TinyEmberPackage {
+        fn new() -> Self {
+            let dir = package_fixture(&[]);
+            for subdir in ["images/source", "images/web", "videos/web", "videos/hq"] {
+                fs::create_dir_all(dir.path().join(subdir)).expect("package directory");
+            }
+            let path = |relative: &str| {
+                dir.path().join(relative).to_str().expect("UTF-8 temp path").to_string()
+            };
+            Self {
+                still_png: path(EMBER_STILL_PATH),
+                full_webp: path(EMBER_FULL_WEBP_PATH),
+                preview_webp: path(EMBER_PREVIEW_WEBP_PATH),
+                web_video: path(EMBER_WEB_VIDEO_PATH),
+                hq_video: path(EMBER_HQ_VIDEO_PATH),
+                certificate: path(EMBER_CERTIFICATE_PATH),
+                dir,
+            }
+        }
+
+        fn seed_dir(&self) -> &str {
+            self.dir.path().to_str().expect("UTF-8 temp path")
+        }
+
+        /// Renders the ember edition of [`tilted_figure_eight_bodies`] under
+        /// [`tiny_ember_config`] at 96×64 into this package, in a small pool (the tiny grids gain
+        /// nothing from more threads).
+        fn render(&self, steps: usize, image_only: bool, fast_encode: bool) -> EmberSummary {
+            let config = tiny_ember_config();
+            let bodies = tilted_figure_eight_bodies();
+            let request = EmberEditionRequest {
+                seed_hex: "46205528",
+                seed_bytes: &[0x46, 0x20, 0x55, 0x28],
+                bodies: &bodies,
+                steps,
+                width: 96,
+                height: 64,
+                image_only,
+                fast_encode,
+                config: &config,
+                paths: EmberOutputPaths {
+                    still_png: &self.still_png,
+                    full_webp: &self.full_webp,
+                    preview_webp: &self.preview_webp,
+                    web_video: &self.web_video,
+                    hq_video: &self.hq_video,
+                    certificate: &self.certificate,
+                },
+            };
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(4)
+                .build()
+                .expect("thread pool")
+                .install(|| render_ember_edition(&request))
+                .expect("the tiny ember edition renders")
+        }
+
+        /// The written certificate as JSON.
+        fn certificate(&self) -> serde_json::Value {
+            serde_json::from_slice(&fs::read(&self.certificate).expect("ember.json")).expect("JSON")
+        }
+
+        /// Asserts that `ember.png` decodes to the still the certificate and `summary` record.
+        fn assert_png_is_the_certified_still(&self, summary: &EmberSummary) {
+            use sha2::{Digest as _, Sha256};
+            let certificate = self.certificate();
+            let certified =
+                certificate["outputs"]["still_rgb48le_sha256"].as_str().expect("still digest");
+            let (width, height, rgb48le) = png_as_rgb48le(std::path::Path::new(&self.still_png));
+            assert_eq!((width, height), (96, 64));
+            assert_eq!(hex::encode(Sha256::digest(&rgb48le)), certified, "ember.png is the still");
+            assert_eq!(certified, summary.still_sha256, "the certificate records the render");
+            for webp in [&self.full_webp, &self.preview_webp] {
+                assert!(fs::metadata(webp).expect("WebP").len() > 0, "{webp}");
+            }
+        }
+    }
+
+    /// `(codec name, frames counted by decoding)` of the first video stream of `path`
+    /// (`ffprobe -count_frames`).
+    fn probe_video(path: &str) -> (String, usize) {
+        let output = Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", "v:0", "-count_frames"])
+            .args(["-show_entries", "stream=codec_name,nb_read_frames"])
+            .args(["-of", "default=noprint_wrappers=1", path])
+            .output()
+            .expect("ffprobe runs");
+        assert!(output.status.success(), "ffprobe {path}: {output:?}");
+        let text = String::from_utf8(output.stdout).expect("UTF-8 ffprobe output");
+        let field = |name: &str| {
+            text.lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+                .unwrap_or_else(|| panic!("ffprobe reports no {name} for {path}:\n{text}"))
+                .to_string()
+        };
+        (field("codec_name"), field("nb_read_frames").parse().expect("a frame count"))
+    }
+
+    /// The PNG at `path` decoded with the `png` crate, as `(width, height, rgb48le bytes)`.
+    fn png_as_rgb48le(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
+        let file = std::io::BufReader::new(File::open(path).expect("PNG file"));
+        let mut reader = png::Decoder::new(file).read_info().expect("PNG header");
+        let mut buffer = vec![0; reader.output_buffer_size().expect("PNG buffer size")];
+        let info = reader.next_frame(&mut buffer).expect("PNG pixels");
+        assert_eq!(
+            (info.color_type, info.bit_depth),
+            (png::ColorType::Rgb, png::BitDepth::Sixteen),
+            "the ember still is 16-bit RGB"
+        );
+        // PNG stores 16-bit samples big-endian.
+        let rgb48le = buffer[..info.buffer_size()]
+            .chunks_exact(2)
+            .flat_map(|sample| [sample[1], sample[0]])
+            .collect();
+        (info.width, info.height, rgb48le)
+    }
+
+    #[test]
+    fn test_render_ember_edition_writes_a_certified_still() {
+        use sha2::{Digest as _, Sha256};
+
+        // The still's WebP derivatives need FFmpeg.
+        if !media_tools_available("test_render_ember_edition_writes_a_certified_still", &["ffmpeg"])
+        {
+            return;
+        }
+        let package = TinyEmberPackage::new();
+        let summary = package.render(3_000, true, false);
+        package.assert_png_is_the_certified_still(&summary);
+
+        // Still only: no frame stream, no videos; the statistics count the still alone.
+        let certificate = package.certificate();
+        let outputs = &certificate["outputs"];
+        assert!(outputs["frames_rgb48le_sha256"].is_null(), "{outputs}");
+        assert_eq!((outputs["frames_emitted"].as_u64(), summary.frames_emitted), (Some(0), 0));
+        assert!(!std::path::Path::new(&package.web_video).exists());
+        assert!(!std::path::Path::new(&package.hq_video).exists());
+        let stats = summary.stats;
+        assert_eq!(stats.frames_with_cinnabar, u64::from(stats.still_cinnabar_fraction > 0.0));
+        assert_eq!(stats.peak_frame_cinnabar_fraction, stats.still_cinnabar_fraction);
+        assert_eq!(certificate["stats"]["frames_with_cinnabar"], stats.frames_with_cinnabar);
+        // The certificate records the request: the configuration under test, the orbit, the
+        // schedule of `main.mp4` and the package seed's own paper.
+        let inputs = &certificate["inputs"];
+        assert_eq!(certificate["config"]["look"]["fresh_tau"], 0.25);
+        assert_eq!(certificate["config"]["fluid"]["rows"], 64);
+        assert_eq!((&inputs["seed"], &inputs["steps"]), (&"46205528".into(), &3_000.into()));
+        assert_eq!(inputs["frames"]["count"], ember_frame_schedule(3_000).len());
+        assert_eq!(
+            inputs["paper_seed_sha256"],
+            hex::encode(Sha256::digest(ember_paper_seed(&[0x46, 0x20, 0x55, 0x28])))
+        );
+        assert_eq!(inputs["bodies"][0]["position"][2], 0.05);
+    }
+
+    /// The production path end to end, at a tiny size: every frame is shaded and streamed into
+    /// both encoders (`--fast-encode`: software H.264 in both slots), the videos hold exactly the
+    /// scheduled frames, the certificate records the frame stream the render hashed, and the
+    /// asset manifest lists both videos with that frame count's duration.
+    #[test]
+    fn test_render_ember_edition_writes_both_videos() {
+        let test = "test_render_ember_edition_writes_both_videos";
+        if !media_tools_available(test, &["ffmpeg", "ffprobe"]) {
+            return;
+        }
+        // The smallest orbit the preflight accepts (the ember stage's cost bound for this test).
+        let config = tiny_ember_config();
+        let preflight =
+            |steps| preflight_ember_edition(&tilted_figure_eight_bodies(), steps, 96, 64, &config);
+        assert!(preflight(TINY_VIDEO_STEPS).is_ok());
+        assert!(matches!(
+            preflight(TINY_VIDEO_STEPS - 1),
+            Err(AppError::Ember(EmberError::OrbitTooShort { .. }))
+        ));
+
+        let package = TinyEmberPackage::new();
+        let summary = package.render(TINY_VIDEO_STEPS, false, true);
+        package.assert_png_is_the_certified_still(&summary);
+
+        let frames = ember_frame_schedule(TINY_VIDEO_STEPS).len();
+        assert_eq!(summary.frames_emitted, frames);
+        let frames_sha256 = summary.frames_sha256.as_deref().expect("a video render hashes frames");
+        let certificate = package.certificate();
+        let outputs = &certificate["outputs"];
+        assert_eq!(outputs["frames_rgb48le_sha256"], frames_sha256, "{outputs}");
+        assert_eq!(outputs["frames_emitted"], frames);
+        let stats = summary.stats;
+        assert!(stats.frames_with_cinnabar <= frames as u64, "{stats:?}");
+        assert!(stats.peak_frame_cinnabar_fraction >= stats.still_cinnabar_fraction, "{stats:?}");
+        assert_eq!(
+            certificate["stats"]["peak_frame_cinnabar_fraction"].as_f64().map(f64::to_bits),
+            Some(stats.peak_frame_cinnabar_fraction.to_bits())
+        );
+
+        // Both videos exist and decode to exactly the scheduled frames.
+        let [web, hq] = ember_video_options(true);
+        for (video, options) in [(&package.web_video, &web), (&package.hq_video, &hq)] {
+            assert!(fs::metadata(video).expect("ember.mp4").len() > 0, "{video}");
+            let (codec, decoded) = probe_video(video);
+            assert_eq!(codec, manifest_codec(&options.codec), "{video}");
+            assert_eq!(decoded, frames, "{video}: every scheduled frame is encoded");
+        }
+
+        // The manifest lists both with the duration of that frame count at the product rate.
+        let manifest = EmberManifest::from_summary(&summary, true);
+        write_asset_manifest(package.seed_dir(), 96, 64, TINY_VIDEO_STEPS, false, Some(&manifest))
+            .expect("manifest");
+        let bytes = fs::read(package.dir.path().join("metadata/assets.json")).expect("assets.json");
+        let assets: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+        let seconds = frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+        for (role, video) in [("ember_web", &package.web_video), ("ember_hq", &package.hq_video)] {
+            let listed = entry(&assets, role);
+            assert_eq!(
+                listed["duration_seconds"].as_f64().map(f64::to_bits),
+                Some(seconds.to_bits()),
+                "{listed}"
+            );
+            assert_eq!(listed["frame_rate"], constants::DEFAULT_VIDEO_FPS, "{listed}");
+            assert_eq!(listed["bytes"], fs::metadata(video).expect("video").len(), "{listed}");
+        }
+        assert_eq!(
+            entry(&assets, "main_web")["duration_seconds"],
+            entry(&assets, "ember_web")["duration_seconds"],
+            "the ember videos are frame-locked to main.mp4"
+        );
     }
 }

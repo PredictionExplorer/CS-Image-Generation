@@ -108,6 +108,8 @@ def render_one(binary: str, seed: str, prefix: str, args: argparse.Namespace) ->
         "--steps",
         str(args.steps),
         "--fast-encode",
+        # The sheet tiles the main master only; the CPU-heavy ember edition is not needed.
+        "--no-ember",
     ]
     t0 = time.monotonic()
     try:

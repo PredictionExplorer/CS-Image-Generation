@@ -23,7 +23,7 @@ import typing
 from pathlib import Path
 
 from _utils import check_ffmpeg, compute_aesthetic_metrics, fmt_duration, resolve_binary
-from run import REQUIRED_PACKAGE_FILES, EXPECTED_SPECTRAL_BINS, SPECTRAL_FILE_RE
+from run import GENERATOR_EXIT_EMBER_FAILED, missing_local_package_parts
 
 CONCURRENT_SIMS = 3
 BINARY = "./target/release/three_body_problem"
@@ -113,35 +113,6 @@ def estimate_aesthetic_score(seed: str, run_id: int) -> float | None:
     return metrics.score
 
 
-def missing_local_package_parts(seed_dir: Path) -> list[str]:
-    """Return missing files/groups using the same package contract as run.py."""
-    missing: list[str] = []
-    for filename in REQUIRED_PACKAGE_FILES:
-        path = seed_dir / filename
-        if not path.is_file():
-            missing.append(filename)
-
-    spectral_dir = seed_dir / "spectral"
-    spectral_bins: set[int] = set()
-    if spectral_dir.is_dir():
-        for path in spectral_dir.iterdir():
-            if not path.is_file():
-                continue
-            match = SPECTRAL_FILE_RE.match(path.name)
-            if match:
-                bin_idx = int(match.group("bin"))
-                if bin_idx in EXPECTED_SPECTRAL_BINS:
-                    spectral_bins.add(bin_idx)
-    else:
-        missing.append("spectral/")
-
-    missing_bins = EXPECTED_SPECTRAL_BINS - spectral_bins
-    if missing_bins:
-        missing.append(f"spectral/*.png ({len(missing_bins)} missing)")
-
-    return missing
-
-
 # ---------------------------------------------------------------------------
 # Single simulation
 # ---------------------------------------------------------------------------
@@ -171,6 +142,7 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
 
         if proc.returncode == 0:
             seed_dir = Path("output") / seed
+            # The same package contract as run.py (every core and ember file, all 64 bins).
             missing_parts = missing_local_package_parts(seed_dir)
             if missing_parts:
                 logger.warning(
@@ -203,10 +175,13 @@ def run_one(binary: str, seed: str, run_id: int) -> SimResult:
             return SimResult(True, seed, elapsed, aesthetic_score)
 
         logger.warning(
-            "[%d] FAIL  %s  exit=%d  (%s)",
+            "[%d] FAIL  %s  exit=%d%s  (%s)",
             run_id,
             seed,
             proc.returncode,
+            " (complete except the ember edition, which failed)"
+            if proc.returncode == GENERATOR_EXIT_EMBER_FAILED
+            else "",
             fmt_duration(elapsed),
         )
         return SimResult(False, seed, elapsed)

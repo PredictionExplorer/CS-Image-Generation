@@ -9,6 +9,11 @@ updates:
     labels:
       - dependencies
     open-pull-requests-limit: 10
+    ignore:
+      # Pinned exactly (`libm = "=0.2.16"`) for determinism: the ember edition's frames are
+      # bit-identical across CPU architectures only for a fixed libm, and any bump may change
+      # results in the last bit. Upgrade by hand and re-bless the ember golden hashes.
+      - dependency-name: "libm"
 
   - package-ecosystem: github-actions
     directory: "/"

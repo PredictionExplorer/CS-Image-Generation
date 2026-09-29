@@ -321,11 +321,85 @@ fn tonemap_to_16bit(fr: f64, fg: f64, fb: f64, fa: f64, levels: &ChannelLevels) 
     ]
 }
 
-/// Save a 16-bit Display P3 image as PNG with explicit color metadata.
-pub fn save_image_as_png_16bit(
+/// Colour encoding a 16-bit RGB PNG is tagged with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PngColorTag {
+    /// Display P3 primaries (D65) with the sRGB transfer curve: the main renderer's output.
+    DisplayP3,
+    /// sRGB (IEC 61966-2-1): BT.709 primaries, D65, sRGB transfer curve (the ember edition).
+    Srgb,
+}
+
+/// cICP (coding-independent code points, ITU-T H.273) of sRGB: BT.709 primaries (1), the
+/// IEC 61966-2-1 transfer (13), identity matrix (0, i.e. RGB) and full range (1).
+const SRGB_CICP: [u8; 4] = [1, 13, 0, 1];
+
+impl PngColorTag {
+    /// Human-readable name for logs.
+    fn label(self) -> &'static str {
+        match self {
+            Self::DisplayP3 => "Display P3",
+            Self::Srgb => "sRGB",
+        }
+    }
+
+    /// Sets the colour chunks the `png` encoder writes itself.
+    ///
+    /// * Display P3 (unchanged since it shipped, byte for byte): `gAMA` 1/2.2 and `cHRM` with the
+    ///   P3 primaries. The cICP field (primaries 12 = P3, transfer 13 = sRGB curve) is recorded
+    ///   in `Info`, but `png` 0.18's encoder ignores that field, so no `cICP` chunk is written.
+    /// * sRGB: an `sRGB` chunk (perceptual intent) plus its compatibility `gAMA` (45455, i.e.
+    ///   1/2.2) and `cHRM` (BT.709 primaries, D65 white) chunks — the exact PNG-3 fallback values,
+    ///   which the encoder only writes when they match bit for bit.
+    fn apply(self, info: &mut png::Info<'_>) {
+        match self {
+            Self::DisplayP3 => {
+                info.source_gamma = Some(png::ScaledFloat::new(0.45455));
+                info.source_chromaticities = Some(png::SourceChromaticities::new(
+                    (0.3127, 0.3290),
+                    (0.6800, 0.3200),
+                    (0.2650, 0.6900),
+                    (0.1500, 0.0600),
+                ));
+                info.coding_independent_code_points = Some(png::CodingIndependentCodePoints {
+                    color_primaries: 12,
+                    transfer_function: 13,
+                    matrix_coefficients: 0,
+                    is_video_full_range_image: true,
+                });
+            }
+            Self::Srgb => {
+                let scaled = png::ScaledFloat::from_scaled;
+                info.srgb = Some(png::SrgbRenderingIntent::Perceptual);
+                info.source_gamma = Some(scaled(45_455));
+                info.source_chromaticities = Some(png::SourceChromaticities {
+                    white: (scaled(31_270), scaled(32_900)),
+                    red: (scaled(64_000), scaled(33_000)),
+                    green: (scaled(30_000), scaled(60_000)),
+                    blue: (scaled(15_000), scaled(6_000)),
+                });
+            }
+        }
+    }
+
+    /// Payload of a `cICP` chunk written explicitly after the header (before any image data, as
+    /// PNG-3 requires). Display P3 keeps its historical bytes, so it gets none.
+    fn explicit_cicp(self) -> Option<[u8; 4]> {
+        match self {
+            Self::DisplayP3 => None,
+            Self::Srgb => Some(SRGB_CICP),
+        }
+    }
+}
+
+/// Writes a 16-bit RGB PNG (big-endian samples, as PNG requires) tagged with `tag`.
+fn write_png_16bit(
     rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
     path: &str,
+    tag: PngColorTag,
 ) -> Result<()> {
+    let encoding_error =
+        |e: png::EncodingError| RenderError::ImageEncoding { reason: e.to_string() };
     let file = File::create(path)
         .map_err(|e| RenderError::ImageEncoding { reason: format!("failed to create PNG: {e}") })?;
     let writer = BufWriter::new(file);
@@ -333,36 +407,44 @@ pub fn save_image_as_png_16bit(
     let mut info = png::Info::with_size(rgb_img.width(), rgb_img.height());
     info.color_type = png::ColorType::Rgb;
     info.bit_depth = png::BitDepth::Sixteen;
-    info.source_gamma = Some(png::ScaledFloat::new(0.45455));
-    info.source_chromaticities = Some(png::SourceChromaticities::new(
-        (0.3127, 0.3290),
-        (0.6800, 0.3200),
-        (0.2650, 0.6900),
-        (0.1500, 0.0600),
-    ));
-    info.coding_independent_code_points = Some(png::CodingIndependentCodePoints {
-        color_primaries: 12,
-        transfer_function: 13,
-        matrix_coefficients: 0,
-        is_video_full_range_image: true,
-    });
+    tag.apply(&mut info);
 
     let mut bytes = Vec::with_capacity(rgb_img.as_raw().len() * 2);
     for &sample in rgb_img.as_raw() {
         bytes.extend_from_slice(&sample.to_be_bytes());
     }
 
-    let encoder = png::Encoder::with_info(writer, info)
-        .map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    let mut encoder =
-        encoder.write_header().map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    encoder
-        .write_image_data(&bytes)
-        .map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
-    encoder.finish().map_err(|e| RenderError::ImageEncoding { reason: e.to_string() })?;
+    let encoder = png::Encoder::with_info(writer, info).map_err(encoding_error)?;
+    let mut encoder = encoder.write_header().map_err(encoding_error)?;
+    if let Some(cicp) = tag.explicit_cicp() {
+        encoder.write_chunk(png::chunk::cICP, &cicp).map_err(encoding_error)?;
+    }
+    encoder.write_image_data(&bytes).map_err(encoding_error)?;
+    encoder.finish().map_err(encoding_error)?;
 
-    info!("   Saved 16-bit Display P3 PNG => {path}");
+    info!("   Saved 16-bit {} PNG => {path}", tag.label());
     Ok(())
+}
+
+/// Save a 16-bit Display P3 image as PNG with explicit color metadata.
+pub fn save_image_as_png_16bit(
+    rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
+    path: &str,
+) -> Result<()> {
+    write_png_16bit(rgb_img, path, PngColorTag::DisplayP3)
+}
+
+/// Save a 16-bit sRGB (IEC 61966-2-1) image as PNG.
+///
+/// The samples must already be sRGB-encoded code values (`0..=65535`). The file carries every
+/// sRGB signal a reader might look for, all agreeing: `sRGB` (perceptual intent), `gAMA` 1/2.2,
+/// `cHRM` with the BT.709 primaries and D65 white, and `cICP` (primaries 1, transfer 13,
+/// matrix 0, full range).
+pub fn save_image_as_srgb_png_16bit(
+    rgb_img: &ImageBuffer<Rgb<u16>, Vec<u16>>,
+    path: &str,
+) -> Result<()> {
+    write_png_16bit(rgb_img, path, PngColorTag::Srgb)
 }
 
 fn tonemap_to_display_buffer(pixels: &PixelBuffer, levels: &ChannelLevels) -> PixelBuffer {
@@ -475,7 +557,18 @@ fn default_accumulation_backend() -> AccumulationBackend {
     AccumulationBackend::ParallelScanlines
 }
 
-fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
+/// Recorded steps at which the video passes emit a frame: every `frame_interval`-th step
+/// (`frame_interval, 2·frame_interval, …` below `total_steps`), then the final step
+/// `total_steps - 1` unless it is already the last checkpoint.
+///
+/// The result is strictly increasing and, for `total_steps > 0`, always ends on the final step,
+/// so the last frame shows the whole trajectory. Step 0 is never a checkpoint unless it is the
+/// final step (`total_steps == 1`); `total_steps == 0` yields no checkpoints.
+/// `frame_interval` must be at least 1 (callers pass `(steps / target_frames).max(1)`).
+///
+/// With [`main_video_frame_interval`] this is the frame schedule of `main.mp4`
+/// ([`main_video_checkpoints`]).
+pub(crate) fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     if total_steps == 0 {
         return Vec::new();
     }
@@ -495,6 +588,27 @@ fn checkpoint_steps(total_steps: usize, frame_interval: usize) -> Vec<usize> {
     }
 
     checkpoints
+}
+
+/// Recorded steps between two frames of the main video (`main.mp4`):
+/// `max(1, ⌊total_steps / DEFAULT_TARGET_FRAMES⌋)`, so a trajectory of at least
+/// [`constants::DEFAULT_TARGET_FRAMES`] steps yields about that many frames and a shorter one
+/// yields a frame per step.
+///
+/// The single source of the main video's frame spacing: pass 2 of `main.mp4`, the still's
+/// finishing effects (which see the last frame's number) and the ember edition's frame schedule
+/// all derive from it, so the two videos can never drift apart.
+pub(crate) fn main_video_frame_interval(total_steps: usize) -> usize {
+    (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1)
+}
+
+/// The recorded steps shown by the frames of `main.mp4`, in order:
+/// [`checkpoint_steps`] at the [`main_video_frame_interval`]. The last entry is always the final
+/// step `total_steps - 1` (1,000,000 steps → 1,802 frames: every 555th step, then step 999,999).
+/// The ember edition renders exactly these steps, so frame `i` of both videos shows the same
+/// moment of the orbit.
+pub(crate) fn main_video_checkpoints(total_steps: usize) -> Vec<usize> {
+    checkpoint_steps(total_steps, main_video_frame_interval(total_steps))
 }
 
 struct AccumulationParams<'a> {
@@ -1793,7 +1907,7 @@ fn render_final_frame_spectral_with_backend(
 
     convert_spd_buffer_to_rgba(&accum_spd, &mut accum_rgba, width as usize, height as usize);
 
-    let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
+    let frame_interval = main_video_frame_interval(total_steps);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
     let mut trajectory_pixels = finish_pipeline
@@ -1838,7 +1952,7 @@ fn render_final_frame_spectral_tiled(
     let total_steps = scene.step_count();
     let dt = constants::DEFAULT_DT;
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
-    let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
+    let frame_interval = main_video_frame_interval(total_steps);
     let preview_frame_number = total_steps.saturating_sub(1) / frame_interval;
     let frame_params = FrameParams { frame_number: preview_frame_number, density: None };
     let effect_config =
@@ -1963,7 +2077,7 @@ fn render_single_frame_spectral_with_backend(
     let velocity_calc = velocity_hdr::VelocityHdrCalculator::new(scene.positions, dt);
 
     // Render all trajectory steps up to and including the first output frame interval
-    let frame_interval = (total_steps / constants::DEFAULT_TARGET_FRAMES as usize).max(1);
+    let frame_interval = main_video_frame_interval(total_steps);
     let first_frame_step = frame_interval;
 
     accumulate_spectral_steps(
@@ -2937,5 +3051,189 @@ mod tests {
             v.iter().sum::<u64>()
         });
         assert_eq!(result, (0..1024u64).sum::<u64>());
+    }
+
+    #[test]
+    fn checkpoint_schedule_matches_the_main_video() {
+        // Production: 1,000,000 recorded steps at 1,800 target frames.
+        let steps = 1_000_000;
+        let interval = main_video_frame_interval(steps);
+        let schedule = main_video_checkpoints(steps);
+        assert_eq!(interval, 555);
+        assert_eq!(schedule, checkpoint_steps(steps, interval));
+        assert_eq!(schedule.len(), 1_802);
+        assert_eq!(schedule[0], 555);
+        assert_eq!(schedule[1_800], 555 * 1_801);
+        assert_eq!(schedule.last(), Some(&(steps - 1)));
+        assert!(schedule.windows(2).all(|pair| pair[0] < pair[1]), "strictly increasing");
+    }
+
+    #[test]
+    fn main_video_frame_interval_regimes() {
+        let target = constants::DEFAULT_TARGET_FRAMES as usize;
+        // Below the target a frame per step (never 0, which would stall `checkpoint_steps`).
+        for steps in [0, 1, 2, target - 1] {
+            assert_eq!(main_video_frame_interval(steps), 1, "{steps} steps");
+        }
+        // Above it, ⌊steps / target⌋.
+        assert_eq!(main_video_frame_interval(target), 1);
+        assert_eq!(main_video_frame_interval(2 * target - 1), 1);
+        assert_eq!(main_video_frame_interval(2 * target), 2);
+        assert_eq!(main_video_frame_interval(1_000_000), 555);
+
+        // Every schedule with at least two steps is a valid ember schedule too: non-empty,
+        // strictly increasing, never step 0, ending on the final step.
+        for steps in (2..40).chain([target - 1, target, target + 1, 2 * target + 7, 123_457]) {
+            let schedule = main_video_checkpoints(steps);
+            assert_eq!(schedule.last(), Some(&(steps - 1)), "{steps} steps");
+            assert!(schedule[0] > 0, "{steps} steps");
+            assert!(schedule.windows(2).all(|pair| pair[0] < pair[1]), "{steps} steps");
+        }
+    }
+
+    /// Three bodies circling at different rates: `steps` recorded positions per body.
+    fn looping_scene(steps: usize) -> SceneData {
+        let body = |radius: f64, turns: f64, phase: f64| -> Vec<Vector3<f64>> {
+            (0..steps)
+                .map(|k| {
+                    let angle = phase + turns * std::f64::consts::TAU * k as f64 / steps as f64;
+                    Vector3::new(0.5 + radius * angle.cos(), 0.5 + radius * angle.sin(), 0.0)
+                })
+                .collect()
+        };
+        let positions = vec![body(0.30, 1.0, 0.0), body(0.20, 2.0, 1.0), body(0.12, 3.0, 2.0)];
+        let colors = vec![vec![(0.75, 0.10, 0.05); steps]; 3];
+        (positions, colors, vec![0.65, 0.85, 0.95])
+    }
+
+    #[test]
+    fn main_video_pass_emits_one_frame_per_checkpoint() {
+        // Pass 2 at the main video's frame interval emits exactly one frame per entry of
+        // `main_video_checkpoints` — the schedule the ember edition renders — in both regimes.
+        let resolved = baseline_resolved_config(8, 6);
+        let render_config = RenderConfig { hdr_scale: 3.0, bloom_mode: BloomMode::None };
+        let settings = SpectralRenderSettings::new(&resolved, &render_config, false);
+        let levels = default_levels();
+        let frame_bytes = 8 * 6 * 3 * 2;
+        // A frame per step; then every 2nd step plus the appended final step (1,850 frames).
+        for steps in [5, 3_700] {
+            let (positions, colors, body_alphas) = looping_scene(steps);
+            let scene = SpectralScene::new(&positions, &colors, &body_alphas);
+            let mut frames = 0usize;
+            let mut last_frame = None;
+            let mut spd = Vec::new();
+            pass_2_write_frames_spectral(
+                Pass2Params {
+                    scene,
+                    frame_interval: main_video_frame_interval(steps),
+                    levels: &levels,
+                    settings,
+                    last_frame_out: &mut last_frame,
+                    accum_spd: &mut spd,
+                },
+                |bytes| {
+                    assert_eq!(bytes.len(), frame_bytes);
+                    frames += 1;
+                    Ok(())
+                },
+            )
+            .expect("pass 2");
+            assert_eq!(frames, main_video_checkpoints(steps).len(), "{steps} steps");
+            assert!(last_frame.is_some(), "the last checkpoint is the final step");
+        }
+    }
+
+    #[test]
+    fn checkpoint_schedule_edge_cases() {
+        assert!(checkpoint_steps(0, 1).is_empty());
+        assert_eq!(checkpoint_steps(1, 1), vec![0]);
+        assert_eq!(checkpoint_steps(2, 1), vec![1]);
+        assert_eq!(checkpoint_steps(10, 3), vec![3, 6, 9]);
+        assert_eq!(checkpoint_steps(10, 4), vec![4, 8, 9]);
+        assert_eq!(checkpoint_steps(5, 100), vec![4]);
+    }
+
+    /// `(type, data)` of every chunk of a PNG file, in file order.
+    fn png_chunks(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
+        let mut chunks = Vec::new();
+        let mut at = 8;
+        while at < bytes.len() {
+            let length =
+                u32::from_be_bytes(bytes[at..at + 4].try_into().expect("4 bytes")) as usize;
+            let kind: [u8; 4] = bytes[at + 4..at + 8].try_into().expect("4 bytes");
+            chunks.push((kind, bytes[at + 8..at + 8 + length].to_vec()));
+            at += 12 + length;
+        }
+        chunks
+    }
+
+    fn be_u32s(data: &[u8]) -> Vec<u32> {
+        data.chunks_exact(4)
+            .map(|word| u32::from_be_bytes(word.try_into().expect("4 bytes")))
+            .collect()
+    }
+
+    fn png_test_image() -> ImageBuffer<Rgb<u16>, Vec<u16>> {
+        let (width, height) = (7u32, 5u32);
+        let samples =
+            (0..width * height * 3).map(|i| (i.wrapping_mul(2_654_435_761) >> 11) as u16).collect();
+        ImageBuffer::from_raw(width, height, samples).expect("7x5x3 samples")
+    }
+
+    /// Chunk types before the image data, and the decoded samples.
+    fn written_png(tag: PngColorTag) -> (Vec<([u8; 4], Vec<u8>)>, Vec<u16>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("tagged.png");
+        let path = path.to_str().expect("UTF-8 temp path");
+        let image = png_test_image();
+        write_png_16bit(&image, path, tag).expect("PNG should encode");
+        let bytes = std::fs::read(path).expect("PNG should exist");
+
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes.clone()))
+            .read_info()
+            .expect("PNG should decode");
+        let mut decoded = vec![0u8; reader.output_buffer_size().expect("buffer size")];
+        reader.next_frame(&mut decoded).expect("frame should decode");
+        let samples: Vec<u16> =
+            decoded.chunks_exact(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]])).collect();
+        assert_eq!(samples, image.into_raw(), "{tag:?}: samples must round-trip exactly");
+
+        let header =
+            png_chunks(&bytes).into_iter().take_while(|(kind, _)| kind != b"IDAT").collect();
+        (header, samples)
+    }
+
+    #[test]
+    fn srgb_png_carries_consistent_srgb_tags() {
+        let (header, _) = written_png(PngColorTag::Srgb);
+        let kinds: Vec<&[u8; 4]> = header.iter().map(|(kind, _)| kind).collect();
+        assert_eq!(kinds, [b"IHDR", b"sRGB", b"gAMA", b"cHRM", b"cICP"]);
+        assert_eq!(header[0].1[8..10], [16, 2], "16-bit truecolour");
+        assert_eq!(header[1].1, [0], "perceptual rendering intent");
+        assert_eq!(be_u32s(&header[2].1), [45_455]);
+        assert_eq!(
+            be_u32s(&header[3].1),
+            [31_270, 32_900, 64_000, 33_000, 30_000, 60_000, 15_000, 6_000],
+            "BT.709 primaries with a D65 white"
+        );
+        assert_eq!(header[4].1, [1, 13, 0, 1], "cICP: BT.709, sRGB transfer, RGB, full range");
+    }
+
+    #[test]
+    fn display_p3_png_layout_is_unchanged() {
+        // The main master's colour chunks as they have always been written: gAMA 1/2.2 and the
+        // P3 primaries (no sRGB chunk, and no cICP chunk because `png` 0.18 does not emit it).
+        let (header, _) = written_png(PngColorTag::DisplayP3);
+        let kinds: Vec<&[u8; 4]> = header.iter().map(|(kind, _)| kind).collect();
+        assert_eq!(kinds, [b"IHDR", b"gAMA", b"cHRM"]);
+        assert_eq!(be_u32s(&header[1].1), [png::ScaledFloat::new(0.45455).into_scaled()]);
+        let expected = png::SourceChromaticities::new(
+            (0.3127, 0.3290),
+            (0.6800, 0.3200),
+            (0.2650, 0.6900),
+            (0.1500, 0.0600),
+        );
+        assert_eq!(header[2].1, expected.to_be_bytes());
     }
 }

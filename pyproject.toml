@@ -46,10 +46,11 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["_utils"]
+known-first-party = ["_utils", "run"]
 
 # ---------------------------------------------------------------------------
-# Mypy — strict typing for repository Python files
+# Mypy — strict typing for repository Python files and their unit tests
+# (tests: `python -m unittest discover -s tests/python -v`, stdlib only)
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
@@ -62,4 +63,5 @@ files = [
     "run.py",
     "run-test-images.py",
     "ci/verify_reference.py",
+    "tests/python/test_run.py",
 ]

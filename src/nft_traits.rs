@@ -26,8 +26,6 @@ use crate::traits_analysis::{
 use crate::{analysis, oklab, render, spectrum};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::fs::File;
-use std::io::BufWriter;
 use std::sync::LazyLock;
 use tracing::{info, warn};
 
@@ -769,8 +767,7 @@ pub fn build(inputs: &NftTraitsInputs<'_>) -> NftTraitsFile {
 /// Serialize a trait file to `{seed_dir}/metadata/nft_traits.json`.
 pub fn write(seed_dir: &str, file: &NftTraitsFile) -> Result<()> {
     let path = format!("{seed_dir}/metadata/nft_traits.json");
-    let out = File::create(&path)?;
-    serde_json::to_writer_pretty(BufWriter::new(out), file).map_err(std::io::Error::other)?;
+    crate::utils::write_json_pretty(&path, file)?;
     info!("   Saved NFT trait metadata => {path}");
     Ok(())
 }

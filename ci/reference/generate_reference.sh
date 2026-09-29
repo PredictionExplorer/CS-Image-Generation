@@ -34,7 +34,8 @@ echo "  Drift: $DRIFT_MODE"
     --steps "$NUM_STEPS" \
     --drift "$DRIFT_MODE" \
     --output "baseline" \
-    --image-only
+    --image-only \
+    --no-ember
 
 # Move the generated files to reference directory
 mv "output/baseline/images/source/master.png" "ci/reference/baseline_${WIDTH}x${HEIGHT}.png"

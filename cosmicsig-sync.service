@@ -17,10 +17,18 @@ EnvironmentFile=/home/user/Dev/CS-Image-Generation/.env
 
 ExecStart=/usr/bin/python3 run.py
 
-# 24-hour hard ceiling: systemd kills the process if it runs longer than this
-RuntimeMaxSec=86400
+# 24-hour ceiling for one run. A Type=oneshot service is "starting" until run.py exits, so
+# TimeoutStartSec is the setting that bounds it (RuntimeMaxSec has no effect on oneshot units).
+# At the limit systemd stops the run as described below. A normal run is much shorter: every new
+# mint, then at most --max-backfill ember backfill packages (about an hour each). A render that
+# hangs hits run.py's per-seed --timeout (4 hours by default) long before this ceiling.
+TimeoutStartSec=86400
 
-# On stop/timeout, give 60s for the script to finish its current seed
+# On stop (or at the ceiling) systemd sends SIGTERM to the whole control group: run.py, the
+# generator and its encoders, or scp. The seed in flight is lost (a run that is shutting down
+# counts no failure) and a later run generates it again; an interrupted upload leaves the remote
+# package incomplete, so it is retried too. run.py uses this time to log a summary and exit;
+# after it systemd sends SIGKILL.
 TimeoutStopSec=60
 
 # Capture stdout/stderr into journald

@@ -1,12 +1,14 @@
 [Unit]
-Description=Run CosmicSignature asset sync every 5 minutes
+Description=Run CosmicSignature asset sync 5 minutes after each run
 
 [Timer]
 # First run 2 minutes after boot
 OnBootSec=2min
 
-# Subsequent runs every 5 minutes after the last run finished
-OnUnitActiveSec=5min
+# Each later run starts 5 minutes after the previous run finished. OnUnitInactiveSec counts
+# from when the service last became inactive (or failed); OnUnitActiveSec would count from when
+# it started, so after an hour-long backfill run the next run would start at once.
+OnUnitInactiveSec=5min
 
 # Allow up to 10s scheduling jitter
 AccuracySec=10s
