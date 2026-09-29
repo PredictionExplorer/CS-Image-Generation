@@ -497,6 +497,13 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(run.plan_seed_queue([], ["b1", "b2"], 5, ledger, 4), ["b2", "b1"])
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 4), [])
 
+    def test_an_orbit_mismatch_gives_a_seed_up_at_once(self) -> None:
+        ledger = run.BackfillLedger(ember_failures={"b1": 1}, orbit_mismatches={"b1"})
+        self.assertEqual(run.plan_seed_queue(["u1"], ["b1", "b2"], 5, ledger), ["u1", "b2"])
+        self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 3), ["b1"])
+        # A higher attempt cap does not bring it back: this binary regenerates the same orbit.
+        self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 100), ["b1"])
+
     def test_other_failures_never_give_a_seed_up(self) -> None:
         ledger = run.BackfillLedger(other_failures={"b1": 10})
         self.assertEqual(run.plan_seed_queue([], ["b1"], 1, ledger), ["b1"])
@@ -535,6 +542,24 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(list(data["ember_failures"]), [SEED_A, SEED_B])
         self.assertEqual(data["other_failures"], {SEED_C: 4})
         self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists())
+
+    def test_orbit_mismatches_round_trip_and_older_files_have_none(self) -> None:
+        ledger = run.BackfillLedger({SEED_A: 1, SEED_B: 1}, {}, {SEED_B, SEED_A})
+        run.save_backfill_ledger(ledger, self.identity, self.path)
+        self.assertEqual(self.load(), ledger)
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["orbit_mismatches"], [SEED_A, SEED_B])
+
+        del data["orbit_mismatches"]  # a file written before the field existed
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load(), run.BackfillLedger({SEED_A: 1, SEED_B: 1}))
+
+        data["orbit_mismatches"] = [SEED_A, 7, None]  # malformed entries are dropped
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().orbit_mismatches, {SEED_A})
+        data["orbit_mismatches"] = {"not": "a list"}
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().orbit_mismatches, set())
 
     def test_counts_reset_when_the_generator_changes(self) -> None:
         run.save_backfill_ledger(
@@ -600,10 +625,24 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
         self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1}))
 
+        # An orbit mismatch counts one attempt and gives the seed up; COMPLETE forgets it.
+        self.assertTrue(ledger.record(SEED_C, run.Outcome.ORBIT_MISMATCH, backfill=True))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1, SEED_C: 1}, {}, {SEED_C}))
+        self.assertTrue(ledger.given_up(SEED_C, 3))
+        with self.assertLogs(run.log, level="INFO"):
+            self.assertFalse(
+                ledger.record(SEED_D, run.Outcome.ORBIT_MISMATCH, backfill=True, interrupted=True)
+            )
+        self.assertFalse(ledger.given_up(SEED_D, 3))
+        self.assertTrue(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1}))
+
     def test_retain_keeps_only_the_waiting_seeds(self) -> None:
-        ledger = run.BackfillLedger({SEED_A: 1, SEED_B: 2}, {SEED_B: 1, SEED_C: 3})
+        ledger = run.BackfillLedger(
+            {SEED_A: 1, SEED_B: 2}, {SEED_B: 1, SEED_C: 3}, {SEED_A, SEED_B}
+        )
         ledger.retain({SEED_B})
-        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 2}, {SEED_B: 1}))
+        self.assertEqual(ledger, run.BackfillLedger({SEED_B: 2}, {SEED_B: 1}, {SEED_B}))
 
 
 # ---------------------------------------------------------------------------
@@ -823,12 +862,13 @@ class ProcessSeedTests(SyncTestCase):
         os.environ[f"FAKE_GEN_MASSES_{SEED_A}"] = "[150.25, 200.5, 180.12500000000003]"
         with self.assertLogs(run.log, level="ERROR") as logs:
             outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
-        self.assertIs(outcome, run.Outcome.EMBER_FAILED)
+        self.assertIs(outcome, run.Outcome.ORBIT_MISMATCH)
         self.assertEqual(self.calls("scp"), [])
         self.assertEqual(self.remote_snapshot(), live)
         message = "\n".join(logs.output)
         self.assertIn(f"0x{SEED_A}", message)
         self.assertIn("DIFFERENT ORBIT", message)
+        self.assertIn("ORBIT MISMATCH", message)
         self.assertIn("simulation.masses", message)
         self.assertNotIn("selected_index", message)
 
@@ -1151,14 +1191,29 @@ class MainTests(SyncTestCase):
         assert remote is not None
         self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B, SEED_C], remote), ([], [SEED_B]))
 
-    def test_a_different_orbit_is_recorded_as_a_failed_attempt(self) -> None:
+    def test_a_different_orbit_gives_the_seed_up_at_once(self) -> None:
         self.remote_package(SEED_A)
         live = self.remote_snapshot()
         os.environ[f"FAKE_GEN_MASSES_{SEED_A}"] = "[1.0, 2.0, 3.0]"
         with self.assertLogs(run.log, level="ERROR"):
             self.assertEqual(self.main([SEED_A]), 1)
         self.assertEqual(self.remote_snapshot(), live)
-        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1}))
+        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1}, {}, {SEED_A}))
+
+        # No second render with this binary, whatever the attempt cap; a WARNING every run.
+        for extra in ((), ("--max-backfill-attempts", "100")):
+            with self.assertLogs(run.log, level="WARNING") as logs:
+                self.assertEqual(self.main([SEED_A], *extra), 0)
+            self.assertIn("regenerates a different orbit", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A])
+
+        # A rebuilt generator tries it again (and here renders the live orbit this time).
+        del os.environ[f"FAKE_GEN_MASSES_{SEED_A}"]
+        stat = Path(self.generator).stat()
+        os.utime(self.generator, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(self.main([SEED_A]), 0)
+        self.assertEqual(self.generated(), [SEED_A, SEED_A])
+        self.assertEqual(self.ledger(), run.BackfillLedger())
 
     def test_a_given_up_seed_is_skipped_and_logged_every_run(self) -> None:
         self.remote_package(SEED_A)

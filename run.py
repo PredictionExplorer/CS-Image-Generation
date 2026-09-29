@@ -37,9 +37,10 @@ Ember backfill (remote packages that lack only the ember edition's files):
     nft_traits.json are never touched.
     --backfill-mode full replaces the whole remote package. A seed whose ember edition fails
     --max-backfill-attempts times with the same generator binary is given up
-    (backfill_failures.json). A backfill run that fails for any other reason is not counted
-    toward that cap, but moves the seed behind the seeds that have failed less often, so a
-    seed that always fails cannot stall the backfill.
+    (backfill_failures.json). A seed whose regenerated orbit differs from the live package's is
+    given up at once: the same binary always regenerates the same orbit. A backfill run that
+    fails for any other reason is not counted toward that cap, but moves the seed behind the
+    seeds that have failed less often, so a seed that always fails cannot stall the backfill.
 
 Uploads: the metadata files and the certificate are uploaded under temporary names and renamed
     into place, so an interrupted upload never leaves a truncated metadata file; a whole package
@@ -202,7 +203,8 @@ DEFAULT_MAX_BACKFILL = 1
 # binary (see GeneratorIdentity) and resets when the binary changes, so a rebuilt generator
 # retries every seed; until then a given-up seed is logged as a WARNING on every run. Backfill
 # runs that fail for another reason are counted separately (BackfillLedger.other_failures): they
-# only order the queue and never give a seed up.
+# only order the queue and never give a seed up. An orbit mismatch does not wait for the cap: it
+# gives the seed up at once (Outcome.ORBIT_MISMATCH).
 MAX_BACKFILL_ATTEMPTS = 3
 
 # Environment variable names for required config
@@ -843,8 +845,9 @@ def find_missing_seeds(seeds: list[str], remote_files: set[str]) -> tuple[list[s
 
 
 def given_up_seeds(backfill: list[str], ledger: BackfillLedger, max_attempts: int) -> list[str]:
-    """Backfill seeds whose ember edition failed `max_attempts` or more times (in API order)."""
-    return [seed for seed in backfill if ledger.ember_failures.get(seed, 0) >= max_attempts]
+    """Backfill seeds given up with this generator binary (in API order): those whose ember
+    edition failed `max_attempts` or more times, and those whose orbit did not match."""
+    return [seed for seed in backfill if ledger.given_up(seed, max_attempts)]
 
 
 def plan_seed_queue(
@@ -868,9 +871,10 @@ def plan_seed_queue(
     for any reason, costs one render per pass over the backlog and cannot stall the backfill.
     Seeds with `max_attempts` or more failed ember attempts are left out: they are given up until
     the generator binary changes, so a seed whose ember edition always fails costs at most
-    `max_attempts` renders. Other failures never give a seed up.
+    `max_attempts` renders. A seed whose regenerated orbit did not match the live package is left
+    out after that one render. Other failures never give a seed up.
     """
-    eligible = [seed for seed in backfill if ledger.ember_failures.get(seed, 0) < max_attempts]
+    eligible = [seed for seed in backfill if not ledger.given_up(seed, max_attempts)]
     ordered = sorted(eligible, key=ledger.failed_runs)
     return [*urgent, *ordered[: max(max_backfill, 0)]]
 
@@ -895,9 +899,14 @@ class Outcome(enum.Enum):
     """The package without the ember edition: generated with GENERATOR_EXIT_EMBER_FAILED, or
     (after processing) uploaded without it. Counts one failed ember attempt."""
     EMBER_FAILED = "ember failed"
-    """The ember edition failed and nothing was uploaded: a backfill seed's exit 3, an orbit that
-    differs from the live package's (or regenerated metadata that cannot show it), or an
-    incomplete local ember edition. Counts one failed ember attempt."""
+    """The ember edition failed and nothing was uploaded: a backfill seed's exit 3, regenerated
+    metadata that cannot show its orbit or give its ember entries, or an incomplete local ember
+    edition. Counts one failed ember attempt."""
+    ORBIT_MISMATCH = "orbit mismatch"
+    """An ember-mode backfill whose regenerated package shows another orbit than the live one:
+    nothing was uploaded. The generator is deterministic, so this binary would regenerate the
+    same orbit on every retry: the seed counts one failed ember attempt and is given up at once
+    (BackfillLedger.orbit_mismatches) instead of after --max-backfill-attempts renders."""
 
 
 # ---------------------------------------------------------------------------
@@ -963,6 +972,14 @@ class BackfillLedger:
     other_failures: dict[str, int] = dataclasses.field(default_factory=dict)
     """Backfill runs that failed for any other reason (FAILED outcomes: the generator exited 1,
     crashed, timed out or was killed, the live package cannot be used, an upload failed)."""
+    orbit_mismatches: set[str] = dataclasses.field(default_factory=set)
+    """Seeds whose regenerated orbit differed from the live package's (ORBIT_MISMATCH): given up
+    at once, whatever --max-backfill-attempts says, until the generator binary changes."""
+
+    def given_up(self, seed: str, max_attempts: int) -> bool:
+        """True if `seed` is given up with this generator binary: an orbit mismatch, or at least
+        `max_attempts` failed ember attempts."""
+        return seed in self.orbit_mismatches or self.ember_failures.get(seed, 0) >= max_attempts
 
     def failed_runs(self, seed: str) -> int:
         """Every failed backfill run of `seed`, whatever the reason: its place in the queue."""
@@ -973,6 +990,7 @@ class BackfillLedger:
         for counts in self._all_counts():
             for seed in [seed for seed in counts if seed not in seeds]:
                 del counts[seed]
+        self.orbit_mismatches = {seed for seed in self.orbit_mismatches if seed in seeds}
 
     def record(
         self, seed: str, outcome: Outcome, *, backfill: bool, interrupted: bool = False
@@ -981,13 +999,16 @@ class BackfillLedger:
 
         COMPLETE clears the seed's counts. CORE_ONLY and EMBER_FAILED count one failed ember
         attempt, for an urgent seed too: a new mint uploaded without its ember edition becomes a
-        backfill seed with one attempt. FAILED counts one other failure for a `backfill` seed only
-        (every run retries urgent seeds anyway). Nothing is counted while the run is `interrupted`
-        (shutting down), since the failure may be the signal's doing.
+        backfill seed with one attempt. ORBIT_MISMATCH counts one too, and gives the seed up.
+        FAILED counts one other failure for a `backfill` seed only (every run retries urgent
+        seeds anyway). Nothing is counted while the run is `interrupted` (shutting down), since
+        the failure may be the signal's doing.
         """
         if outcome is Outcome.COMPLETE:
             cleared = [counts.pop(seed) for counts in self._all_counts() if seed in counts]
-            return bool(cleared)
+            mismatched = seed in self.orbit_mismatches
+            self.orbit_mismatches.discard(seed)
+            return bool(cleared) or mismatched
         if outcome is Outcome.FAILED and not backfill:
             return False
         if interrupted:
@@ -995,6 +1016,8 @@ class BackfillLedger:
             return False
         counts = self.other_failures if outcome is Outcome.FAILED else self.ember_failures
         counts[seed] = counts.get(seed, 0) + 1
+        if outcome is Outcome.ORBIT_MISMATCH:
+            self.orbit_mismatches.add(seed)
         return True
 
     def _all_counts(self) -> tuple[dict[str, int], dict[str, int]]:
@@ -1013,9 +1036,10 @@ def load_backfill_ledger(
     """The failure counts of earlier runs with the same generator binary.
 
     The file is `{"generator": {"path", "size", "mtime_ns"}, "ember_failures": {seed: count},
-    "other_failures": {seed: count}}`. The ledger is empty if the file is absent, unreadable or
-    malformed (logged), or was written for another generator binary (the counts reset when the
-    binary changes).
+    "other_failures": {seed: count}, "orbit_mismatches": [seed, ...]}` ("orbit_mismatches" may be
+    absent: files written before it existed). The ledger is empty if the file is absent,
+    unreadable or malformed (logged), or was written for another generator binary (the counts
+    reset when the binary changes).
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -1040,8 +1064,13 @@ def load_backfill_ledger(
             path,
         )
         return BackfillLedger()
+    mismatches = data.get("orbit_mismatches", [])
     return BackfillLedger(
-        _ledger_counts(data["ember_failures"]), _ledger_counts(data["other_failures"])
+        _ledger_counts(data["ember_failures"]),
+        _ledger_counts(data["other_failures"]),
+        {seed for seed in mismatches if isinstance(seed, str)}
+        if isinstance(mismatches, list)
+        else set(),
     )
 
 
@@ -1055,6 +1084,7 @@ def save_backfill_ledger(
         "generator": generator.to_json() if generator is not None else None,
         "ember_failures": dict(sorted(ledger.ember_failures.items())),
         "other_failures": dict(sorted(ledger.other_failures.items())),
+        "orbit_mismatches": sorted(ledger.orbit_mismatches),
     }
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -1714,8 +1744,9 @@ def upload_ember_backfill(
     deleted first). The published main art, spectral files, generation.json and nft_traits.json
     are never touched.
 
-    Returns COMPLETE once uploaded; EMBER_FAILED (nothing uploaded) if the regenerated package
-    shows another orbit, or its own metadata cannot show its orbit or give its ember entries;
+    Returns COMPLETE once uploaded; ORBIT_MISMATCH (nothing uploaded) if the regenerated package
+    shows another orbit; EMBER_FAILED (nothing uploaded) if its own metadata cannot show its orbit
+    or give its ember entries;
     FAILED (nothing uploaded, not an ember attempt) if the live package cannot be read or used,
     or ssh, scp or the local disk failed.
     """
@@ -1744,13 +1775,14 @@ def upload_ember_backfill(
     if differences:
         log.error(
             "0x%s: the regenerated package shows a DIFFERENT ORBIT than the live one (%s). Its "
-            "ember edition would not match the published art, so nothing is uploaded. Only "
-            "--backfill-mode full would upload it, replacing the published package, main art "
-            "included.",
+            "ember edition would not match the published art, so nothing is uploaded, and the "
+            "seed is given up with this generator binary (it would regenerate the same orbit). "
+            "Only --backfill-mode full would upload it, replacing the published package, main "
+            "art included.",
             seed,
             "; ".join(differences),
         )
-        return Outcome.EMBER_FAILED
+        return Outcome.ORBIT_MISMATCH
 
     try:
         merged = merge_ember_manifest(live.manifest, json.loads(local_manifest_text))
@@ -1872,7 +1904,9 @@ def process_seed(
             exit 3, or a generator that predates the edition), after any stale ember file was
             deleted from its remote directory.
         EMBER_FAILED: the ember edition failed and nothing was uploaded (a backfill seed's exit
-            3, a different orbit, an incomplete local ember edition).
+            3, an incomplete local ember edition).
+        ORBIT_MISMATCH: an ember-mode backfill regenerated another orbit than the live
+            package's; nothing was uploaded, and the seed is given up with this binary.
         FAILED: nothing was uploaded for any other reason (for an ember-mode backfill, this
             includes a live package that cannot be read or used, checked before generating).
     The local package is deleted before generating and afterwards, whatever the outcome.
@@ -1911,6 +1945,12 @@ def process_seed(
         log.warning("OK WITHOUT EMBER  seed=0x%s  (total %s)  core package uploaded", seed, elapsed)
     elif outcome is Outcome.EMBER_FAILED:
         log.error("EMBER FAILED  seed=0x%s  (total %s)  nothing uploaded", seed, elapsed)
+    elif outcome is Outcome.ORBIT_MISMATCH:
+        log.error(
+            "ORBIT MISMATCH  seed=0x%s  (total %s)  nothing uploaded; given up with this binary",
+            seed,
+            elapsed,
+        )
     else:
         log.error("FAILURE  seed=0x%s  (total %s)  nothing uploaded", seed, elapsed)
     return outcome
@@ -2343,13 +2383,24 @@ def sync(args: argparse.Namespace) -> int:
     ledger.retain(backfill_seeds)
     given_up = given_up_seeds(backfill, ledger, args.max_backfill_attempts)
     for seed in given_up:
-        log.warning(
-            "0x%s: ember backfill given up after %d attempts with this generator binary "
-            "(rebuild the generator, or delete the seed from ember_failures in %s, to try again)",
-            seed,
-            ledger.ember_failures[seed],
-            BACKFILL_FAILURES,
-        )
+        if seed in ledger.orbit_mismatches:
+            log.warning(
+                "0x%s: ember backfill given up: this generator binary regenerates a different "
+                "orbit than the live package (rebuild the generator, or delete the seed from "
+                "orbit_mismatches in %s, to try again; --backfill-mode full would replace the "
+                "whole published package)",
+                seed,
+                BACKFILL_FAILURES,
+            )
+        else:
+            log.warning(
+                "0x%s: ember backfill given up after %d attempts with this generator binary "
+                "(rebuild the generator, or delete the seed from ember_failures in %s, to try "
+                "again)",
+                seed,
+                ledger.ember_failures[seed],
+                BACKFILL_FAILURES,
+            )
     missing = plan_seed_queue(urgent, backfill, max_backfill, ledger, args.max_backfill_attempts)
     deferred = incomplete - len(given_up) - len(missing)
     if deferred:
@@ -2398,10 +2449,10 @@ def sync(args: argparse.Namespace) -> int:
             backfill=args.backfill_mode if is_backfill else None,
             ember_capable=ember_capable,
         )
-        if outcome in (Outcome.FAILED, Outcome.EMBER_FAILED):
+        if outcome in (Outcome.FAILED, Outcome.EMBER_FAILED, Outcome.ORBIT_MISMATCH):
             fail_count += 1
             failed_seeds.append(seed)
-            if outcome is Outcome.EMBER_FAILED:
+            if outcome is not Outcome.FAILED:
                 ember_failed_seeds.append(seed)
         else:
             ok_count += 1
