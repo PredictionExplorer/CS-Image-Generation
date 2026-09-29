@@ -24,7 +24,7 @@ pub static SAT_BOOST_ENABLED: AtomicBool = AtomicBool::new(true);
 /// - Scalar fallback: portable, suitable for all other architectures
 ///
 /// # Accuracy
-/// AVX2 path uses a vectorized `exp()` approximation (< 2e-11 relative error)
+/// AVX2 path uses a vectorized `exp()` that stays within 2 ULP of libm `exp`
 /// for maximum throughput.  Results may differ from the scalar path by a few
 /// ULPs but are deterministic within the same architecture.
 #[must_use]
@@ -85,7 +85,8 @@ fn spd_to_rgba_scalar_with_sat_boost(spd: &[f64; NUM_BINS], boosted: bool) -> (f
 
     for i in 0..NUM_BINS {
         let e = spd[i];
-        if e <= 1e-10 {
+        // Skip NaN as well, matching the AVX2 (ordered compare) and NEON kernels.
+        if e.is_nan() || e <= 1e-10 {
             continue;
         }
         let (lx, ly, lz, k) = BIN_XYZ_LUT[i];
@@ -140,14 +141,40 @@ fn finalize_rgba(
     (r * brightness, g * brightness, b * brightness, brightness)
 }
 
-/// Fully vectorized 1 - exp(-x) for 4 f64 lanes using AVX2+FMA.
+/// Taylor coefficients of exp: `INV_FACTORIAL[k]` = 1/k! for k = 0..=13.
 ///
-/// Uses Cody-Waite range reduction with a degree-7 Taylor polynomial,
-/// keeping the entire computation in SIMD registers (no scalar fallback).
-/// Input x must be non-negative; relative error < 2e-11 for x in [0, 700].
+/// With |r| ≤ ln2/2 the truncation error of a degree-d Taylor polynomial is
+/// about |r|^(d+1)/(d+1)!: ~5e-9 for d = 7, ~2e-16 (≈ 1 ULP) for d = 12 and
+/// ~4e-18 for d = 13, so 13 is the lowest degree that leaves rounding as the
+/// only error source.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+const INV_FACTORIAL: [f64; 14] = [
+    1.0,
+    1.0,
+    1.0 / 2.0,
+    1.0 / 6.0,
+    1.0 / 24.0,
+    1.0 / 120.0,
+    1.0 / 720.0,
+    1.0 / 5_040.0,
+    1.0 / 40_320.0,
+    1.0 / 362_880.0,
+    1.0 / 3_628_800.0,
+    1.0 / 39_916_800.0,
+    1.0 / 479_001_600.0,
+    1.0 / 6_227_020_800.0,
+];
+
+/// Fully vectorized exp(-x) for 4 f64 lanes using AVX2+FMA.
+///
+/// Uses Cody-Waite range reduction (-x = n·ln2 + r, |r| ≤ ln2/2) with a
+/// degree-13 Taylor polynomial, keeping the entire computation in SIMD
+/// registers (no scalar fallback). Input x must be non-negative and is clamped
+/// to 700 so the 2^n scale factor stays a normal double. The result is within
+/// 2 ULP of libm `exp`, which the scalar and NEON paths use.
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
 #[inline]
-unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
+unsafe fn exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
     use std::arch::x86_64::*;
 
     // SAFETY: caller guarantees AVX2+FMA are available; all intrinsics below require only those features.
@@ -156,7 +183,7 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let zero = _mm256_setzero_pd();
         let neg_x = _mm256_sub_pd(zero, x_safe);
 
-        let log2_e = _mm256_set1_pd(1.442_695_040_888_963_4);
+        let log2_e = _mm256_set1_pd(std::f64::consts::LOG2_E);
         let ln2_hi = _mm256_set1_pd(6.931_471_803_691_238e-1);
         let ln2_lo = _mm256_set1_pd(1.908_214_929_270_585e-10);
 
@@ -167,21 +194,24 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
         let r = _mm256_fmadd_pd(neg_n, ln2_hi, neg_x);
         let r = _mm256_fmadd_pd(neg_n, ln2_lo, r);
 
-        let c7 = _mm256_set1_pd(1.984_126_984_126_984_1e-4);
-        let c6 = _mm256_set1_pd(1.388_888_888_888_889e-3);
-        let c5 = _mm256_set1_pd(8.333_333_333_333_333e-3);
-        let c4 = _mm256_set1_pd(4.166_666_666_666_666_4e-2);
-        let c3 = _mm256_set1_pd(1.666_666_666_666_666_6e-1);
-        let c2 = _mm256_set1_pd(5.000_000_000_000_000_0e-1);
-        let one = _mm256_set1_pd(1.0);
-
-        let p = _mm256_fmadd_pd(c7, r, c6);
-        let p = _mm256_fmadd_pd(p, r, c5);
-        let p = _mm256_fmadd_pd(p, r, c4);
-        let p = _mm256_fmadd_pd(p, r, c3);
-        let p = _mm256_fmadd_pd(p, r, c2);
-        let p = _mm256_fmadd_pd(p, r, one);
-        let exp_r = _mm256_fmadd_pd(p, r, one);
+        // exp(r) = 1 + r + r²·q(r) with q(r) = Σ_{k=2..=13} r^(k-2)/k!, using
+        // Estrin's scheme for q: 4 dependent FMAs instead of Horner's 11.
+        let c = |k: usize| _mm256_set1_pd(INV_FACTORIAL[k]);
+        let r2 = _mm256_mul_pd(r, r);
+        let r4 = _mm256_mul_pd(r2, r2);
+        let r8 = _mm256_mul_pd(r4, r4);
+        let q2_3 = _mm256_fmadd_pd(c(3), r, c(2));
+        let q4_5 = _mm256_fmadd_pd(c(5), r, c(4));
+        let q6_7 = _mm256_fmadd_pd(c(7), r, c(6));
+        let q8_9 = _mm256_fmadd_pd(c(9), r, c(8));
+        let q10_11 = _mm256_fmadd_pd(c(11), r, c(10));
+        let q12_13 = _mm256_fmadd_pd(c(13), r, c(12));
+        let q2_5 = _mm256_fmadd_pd(q4_5, r2, q2_3);
+        let q6_9 = _mm256_fmadd_pd(q8_9, r2, q6_7);
+        let q10_13 = _mm256_fmadd_pd(q12_13, r2, q10_11);
+        let q2_9 = _mm256_fmadd_pd(q6_9, r4, q2_5);
+        let q = _mm256_fmadd_pd(q10_13, r8, q2_9);
+        let exp_r = _mm256_add_pd(_mm256_set1_pd(1.0), _mm256_fmadd_pd(q, r2, r));
 
         let n_i32 = _mm256_cvtpd_epi32(n);
         let n_i64 = _mm256_cvtepi32_epi64(n_i32);
@@ -190,9 +220,22 @@ unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x8
             52,
         ));
 
-        let exp_neg = _mm256_mul_pd(exp_r, pow2n);
-        _mm256_sub_pd(one, exp_neg)
+        _mm256_mul_pd(exp_r, pow2n)
     }
+}
+
+/// Fully vectorized 1 - exp(-x) for 4 f64 lanes using AVX2+FMA.
+///
+/// Mirrors the scalar path's `1.0 - (-x).exp()` formulation, so the two agree
+/// to within `2 * f64::EPSILON` for every input, including tiny x where the
+/// subtraction cancels.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+#[inline]
+unsafe fn one_minus_exp_neg_avx2(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
+    use std::arch::x86_64::*;
+
+    // SAFETY: caller guarantees AVX2+FMA are available.
+    unsafe { _mm256_sub_pd(_mm256_set1_pd(1.0), exp_neg_avx2(x)) }
 }
 
 /// AVX2 SIMD implementation — fully vectorized inner loop (no scalar exp).
@@ -211,7 +254,7 @@ unsafe fn spd_to_rgba_avx2(spd: &[f64; NUM_BINS], boosted: bool) -> (f64, f64, f
         let threshold = _mm256_set1_pd(1e-10);
 
         for chunk_start in (0..NUM_BINS).step_by(4) {
-            let energy = _mm256_loadu_pd(&spd[chunk_start]);
+            let energy = _mm256_loadu_pd(spd[chunk_start..].as_ptr());
 
             let lut0 = BIN_XYZ_LUT[chunk_start];
             let lut1 = BIN_XYZ_LUT[chunk_start + 1];
@@ -549,13 +592,48 @@ mod tests {
                 _mm256_storeu_pd(out.as_mut_ptr(), rv);
                 out[0]
             };
+            // Absolute bound: for tiny x both sides share the cancellation in
+            // `1 - exp(-x)`, so relative error against this reference is not
+            // meaningful there.
             let abs_err = (result - expected).abs();
-            let rel_err = if expected.abs() > 1e-15 { abs_err / expected.abs() } else { abs_err };
             assert!(
-                rel_err < 1e-10 || abs_err < 1e-15,
-                "vectorized exp error for x={x}: got={result} expected={expected} rel={rel_err:.2e}"
+                abs_err <= 2.0 * f64::EPSILON,
+                "vectorized exp error for x={x}: got={result} expected={expected} abs={abs_err:.2e}"
             );
         }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(miri)))]
+    #[test]
+    fn test_avx2_exp_neg_within_2_ulp_of_libm() {
+        use std::arch::x86_64::*;
+
+        let mut inputs: Vec<f64> =
+            (0..=200_000).map(|i| f64::from(i) * 700.0 / 200_000.0).collect();
+        // Range-reduction worst cases: |r| = ln2/2, where the polynomial error peaks.
+        for m in 0..=1010 {
+            let x = (f64::from(m) + 0.5) * std::f64::consts::LN_2;
+            inputs.extend([x.next_down(), x, x.next_up()]);
+        }
+        inputs.extend((0..3000).map(|k| 10f64.powf(-f64::from(k) / 10.0)));
+        inputs.retain(|&x| x <= 700.0);
+
+        let mut worst = (0_u64, 0.0);
+        for chunk in inputs.chunks(4) {
+            let mut xs = [0.0; 4];
+            xs[..chunk.len()].copy_from_slice(chunk);
+            let mut out = [0.0; 4];
+            unsafe {
+                _mm256_storeu_pd(out.as_mut_ptr(), exp_neg_avx2(_mm256_loadu_pd(xs.as_ptr())));
+            }
+            for (&x, &got) in xs.iter().zip(&out).take(chunk.len()) {
+                let ulps = got.to_bits().abs_diff((-x).exp().to_bits());
+                if ulps > worst.0 {
+                    worst = (ulps, x);
+                }
+            }
+        }
+        assert!(worst.0 <= 2, "exp_neg_avx2 is {} ULP from libm at x={}", worst.0, worst.1);
     }
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
@@ -606,6 +684,18 @@ mod tests {
         assert_simd_scalar_match(&above, "above_threshold");
 
         assert!(ra.3 >= rb.3, "above threshold should be >= below threshold in brightness");
+    }
+
+    #[test]
+    fn test_nan_bins_are_ignored() {
+        let clean = make_spd(&[0.0, 0.4, 0.9, 0.2, 0.0, 0.7]);
+        let mut with_nan = clean;
+        with_nan[0] = f64::NAN;
+        with_nan[4] = f64::NAN;
+        with_nan[NUM_BINS - 1] = f64::NAN;
+
+        assert_eq!(spd_to_rgba_scalar(&with_nan), spd_to_rgba_scalar(&clean), "scalar");
+        assert_eq!(spd_to_rgba_simd(&with_nan), spd_to_rgba_simd(&clean), "simd");
     }
 
     #[test]
