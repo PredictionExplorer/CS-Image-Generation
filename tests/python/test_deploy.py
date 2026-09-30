@@ -191,7 +191,9 @@ def fake_cargo(argv: list[str]) -> int:
             str(Path.cwd()),
             os.environ.get("CARGO_TARGET_DIR"),
             os.environ.get("CI"),
-            os.nice(0),
+            # Read, not set: os.nice(0) raises PermissionError on macOS once the niceness is 10
+            # or more (for example when the whole suite runs under `nice`).
+            os.getpriority(os.PRIO_PROCESS, 0),
             _sees_token(),
         ]
     )
@@ -460,6 +462,11 @@ FAKES = {
 # What every launcher carries besides its fake's own code.
 FAKE_SHARED = (_sees_token, _log_call, _load_json, fake_binary_text, _parse_unit, _unit_load_error)
 
+# The source of every fake and shared helper, read once when this module is imported: the
+# launchers then hold the code this run loaded, even if the file is edited while tests run.
+_FAKE_HELPERS: tuple[Callable[..., object], ...] = (*FAKE_SHARED, *FAKES.values())
+_FAKE_SOURCES = {helper: inspect.getsource(helper) for helper in _FAKE_HELPERS}
+
 
 def install_fake(bin_dir: Path, name: str, fake: str | None = None) -> Path:
     """Write an executable script `name` that runs FAKES[fake or name] into `bin_dir`.
@@ -469,7 +476,7 @@ def install_fake(bin_dir: Path, name: str, fake: str | None = None) -> Path:
     """
     function = FAKES[fake or name]
     constants = f"GENERATOR_NAME = {GENERATOR_NAME!r}\nFAKE_BINARY = {FAKE_BINARY!r}\n"
-    sources = [inspect.getsource(helper) for helper in (*FAKE_SHARED, function)]
+    sources = [_FAKE_SOURCES[helper] for helper in (*FAKE_SHARED, function)]
     launcher = bin_dir / name
     launcher.write_text(
         f"#!{sys.executable} -IS\n{FAKE_PRELUDE}\n{constants}\n\n"
@@ -1344,18 +1351,25 @@ class CiGateTests(DeployTestCase):
             self.github.body = b"<html>unicorn</html>"
 
         def slow() -> None:
-            self.github.delay = 1.0
+            self.github.delay = 2.0
 
+        # Only the slow answer needs a short client timeout; the others keep the default, so a
+        # busy host that answers late cannot turn them into timeouts.
+        default = deploy.API_TIMEOUT
         cases = (
-            (refuse, "GitHub API request failed"),
-            (rate_limit, "rate limit exceeded (HTTP 403; it resets at 2030-03-17T17:46:40+00:00)"),
-            (secondary_rate_limit, "rate limit exceeded (HTTP 429; retry after 60s)"),
-            (server_error, "GitHub API returned HTTP 502"),
-            (not_json, "GitHub API response is not JSON"),
-            (slow, "GitHub API request failed"),
+            (refuse, "GitHub API request failed", default),
+            (
+                rate_limit,
+                "rate limit exceeded (HTTP 403; it resets at 2030-03-17T17:46:40+00:00)",
+                default,
+            ),
+            (secondary_rate_limit, "rate limit exceeded (HTTP 429; retry after 60s)", default),
+            (server_error, "GitHub API returned HTTP 502", default),
+            (not_json, "GitHub API response is not JSON", default),
+            (slow, "GitHub API request failed", 0.3),
         )
-        for configure, expected in cases:
-            with self.subTest(expected), mock.patch.object(deploy, "API_TIMEOUT", 0.3):
+        for configure, expected, timeout in cases:
+            with self.subTest(expected), mock.patch.object(deploy, "API_TIMEOUT", timeout):
                 configure()
                 with self.logs("WARNING") as lines:
                     self.assertEqual(self.tick(), 0)
