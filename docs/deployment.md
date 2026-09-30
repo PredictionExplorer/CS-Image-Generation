@@ -542,7 +542,7 @@ exist, because two schedulers would start the sync; `status` lists them. Run the
 | `binary_sha256` | SHA-256 of the installed generator (a tick compares it) |
 | `previous_sha`, `previous_binary_sha256` | what `rollback` switches back to: the commit deployed before (none after the first deploy or a rollback) |
 | `rolled_back_from` | the commit the last rollback left |
-| `failed_shas` | `{sha: {reason, detail, at, checked_at}}`; reasons `ci`, `build`, `tests`, `switch`, `rollback` (the 20 most recent) |
+| `failed_shas` | `{sha: {reason, detail, at, checked_at, seq}}`; reasons `ci`, `build`, `tests`, `switch`, `rollback` (the 20 most recently recorded; `seq` keeps the order they were recorded in, which the file's sorted keys lose; records without `seq`, written by an older agent, count as older than any with it, ordered by `at`) |
 | `last_error`, `last_error_at` | the error of the last tick that had one (cleared by a tick without) |
 | `sync_timer_restart_pending` | `true` while the sync timer could not be enabled again after a switch; every tick that is not paused retries (dropped when a switch leaves the checkout to a human) |
 | `switch_in_progress` | `{target, old_head, old_binary_sha256, mode, started_at}` while a switch changes the checkout; one left behind means the switch died half way |

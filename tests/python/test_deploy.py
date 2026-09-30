@@ -2413,9 +2413,62 @@ class OperatorTests(DeployTestCase):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# A state.json as the agent wrote it before it numbered failures (Failure.seq): written by that
+# version's save_failure, recording f, c, e and d in this order (c and e in the same second).
+PREVIOUS_STATE_JSON = """{
+  "binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "deployed_at": "2026-09-01T12:00:00+00:00",
+  "deployed_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deployed_subject": "feat: v1",
+  "failed_shas": {
+    "cccccccccccccccccccccccccccccccccccccccc": {
+      "at": "2026-09-01T12:02:00+00:00",
+      "checked_at": "2026-09-01T12:02:00+00:00",
+      "detail": "'CI passed' concluded failure",
+      "reason": "ci"
+    },
+    "dddddddddddddddddddddddddddddddddddddddd": {
+      "at": "2026-09-01T12:03:00+00:00",
+      "detail": "smoke test failed",
+      "reason": "switch"
+    },
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+      "at": "2026-09-01T12:02:00+00:00",
+      "detail": "cargo test failed",
+      "reason": "tests"
+    },
+    "ffffffffffffffffffffffffffffffffffffffff": {
+      "at": "2026-09-01T12:01:00+00:00",
+      "detail": "cargo build failed",
+      "reason": "build"
+    }
+  },
+  "last_error": null,
+  "last_error_at": null,
+  "previous_binary_sha256": null,
+  "previous_sha": "9999999999999999999999999999999999999999",
+  "rolled_back_from": null,
+  "schema_version": 1,
+  "switch_in_progress": null,
+  "sync_timer_restart_pending": false
+}
+"""
+
 
 class HelperTests(unittest.TestCase):
     """Small pure helpers."""
+
+    def temp_paths(self) -> deploy.Paths:
+        """Paths under a fresh temporary directory (for the state.json helpers)."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        return deploy.Paths(
+            repo=root / "repo",
+            state_dir=root / "state",
+            data_dir=root / "data",
+            unit_dir=root / "units",
+        )
 
     def test_journal_lines_carry_their_priority(self) -> None:
         record = logging.LogRecord("x", logging.ERROR, __file__, 1, "bad\nworse", None, None)
@@ -2553,6 +2606,101 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(len(state.failed_shas), deploy.MAX_FAILED_SHAS)
         self.assertNotIn(f"{0:040x}", state.failed_shas)
         self.assertIn(f"{deploy.MAX_FAILED_SHAS + 4:040x}", state.failed_shas)
+
+    def test_the_cap_forgets_the_oldest_recorded_failure_across_saves(self) -> None:
+        # state.json's keys are sorted, so a reload lists the failures alphabetically. Recorded
+        # in reverse alphabetical order within one second (so `at` cannot tell them apart), the
+        # oldest records are the alphabetically last: the cap must forget those, not the first.
+        paths = self.temp_paths()
+        extra = 3
+        shas = [f"{n:040x}" for n in reversed(range(deploy.MAX_FAILED_SHAS + extra))]
+        now = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        with mock.patch.object(deploy, "utcnow", return_value=now):
+            for index, sha in enumerate(shas):
+                recorded = deploy.save_failure(paths, sha, deploy.REASON_BUILD, f"failure {index}")
+                self.assertEqual(recorded, deploy.load_state(paths.state_file).failed_shas[sha])
+        on_disk = json.loads(paths.state_file.read_text(encoding="utf-8"))["failed_shas"]
+        self.assertEqual(list(on_disk), sorted(shas[extra:]))  # the file's order is lost...
+        state = deploy.load_state(paths.state_file)
+        self.assertEqual(list(state.failed_shas), shas[extra:])  # ...but not the recording order
+        self.assertEqual(state.failed_shas[shas[-1]].detail, f"failure {len(shas) - 1}")
+
+        # Recording a commit again (as a CI re-check does) makes it the newest record.
+        again, next_oldest = shas[extra], shas[extra + 1]
+        deploy.save_failure(paths, again, deploy.REASON_CI, "still red")
+        deploy.save_failure(paths, "f" * 40, deploy.REASON_BUILD, "newest")
+        state = deploy.load_state(paths.state_file)
+        self.assertNotIn(next_oldest, state.failed_shas)
+        self.assertEqual(list(state.failed_shas)[-2:], [again, "f" * 40])
+
+    def test_a_state_json_of_the_previous_version_still_loads(self) -> None:
+        paths = self.temp_paths()
+        paths.state_dir.mkdir(parents=True)
+        paths.state_file.write_text(PREVIOUS_STATE_JSON, encoding="utf-8")
+        state = deploy.load_state(paths.state_file)
+        self.assertEqual((state.deployed_sha, state.previous_sha), ("a" * 40, "9" * 40))
+        self.assertEqual(state.binary_sha256, "b" * 64)
+        self.assertEqual(
+            state.failed_shas["c" * 40],
+            deploy.Failure(
+                deploy.REASON_CI,
+                "'CI passed' concluded failure",
+                "2026-09-01T12:02:00+00:00",
+                "2026-09-01T12:02:00+00:00",
+            ),
+        )
+        # Unnumbered records are ordered by `at`, then (within one second) by commit id.
+        self.assertEqual(list(state.failed_shas), ["f" * 40, "c" * 40, "e" * 40, "d" * 40])
+        self.assertEqual({failure.seq for failure in state.failed_shas.values()}, {0})
+
+        # New records are newer than all of them, and the cap forgets the oldest `at` first. (The
+        # previous version forgot the alphabetically first commit: here, a new record.)
+        for index in range(deploy.MAX_FAILED_SHAS - 2):
+            deploy.save_failure(paths, f"{index:040x}", deploy.REASON_BUILD, "new")
+        state = deploy.load_state(paths.state_file)
+        self.assertEqual(len(state.failed_shas), deploy.MAX_FAILED_SHAS)
+        self.assertEqual(list(state.failed_shas)[:3], ["e" * 40, "d" * 40, f"{0:040x}"])
+
+        # The file keeps the layout the previous version reads ({sha: {reason, detail, at}},
+        # where it ignores seq), so the agent of an older commit keeps the records.
+        record = json.loads(paths.state_file.read_text(encoding="utf-8"))["failed_shas"]["d" * 40]
+        self.assertEqual(
+            record,
+            {
+                "reason": deploy.REASON_SWITCH,
+                "detail": "smoke test failed",
+                "at": "2026-09-01T12:03:00+00:00",
+                "seq": 0,
+            },
+        )
+
+    def test_a_malformed_failure_number_reads_as_unnumbered(self) -> None:
+        for seq in (True, -1, 0, "3", 2.0, None):
+            with self.subTest(seq=seq):
+                failure = deploy.Failure.from_json({"reason": "build", "seq": seq})
+                self.assertEqual(failure, deploy.Failure("build", "", ""))
+
+    def test_a_ci_failure_checked_in_the_future_is_due_again(self) -> None:
+        # After the clock steps back, waiting for it to reach checked_at would stall the
+        # re-checks for as long as it stepped back.
+        now = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        cases: list[tuple[int | None, bool]] = [
+            (None, True),
+            (-15, True),
+            (-14, False),
+            (0, False),
+            (1, True),
+            (24 * 60, True),
+        ]
+        for minutes, due in cases:
+            checked = (
+                None
+                if minutes is None
+                else deploy.isoformat(now + datetime.timedelta(minutes=minutes))
+            )
+            with self.subTest(minutes=minutes):
+                failure = deploy.Failure(deploy.REASON_CI, "", "", checked)
+                self.assertIs(deploy.ci_recheck_due(failure, now), due)
 
 
 # ---------------------------------------------------------------------------

@@ -989,6 +989,10 @@ class Failure:
     """When it was first recorded (isoformat)."""
     checked_at: str | None = None
     """CI failures only: when GitHub was last asked (re-checked every CI_RECHECK_INTERVAL)."""
+    seq: int = 0
+    """The record's place in the order failures were recorded: State.record_failure numbers
+    each record above every other record. 0 marks a record written by a version that did not
+    number them (see recording_order)."""
 
     @property
     def final(self) -> bool:
@@ -997,25 +1001,44 @@ class Failure:
 
     def to_json(self) -> dict[str, object]:
         """The state.json form."""
-        data: dict[str, object] = {"reason": self.reason, "detail": self.detail, "at": self.at}
+        data: dict[str, object] = {
+            "reason": self.reason,
+            "detail": self.detail,
+            "at": self.at,
+            "seq": self.seq,
+        }
         if self.checked_at is not None:
             data["checked_at"] = self.checked_at
         return data
 
     @classmethod
     def from_json(cls, data: object) -> Failure | None:
-        """Parse a state.json failure record; None if malformed."""
+        """Parse a state.json failure record; None if malformed (a malformed seq reads as 0)."""
         if not isinstance(data, dict):
             return None
         reason, detail, at = _as_str(data.get("reason")), data.get("detail"), data.get("at")
         if reason is None:
             return None
+        seq = data.get("seq")
         return cls(
             reason=reason,
             detail=_as_str(detail) or "",
             at=_as_str(at) or "",
             checked_at=_as_str(data.get("checked_at")),
+            seq=seq if isinstance(seq, int) and not isinstance(seq, bool) and seq > 0 else 0,
         )
+
+
+def recording_order(item: tuple[str, Failure]) -> tuple[int, str, str]:
+    """Sort key of a failed_shas entry that puts the oldest record first.
+
+    The record's number decides. Records without one (0) sort before every numbered record, by
+    `at` and then commit id: `at` is the only evidence of their order left, but it is written
+    to the second, so records of the same second fall back to the commit id. (`at` is
+    isoformat() in UTC, so its text sorts by time.)
+    """
+    sha, failure = item
+    return failure.seq, failure.at, sha
 
 
 @dataclasses.dataclass
@@ -1080,6 +1103,13 @@ class State:
     previous_binary_sha256: str | None = None
     rolled_back_from: str | None = None
     failed_shas: dict[str, Failure] = dataclasses.field(default_factory=dict)
+    """The MAX_FAILED_SHAS most recently recorded failures, oldest first.
+
+    state.json's keys are sorted, so this order does not survive a save: each record's `seq`
+    carries it. Versions before `seq` read a state.json that has it (they ignore the field) but
+    drop it when they write the file, as the agent of an older commit does after a rollback;
+    this version then orders those records by `at` (recording_order).
+    """
     last_error: str | None = None
     last_error_at: str | None = None
     sync_timer_restart_pending: bool = False
@@ -1120,20 +1150,25 @@ class State:
             setattr(state, name, _as_str(data.get(name)))
         failed = data.get("failed_shas")
         if isinstance(failed, dict):
+            records: list[tuple[str, Failure]] = []
             for sha, record in failed.items():
                 failure = Failure.from_json(record)
                 if isinstance(sha, str) and failure is not None:
-                    state.failed_shas[sha] = failure
+                    records.append((sha, failure))
+            state.failed_shas = dict(sorted(records, key=recording_order))
         state.sync_timer_restart_pending = data.get("sync_timer_restart_pending") is True
         state.switch_in_progress = SwitchRecord.from_json(data.get("switch_in_progress"))
         return state
 
     def record_failure(self, sha: str, failure: Failure) -> None:
-        """Remember a failed commit, keeping only the MAX_FAILED_SHAS most recent records."""
+        """Remember a failed commit as the most recent record (renumbering `failure`), and
+        forget the oldest records beyond MAX_FAILED_SHAS."""
         self.failed_shas.pop(sha, None)
-        self.failed_shas[sha] = failure
+        newest = max((known.seq for known in self.failed_shas.values()), default=0)
+        self.failed_shas[sha] = dataclasses.replace(failure, seq=newest + 1)
         while len(self.failed_shas) > MAX_FAILED_SHAS:
-            del self.failed_shas[next(iter(self.failed_shas))]
+            oldest, _ = min(self.failed_shas.items(), key=recording_order)
+            del self.failed_shas[oldest]
 
 
 def load_state(path: Path) -> State:
@@ -1189,7 +1224,8 @@ def save_failure(
         state.record_failure(sha, failure)
         if switch_ended:
             state.switch_in_progress = None
-    return failure
+        recorded = state.failed_shas[sha]
+    return recorded
 
 
 def set_sync_timer_restart_pending(paths: Paths, pending: bool) -> None:
@@ -2225,9 +2261,13 @@ class TickResult:
 
 
 def ci_recheck_due(failure: Failure, now: datetime.datetime) -> bool:
-    """True once a CI failure's last check is CI_RECHECK_INTERVAL old."""
+    """True once a CI failure's last check is CI_RECHECK_INTERVAL old.
+
+    A last check in the future (the clock stepped back since) is due too: waiting for the clock
+    to catch up could stall the re-checks for as long as it stepped back.
+    """
     checked = parse_timestamp(failure.checked_at)
-    return checked is None or now - checked >= CI_RECHECK_INTERVAL
+    return checked is None or checked > now or now - checked >= CI_RECHECK_INTERVAL
 
 
 def fetch_origin(repo: Path) -> None:
