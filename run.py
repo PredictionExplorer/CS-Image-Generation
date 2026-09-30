@@ -42,6 +42,16 @@ Ember backfill (remote packages that lack only the ember edition's files):
     fails for any other reason is not counted toward that cap, but moves the seed behind the
     seeds that have failed less often, so a seed that always fails cannot stall the backfill.
 
+Stale ember editions (after a deploy that changes the ember edition's look):
+    `<generator> --ember-algorithm` prints the id of the look the generator renders (ember-v<N>,
+    the "algorithm" every package records in metadata/ember.json). Before planning, a run reads
+    the id of every live certificate in one ssh call and withdraws each listed seed's edition
+    whose id is older: its certificate first, then its metadata/assets.json entries, then its
+    media. The package then lacks only the ember edition, so the backfill renders it again in the
+    current look; until then the token has no ember edition, so the old look is never online next
+    to the new one. Nothing is withdrawn unless both ids can be read.
+    --keep-stale-ember (env COSMICSIG_KEEP_STALE_EMBER=yes) keeps the live editions as they are.
+
 Uploads: the metadata files and the certificate are uploaded under temporary names and renamed
     into place, so an interrupted upload never leaves a truncated metadata file; a whole package
     first loses its remote metadata/assets.json, so an interrupted one reads as incomplete (and
@@ -87,11 +97,14 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # Defaults (non-sensitive only; deployment values come from .env / env vars)
 # ---------------------------------------------------------------------------
 
-# Per-seed generator timeout. A package takes about an hour on the production host. This must stay
-# well below the service's 24-hour TimeoutStartSec: a render that hangs then fails and moves back
-# in the queue, instead of using up every run until systemd stops it (a stopped run counts no
-# failure, so the same seed would come first again).
-DEFAULT_TIMEOUT = 4 * 3600  # 4 hours
+# Per-seed generator timeout. A package is a full render, and the ember edition's current look (a
+# finer fluid grid and supersampling) made it substantially more expensive than the earlier one;
+# its time on the production host is re-measured after the deploy (the `OK  seed=... (total ...)`
+# log lines). The timeout only has to catch a render that hangs, so it leaves ample headroom, but
+# it must stay well below the service's 24-hour TimeoutStartSec: a render that hangs then fails
+# and moves back in the queue, instead of using up every run until systemd stops it (a stopped run
+# counts no failure, so the same seed would come first again).
+DEFAULT_TIMEOUT = 10 * 3600  # 10 hours
 API_TOKEN_FETCH_LIMIT = 999999
 DEFAULT_ARBITRUM_RPC_URL = "https://arb1.arbitrum.io/rpc"
 DEFAULT_NFT_CONTRACT = "0xbb84Be3500A63581d3F2d5AC3bdF8685AAedad25"
@@ -130,6 +143,14 @@ PART_SUFFIX = ".part"
 GENERATOR_EMBER_FLAG = "--no-ember"
 GENERATOR_PROBE_TIMEOUT = 30
 
+# The ember algorithm probe: `<generator> --ember-algorithm` prints the id of the ember look it
+# renders, the "algorithm" of every metadata/ember.json it writes, and exits 0 without rendering.
+# A binary that predates the flag rejects it (exit status 2). The id's number grows whenever the
+# edition's rendered bits change, so a live certificate with a lower number holds a look the
+# generator no longer renders: a stale edition (withdraw_stale_ember_editions()).
+GENERATOR_EMBER_ALGORITHM_FLAG = "--ember-algorithm"
+EMBER_ALGORITHM_RE = re.compile(r"ember-v(?P<number>[0-9]+)")
+
 
 # Expected per-seed package emitted by the Rust generator.
 SPECTRAL_BIN_COUNT = 64
@@ -150,10 +171,12 @@ CORE_PACKAGE_FILES = (
     ASSET_MANIFEST,
     NFT_TRAITS,
 )
-# The ember edition (sumi and vermilion on kozo) and its determinism certificate. Packages
-# generated before it existed, or whose ember edition failed, lack only these files: they are
-# regenerated as a backfill that yields to new mints (see find_missing_seeds, plan_seed_queue and
-# --backfill-mode). Keep in sync with app::EMBER_OUTPUT_PATHS (a Rust unit test checks it).
+# The ember edition (the orbit drawn in sumi ink by the fluid it stirs) and its determinism
+# certificate. Packages generated before it existed, whose ember edition failed, or whose stale
+# edition was withdrawn, lack only these files: they are regenerated as a backfill that yields to
+# new mints (see find_missing_seeds, plan_seed_queue, --backfill-mode and
+# withdraw_stale_ember_editions). Keep in sync with app::EMBER_OUTPUT_PATHS (a Rust unit test
+# checks it).
 EMBER_PACKAGE_FILES = (
     "images/source/ember.png",
     "images/web/ember_full.webp",
@@ -195,8 +218,8 @@ GENERATOR_EXIT_EMBER_FAILED = 3
 
 # Backfill seeds (packages missing only the ember edition) generated per run. Each run first
 # generates every seed missing a core file (new mints), so a mint waits for at most this many
-# backfill packages, each a full render taking about an hour (61 min measured on the production
-# host), plus the timer's restart delay.
+# backfill packages, each a full render that takes hours (see DEFAULT_TIMEOUT), plus the timer's
+# restart delay.
 DEFAULT_MAX_BACKFILL = 1
 
 # Failed ember attempts after which a backfill seed is given up. The count is kept per generator
@@ -217,6 +240,7 @@ ENV_NFT_CONTRACT = "COSMICSIG_NFT_CONTRACT"
 ENV_MAX_BACKFILL = "COSMICSIG_MAX_BACKFILL"
 ENV_BACKFILL_MODE = "COSMICSIG_BACKFILL_MODE"
 ENV_MAX_BACKFILL_ATTEMPTS = "COSMICSIG_MAX_BACKFILL_ATTEMPTS"
+ENV_KEEP_STALE_EMBER = "COSMICSIG_KEEP_STALE_EMBER"
 
 # Minimal ABI selectors for the verified Cosmic Signature NFT contract.
 SELECTOR_TOTAL_SUPPLY = "0x18160ddd"  # totalSupply()
@@ -861,7 +885,7 @@ def plan_seed_queue(
 
     The cap bounds the latency of new mints. A run plans its queue once, at the start, so a token
     minted during a run waits for that run to finish: after the run's own new mints, at most
-    `max_backfill` backfill packages of about an hour each. (Nothing else bounds a run: systemd's
+    `max_backfill` backfill packages, each a full render. (Nothing else bounds a run: systemd's
     RuntimeMaxSec has no effect on a Type=oneshot service, and the unit's TimeoutStartSec is a
     24-hour safety net.)
 
@@ -1141,6 +1165,49 @@ def generator_supports_ember(exec_cmd: list[str]) -> bool:
         log.error("%s --help exited with rc=%d", exec_cmd[0], result.returncode)
         return False
     return GENERATOR_EMBER_FLAG in result.stdout or GENERATOR_EMBER_FLAG in result.stderr
+
+
+def generator_ember_algorithm(exec_cmd: list[str]) -> str | None:
+    """The id of the ember look the generator renders (`<generator> --ember-algorithm`).
+
+    The id is its output, stripped, if that is a single EMBER_ALGORITHM_RE id and the probe
+    exited 0 (e.g. "ember-v2"). None, with one WARNING, for anything else: a binary that predates
+    the flag (its argument parser exits with status 2), another failure or a timeout, or any
+    other output. Without the id no live ember edition can be recognised as stale, so the caller
+    withdraws none.
+    """
+    flag = GENERATOR_EMBER_ALGORITHM_FLAG
+    try:
+        result = run_subprocess(
+            [*exec_cmd, flag], timeout=GENERATOR_PROBE_TIMEOUT, label="generator-ember-algorithm"
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        problem = "could not be run"
+    else:
+        algorithm = result.stdout.strip()
+        if result.returncode == 0 and EMBER_ALGORITHM_RE.fullmatch(algorithm):
+            log.debug("The generator renders the ember edition with %s", algorithm)
+            return algorithm
+        if result.returncode != 0:
+            problem = f"exited with rc={result.returncode} ({result.stderr.strip()[:200]})"
+        else:
+            problem = f"printed {algorithm[:80]!r}, not an ember algorithm id"
+    log.warning(
+        "%s %s %s: stale ember editions cannot be detected with this generator, so no live "
+        "ember edition is withdrawn",
+        exec_cmd[0],
+        flag,
+        problem,
+    )
+    return None
+
+
+def ember_algorithm_number(algorithm: str) -> int:
+    """The number of an EMBER_ALGORITHM_RE id ("ember-v2" is 2); ValueError for anything else."""
+    match = EMBER_ALGORITHM_RE.fullmatch(algorithm)
+    if match is None:
+        raise ValueError(f"not an ember algorithm id: {algorithm!r}")
+    return int(match.group("number"))
 
 
 def log_stale_generator(exec_cmd: list[str]) -> None:
@@ -1650,6 +1717,23 @@ def merge_ember_manifest(live: object, local: object) -> dict[str, object]:
     return merged
 
 
+def without_ember_entries(live: object) -> dict[str, object]:
+    """The live metadata/assets.json without its ember entries (a withdrawn ember edition).
+
+    Every other entry and every top-level field, generated_at included, is kept verbatim and in
+    order. Raises ValueError if the manifest is malformed.
+    """
+    live_manifest, live_assets = _manifest(live, "live")
+    stripped = dict(live_manifest)
+    stripped["assets"] = [entry for entry in live_assets if not is_ember_asset(entry)]
+    return stripped
+
+
+def manifest_json(manifest: dict[str, object]) -> str:
+    """The text of a metadata/assets.json that run.py rewrote (merged or stripped)."""
+    return json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+
+
 def read_remote_file(ssh_host: str, ssh_user: str, remote_path: str) -> str | None:
     """The text of a remote file, or None (logged) if ssh or the read failed."""
     result = run_remote(
@@ -1796,9 +1880,7 @@ def upload_ember_backfill(
         )
         return Outcome.EMBER_FAILED
     try:
-        (seed_dir / ASSET_MANIFEST).write_text(
-            json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        (seed_dir / ASSET_MANIFEST).write_text(manifest_json(merged), encoding="utf-8")
     except OSError as exc:
         log.error("0x%s: could not write the merged %s: %s", seed, ASSET_MANIFEST, exc)
         return Outcome.FAILED
@@ -1810,6 +1892,258 @@ def upload_ember_backfill(
     ):
         return Outcome.FAILED
     return Outcome.COMPLETE
+
+
+# ---------------------------------------------------------------------------
+# Stale ember editions: withdrawn when the generator renders a newer look
+# ---------------------------------------------------------------------------
+
+# A sed script that prints the id of a certificate's top-level "algorithm". The generator writes
+# metadata/ember.json with serde_json's pretty printer, which indents top-level keys by exactly
+# two spaces (nested ones by more), so that key's line is `  "algorithm": "<id>",`. A certificate
+# in any other layout reads as unreadable, and an unreadable one is never stale.
+_CERTIFICATE_ALGORITHM_SED = r's/^  "algorithm": "\([^"]*\)",\{0,1\}$/\1/p'
+
+
+def list_remote_ember_algorithms(
+    ssh_host: str, ssh_user: str, remote_dir: str
+) -> dict[str, str | None] | None:
+    """The algorithm of every live ember certificate: {seed: its id, or None if unreadable}.
+
+    One ssh call for all packages, in POSIX sh and sed only (the asset host has neither Python
+    nor jq): for each 0x<seed>/metadata/ember.json it prints the package and the ids
+    _CERTIFICATE_ALGORITHM_SED finds. An algorithm is read only if there is exactly one and it
+    matches EMBER_ALGORITHM_RE; anything else (another layout, a truncated or unreadable file, a
+    malformed id) is None. Packages without a certificate are absent. Returns None (logged) if ssh
+    or the listing failed.
+    """
+    sed = shlex.quote(_CERTIFICATE_ALGORITHM_SED)
+    remote_cmd = (
+        f"cd {shlex.quote(remote_dir)} || exit 1; for f in 0x*/{EMBER_CERTIFICATE}; do "
+        '[ -f "$f" ] || continue; '
+        f"""printf '%s\\t%s\\n' "${{f%%/*}}" "$(sed -n {sed} "$f" | tr '\\n' ' ')"; done"""
+    )
+    result = run_remote(ssh_host, ssh_user, remote_cmd, timeout=60, label="ssh-ember-algorithms")
+    if result is None:
+        log.error("Could not read the live ember certificates (ssh did not complete)")
+        return None
+    if result.returncode != 0:
+        log.error(
+            "Reading the live ember certificates failed (rc=%d): %s",
+            result.returncode,
+            result.stderr.strip()[:300],
+        )
+        return None
+
+    algorithms: dict[str, str | None] = {}
+    for line in result.stdout.splitlines():
+        package, tab, found = line.partition("\t")
+        if not tab or not package.startswith("0x"):
+            continue
+        ids = found.split()
+        readable = len(ids) == 1 and EMBER_ALGORITHM_RE.fullmatch(ids[0]) is not None
+        algorithms[package.removeprefix("0x")] = ids[0] if readable else None
+    return algorithms
+
+
+def stale_ember_editions(
+    seeds: Sequence[str],
+    live: dict[str, str | None],
+    generator_algorithm: str,
+    remote_files: set[str],
+) -> dict[str, str]:
+    """The seeds whose live ember edition is stale, in `seeds` order: {seed: its algorithm}.
+
+    `live` is list_remote_ember_algorithms()'s result and `remote_files` list_remote_files()'s.
+    An edition is stale if its certificate's algorithm is an older id than `generator_algorithm`
+    (a lower number): the generator no longer renders that look. Every other edition stays:
+      * one whose algorithm cannot be read (a WARNING names it): never guess;
+      * a newer one (one WARNING): a rolled-back generator must not take the current look off the
+        asset host, and render the old one again;
+      * one whose package lacks a core file: that package is regenerated and uploaded in full
+        this run, which replaces its ember edition too;
+      * one whose seed is not in `seeds` (one WARNING): run.py only regenerates listed seeds, so
+        a withdrawn edition would never come back.
+    """
+    number = ember_algorithm_number(generator_algorithm)
+    stale: dict[str, str] = {}
+    newer: list[str] = []
+    for seed in seeds:
+        if seed not in live:
+            continue
+        algorithm = live[seed]
+        if algorithm is None:
+            log.warning(
+                "0x%s: the algorithm of its live %s cannot be read, so its ember edition is kept "
+                "as it is (check that file on the asset host)",
+                seed,
+                EMBER_CERTIFICATE,
+            )
+        elif ember_algorithm_number(algorithm) > number:
+            newer.append(seed)
+        elif ember_algorithm_number(algorithm) < number:
+            missing = missing_remote_package_parts(seed, remote_files)
+            if missing and not is_ember_backfill(missing):
+                log.debug(
+                    "0x%s: its %s ember edition goes with its full regeneration", seed, algorithm
+                )
+            else:
+                stale[seed] = algorithm
+    if newer:
+        log.warning(
+            "%d live ember editions are newer than this generator's %s, so they are kept (was "
+            "the generator rolled back?): %s",
+            len(newer),
+            generator_algorithm,
+            ", ".join(f"0x{seed}" for seed in newer),
+        )
+    listed = set(seeds)
+    unlisted = sorted(
+        seed
+        for seed, algorithm in live.items()
+        if seed not in listed
+        and algorithm is not None
+        and ember_algorithm_number(algorithm) < number
+    )
+    if unlisted:
+        log.warning(
+            "%d stale ember editions are kept because their seeds are not in the seed list, so "
+            "nothing would render them again (remove those packages from the asset host by hand "
+            "if they are obsolete): %s",
+            len(unlisted),
+            ", ".join(f"0x{seed}" for seed in unlisted),
+        )
+    return stale
+
+
+def withdraw_ember_edition(seed: str, ssh_host: str, ssh_user: str, remote_dir: str) -> bool:
+    """Take the live ember edition of `seed` off the asset host; False (logged) if that failed.
+
+    The live metadata/assets.json is read and checked first: one that cannot be read or used
+    leaves the package untouched. Then, in this order:
+      1. metadata/ember.json is deleted, so from here on the package reads as a backfill seed,
+         however far the withdrawal gets (the backfill then replaces whatever is left);
+      2. metadata/assets.json is replaced by the live one without its ember entries
+         (without_ember_entries(); uploaded as .part and renamed into place, so it is never left
+         truncated), so it no longer lists the files step 3 deletes;
+      3. every ember file is deleted (remove_remote_ember_files()).
+    Idempotent: withdrawing a withdrawn edition rewrites the same manifest and deletes nothing.
+    """
+    package = remote_seed_dir(remote_dir, seed)
+    live_text = read_remote_file(ssh_host, ssh_user, f"{package}/{ASSET_MANIFEST}")
+    if live_text is None:
+        return False
+    try:
+        stripped = without_ember_entries(json.loads(live_text))
+    except ValueError as exc:
+        log.error(
+            "0x%s: its stale ember edition cannot be withdrawn: the live %s cannot be used (%s). "
+            "Nothing is changed until it is repaired on the asset host.",
+            seed,
+            ASSET_MANIFEST,
+            exc,
+        )
+        return False
+
+    seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
+    local_manifest = seed_dir / ASSET_MANIFEST
+    step = UploadStep((local_manifest,), posixpath.dirname(ASSET_MANIFEST), staged=True)
+    cleanup_seed_dir(seed)  # the directory must hold this manifest only
+    try:
+        try:
+            local_manifest.parent.mkdir(parents=True)
+            local_manifest.write_text(manifest_json(stripped), encoding="utf-8")
+        except OSError as exc:
+            log.error(
+                "0x%s: could not write its %s without ember entries: %s", seed, ASSET_MANIFEST, exc
+            )
+            return False
+        if not upload_steps(
+            ssh_host, ssh_user, remote_dir, seed_dir, [step], remove=(EMBER_CERTIFICATE,)
+        ):
+            return False
+    finally:
+        cleanup_seed_dir(seed)
+    return remove_remote_ember_files(ssh_host, ssh_user, remote_dir, seed)
+
+
+def withdraw_stale_ember_editions(
+    seeds: Sequence[str],
+    remote_files: set[str],
+    generator_algorithm: str,
+    ssh_host: str,
+    ssh_user: str,
+    remote_dir: str,
+    *,
+    dry_run: bool,
+) -> tuple[set[str], bool]:
+    """Withdraw every stale live ember edition (stale_ember_editions()) before the run plans.
+
+    A stale edition shows a look the generator no longer renders; the artist retired it, so it
+    must not stay online next to the current one. Each is withdrawn (withdraw_ember_edition()),
+    which leaves its package lacking only the ember edition: a backfill seed, which the ember
+    backfill renders again in the current look (--max-backfill per run, after new mints). Until
+    then the token has no ember edition. Only seeds in `seeds` are touched (the seed list of this
+    run), since run.py never regenerates any other package.
+
+    Nothing is withdrawn unless the certificates were read in full (one ssh call), and only
+    certificates whose algorithm could be read and is older than `generator_algorithm` count, so
+    no failure or unexpected file can start a mass withdrawal. The ssh call is skipped when
+    `remote_files` holds no certificate. In a dry run nothing changes on the asset host.
+
+    Returns `remote_files` without the files of every withdrawn edition (every one a dry run would
+    withdraw), so this run's planning already sees those packages as backfill seeds, and False if
+    the certificates could not be read or a withdrawal failed (both logged; the other withdrawals
+    go ahead). A later run retries a failed withdrawal, or backfills the package if its
+    certificate is already gone.
+    """
+    if not any(path.endswith(f"/{EMBER_CERTIFICATE}") for path in remote_files):
+        return remote_files, True
+    live = list_remote_ember_algorithms(ssh_host, ssh_user, remote_dir)
+    if live is None:
+        log.error("Stale ember editions cannot be recognised, so none is withdrawn this run")
+        return remote_files, False
+    stale = stale_ember_editions(seeds, live, generator_algorithm, remote_files)
+    if not stale:
+        return remote_files, True
+
+    withdrawn: list[str] = []
+    failed: list[str] = []
+    for seed, algorithm in stale.items():
+        if shutdown_requested:
+            log.info(
+                "Shutdown requested -- %d stale ember editions wait for a later run",
+                len(stale) - len(withdrawn) - len(failed),
+            )
+            break
+        if dry_run:
+            log.info("DRY-RUN  would withdraw the %s ember edition of 0x%s", algorithm, seed)
+        elif withdraw_ember_edition(seed, ssh_host, ssh_user, remote_dir):
+            log.info(
+                "WITHDRAWN  seed=0x%s  its %s ember edition is off the asset host", seed, algorithm
+            )
+        else:
+            failed.append(seed)  # withdraw_ember_edition() logged why
+            continue
+        withdrawn.append(seed)
+
+    retired = sorted(set(stale.values()), key=ember_algorithm_number)
+    log.info(
+        "%s %d stale ember editions (%s -> %s): the ember backfill renders them again",
+        "DRY-RUN  would withdraw" if dry_run else "Withdrew",
+        len(withdrawn),
+        ", ".join(retired),
+        generator_algorithm,
+    )
+    if failed:
+        log.error(
+            "%d stale ember editions could not be withdrawn (see above; a later run retries each, "
+            "or renders it again if its certificate is already gone): %s",
+            len(failed),
+            ", ".join(f"0x{seed}" for seed in failed),
+        )
+    gone = {f"0x{seed}/{path}" for seed in withdrawn for path in EMBER_PACKAGE_FILES}
+    return remote_files - gone, not failed
 
 
 # ---------------------------------------------------------------------------
@@ -1829,7 +2163,7 @@ def _generate_and_upload(
 ) -> Outcome:
     """process_seed() without the dry run, the cleanup and the final log line."""
     # An ember-mode backfill needs the live package's orbit and manifest: check them before the
-    # hour-long render, so a live package that cannot be used costs no render.
+    # render, which takes hours, so a live package that cannot be used costs no render.
     if (
         backfill is BackfillMode.EMBER
         and read_live_package(seed, ssh_host, ssh_user, remote_dir) is None
@@ -2083,7 +2417,14 @@ def preflight(
         log.error("[preflight] Generator binary: NOT FOUND")
         all_ok = False
     elif generator_supports_ember(generator):
-        log.info("[preflight] Generator binary: OK (%s, ember edition supported)", generator[0])
+        # A binary without the ember algorithm probe still works (with a WARNING): it only
+        # cannot recognise stale ember editions.
+        algorithm = generator_ember_algorithm(generator)
+        log.info(
+            "[preflight] Generator binary: OK (%s, ember edition supported%s)",
+            generator[0],
+            f", renders {algorithm}" if algorithm else "",
+        )
     else:
         log.error(
             "[preflight] Generator binary: FAILED (%s predates the ember edition: its --help "
@@ -2139,6 +2480,16 @@ def backfill_mode(value: str) -> BackfillMode:
     except ValueError:
         choices = ", ".join(mode.value for mode in BackfillMode)
         raise argparse.ArgumentTypeError(f"{value!r} is not one of {choices}") from None
+
+
+def yes_no(value: str) -> bool:
+    """argparse type: a switch, "yes", "true", "on" or "1", or "no", "false", "off", "0" or ""."""
+    text = value.strip().lower()
+    if text in ("yes", "true", "on", "1"):
+        return True
+    if text in ("no", "false", "off", "0", ""):
+        return False
+    raise argparse.ArgumentTypeError(f"{value!r} is not yes or no")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -2221,6 +2572,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--keep-stale-ember",
+        type=yes_no,
+        nargs="?",
+        const=True,
+        metavar="{yes,no}",
+        default=os.environ.get(ENV_KEEP_STALE_EMBER, "no"),
+        help=(
+            "Keep live ember editions that an older ember algorithm than the generator's "
+            "rendered; by default each run withdraws them from the asset host, so that the "
+            "backfill renders them again in the current look. The flag alone means yes "
+            f"(env: {ENV_KEEP_STALE_EMBER}; default: no)"
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Report missing files without generating or uploading",
@@ -2281,11 +2646,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def sync(args: argparse.Namespace) -> int:
-    """One sync run: plan the incomplete packages, generate and upload them; the exit status.
+    """One sync run: withdraw stale ember editions, plan the incomplete packages, generate and
+    upload them; the exit status.
 
     Returns 0 if every planned seed succeeded (an urgent package uploaded without its ember
     edition counts as a success) and 1 on a configuration error, a failed seed list or remote
-    listing, or any failed seed (a failed ember backfill included).
+    listing, any failed seed (a failed ember backfill included), or live ember certificates that
+    could not be read or a stale ember edition that could not be withdrawn.
     """
     missing_cfg = validate_config(args)
     if missing_cfg:
@@ -2305,6 +2672,7 @@ def sync(args: argparse.Namespace) -> int:
     log.info("  max_backfill          = %d", args.max_backfill)
     log.info("  backfill_mode         = %s", args.backfill_mode.value)
     log.info("  max_backfill_attempts = %d", args.max_backfill_attempts)
+    log.info("  keep_stale_ember      = %s", args.keep_stale_ember)
     log.info("  dry_run               = %s", args.dry_run)
     log.info("  preflight             = %s", args.preflight)
     log.info("=" * 60)
@@ -2331,12 +2699,16 @@ def sync(args: argparse.Namespace) -> int:
     ember_capable = True
     generator_identity: GeneratorIdentity | None = None
     max_backfill: int = args.max_backfill
+    # The ember look the generator renders; None leaves every live ember edition as it is.
+    ember_algorithm: str | None = None
     if exec_cmd is not None:
         generator_identity = GeneratorIdentity.of(exec_cmd[0])
         ember_capable = generator_supports_ember(exec_cmd)
         if not ember_capable:
             log_stale_generator(exec_cmd)
             max_backfill = 0
+        elif not args.keep_stale_ember:
+            ember_algorithm = generator_ember_algorithm(exec_cmd)
 
     LOCAL_OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -2356,6 +2728,19 @@ def sync(args: argparse.Namespace) -> int:
     if remote_files is None:
         log.error("Cannot tell which packages are incomplete without the remote listing. Exiting.")
         return 1
+    # Withdrawn editions leave their packages lacking only the ember edition, so the plan below
+    # already counts them as backfill seeds.
+    withdrawal_ok = True
+    if ember_algorithm is not None:
+        remote_files, withdrawal_ok = withdraw_stale_ember_editions(
+            seeds,
+            remote_files,
+            ember_algorithm,
+            args.ssh_host,
+            args.ssh_user,
+            args.remote_dir,
+            dry_run=args.dry_run,
+        )
     urgent, backfill = find_missing_seeds(seeds, remote_files)
     incomplete = len(urgent) + len(backfill)
     backfill_seeds = set(backfill)
@@ -2367,7 +2752,7 @@ def sync(args: argparse.Namespace) -> int:
             len(seeds),
             fmt_duration(elapsed),
         )
-        return 0
+        return 0 if withdrawal_ok else 1
 
     log.info(
         "Found %d seeds with incomplete asset packages (out of %d total): %d new or incomplete, "
@@ -2413,7 +2798,7 @@ def sync(args: argparse.Namespace) -> int:
             "; paused: the generator predates the ember edition" if not ember_capable else "",
         )
     if not missing:
-        return 0
+        return 0 if withdrawal_ok else 1
 
     # --- Phase 2: generate and upload sequentially ---
 
@@ -2503,7 +2888,7 @@ def sync(args: argparse.Namespace) -> int:
     log.info("  Wall time            : %s", fmt_duration(elapsed))
     log.info("=" * 60)
 
-    return 1 if fail_count > 0 else 0
+    return 1 if fail_count > 0 or not withdrawal_ok else 0
 
 
 if __name__ == "__main__":
