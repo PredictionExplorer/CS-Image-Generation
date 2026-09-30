@@ -11,6 +11,8 @@ something needs a human.
 - [First-time setup](#first-time-setup)
 - [How a deploy works](#how-a-deploy-works)
 - [The CI gate](#the-ci-gate)
+- [When a deploy changes the ember look](#when-a-deploy-changes-the-ember-look): the old
+  editions are withdrawn and rendered again
 - [Operating it](#operating-it): status, logs, pause and resume, retry, rollback, manual runs
 - [Troubleshooting](#troubleshooting)
 - [Security model](#security-model)
@@ -238,8 +240,8 @@ One tick of `cosmicsig_deploy.py run`:
 
 **Latency.** Merge to production takes the CI run (the slowest job), up to 2 minutes until the
 next tick, the build and tests on the host (a few minutes, incremental), plus the rest of a sync
-run that is in progress (a backfill package takes about an hour), because a render is never
-interrupted.
+run that is in progress (a backfill package is a full render, which takes hours), because a
+render is never interrupted.
 
 ## The CI gate
 
@@ -262,6 +264,102 @@ and considers only check runs named `CI passed`, created by the GitHub Actions a
 | queued, in progress, or none yet | `waiting for CI` (INFO); the next tick asks again |
 | API error, timeout, rate limit | WARNING; the next tick asks again; never deploys |
 | HTTP 401 to a request with the token | ERROR naming the token's variable; asked again at once without the token, and that answer decides |
+
+## When a deploy changes the ember look
+
+Every package's `metadata/ember.json` records the ember algorithm that rendered it
+(`"algorithm": "ember-v1"`), and the generator reports its own:
+`three_body_problem --ember-algorithm` prints, for example, `ember-v2`. A change that alters the
+ember edition's rendered bits bumps that id. The sync run the agent starts right after deploying
+such a change takes every edition of the older look off the asset host, and the ember backfill
+renders them again in the new one. Nothing needs doing by hand; this section says what to expect
+and how to steer it.
+
+**What the first run does.** Before it plans, `run.py`:
+
+1. reads the algorithm of every live certificate, with one SSH call (`sh` and `sed` on the asset
+   host);
+2. withdraws each edition whose algorithm is older than the generator's, for every seed in the
+   current seed list. Per package, in this order: it deletes `metadata/ember.json`, replaces
+   `metadata/assets.json` with the same manifest without its `ember_*` entries (uploaded as
+   `assets.json.part` and renamed into place; every other entry and field is kept as it was),
+   and deletes the five ember media files. The main art, the spectral files and the other
+   metadata are never touched;
+3. plans as usual. The withdrawn packages now lack only the ember edition, so they are ember
+   backfill seeds: regenerated at `--max-backfill` per run (default 1), after any new mint,
+   with the usual orbit check (see the README's *The ember backfill*).
+
+The journal shows one line per package,
+`WITHDRAWN  seed=0x…  its ember-v1 ember edition is off the asset host`, and one summary,
+`Withdrew N stale ember editions (ember-v1 -> ember-v2): the ember backfill renders them again`.
+Every later run finds nothing stale: a re-rendered package's certificate records the new id.
+
+**Tokens have no ember edition until they are re-rendered.** This is intended. The artist
+retired the old look, so it must not stay online, not even next to the new one while the
+backfill works through the collection. A withdrawn package is a valid package without the
+edition (its manifest lists no `ember_*` role), exactly like one uploaded before the edition
+existed, which consumers already handle; each re-render adds the new edition back.
+
+**How long it takes.** Every listed token is rendered again once, one per run by default: a
+full package render, then its upload and the timer's 5-minute pause. The new look costs
+substantially more than the old one; its render time on this host is measured after the deploy.
+Read it from the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the journal and
+multiply by the number of withdrawn tokens for the whole pass. At the default `--max-backfill`
+of 1, a new mint waits for at most one backfill package (the rest of the run in progress). The
+per-seed timeout is 10 hours (`run.py --timeout`), well below the sync unit's 24-hour limit.
+
+**Watching progress.**
+
+```bash
+journalctl --user -u cosmicsig-sync -f                                 # live
+grep -E 'WITHDRAWN|Withdrew|ember edition uploaded' imgcheck.log         # the whole history
+python3 run.py --dry-run   # between runs: "... N missing only the ember edition"
+```
+
+`--dry-run` exits at once while a sync run holds `run.lock`. On the asset host, in the asset
+directory (`COSMICSIG_REMOTE_DIR`), count the live editions per algorithm and list the tokens
+still waiting:
+
+```bash
+grep -h '^  "algorithm"' 0x*/metadata/ember.json | sort | uniq -c
+for d in 0x*/; do [ -f "${d}metadata/ember.json" ] || echo "$d"; done
+```
+
+**Safety.** A mass withdrawal needs an explicit, readable signal; a failure or an unexpected file
+never starts one.
+
+- Nothing is withdrawn unless the generator reports its id. A binary without
+  `--ember-algorithm` (built before the flag existed) logs a WARNING on every run and withdraws
+  nothing.
+- A certificate whose algorithm cannot be read is kept, with a WARNING naming it. If the
+  certificates cannot be read at all (SSH fails), nothing is withdrawn that run: an ERROR, the
+  run exits `1`, and the next run tries again.
+- Only an older id is stale. After a rollback to a generator with an older id, the newer live
+  editions are kept (one WARNING per run: `… are newer than this generator's …`) and new mints
+  get the older look; deploying the newer generator again re-renders only those.
+- Only seeds in the current seed list are touched, because `run.py` regenerates no other
+  package: a withdrawn edition there would never come back. Stale editions of unlisted packages
+  are kept and named in a WARNING on every run; remove such packages by hand if they are
+  obsolete.
+- A package that lacks a core file is left alone: the same run regenerates and uploads it in
+  full, new ember edition included.
+- The certificate goes first, so a withdrawal that is interrupted (a lost connection, a stop)
+  already leaves a backfill seed, and its re-render replaces the manifest entries and media that
+  were left. A live `metadata/assets.json` that cannot be read or parsed leaves the package
+  untouched, with an ERROR on every run until it is repaired on the asset host. A failed
+  withdrawal makes the run exit `1`.
+- A re-render whose orbit differs from the live package's uploads nothing and is given up with
+  that binary (see the README's *The ember backfill*, retry cap). That token then stays without
+  an ember edition until someone decides: a rebuilt generator, or `--backfill-mode full`.
+
+**Keeping the old editions.** Set `COSMICSIG_KEEP_STALE_EMBER=yes` in the checkout's `.env` (or
+pass `--keep-stale-ember` to a manual run): every run then leaves the live editions as they are,
+and since their packages are complete, they are not rendered again either. Set it *before* the
+change is deployed: the sync run the agent starts right after the switch withdraws every stale
+edition at once. Remove it, or set `no`, to
+have the next run withdraw them. `COSMICSIG_MAX_BACKFILL=0` (`--max-backfill 0`) is different: it
+pauses only the re-rendering, so the stale editions are still withdrawn and the tokens stay
+without an ember edition until the backfill resumes.
 
 ## Operating it
 

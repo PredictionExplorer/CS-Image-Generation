@@ -1,4 +1,5 @@
-"""Tests for run.py: planning, the ember failure ledger, generation outcomes, uploads and main().
+"""Tests for run.py: planning, the ember failure ledger, generation outcomes, uploads, stale ember
+editions and main().
 
 Standard library only, and no network. The generator, ssh and scp are fakes on PATH: tiny
 launcher scripts that call the fake_* functions of this module. The fake ssh runs the remote
@@ -16,6 +17,7 @@ import fcntl
 import json
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -47,6 +49,11 @@ SEED_D = "d" * 64
 # overrides them for one seed).
 DEFAULT_MASSES = "[150.25, 200.5, 180.125]"
 
+# The ember look the fake generator renders (FAKE_GEN_EMBER_ALGORITHM overrides it), and an older
+# one, which live packages of the earlier look record.
+CURRENT_ALGORITHM = "ember-v2"
+STALE_ALGORITHM = "ember-v1"
+
 CORE_MEDIA_ROLES = {
     "images/source/master.png": "source_master",
     "images/web/full.webp": "web_full",
@@ -76,6 +83,20 @@ def manifest_entry(path: str, role: str, tag: str) -> dict[str, object]:
     }
 
 
+def certificate_text(algorithm: str, tag: str) -> str:
+    """A fake metadata/ember.json, laid out like the generator's (serde_json's pretty printer):
+    the top-level key is the line `  "algorithm": "<id>",`. The nested "algorithm" is a decoy that
+    must never be read as the certificate's."""
+    certificate = {
+        "schema_version": 2,
+        "edition": "ember",
+        "algorithm": algorithm,
+        "contract": f"the {tag} render",
+        "config": {"look": {"algorithm": "ember-v0"}},
+    }
+    return json.dumps(certificate, indent=2) + "\n"
+
+
 def write_package(
     package: Path,
     seed: str,
@@ -85,9 +106,11 @@ def write_package(
     ember_manifest: bool,
     masses: str = DEFAULT_MASSES,
     extra_entries: Sequence[dict[str, object]] = (),
+    algorithm: str = CURRENT_ALGORITHM,
 ) -> None:
     """Write a fake package: every core file, 64 spectral bins, metadata, optionally the ember
-    edition's files and manifest entries. Every file's content names `tag`."""
+    edition's files (its certificate records `algorithm`) and manifest entries. Every file's
+    content names `tag`."""
     for path in (*CORE_MEDIA_ROLES, *SPECTRAL_FILES):
         target = package / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -111,10 +134,13 @@ def write_package(
     manifest = {"schema_version": 2, "generated_at": f"{tag}-time", "assets": entries}
     (metadata / "assets.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if ember_files:
-        for path in run.EMBER_PACKAGE_FILES:
+        for path in run.EMBER_MEDIA_FILES:
             target = package / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(f"{path} {tag}\n", encoding="utf-8")
+        (package / run.EMBER_CERTIFICATE).write_text(
+            certificate_text(algorithm, tag), encoding="utf-8"
+        )
 
 
 def remote_listing(seed: str, files: Sequence[str]) -> set[str]:
@@ -166,11 +192,21 @@ def fake_generator(argv: list[str]) -> int:
     --help does not list --no-ember. FAKE_GEN_CORRUPT names a file it overwrites with invalid
     JSON while rendering (a live file that changes during the render). FAKE_GEN_LOCK_PROBE names
     run.py's lock file: each render logs whether it is free and whether the generator holds it.
+    FAKE_GEN_EMBER_ALGORITHM (default CURRENT_ALGORITHM) is what --ember-algorithm prints and what
+    its certificates record; empty, or with FAKE_GEN_STALE=1, the binary predates that flag and
+    its argument parser rejects it (exit 2, like clap).
     """
+    algorithm = os.environ.get("FAKE_GEN_EMBER_ALGORITHM", CURRENT_ALGORITHM)
     if "--help" in argv:
         print("Usage: three_body_problem [OPTIONS]\n      --image-only")
         if os.environ.get("FAKE_GEN_STALE") != "1":
             print("      --no-ember   Skip the ember edition")
+        return 0
+    if "--ember-algorithm" in argv:
+        if not algorithm or os.environ.get("FAKE_GEN_STALE") == "1":
+            print("error: unexpected argument '--ember-algorithm' found", file=sys.stderr)
+            return 2
+        print(algorithm)
         return 0
     seed = argv[argv.index("--seed") + 1].removeprefix("0x")
     name = argv[argv.index("--output") + 1]
@@ -199,6 +235,7 @@ def fake_generator(argv: list[str]) -> int:
         ember_files=mode == "complete",
         ember_manifest=mode in ("complete", "no_ember_files"),
         masses=os.environ.get(f"FAKE_GEN_MASSES_{seed}", DEFAULT_MASSES),
+        algorithm=algorithm,
     )
     if mode == "stray":
         (package / run.EMBER_MEDIA_FILES[0]).write_text("partial", encoding="utf-8")
@@ -372,8 +409,10 @@ class SyncTestCase(unittest.TestCase):
         ember: bool = False,
         masses: str = DEFAULT_MASSES,
         extra_entries: Sequence[dict[str, object]] = (),
+        algorithm: str = CURRENT_ALGORITHM,
     ) -> Path:
-        """A live package on the fake remote, tagged "live"."""
+        """A live package on the fake remote, tagged "live" (its certificate records
+        `algorithm`)."""
         package = self.remote / f"0x{seed}"
         write_package(
             package,
@@ -383,8 +422,15 @@ class SyncTestCase(unittest.TestCase):
             ember_manifest=ember,
             masses=masses,
             extra_entries=extra_entries,
+            algorithm=algorithm,
         )
         return package
+
+    def listing(self) -> set[str]:
+        """run.list_remote_files() of the fake remote, which must succeed."""
+        remote = run.list_remote_files("fakehost", "fakeuser", str(self.remote))
+        assert remote is not None
+        return remote
 
     def remote_snapshot(self) -> dict[str, str]:
         """Every remote file (relative path) and its content."""
@@ -405,6 +451,10 @@ class SyncTestCase(unittest.TestCase):
         if not self.calls_file.exists():
             return []
         return [json.loads(line) for line in self.calls_file.read_text().splitlines()]
+
+    def forget_calls(self) -> None:
+        """Start the call log afresh."""
+        self.calls_file.unlink(missing_ok=True)
 
     def calls(self, kind: str) -> list[list[object]]:
         """The logged calls of one fake ("generate", "ssh", "scp", "find"), in order."""
@@ -679,6 +729,34 @@ class GeneratorTests(SyncTestCase):
         with self.assertLogs(run.log, level="ERROR"):
             self.assertFalse(run.generator_supports_ember([str(self.root / "missing")]))
 
+    def ember_algorithm(self, printed: str | None = None) -> str | None:
+        """run.generator_ember_algorithm() of the fake generator, which prints `printed`."""
+        if printed is not None:
+            os.environ["FAKE_GEN_EMBER_ALGORITHM"] = printed
+        return run.generator_ember_algorithm([self.generator])
+
+    def test_ember_algorithm_probe(self) -> None:
+        self.assertEqual(self.ember_algorithm(), CURRENT_ALGORITHM)
+        self.assertEqual(self.ember_algorithm("ember-v10"), "ember-v10")
+        self.assertEqual(self.ember_algorithm("  ember-v3\n"), "ember-v3")
+
+    def test_ember_algorithm_probe_accepts_nothing_but_one_id(self) -> None:
+        for printed in ("Ember v2", "ember-v2 (sumi)", "ember-v", "EMBER-V2", "ember-v2\nember-v3"):
+            with self.subTest(printed=printed), self.assertLogs(run.log, "WARNING") as logs:
+                self.assertIsNone(self.ember_algorithm(printed))
+            self.assertIn("not an ember algorithm id", "\n".join(logs.output))
+            self.assertIn("stale ember editions cannot be detected", "\n".join(logs.output))
+
+    def test_a_generator_that_predates_the_ember_algorithm_probe(self) -> None:
+        # The argument parser of an older binary rejects the flag with status 2.
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            self.assertIsNone(self.ember_algorithm(""))
+        self.assertIn("exited with rc=2 (error: unexpected argument", "\n".join(logs.output))
+        self.assertIn("so no live ember edition is withdrawn", "\n".join(logs.output))
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            self.assertIsNone(run.generator_ember_algorithm([str(self.root / "missing")]))
+        self.assertIn("could not be run", "\n".join(logs.output))
+
 
 # ---------------------------------------------------------------------------
 # Remote listing
@@ -811,8 +889,12 @@ class ProcessSeedTests(SyncTestCase):
         for path, content in live.items():
             if not path.endswith(run.ASSET_MANIFEST):
                 self.assertEqual(remote[path], content, path)
-        for path in run.EMBER_PACKAGE_FILES:
+        for path in run.EMBER_MEDIA_FILES:
             self.assertEqual(remote[f"0x{SEED_A}/{path}"], f"{path} new\n")
+        self.assertEqual(
+            remote[f"0x{SEED_A}/{run.EMBER_CERTIFICATE}"],
+            certificate_text(CURRENT_ALGORITHM, "new"),
+        )
 
         merged = json.loads((package / run.ASSET_MANIFEST).read_text(encoding="utf-8"))
         kept = [entry for entry in live_manifest["assets"] if not run.is_ember_asset(entry)]
@@ -1064,6 +1146,295 @@ class ProcessSeedTests(SyncTestCase):
 
 
 # ---------------------------------------------------------------------------
+# Stale ember editions
+# ---------------------------------------------------------------------------
+
+SEED_E = "e" * 64
+SEED_F = "f" * 64
+
+
+class StaleEmberTests(SyncTestCase):
+    """Reading the live certificates, choosing the stale editions, and withdrawing them."""
+
+    def ember_paths(self, *seeds: str) -> set[str]:
+        """The remote listing's paths of every ember file of `seeds`."""
+        return {f"0x{seed}/{path}" for seed in seeds for path in run.EMBER_PACKAGE_FILES}
+
+    def withdraw_all(
+        self, seeds: list[str], *, dry_run: bool = False
+    ) -> tuple[set[str], bool, set[str]]:
+        """run.withdraw_stale_ember_editions() against the fake remote: its listing, its status,
+        and the listing it started from. The call log starts after that first listing."""
+        listing = self.listing()
+        self.forget_calls()
+        remaining, ok = run.withdraw_stale_ember_editions(
+            seeds,
+            listing,
+            CURRENT_ALGORITHM,
+            "fakehost",
+            "fakeuser",
+            str(self.remote),
+            dry_run=dry_run,
+        )
+        return remaining, ok, listing
+
+    def withdraw(self, seed: str) -> bool:
+        """run.withdraw_ember_edition() of `seed` against the fake remote."""
+        return run.withdraw_ember_edition(seed, "fakehost", "fakeuser", str(self.remote))
+
+    def test_every_certificate_is_read_in_one_ssh_call(self) -> None:
+        self.remote_package(SEED_A, ember=True)
+        self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)
+        self.remote_package(SEED_C, ember=True)
+        self.remote_package(SEED_D)  # no ember edition, so no certificate
+        self.remote_package(SEED_E, ember=True, algorithm="ember-2")
+        self.remote_package(SEED_F, ember=True)
+        certificate = self.remote / f"0x{SEED_C}" / run.EMBER_CERTIFICATE
+        certificate.write_text('{"schema_version": 2, "algorithm": "ember-v1"}', encoding="utf-8")
+        duplicated = self.remote / f"0x{SEED_F}" / run.EMBER_CERTIFICATE
+        duplicated.write_text(
+            '{\n  "algorithm": "ember-v1",\n  "algorithm": "ember-v2"\n}\n', encoding="utf-8"
+        )
+        algorithms = run.list_remote_ember_algorithms("fakehost", "fakeuser", str(self.remote))
+        self.assertEqual(
+            algorithms,
+            {
+                SEED_A: CURRENT_ALGORITHM,
+                SEED_B: STALE_ALGORITHM,
+                SEED_C: None,  # another layout (compact JSON): unreadable
+                SEED_E: None,  # not an ember algorithm id
+                SEED_F: None,  # two top-level ids
+            },
+        )
+        self.assertEqual(len(self.ssh_commands()), 1)
+
+    def test_a_failed_certificate_listing_is_none(self) -> None:
+        with self.assertLogs(run.log, level="ERROR"):  # the directory is missing
+            self.assertIsNone(run.list_remote_ember_algorithms("fakehost", "fakeuser", "/missing"))
+        os.environ["FAKE_SSH_FAIL"] = "1"
+        with self.assertLogs(run.log, level="ERROR"):
+            self.assertIsNone(
+                run.list_remote_ember_algorithms("fakehost", "fakeuser", str(self.remote))
+            )
+
+    def test_only_older_readable_editions_of_listed_complete_packages_are_stale(self) -> None:
+        unlisted, urgent, backfill = "1" * 64, "2" * 64, "3" * 64
+        live: dict[str, str | None] = {
+            SEED_A: CURRENT_ALGORITHM,
+            SEED_B: STALE_ALGORITHM,
+            SEED_C: None,
+            SEED_D: "ember-v3",
+            unlisted: STALE_ALGORITHM,
+            urgent: STALE_ALGORITHM,
+            backfill: "ember-v0",
+        }
+        remote = remote_listing(urgent, run.REQUIRED_PACKAGE_FILES[1:])  # lacks master.png
+        remote |= remote_listing(backfill, [*run.CORE_PACKAGE_FILES, run.EMBER_CERTIFICATE])
+        for seed in (SEED_A, SEED_B, SEED_C, SEED_D, unlisted):
+            remote |= remote_listing(seed, run.REQUIRED_PACKAGE_FILES)
+        seeds = [backfill, SEED_A, SEED_B, SEED_C, SEED_D, urgent]
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            stale = run.stale_ember_editions(seeds, live, CURRENT_ALGORITHM, remote)
+        self.assertEqual(list(stale.items()), [(backfill, "ember-v0"), (SEED_B, STALE_ALGORITHM)])
+        warnings = "\n".join(logs.output)
+        self.assertIn(
+            f"0x{SEED_C}: the algorithm of its live metadata/ember.json cannot be read", warnings
+        )
+        self.assertIn(f"newer than this generator's {CURRENT_ALGORITHM}", warnings)
+        self.assertIn(f"rolled back?): 0x{SEED_D}", warnings)
+        self.assertIn("not in the seed list, so nothing would render them again", warnings)
+        self.assertIn(f"obsolete): 0x{unlisted}", warnings)
+        self.assertNotIn(urgent, warnings)
+
+    def test_algorithms_compare_by_number(self) -> None:
+        remote = remote_listing(SEED_A, run.REQUIRED_PACKAGE_FILES)
+        stale = run.stale_ember_editions([SEED_A], {SEED_A: "ember-v9"}, "ember-v10", remote)
+        self.assertEqual(stale, {SEED_A: "ember-v9"})
+        with self.assertLogs(run.log, level="WARNING"):
+            self.assertEqual(
+                run.stale_ember_editions([SEED_A], {SEED_A: "ember-v10"}, "ember-v9", remote), {}
+            )
+
+    def test_the_certificate_goes_first_then_the_manifest_entries_then_the_media(self) -> None:
+        poster: dict[str, object] = {
+            "role": "poster",
+            "title": "Kōzo, été",
+            "duration_seconds": 30.033333333333335,
+            "bytes": 12345678901234567890123,
+        }
+        package = self.remote_package(
+            SEED_B, ember=True, algorithm=STALE_ALGORITHM, extra_entries=[poster]
+        )
+        live = self.remote_snapshot()
+        live_manifest = json.loads((package / run.ASSET_MANIFEST).read_text(encoding="utf-8"))
+
+        self.assertTrue(self.withdraw(SEED_B))
+
+        remote = self.remote_snapshot()
+        manifest_path = f"0x{SEED_B}/{run.ASSET_MANIFEST}"
+        kept = {
+            path: content
+            for path, content in live.items()
+            if path not in self.ember_paths(SEED_B) and path != manifest_path
+        }
+        self.assertEqual({p: c for p, c in remote.items() if p != manifest_path}, kept)
+        manifest = json.loads(remote[manifest_path])
+        # The same fields in the same order, each unchanged; only the ember entries are gone.
+        self.assertEqual(list(manifest), list(live_manifest))
+        for field, value in live_manifest.items():
+            if field != "assets":
+                self.assertEqual(manifest[field], value, field)
+        self.assertEqual(
+            manifest["assets"], [e for e in live_manifest["assets"] if not run.is_ember_asset(e)]
+        )
+        self.assertEqual(manifest["assets"][-1], poster)
+        self.assertEqual(len(manifest["assets"]), len(CORE_MEDIA_ROLES) + 2)
+
+        remote_package = f"{self.remote}/0x{SEED_B}"
+        manifest_target = f"{remote_package}/{run.ASSET_MANIFEST}"
+        self.assertEqual(
+            self.call_log(),
+            [
+                ["ssh", f"cat -- {manifest_target}"],
+                [
+                    "ssh",
+                    f"rm -f -- {remote_package}/{run.EMBER_CERTIFICATE} && "
+                    f"mkdir -p -- {remote_package}/metadata",
+                ],
+                ["scp", [f"output/0x{SEED_B}/{run.ASSET_MANIFEST}"], f"{manifest_target}.part"],
+                ["ssh", f"mv -f -- {manifest_target}.part {manifest_target}"],
+                [
+                    "ssh",
+                    "rm -f -- "
+                    + " ".join(f"{remote_package}/{path}" for path in run.EMBER_PACKAGE_FILES),
+                ],
+            ],
+        )
+        self.assertEqual(self.remote_part_files(), [])
+        self.assertFalse((run.LOCAL_OUTPUT_DIR / f"0x{SEED_B}").exists())
+        self.assertEqual(run.find_missing_seeds([SEED_B], self.listing()), ([], [SEED_B]))
+
+    def test_a_withdrawal_is_idempotent(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        self.assertTrue(self.withdraw(SEED_A))
+        withdrawn = self.remote_snapshot()
+        self.assertTrue(self.withdraw(SEED_A))
+        self.assertEqual(self.remote_snapshot(), withdrawn)
+        # A package without a certificate is never considered again: not even ssh is needed.
+        remaining, ok, listing = self.withdraw_all([SEED_A])
+        self.assertTrue(ok)
+        self.assertEqual(remaining, listing)
+        self.assertEqual(self.call_log(), [])
+        self.assertEqual(self.remote_snapshot(), withdrawn)
+
+    def test_stale_editions_are_withdrawn_and_planned_as_backfill_seeds(self) -> None:
+        self.remote_package(SEED_A, ember=True)
+        self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)
+        self.remote_package(SEED_C, ember=True, algorithm="ember-v0")
+        a_before = {p: c for p, c in self.remote_snapshot().items() if SEED_A in p}
+        with self.assertLogs(run.log, level="INFO") as logs:
+            remaining, ok, _listing = self.withdraw_all([SEED_A, SEED_B, SEED_C])
+        self.assertTrue(ok)
+        self.assertEqual(remaining, self.listing())  # the listing a new run would see
+        self.assertEqual(
+            run.find_missing_seeds([SEED_A, SEED_B, SEED_C], remaining), ([], [SEED_B, SEED_C])
+        )
+        self.assertEqual({p: c for p, c in self.remote_snapshot().items() if SEED_A in p}, a_before)
+        text = "\n".join(logs.output)
+        self.assertIn(f"WITHDRAWN  seed=0x{SEED_B}  its {STALE_ALGORITHM} ember edition", text)
+        self.assertIn(f"WITHDRAWN  seed=0x{SEED_C}  its ember-v0 ember edition", text)
+        self.assertIn(
+            f"Withdrew 2 stale ember editions (ember-v0, {STALE_ALGORITHM} -> {CURRENT_ALGORITHM})",
+            text,
+        )
+
+    def test_a_failed_withdrawal_does_not_stop_the_others(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)
+        os.environ["FAKE_SSH_FAIL_ON"] = f"cat -- {self.remote}/0x{SEED_A}/"
+        with self.assertLogs(run.log, level="INFO") as logs:
+            remaining, ok, _listing = self.withdraw_all([SEED_A, SEED_B])
+        self.assertFalse(ok)
+        self.assertEqual(remaining, self.listing())
+        self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], remaining), ([], [SEED_B]))
+        self.assertIn(
+            f"1 stale ember editions could not be withdrawn (see above; a later run retries each, "
+            f"or renders it again if its certificate is already gone): 0x{SEED_A}",
+            "\n".join(logs.output),
+        )
+
+    def test_an_interrupted_withdrawal_already_reads_as_a_backfill_seed(self) -> None:
+        package = self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live_manifest = (package / run.ASSET_MANIFEST).read_text(encoding="utf-8")
+        os.environ["FAKE_SCP_FAIL_ON"] = run.ASSET_MANIFEST
+        with self.assertLogs(run.log, level="ERROR"):
+            self.assertFalse(self.withdraw(SEED_A))
+        self.assertFalse((package / run.EMBER_CERTIFICATE).exists())
+        self.assertEqual((package / run.ASSET_MANIFEST).read_text(encoding="utf-8"), live_manifest)
+        self.assertEqual(run.find_missing_seeds([SEED_A], self.listing()), ([], [SEED_A]))
+
+        # The backfill replaces whatever the withdrawal left: media, manifest entries, certificate.
+        del os.environ["FAKE_SCP_FAIL_ON"]
+        self.assertIs(self.process(SEED_A, backfill=run.BackfillMode.EMBER), run.Outcome.COMPLETE)
+        remote = self.remote_snapshot()
+        for path in run.EMBER_MEDIA_FILES:
+            self.assertEqual(remote[f"0x{SEED_A}/{path}"], f"{path} new\n")
+        certificate = json.loads(remote[f"0x{SEED_A}/{run.EMBER_CERTIFICATE}"])
+        self.assertEqual(certificate["algorithm"], CURRENT_ALGORITHM)
+        manifest = json.loads(remote[f"0x{SEED_A}/{run.ASSET_MANIFEST}"])
+        ember = [entry for entry in manifest["assets"] if run.is_ember_asset(entry)]
+        self.assertEqual([entry["role"] for entry in ember], list(run.EMBER_MANIFEST_ROLES))
+        self.assertTrue(all(str(entry["sha256"]).startswith("new:") for entry in ember))
+
+    def test_an_unusable_live_manifest_leaves_the_package_untouched(self) -> None:
+        package = self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        (package / run.ASSET_MANIFEST).write_text(CORRUPT_JSON, encoding="utf-8")
+        live = self.remote_snapshot()
+        with self.assertLogs(run.log, level="ERROR") as logs:
+            self.assertFalse(self.withdraw(SEED_A))
+        self.assertIn("repaired on the asset host", "\n".join(logs.output))
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.calls("scp"), [])
+
+    def test_a_dry_run_changes_nothing(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        with self.assertLogs(run.log, level="INFO") as logs:
+            remaining, ok, listing = self.withdraw_all([SEED_A], dry_run=True)
+        self.assertTrue(ok)
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(len(self.ssh_commands()), 1)  # the certificates were read, nothing else
+        self.assertEqual(self.calls("scp"), [])
+        # The plan a real run would make: the package waits for the backfill.
+        self.assertEqual(remaining, listing - self.ember_paths(SEED_A))
+        text = "\n".join(logs.output)
+        self.assertIn(
+            f"DRY-RUN  would withdraw the {STALE_ALGORITHM} ember edition of 0x{SEED_A}", text
+        )
+        self.assertIn("DRY-RUN  would withdraw 1 stale ember editions", text)
+
+    def test_nothing_is_withdrawn_when_the_certificates_cannot_be_read(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        listing = self.listing()
+        os.environ["FAKE_SSH_FAIL"] = "1"
+        with self.assertLogs(run.log, level="ERROR") as logs:
+            remaining, ok = run.withdraw_stale_ember_editions(
+                [SEED_A],
+                listing,
+                CURRENT_ALGORITHM,
+                "fakehost",
+                "fakeuser",
+                str(self.remote),
+                dry_run=False,
+            )
+        self.assertFalse(ok)
+        self.assertEqual(remaining, listing)
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertIn("none is withdrawn this run", "\n".join(logs.output))
+
+
+# ---------------------------------------------------------------------------
 # Manifest merge, orbit check, timeouts
 # ---------------------------------------------------------------------------
 
@@ -1106,6 +1477,33 @@ class EmberBackfillHelperTests(unittest.TestCase):
         for live, local in cases:
             with self.subTest(live=live, local=local), self.assertRaises(ValueError):
                 run.merge_ember_manifest(live, local)
+
+    def test_without_ember_entries_keeps_everything_else_verbatim(self) -> None:
+        source: dict[str, object] = {"role": "source_master", "sha256": "live"}
+        ember: dict[str, object] = {"role": "ember_web", "sha256": "stale"}
+        main_web: dict[str, object] = {"role": "main_web", "duration_seconds": 30.033333333333335}
+        live = {
+            "schema_version": 2,
+            "generated_at": "then",
+            "assets": [source, ember, main_web],
+            "extra": {"kept": True},
+        }
+        stripped = run.without_ember_entries(live)
+        self.assertEqual(list(stripped), list(live))
+        self.assertEqual(stripped, {**live, "assets": [source, main_web]})
+        self.assertEqual(live["assets"], [source, ember, main_web])  # the input is unchanged
+        malformed: list[object] = [[], {"assets": {}}, {"assets": [{"path": "no role"}]}]
+        for manifest in malformed:
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                run.without_ember_entries(manifest)
+
+    def test_ember_algorithm_numbers(self) -> None:
+        self.assertEqual(run.ember_algorithm_number("ember-v2"), 2)
+        self.assertEqual(run.ember_algorithm_number("ember-v10"), 10)
+        # "٣" is an Arabic-Indic three: a digit to `\d`, but not an ember algorithm number.
+        for invalid in ("ember-v", "ember-2", "ember-v2 ", "Ember-v2", "ember-v٣"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                run.ember_algorithm_number(invalid)
 
     def test_orbit_differences_compare_exact_numbers(self) -> None:
         def traits(masses: str, index: int = 7, retries: int = 1) -> object:
@@ -1315,6 +1713,149 @@ class MainTests(SyncTestCase):
         self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], remote), ([], [SEED_A, SEED_B]))
         self.assertFalse(run.BACKFILL_FAILURES.exists())  # no ember attempt was made
 
+    def ember_edition(self, seed: str) -> dict[str, str]:
+        """The remote ember files of `seed` and its manifest: {path: content}."""
+        paths = {f"0x{seed}/{path}" for path in (*run.EMBER_PACKAGE_FILES, run.ASSET_MANIFEST)}
+        return {path: text for path, text in self.remote_snapshot().items() if path in paths}
+
+    def test_a_stale_ember_edition_is_withdrawn_and_rendered_again(self) -> None:
+        a_package = self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        b_package = self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)
+        ember_or_manifest = [*run.EMBER_PACKAGE_FILES, run.ASSET_MANIFEST]
+        core = {
+            path: content
+            for path, content in self.remote_snapshot().items()
+            if not path.endswith(tuple(ember_or_manifest))
+        }
+
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "1"), 0)
+        text = "\n".join(logs.output)
+        self.assertIn(
+            f"Withdrew 2 stale ember editions ({STALE_ALGORITHM} -> {CURRENT_ALGORITHM})", text
+        )
+        self.assertIn("2 missing only the ember edition", text)
+        # Both editions went before the plan; the backfill rendered one of them again.
+        self.assertEqual(self.generated(), [SEED_A])
+        a_certificate = json.loads((a_package / run.EMBER_CERTIFICATE).read_text(encoding="utf-8"))
+        self.assertEqual(a_certificate["algorithm"], CURRENT_ALGORITHM)
+        self.assertEqual(
+            (a_package / run.EMBER_MEDIA_FILES[0]).read_text(encoding="utf-8"),
+            f"{run.EMBER_MEDIA_FILES[0]} new\n",
+        )
+        # SEED_B has no ember edition until a later run: no certificate, media or manifest entry.
+        self.assertEqual(self.ember_edition(SEED_B).keys(), {f"0x{SEED_B}/{run.ASSET_MANIFEST}"})
+        b_manifest = json.loads((b_package / run.ASSET_MANIFEST).read_text(encoding="utf-8"))
+        self.assertFalse(any(run.is_ember_asset(entry) for entry in b_manifest["assets"]))
+        self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], self.listing()), ([], [SEED_B]))
+        # The core packages are the published ones, byte for byte.
+        self.assertEqual({path: self.remote_snapshot()[path] for path in core}, core)
+
+        # The next run renders SEED_B; the fresh edition of SEED_A is never withdrawn again.
+        a_edition = self.ember_edition(SEED_A)
+        self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "1"), 0)
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assertEqual(self.ember_edition(SEED_A), a_edition)
+        b_certificate = json.loads((b_package / run.EMBER_CERTIFICATE).read_text(encoding="utf-8"))
+        self.assertEqual(b_certificate["algorithm"], CURRENT_ALGORITHM)
+
+        # Every token shows the current look: a third run has nothing to do.
+        live = self.remote_snapshot()
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "1"), 0)
+        self.assertIn("complete asset packages on remote. Nothing to do.", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assertEqual(self.remote_snapshot(), live)
+
+    def test_the_keep_stale_ember_switch_keeps_every_live_edition(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
+        self.assertEqual(self.main([SEED_A]), 0)
+        del os.environ[run.ENV_KEEP_STALE_EMBER]
+        self.assertEqual(self.main([SEED_A], "--keep-stale-ember"), 0)
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.generated(), [])
+        self.assertEqual(len(self.ssh_commands()), 2)  # the listings: no certificate was read
+
+        # The command line overrides the environment.
+        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
+        self.assertEqual(self.main([SEED_A], "--keep-stale-ember", "no"), 0)
+        self.assertEqual(self.generated(), [SEED_A])
+        certificate = self.remote / f"0x{SEED_A}" / run.EMBER_CERTIFICATE
+        self.assertEqual(
+            json.loads(certificate.read_text(encoding="utf-8"))["algorithm"], CURRENT_ALGORITHM
+        )
+
+    def test_a_dry_run_withdraws_nothing_and_shows_the_plan(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A], "--dry-run"), 0)
+        text = "\n".join(logs.output)
+        self.assertIn(
+            f"DRY-RUN  would withdraw the {STALE_ALGORITHM} ember edition of 0x{SEED_A}", text
+        )
+        self.assertIn(f"DRY-RUN  would regenerate 0x{SEED_A}", text)
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.generated(), [])
+        self.assertEqual(self.calls("scp"), [])
+
+    def test_a_generator_without_the_ember_algorithm_probe_withdraws_nothing(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        os.environ["FAKE_GEN_EMBER_ALGORITHM"] = ""  # a binary that predates the flag
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            self.assertEqual(self.main([SEED_A]), 0)
+        self.assertIn("stale ember editions cannot be detected", "\n".join(logs.output))
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.generated(), [])
+
+    def test_unreadable_certificates_withdraw_nothing_and_fail_the_run(self) -> None:
+        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        live = self.remote_snapshot()
+        os.environ["FAKE_SSH_FAIL_ON"] = f"cd {shlex.quote(str(self.remote))} || exit 1; for "
+        with self.assertLogs(run.log, level="ERROR") as logs:
+            self.assertEqual(self.main([SEED_A]), 1)
+        self.assertIn("none is withdrawn this run", "\n".join(logs.output))
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.generated(), [])
+
+    def test_the_keep_stale_ember_setting(self) -> None:
+        self.assertFalse(run.parse_args([]).keep_stale_ember)
+        self.assertTrue(run.parse_args(["--keep-stale-ember"]).keep_stale_ember)
+        for value, expected in (
+            ("yes", True),
+            ("TRUE", True),
+            (" on ", True),
+            ("1", True),
+            ("no", False),
+            ("off", False),
+            ("0", False),
+            ("", False),
+        ):
+            with self.subTest(value=value):
+                os.environ[run.ENV_KEEP_STALE_EMBER] = value
+                self.assertIs(run.parse_args([]).keep_stale_ember, expected)
+        os.environ[run.ENV_KEEP_STALE_EMBER] = "maybe"
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+            run.parse_args([])
+        self.assertEqual(raised.exception.code, 2)
+        del os.environ[run.ENV_KEEP_STALE_EMBER]
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+            run.parse_args(["--keep-stale-ember", "2"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_the_seed_timeout_stays_well_below_the_run_ceiling(self) -> None:
+        unit = REPO_ROOT / "ops" / "systemd" / "cosmicsig-sync.service"
+        ceiling = [
+            int(line.split("=", 1)[1])
+            for line in unit.read_text(encoding="utf-8").splitlines()
+            if line.startswith("TimeoutStartSec=")
+        ]
+        self.assertEqual(len(ceiling), 1)
+        self.assertLessEqual(run.DEFAULT_TIMEOUT, ceiling[0] // 2)
+
     def test_dry_run_generates_and_uploads_nothing(self) -> None:
         self.remote_package(SEED_A)
         self.assertEqual(self.main([SEED_A, SEED_B], "--dry-run"), 0)
@@ -1404,7 +1945,9 @@ class MainTests(SyncTestCase):
 
         with self.assertLogs(run.log, level="INFO") as logs:
             self.assertTrue(preflight())
-        self.assertIn("ember edition supported", "\n".join(logs.output))
+        self.assertIn(
+            f"ember edition supported, renders {CURRENT_ALGORITHM}", "\n".join(logs.output)
+        )
         os.environ["FAKE_GEN_STALE"] = "1"
         with self.assertLogs(run.log, level="ERROR") as logs:
             self.assertFalse(preflight())
