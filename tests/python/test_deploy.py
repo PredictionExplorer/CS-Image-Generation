@@ -1676,6 +1676,50 @@ class BuildTests(DeployTestCase):
             sorted([shas[0], *shas[3:]]),
         )
 
+    def test_releases_published_within_one_second_are_pruned_by_publish_order(self) -> None:
+        # Regression: built_at was written to the second, so releases published within one
+        # second tied and the file system's listing order decided which one survived.
+        source = self.root / "binary"
+        source.write_text("binary\n", encoding="utf-8")
+        second = datetime.datetime(2026, 9, 30, 6, 0, 0, tzinfo=datetime.timezone.utc)
+        # Published newest last, with names that sort the other way: a name tie-break alone
+        # cannot pass, and the built_at assertion catches second-precision ties whatever the
+        # listing order.
+        shas = [f"{index:040x}" for index in (3, 2, 1, 0)]
+        for offset, sha in enumerate(shas):
+            moment = second + datetime.timedelta(microseconds=10 * offset)
+            with mock.patch.object(deploy, "utcnow", return_value=moment):
+                deploy.publish_release(self.paths, sha, source, source="test")
+        manifest = json.loads((self.paths.releases / shas[1] / deploy.RELEASE_MANIFEST).read_text())
+        self.assertEqual(manifest["built_at"], "2026-09-30T06:00:00.000010+00:00")
+        with mock.patch.object(deploy, "KEEP_RELEASES", 1):
+            deploy.prune_releases(self.paths, keep=set())
+        self.assertEqual([path.name for path in self.paths.releases.iterdir()], [shas[-1]])
+
+    def test_releases_of_the_same_time_are_pruned_by_name_whatever_the_listing_order(self) -> None:
+        # built_at written to the second by an earlier version of the tool can tie exactly.
+        source = self.root / "binary"
+        source.write_text("binary\n", encoding="utf-8")
+        shas = [f"{index:040x}" for index in range(4)]
+        survivors = []
+        for listing in (sorted, lambda names: sorted(names, reverse=True)):
+            shutil.rmtree(self.paths.releases, ignore_errors=True)
+            for sha in shas:
+                deploy.publish_release(self.paths, sha, source, source="test")
+                manifest = self.paths.releases / sha / deploy.RELEASE_MANIFEST
+                data = json.loads(manifest.read_text())
+                data["built_at"] = "2026-09-30T06:00:00+00:00"
+                manifest.write_text(json.dumps(data))
+            releases = self.paths.releases
+            listed = [releases / name for name in listing(p.name for p in releases.iterdir())]
+            with (
+                mock.patch.object(deploy, "KEEP_RELEASES", 2),
+                mock.patch.object(type(releases), "iterdir", return_value=iter(listed)),
+            ):
+                deploy.prune_releases(self.paths, keep=set())
+            survivors.append(sorted(path.name for path in releases.iterdir()))
+        self.assertEqual(survivors, [shas[2:], shas[2:]])
+
     def test_deploys_keep_the_releases_that_rollback_needs(self) -> None:
         self.mark_deployed()
         with mock.patch.object(deploy, "KEEP_RELEASES", 1):
