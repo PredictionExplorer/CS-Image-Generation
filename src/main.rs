@@ -175,6 +175,13 @@ struct Args {
     /// Omit to randomize from a curated range.
     #[arg(long)]
     equil_weight: Option<f64>,
+
+    /// Print the id of the ember look this generator renders (e.g. `ember-v2`,
+    /// the `algorithm` of every `metadata/ember.json` it writes) and exit.
+    /// The sync loop (run.py) withdraws and re-renders the published editions
+    /// of every older look.
+    #[arg(long, default_value_t = false, exclusive = true)]
+    ember_algorithm: bool,
 }
 
 fn parse_bounded_sims(value: &str) -> std::result::Result<usize, String> {
@@ -388,6 +395,10 @@ fn main() -> Result<ExitCode> {
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     let args = Args::parse();
+    if args.ember_algorithm {
+        println!("{}", three_body_problem::ember::certificate::ALGORITHM_VERSION);
+        return Ok(ExitCode::SUCCESS);
+    }
 
     setup_logging(&args.log_level);
 
@@ -734,6 +745,16 @@ mod tests {
         assert_eq!(args.log_level, DEFAULT_LOG_LEVEL);
         assert!(args.chaos_weight.is_none());
         assert!(args.equil_weight.is_none());
+        assert!(!args.ember_algorithm);
+    }
+
+    #[test]
+    fn test_ember_algorithm_stands_alone() {
+        assert!(Args::parse_from(["three_body_problem", "--ember-algorithm"]).ember_algorithm);
+        assert!(
+            Args::try_parse_from(["three_body_problem", "--ember-algorithm", "--no-ember"])
+                .is_err()
+        );
     }
 
     #[test]
