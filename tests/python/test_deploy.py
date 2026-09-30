@@ -2680,6 +2680,28 @@ class HelperTests(unittest.TestCase):
                 failure = deploy.Failure.from_json({"reason": "build", "seq": seq})
                 self.assertEqual(failure, deploy.Failure("build", "", ""))
 
+    def test_a_ci_failure_checked_in_the_future_is_due_again(self) -> None:
+        # After the clock steps back, waiting for it to reach checked_at would stall the
+        # re-checks for as long as it stepped back.
+        now = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        cases: list[tuple[int | None, bool]] = [
+            (None, True),
+            (-15, True),
+            (-14, False),
+            (0, False),
+            (1, True),
+            (24 * 60, True),
+        ]
+        for minutes, due in cases:
+            checked = (
+                None
+                if minutes is None
+                else deploy.isoformat(now + datetime.timedelta(minutes=minutes))
+            )
+            with self.subTest(minutes=minutes):
+                failure = deploy.Failure(deploy.REASON_CI, "", "", checked)
+                self.assertIs(deploy.ci_recheck_due(failure, now), due)
+
 
 # ---------------------------------------------------------------------------
 # ops/server/bootstrap-root.sh

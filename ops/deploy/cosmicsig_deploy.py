@@ -2261,9 +2261,13 @@ class TickResult:
 
 
 def ci_recheck_due(failure: Failure, now: datetime.datetime) -> bool:
-    """True once a CI failure's last check is CI_RECHECK_INTERVAL old."""
+    """True once a CI failure's last check is CI_RECHECK_INTERVAL old.
+
+    A last check in the future (the clock stepped back since) is due too: waiting for the clock
+    to catch up could stall the re-checks for as long as it stepped back.
+    """
     checked = parse_timestamp(failure.checked_at)
-    return checked is None or now - checked >= CI_RECHECK_INTERVAL
+    return checked is None or checked > now or now - checked >= CI_RECHECK_INTERVAL
 
 
 def fetch_origin(repo: Path) -> None:
