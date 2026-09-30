@@ -19,13 +19,12 @@ use crate::render::error::{RenderError, Result};
 /// counterparts for sRGB frames).
 #[derive(Debug, Clone)]
 pub struct VideoEncodingOptions {
-    /// Output bitrate (only used for hardware encoders or 2-pass encoding)
-    /// Leave empty for CRF mode (quality-based variable bitrate)
+    /// Output bitrate (for a bitrate-targeted encode). Leave empty for CRF mode (quality-based
+    /// variable bitrate), which every encode of the generator uses
     pub bitrate: String,
 
     /// H.264/H.265 preset (ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow)
     /// Slower presets provide better compression at the cost of encoding time
-    /// Note: Not used by hardware encoders
     pub preset: String,
 
     /// Constant Rate Factor (0-51, lower = better quality)
@@ -39,7 +38,8 @@ pub struct VideoEncodingOptions {
     /// yuv420p10le = 10-bit 4:2:0 (good quality, smaller files)
     pub pixel_format: String,
 
-    /// Video codec to use (e.g., "libx264", "libx265", "`h264_videotoolbox`")
+    /// Video codec to use: a software encoder (`libx264`, `libx265`); the generator never uses
+    /// a hardware encoder
     pub codec: String,
 
     /// Input pixel format from source frames (rgb24 for 8-bit, rgb48le for 16-bit)
@@ -78,7 +78,7 @@ impl Default for VideoEncodingOptions {
 ///   `FFmpeg` 7.1 derives the matrix of its automatically inserted scaler from `-colorspace`,
 ///   but older releases (the production host runs 6.1) convert RGB with BT.601 while still
 ///   tagging BT.709. That mismatch moves saturated colours by up to 24 levels (8-bit scale,
-///   measured on primaries and the vermilion `(177, 34, 16)`); the matched round trip stays
+///   measured on primaries and the warm red `(177, 34, 16)`); the matched round trip stays
 ///   within 3 levels at 8-bit 4:2:0 and 0.25 levels at 10 bits.
 /// * `setparams` stamps every frame with the sRGB tags. `FFmpeg` 7.1 takes the encoder's
 ///   primaries and transfer from the frames and drops the `-color_primaries`/`-color_trc`
@@ -214,8 +214,8 @@ impl VideoEncodingOptions {
     /// Software-only fast encode of sRGB frames (the ember edition under `--fast-encode`):
     /// `libx264`, preset fast, CRF 21, 10-bit 4:2:0 (High 10), with the sRGB conversion and tags.
     ///
-    /// Unlike [`fast_encode`](Self::fast_encode) it never selects a hardware encoder, so the
-    /// same command runs everywhere and the ember edition stays CPU-only end to end.
+    /// Like [`fast_encode`](Self::fast_encode) it is software only, with the sRGB conversion and
+    /// tags of the ember edition instead of Display P3.
     #[must_use]
     pub fn software_fast_srgb() -> Self {
         let pixel_format = "yuv420p10le";
@@ -233,59 +233,11 @@ impl VideoEncodingOptions {
         }
     }
 
-    /// Fast encoding mode using hardware acceleration (macOS `VideoToolbox`)
+    /// Fast encode of the main edition's Display P3 frames (`--fast-encode`, for drafts):
+    /// `libx264`, preset fast, CRF 21, 10-bit 4:2:0, tagged Display P3.
     ///
-    /// This configuration prioritizes encoding speed over maximum quality:
-    /// - Hardware HEVC encoder: 3-5× faster than software
-    /// - 10-bit color: Maintains gradient quality
-    /// - 4:2:0 chroma: Standard compatibility
-    /// - Quality ~65/100: Roughly equivalent to CRF 20-22
-    /// - Fast encoding: Suitable for draft renders or batch generation
-    ///
-    /// Trade-offs:
-    /// - Encoding time: 3-5× faster than default
-    /// - File size: ~15-25% larger than software encoder at same quality
-    /// - Quality: Very good (5-10% worse than software at peak quality)
-    ///
-    /// Best for: Preview renders, iteration, batch generation
-    #[cfg(target_os = "macos")]
-    #[must_use]
-    pub fn fast_encode() -> Self {
-        Self {
-            codec: "hevc_videotoolbox".to_string(),
-            preset: String::new(),  // Not used by hardware encoder
-            crf: 0,                 // Not used by hardware encoder
-            bitrate: String::new(), // VBR mode with -q:v
-            pixel_format: "yuv420p10le".to_string(),
-            input_pixel_format: "rgb48le".to_string(),
-            extra_args: vec![
-                // Hardware encoder quality (0-100 scale, 65 ≈ CRF 20-22)
-                "-q:v".to_string(),
-                "60".to_string(),
-                // Allow B-frames for better compression
-                "-allow_sw".to_string(),
-                "1".to_string(),
-                // Web optimization
-                "-movflags".to_string(),
-                "+faststart".to_string(),
-                // Color metadata
-                "-colorspace".to_string(),
-                "bt709".to_string(),
-                "-color_primaries".to_string(),
-                "smpte432".to_string(),
-                "-color_trc".to_string(),
-                "iec61966-2-1".to_string(),
-                "-color_range".to_string(),
-                "tv".to_string(),
-                // Compatibility tag
-                "-tag:v".to_string(),
-                "hvc1".to_string(),
-            ],
-        }
-    }
-
-    /// Fast encoding fallback for non-macOS platforms (H.264 with faster settings)
-    #[cfg(not(target_os = "macos"))]
+    /// Software only, on every platform: nothing in the generator uses a GPU or a hardware
+    /// encoder, so a draft runs the same command everywhere.
     #[must_use]
     pub fn fast_encode() -> Self {
         Self {
@@ -668,27 +620,16 @@ mod tests {
         assert!(options.extra_args.contains(&"+faststart".to_string()));
     }
 
+    /// The draft encode is software on every platform (the generator is CPU-only).
     #[test]
-    #[cfg(target_os = "macos")]
-    fn test_fast_encode_macos() {
-        let fast = VideoEncodingOptions::fast_encode();
-        assert_eq!(fast.codec, "hevc_videotoolbox");
-        assert!(fast.preset.is_empty()); // Hardware encoder doesn't use preset
-        assert_eq!(fast.pixel_format, "yuv420p10le");
-        assert_eq!(fast.input_pixel_format, "rgb48le");
-        assert!(fast.extra_args.contains(&"-q:v".to_string()));
-        assert!(fast.extra_args.contains(&"60".to_string()));
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn test_fast_encode_other_platforms() {
+    fn test_fast_encode_is_software_everywhere() {
         let fast = VideoEncodingOptions::fast_encode();
         assert_eq!(fast.codec, "libx264");
         assert_eq!(fast.preset, "fast");
         assert_eq!(fast.crf, 21);
         assert_eq!(fast.pixel_format, "yuv420p10le");
         assert_eq!(fast.input_pixel_format, "rgb48le");
+        assert!(!fast.extra_args.iter().any(|arg| arg.contains("videotoolbox") || arg == "-q:v"));
     }
 
     #[test]
@@ -943,7 +884,7 @@ mod tests {
         assert!(input < output_format && output_format < filter);
     }
 
-    /// Solid sRGB test colours (8-bit code values): the ember's vermilion, paper and ink black,
+    /// Solid sRGB test colours (8-bit code values): a saturated warm red, paper and ink black,
     /// the primaries, white and mid grey.
     const ROUND_TRIP_COLOURS: [[u8; 3]; 8] = [
         [177, 34, 16],
