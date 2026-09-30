@@ -202,6 +202,19 @@ fn version_flag_exits_successfully() {
     assert!(stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
 }
 
+/// run.py's stale-edition probe: the id of the ember look, alone on stdout, and exit status 0,
+/// without touching the output directory.
+#[test]
+fn ember_algorithm_flag_prints_the_look_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let output = run_binary_in(dir.path(), &["--ember-algorithm"]);
+    assert!(output.status.success(), "--ember-algorithm should exit 0: {}", log_of(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, format!("{}\n", three_body_problem::ember::certificate::ALGORITHM_VERSION));
+    assert!(stdout.starts_with("ember-v"), "{stdout}");
+    assert_eq!(std::fs::read_dir(dir.path()).expect("readable").count(), 0, "nothing written");
+}
+
 #[test]
 fn exit_statuses_follow_the_documented_contract() {
     let dir = tempfile::tempdir().expect("temp dir");
