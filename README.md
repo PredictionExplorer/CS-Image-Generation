@@ -25,30 +25,44 @@ The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`).
 ## The Ember Edition
 
 Each package also contains a second, very different picture of the selected orbit. The three
-bodies are dragged as small discs through a two-dimensional Navier–Stokes fluid. Water that
-sweeps past a body through its spinning boundary layer picks up black pine-soot sumi, and the
-flow carries the ink into filaments. Where the fresh waters of two bodies meet, the ink turns vermilion. Everything is
-shaded spectrally (36 bands, Kubelka–Munk) as sumi and cinnabar on a mottled kozo sheet:
+bodies are dragged through a two-dimensional Navier–Stokes fluid as small solid bodies, each
+stretched by the tidal pull of the other two: a disc when it is alone, an ellipse of up to 3:1 at
+the orbit's closest encounters. Water that sweeps past a body through its spinning boundary layer
+picks up black pine-soot sumi, and the flow carries the ink into filaments. The ink stays black
+for a moment, then fades to a pale grey wash, on a clock set in film time, so every orbit's film
+fades at the same pace. There is no colour but the ink: everything is shaded spectrally
+(36 bands, Kubelka–Munk) as sumi on a mottled kozo sheet:
 
 - a 16-bit sRGB still of the orbit's final step (`images/source/ember.png`) with WebP derivatives;
 - a 60 fps video in H.264 and HEVC whose frames follow `main.mp4` frame for frame and whose last
   frame is the still;
 - a determinism certificate, `metadata/ember.json`.
 
-The ember edition runs **on the CPU only** and is **bit-identical across CPU architectures**
-(x86_64 with or without AVX2/FMA, aarch64) and thread counts. It uses only exactly rounded
-arithmetic, a pinned pure-Rust `libm` for transcendentals, its own FFT and order-independent
-parallelism. The certificate records the SHA-256 of the raw 16-bit frame stream and of the still,
-plus every input they depend on, so anyone can re-render a seed on another machine and compare.
-Encoded files (MP4, WebP) are outside that guarantee because their bytes depend on encoder versions.
+The ember edition runs **on the CPU only**, like everything in the generator (no GPU, no hardware
+video encoder), and is **bit-identical across CPU architectures** (x86_64 with or without
+AVX2/FMA, aarch64) and thread counts. It uses only exactly rounded arithmetic, a pinned pure-Rust
+`libm` for transcendentals, its own FFT and order-independent parallelism. The certificate
+records the SHA-256 of the raw 16-bit frame stream and of the still, plus every input they depend
+on, so anyone can re-render a seed on another machine and compare. Encoded files (MP4, WebP) are
+outside that guarantee because their bytes depend on encoder versions.
 
-The ember stage adds about 25 minutes to a default package on a 64-core Threadripper, for about
-61 minutes in total (the fluid solver dominates; see
-[docs/ember-edition.md](docs/ember-edition.md#runtime)). It adds about 0.4 GB to the package,
-mostly the archival HEVC video (about 284 MB). That document
-also covers the physics, the ink model, the look, the certificate fields, and how to verify a
-package on two machines. Pass `--no-ember` to skip the edition. If the edition fails, the rest of
-the package is still written and the run exits with status `3` (see [Exit status](#exit-status)).
+The certificate names the look that rendered the edition (`"algorithm"`, currently `ember-v2`;
+`three_body_problem --ember-algorithm` prints the generator's). The first look, `ember-v1`, also
+drew vermilion where two bodies' fresh waters met; the artist retired it, and the sync loop
+replaces every published `ember-v1` edition (see [Stale ember editions](#stale-ember-editions)).
+
+On the production host, a 64-core Threadripper, the ember render of seed `0x46205528` took
+78 minutes with `ember-v2` (measured while a sync run shared the host; 23 minutes with
+`ember-v1`), so a default package takes an estimated 2 hours there (about 70 minutes with
+`ember-v1`). That render matched an Apple M4 Max's bit for bit; on the M4 Max, shared with other
+work, it took 2 h 05 min on its own and the seed's whole package 3 h 40 min, both upper bounds
+for that machine. The fluid solver dominates (see
+[docs/ember-edition.md](docs/ember-edition.md#runtime)). The edition adds about 0.55 GB to the
+package (0.81 GB in all), and its render peaks at 4.9 GB of memory: a package's memory peak (85 GB
+resident on the M4 Max) belongs to the main render. That document also covers the physics, the
+ink model, the look, the certificate fields, and how to verify a package on two machines. Pass
+`--no-ember` to skip the edition. If the edition fails, the rest of the package is still written
+and the run exits with status `3` (see [Exit status](#exit-status)).
 
 ## Requirements
 
@@ -115,10 +129,11 @@ CLI reference:
 | `--drift` | `elliptical` | Camera drift mode: `none`, `linear`, `brownian`, `elliptical` |
 | `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
 | `--equil-weight` | random | Borda weight for equilateralness; omit to sample from a curated range |
-| `--fast-encode` | off | Use faster (lower quality) video encoding. The ember edition always stays on software encoders: its HQ slot becomes H.264 10-bit |
+| `--fast-encode` | off | Faster draft encoding: the HQ slot of every video (main, spectral sweep, ember) becomes software `libx264` 10-bit 4:2:0 (preset fast, CRF 21) instead of archival HEVC, on every platform. Nothing in the generator uses a hardware encoder. The ember pixels and digests do not change |
 | `--image-only` | off | Render only the stills and their WebPs: the master and the ember still with its certificate. Skip all videos, the spectral gallery, and the sweep |
 | `--no-ember` | off | Skip the ember edition (no `ember.png`, ember WebPs, ember videos, or `metadata/ember.json`) |
 | `--metadata-only` | off | Skip all rendering and write only `metadata/generation.json` and `metadata/nft_traits.json` |
+| `--ember-algorithm` | off | Print the id of the ember look this generator renders (for example `ember-v2`, the `algorithm` in every `metadata/ember.json` it writes) and exit with status `0`, without rendering or writing anything. It takes no other flag. `run.py` uses it to find stale ember editions |
 | `--log-level` | `info` | Tracing log level (`error`, `warn`, `info`, `debug`, `trace`) |
 
 ### Exit status
@@ -160,7 +175,7 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 - `images/web/ember_full.webp` / `images/web/ember_preview.webp` — full-size and preview WebPs of the ember still
 - `videos/web/ember.mp4` — browser-compatible H.264 ember video (sRGB, 60 fps, in step with `main.mp4`)
 - `videos/hq/ember.mp4` — archival HEVC 4:2:2 10-bit ember video (software H.264 10-bit under `--fast-encode`)
-- `metadata/ember.json` — the ember edition's determinism certificate: inputs, configuration, and SHA-256 of the raw frames and still (see [docs/ember-edition.md](docs/ember-edition.md))
+- `metadata/ember.json` — the ember edition's determinism certificate: the look's algorithm id (`ember-v2`), inputs, configuration, and SHA-256 of the raw frames and still (see [docs/ember-edition.md](docs/ember-edition.md))
 - `metadata/generation.json` — per-package resolved generation parameters and randomization log
 - `metadata/assets.json` — website asset manifest with paths, dimensions, codecs, byte sizes, and SHA-256 hashes (ember entries use the `ember_*` roles and `"color_space": "srgb"`)
 - `metadata/nft_traits.json` — public NFT trait file: marketplace-ready attributes, physics analyses (syzygies, braid word, fate, chaos index), and the seed-resolved generation context (see [docs/augur-explorer-integration.md](docs/augur-explorer-integration.md))
@@ -174,8 +189,11 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
 1. Fetches the current list of CosmicSignature token seeds from the CosmicGame HTTP API.
 2. Checks which per-seed asset packages already exist on the remote server (via SSH). If the
    listing fails, the run stops with status `1` instead of treating the remote as empty.
-3. Generates incomplete packages locally with the Rust binary.
-4. Uploads each package to the remote server via SCP: the media first, then `metadata/`, and
+3. Withdraws stale ember editions: when the generator renders a newer ember look than a live
+   package's, that package's ember edition is taken off the server, and the backfill renders it
+   again (see [Stale ember editions](#stale-ember-editions)).
+4. Generates incomplete packages locally with the Rust binary.
+5. Uploads each package to the remote server via SCP: the media first, then `metadata/`, and
    `metadata/ember.json` last of all (any remote copy of it is deleted before the upload
    starts). The metadata files and the certificate are uploaded under temporary `.part` names
    and then renamed into place, `metadata/assets.json` after the other metadata files, so an
@@ -184,19 +202,22 @@ Under `output/<name>/` (default name `output`, so default paths look like `outpu
    the new manifest lands, the package reads as new or incomplete, so an interrupted upload is
    regenerated and uploaded in full by a later run, whatever the backfill mode. Each transfer
    times out after 15 minutes, or after one second per MB when it carries more than 900 MB.
-5. Deletes the local copies, whatever the outcome.
+6. Deletes the local copies, whatever the outcome.
 
-It also supports `--dry-run` (report what's missing without generating or uploading) and `--preflight` (test all external dependencies before committing to real runs).
+It also supports `--dry-run` (report what's missing, and which ember editions would be withdrawn, without generating, uploading or withdrawing) and `--preflight` (test all external dependencies before committing to real runs).
 
 Runs never overlap: `run.py` holds an exclusive lock on `run.lock` in its working directory for its whole run (every mode, `--dry-run` and `--preflight` included; `--help` needs none). A second `run.py` started meanwhile logs `Another run holds the single-instance lock …/run.lock (pid N): exiting without doing anything` and exits with `1`.
 
 On the generator host, `run.py` runs from the systemd user timer `cosmicsig-sync.timer` (5 minutes after each run), and every commit merged to `main` is deployed there automatically once CI passes: see [docs/deployment.md](docs/deployment.md).
 
-At startup `run.py` runs `<generator> --help` and checks that it lists `--no-ember`. A binary
-without it predates the ember edition (for example, the checkout was pulled but not rebuilt): every
-run then logs an ERROR telling you to rebuild the generator, checks packages against the core
-files only so that new mints are still uploaded (without the ember edition), and pauses the ember
-backfill. `--preflight` reports such a binary as a failed check.
+At startup `run.py` probes the generator twice. `<generator> --help` must list `--no-ember`. A
+binary without it predates the ember edition (for example, the checkout was pulled but not
+rebuilt): every run then logs an ERROR telling you to rebuild the generator, checks packages
+against the core files only so that new mints are still uploaded (without the ember edition), and
+pauses the ember backfill. `<generator> --ember-algorithm` must print the id of the ember look it
+renders (for example `ember-v2`). A binary without that flag still works, but every run logs a
+WARNING and no stale ember edition is withdrawn. `--preflight` reports a binary without
+`--no-ember` as a failed check, and names the ember algorithm of one that has the probe.
 
 Remote files mirror the Rust output package under `COSMICSIG_REMOTE_DIR/0x<seed>/`:
 
@@ -237,9 +258,9 @@ Only API-listed seeds are considered. If any required file of an API seed's remo
 
 ### The ember backfill
 
-Packages uploaded before the ember edition existed, or after their ember edition failed, lack only its six files. `run.py` regenerates them as a backfill that yields to new mints.
+Packages uploaded before the ember edition existed, packages uploaded after their ember edition failed, and packages whose stale ember edition was withdrawn (see [below](#stale-ember-editions)) lack only its six files. `run.py` regenerates them as a backfill that yields to new mints.
 
-**Scheduling and mint latency.** Each run plans its queue once, at the start: every urgent seed first, then at most `--max-backfill` backfill seeds (default 1, env `COSMICSIG_MAX_BACKFILL`; `0` pauses the backfill), those with the fewest failed runs first (see the retry cap below), then in API order. A token minted while a run is in progress is picked up by the next run. It waits for the rest of the current run (after that run's own new mints, at most `--max-backfill` backfill packages of about an hour each: 61 minutes measured on the production host), plus the timer's 5-minute pause after each run, and then for its own package.
+**Scheduling and mint latency.** Each run plans its queue once, at the start: every urgent seed first, then at most `--max-backfill` backfill seeds (default 1, env `COSMICSIG_MAX_BACKFILL`; `0` pauses the backfill), those with the fewest failed runs first (see the retry cap below), then in API order. A token minted while a run is in progress is picked up by the next run. It waits for the rest of the current run (after that run's own new mints, at most `--max-backfill` backfill packages, each a full render that takes hours: an estimated 2 hours on the production host), plus the timer's 5-minute pause after each run, and then for its own package.
 
 **Backfill modes** (`--backfill-mode`, env `COSMICSIG_BACKFILL_MODE`):
 
@@ -252,7 +273,7 @@ In both modes, a backfill seed whose generator exits `3` uploads nothing (its co
 
 In `ember` mode, `run.py` also reads and checks the live `nft_traits.json` and `assets.json` before the render, so a live package it cannot use costs no render. If they cannot be read (for example, SSH fails), nothing is rendered and a later run tries again. If one of them is unusable (not valid JSON, a manifest without an `assets` list, or a traits file without the three orbit fields), nothing is rendered or uploaded, and an ERROR (`the live package cannot be used for an ember backfill: …`) says that the package needs repair on the asset host: restore the file, or delete the package's `metadata/assets.json` to have the seed regenerated and uploaded in full. Neither case is an ember attempt, so neither gives the seed up (see the retry cap below).
 
-**Versions of backfilled tokens.** An `ember` backfill leaves the published `metadata/nft_traits.json` untouched, so a backfilled token keeps `pipeline_version` `1.0.0`, while its new `metadata/ember.json` records `crate_version` `1.1.0`. Only its `metadata/assets.json` changes: it gains the `ember_*` entries and a new `generated_at`. Consumers should detect the ember edition from the `ember_*` roles in `metadata/assets.json` (or from `metadata/ember.json`), never from `pipeline_version`.
+**Versions of backfilled tokens.** An `ember` backfill leaves the published `metadata/nft_traits.json` untouched, so a backfilled token keeps its original `pipeline_version` (`1.0.0` for the tokens minted before the ember edition), while its new `metadata/ember.json` records the `crate_version` of the build that rendered the edition (`1.1.0`) and the look's `algorithm` (`ember-v2`). Only its `metadata/assets.json` changes: it gains the `ember_*` entries and a new `generated_at`. Consumers should detect the ember edition from the `ember_*` roles in `metadata/assets.json` (or from `metadata/ember.json`), never from `pipeline_version`, and the look from the certificate's `algorithm`, never from `crate_version` (`ember-v1` and `ember-v2` editions both record `1.1.0`).
 
 **Retry cap.** A failed ember attempt is a generator exit `3`, regenerated metadata that cannot show its orbit, or a local package whose ember files are incomplete. After `--max-backfill-attempts` failed attempts (default 3, env `COSMICSIG_MAX_BACKFILL_ATTEMPTS`), a seed is left out of the plan, and every run logs the WARNING `0x<seed>: ember backfill given up after N attempts …`. An orbit that differs from the live package's does not wait for the cap: the generator is deterministic, so the same binary would render the same wrong orbit every time. The seed is given up after that one render (it is listed under `orbit_mismatches` in `backfill_failures.json`), whatever `--max-backfill-attempts` says, and every run logs `0x<seed>: ember backfill given up: this generator binary regenerates a different orbit than the live package …`.
 
@@ -260,7 +281,36 @@ Any other failure of a backfill seed (the generator exits `1` or is killed by a 
 
 The counts live in `backfill_failures.json` in `run.py`'s working directory: `ember_failures` (toward the cap) and `other_failures` (for the order), together with the generator binary's identity (resolved path, size and modification time). Rebuilding the generator resets every count, so a fixed binary retries all the seeds it had given up. To retry one given-up seed with the same binary, delete its entry from `ember_failures`. In a run where a backfill seed fails, `run.py` exits with `1`, so the failure is visible to systemd (the service shows `failed`): until the seed is given up, or for as long as it fails for another reason.
 
-**Duration and disk space.** After the upgrade to the ember edition, every existing token is a backfill seed. At the default of one package per run (about 61 minutes, then the upload and the timer's 5-minute pause, so about 66 minutes each), the 48 existing tokens take about 2 days. Each package grows by about 0.4 GB on the asset host (`ember.png` about 36 MB, the web `ember.mp4` about 84 MB at CRF 22, the HQ `ember.mp4` about 284 MB), so about 19 GB for 48 tokens.
+**Duration and disk space.** A backfill pass regenerates every waiting token once, one package per run by default: a full render, then the upload and the timer's 5-minute pause. The ember look introduced with `ember-v2` costs substantially more than the first one: a package takes an estimated 2 hours on the production host, against about 70 minutes measured with `ember-v1` (read the measured figure from the `OK  seed=0x…  (total …)` log lines), so a pass over N tokens takes about N × 2 hours: about 4–4.5 days for 48 tokens. A render that hangs is stopped by the per-seed `--timeout` (10 hours by default). Each package holds about 0.55 GB more with the ember edition than without it (measured for seed `0x46205528`: `ember.png` about 37 MB, the web `ember.mp4` about 136 MB at CRF 22, the HQ `ember.mp4` about 375 MB).
+
+### Stale ember editions
+
+Every package records the ember algorithm that rendered it (`"algorithm"` in `metadata/ember.json`, for example `ember-v1`). The number grows whenever the ember edition's rendered bits change.
+
+Before planning, each run reads the algorithm of every live certificate with one SSH call and compares it with the generator's (`--ember-algorithm`). A live edition with an **older** id shows a look the artist retired, so `run.py` withdraws it, in this order:
+
+1. it deletes `metadata/ember.json`;
+2. it replaces `metadata/assets.json` with the same manifest without its `ember_*` entries (staged as `.part`, then renamed into place);
+3. it deletes the five ember media files.
+
+The main art, spectral files, `generation.json` and `nft_traits.json` are never touched. The package then lacks only the ember edition, so the same run already plans it as an ember backfill seed, and the backfill renders it again in the current look (orbit check and merged manifest as above). Until then the token has no ember edition. That is intended: the old look must not stay online. If the re-render shows a different orbit, the token stays without an ember edition until someone decides (a rebuilt generator, or `--backfill-mode full`).
+
+Nothing is withdrawn unless both ids can be read:
+
+- A generator without `--ember-algorithm` withdraws nothing (WARNING).
+- A certificate whose top-level `algorithm` line cannot be read is kept (a WARNING names it).
+- If the certificates cannot be listed, nothing is withdrawn that run (ERROR, exit status `1`).
+
+Other safeguards:
+
+- A newer live id (after a generator rollback) is kept.
+- Only API-listed seeds are touched, because `run.py` regenerates no other package. Stale editions of other packages are named in a WARNING.
+- A package missing a core file is regenerated in full anyway.
+- An interrupted withdrawal already reads as a backfill seed.
+- A failed withdrawal makes the run exit `1`, and a later run retries it.
+- `--dry-run` logs `DRY-RUN  would withdraw …` and changes nothing.
+
+To keep the live editions, set `COSMICSIG_KEEP_STALE_EMBER=yes` (or pass `--keep-stale-ember`) *before* the change is deployed. `--max-backfill 0` is different: it pauses only the re-rendering, so stale editions are still withdrawn. The operator's view (timing, progress, safety) is in [docs/deployment.md](docs/deployment.md#when-a-deploy-changes-the-ember-look).
 
 ### How the Two Machines Relate
 
@@ -340,10 +390,11 @@ COSMICSIG_REMOTE_DIR=/home/frontend/nft-assets/new/cosmicsignature
 | `COSMICSIG_MAX_BACKFILL` | Optional. Packages missing only the ember edition to regenerate per run, after all new ones (default 1; 0 pauses the backfill). Same as `--max-backfill`. |
 | `COSMICSIG_BACKFILL_MODE` | Optional. `ember` (default: upload only the ember edition, after the orbit check) or `full` (replace the whole package). Same as `--backfill-mode`; see [The ember backfill](#the-ember-backfill). |
 | `COSMICSIG_MAX_BACKFILL_ATTEMPTS` | Optional. Failed ember attempts after which a backfill seed is given up until the generator binary changes (default 3). Same as `--max-backfill-attempts`. |
+| `COSMICSIG_KEEP_STALE_EMBER` | Optional. `yes` keeps live ember editions rendered by an older ember algorithm instead of withdrawing them to be rendered again (default `no`). Same as `--keep-stale-ember`; see [Stale ember editions](#stale-ember-editions). |
 
 **5. Run the preflight check**
 
-This tests SSH connectivity, remote write permissions, seed-source reachability (API and/or Arbitrum), that the release generator binary exists and supports the ember edition (its `--help` lists `--no-ember`), and that `ffmpeg` is on `PATH`:
+This tests SSH connectivity, remote write permissions, seed-source reachability (API and/or Arbitrum), that the release generator binary exists and supports the ember edition (its `--help` lists `--no-ember`; the log names the ember algorithm it renders), and that `ffmpeg` is on `PATH`:
 
 ```bash
 python3 run.py --preflight
@@ -405,7 +456,13 @@ python3 ops/deploy/cosmicsig_deploy.py status
 
 **Migrating a legacy deployment** (the system units `/etc/systemd/system/cosmicsig-sync.{service,timer}` and a checkout pulled and built by hand): follow [First-time setup](docs/deployment.md#first-time-setup). The bootstrap waits for a running sync to finish before it retires the legacy units.
 
-After the upgrade to the ember edition, check the first backfilled package about an hour later. The log shows `same orbit as the live package; uploading only its ember edition`, then a line of the form `OK  seed=0x…  (total …)  ember edition uploaded` (search for `ember edition uploaded`). On the asset host, the package's `metadata/assets.json` lists the five `ember_*` roles, `metadata/ember.json` exists, and `images/source/master.png` is unchanged: its `sha256sum` equals the `sha256` of the manifest's `source_master` entry. The ember backfill then runs on its own for about 2 days (see [The ember backfill](#the-ember-backfill)). Make sure the asset host has about 20 GB free for it.
+After a deploy that changes the ember look, the first sync run withdraws every older ember edition (the log shows `Withdrew N stale ember editions (ember-v1 -> ember-v2)`) and starts rendering them again, one per run. Check the first re-rendered package when its run ends:
+
+- the log shows `same orbit as the live package; uploading only its ember edition`, then `OK  seed=0x…  (total …)  ember edition uploaded` (search for `ember edition uploaded`);
+- on the asset host, its `metadata/ember.json` records the new algorithm and its `metadata/assets.json` lists the five `ember_*` roles;
+- `images/source/master.png` is unchanged: its `sha256sum` equals the `sha256` of the manifest's `source_master` entry.
+
+That line's `total` is the time per token for the rest of the pass (see [The ember backfill](#the-ember-backfill)). An `ember-v2` edition takes about 0.55 GB on the asset host, against about 0.4 GB for an `ember-v1` one: make sure the host has room for the difference over every token. See [docs/deployment.md](docs/deployment.md#when-a-deploy-changes-the-ember-look).
 
 ## Batch Testing
 
@@ -527,7 +584,7 @@ The GitHub settings that protect `main` (pull requests only, the `CI passed` che
 
 For a detailed description of the spectral pipeline (SPD buffer, accumulation, gallery, and spectral sweep video), see [docs/spectral-algorithm.md](docs/spectral-algorithm.md).
 
-For the ember edition (fluid, ink, look, spectral shading, the determinism contract and its certificate), see [docs/ember-edition.md](docs/ember-edition.md).
+For the ember edition (tidal bodies, fluid, ink, look, spectral shading, the determinism contract and its certificate), see [docs/ember-edition.md](docs/ember-edition.md).
 
 ## Security
 
@@ -544,7 +601,7 @@ src/main.rs              CLI entry point
 src/app.rs               Pipeline orchestration
 src/sim.rs               Physics simulation and selection
 src/render/              Rendering, tonemapping, visual profiles, video
-src/ember/               The ember edition (fluid, ink, spectral sumi/cinnabar, certificate)
+src/ember/               The ember edition (tidal bodies, fluid, ink, spectral sumi, certificate)
 src/post_effects/        Active bloom, prism, and spectral-sweep post effects
 src/spectrum.rs          Spectral conversion
 src/spectrum_simd.rs     SIMD spectral fast paths
