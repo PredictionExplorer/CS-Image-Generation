@@ -273,9 +273,10 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def isoformat(moment: datetime.datetime) -> str:
-    """An ISO 8601 timestamp to the second (parseable by datetime.fromisoformat on 3.10)."""
-    return moment.astimezone(datetime.timezone.utc).isoformat(timespec="seconds")
+def isoformat(moment: datetime.datetime, *, timespec: str = "seconds") -> str:
+    """An ISO 8601 timestamp in UTC, to the second unless `timespec` asks for more (such as
+    "microseconds"); parseable by datetime.fromisoformat on 3.10."""
+    return moment.astimezone(datetime.timezone.utc).isoformat(timespec=timespec)
 
 
 def parse_timestamp(text: str | None) -> datetime.datetime | None:
@@ -1694,7 +1695,10 @@ def publish_release(paths: Paths, sha: str, binary: Path, *, source: str) -> Pat
     manifest = {
         "sha": sha,
         "sha256": file_sha256(tmp / BINARY_NAME),
-        "built_at": isoformat(utcnow()),
+        # To the microsecond: prune_releases() keeps the newest releases by this time, and
+        # releases published within one second (as the test suite's fake builds are) must not
+        # tie.
+        "built_at": isoformat(utcnow(), timespec="microseconds"),
         "source": source,
     }
     atomic_write_json(tmp / RELEASE_MANIFEST, manifest)
@@ -1759,10 +1763,16 @@ def build_release(paths: Paths, target: str) -> Path:
 
 
 def prune_releases(paths: Paths, keep: set[str]) -> None:
-    """Keep the KEEP_RELEASES newest releases and those in `keep` (deployed, previous)."""
+    """Keep the KEEP_RELEASES newest releases and those in `keep` (deployed, previous).
+
+    A release's age is its manifest's built_at (to the microsecond; the directory's mtime if the
+    manifest is unreadable). Releases of the same time, such as two built_at values written to the
+    second by an older version of this tool, are ordered by name, so what is kept never depends
+    on the order in which the file system lists the directory.
+    """
     if not paths.releases.is_dir():
         return
-    releases: list[tuple[float, Path]] = []
+    releases: list[tuple[datetime.datetime, str, Path]] = []
     for child in paths.releases.iterdir():
         if child.name.startswith(".") and child.name.endswith(".tmp"):
             shutil.rmtree(child, ignore_errors=True)
@@ -1774,9 +1784,11 @@ def prune_releases(paths: Paths, keep: set[str]) -> None:
             manifest = json.loads((child / RELEASE_MANIFEST).read_text(encoding="utf-8"))
             if isinstance(manifest, dict):
                 built = parse_timestamp(_as_str(manifest.get("built_at")))
-        releases.append((built.timestamp() if built else child.stat().st_mtime, child))
-    releases.sort(key=lambda item: item[0], reverse=True)
-    for index, (_, child) in enumerate(releases):
+        if built is None:
+            built = datetime.datetime.fromtimestamp(child.stat().st_mtime, datetime.timezone.utc)
+        releases.append((built, child.name, child))
+    releases.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    for index, (_, _, child) in enumerate(releases):
         if index < KEEP_RELEASES or child.name in keep:
             continue
         shutil.rmtree(child, ignore_errors=True)
