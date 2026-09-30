@@ -28,8 +28,8 @@
 //! to it, every float bit for bit (the crate enables `serde_json`'s `float_roundtrip`, which
 //! parses every decimal exactly). The reader is strict: it rejects other layout versions
 //! ([`CERTIFICATE_SCHEMA_VERSION`]) and editions, missing fields — the nullable ones
-//! (`outputs.frames_rgb48le_sha256`, `config.look.floor_tau`, `config.look.ember_tau`)
-//! included, which must be present, as `null` or a value — unknown fields at every level (a
+//! (`outputs.frames_rgb48le_sha256`, `config.look.floor_tau`) included, which must be present,
+//! as `null` or a value — unknown fields at every level (a
 //! field this build does not understand could be an input it would silently ignore), and
 //! outputs that disagree about the frames ([`CertificateError::InconsistentOutputs`]: frames
 //! emitted without a frames digest, which would pass as a still-only certificate, or a frames
@@ -62,11 +62,19 @@ use crate::sim::Body;
 /// * 1 — the first layout (test renders only; never published).
 /// * 2 — adds `stats.frames_with_cinnabar` and `stats.peak_frame_cinnabar_fraction`, and
 ///   requires the nullable keys `outputs.frames_rgb48le_sha256`, `config.look.floor_tau` and
-///   `config.look.ember_tau` to be present (as `null` or a value).
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 2;
+///   `config.look.ember_tau` to be present (as `null` or a value). Published with `ember-v1`.
+/// * 3 — the sumi edition with tidal bodies (`ember-v2`): no vermilion, so the cinnabar
+///   statistics and the look's vermilion settings are gone; adds the `tidal` configuration and
+///   `derived.hold_time`, `derived.fade_time` and `derived.tidal_reference`.
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 
-/// Version of the rendering algorithm. Bump it whenever a change alters rendered bits.
-pub const ALGORITHM_VERSION: &str = "ember-v1";
+/// Version of the rendering algorithm, `ember-v<N>`. Bump `N` whenever a change alters rendered
+/// bits; the sync loop (`run.py`) withdraws and re-renders every published edition of an older
+/// version (`<generator> --ember-algorithm` prints this value).
+///
+/// * `ember-v1` — sumi and vermilion on kozo, disc bodies.
+/// * `ember-v2` — sumi on kozo, tidally stretched bodies, the fade timed in film time.
+pub const ALGORITHM_VERSION: &str = "ember-v2";
 
 /// The certificate's `edition`.
 pub const EDITION: &str = "ember";
@@ -287,6 +295,12 @@ pub struct CertificateDerived {
     pub duration: f64,
     /// Fluid time at which the bodies stopped inking.
     pub valve_time: f64,
+    /// Time for which fresh ink stays black, in fluid units.
+    pub hold_time: f64,
+    /// E-folding time of the fade, in fluid units.
+    pub fade_time: f64,
+    /// The orbit's reference tidal anisotropy, which scales the bodies' stretch.
+    pub tidal_reference: f64,
     /// Fluid grid `[nx, ny]`.
     pub fluid_grid: [usize; 2],
     /// Fluid grid spacing in world units.
@@ -475,6 +489,9 @@ impl EmberCertificate {
             derived: CertificateDerived {
                 duration: summary.duration,
                 valve_time: summary.valve_time,
+                hold_time: summary.hold_time,
+                fade_time: summary.fade_time,
+                tidal_reference: summary.tidal_reference,
                 fluid_grid: summary.fluid_grid,
                 fluid_dx: summary.fluid_dx,
                 ink_grid: summary.ink_grid,
@@ -589,6 +606,9 @@ mod tests {
             frames_sha256: Some("cd".repeat(32)),
             duration: 8.779_257_088_198_804,
             valve_time: 8.779_257_088_198_804 - 0.2,
+            hold_time: 8.779_257_088_198_804 * 0.8 / 30.0,
+            fade_time: 8.779_257_088_198_804 * 0.025,
+            tidal_reference: third * 1.7e3,
             fluid_grid: [90, 64],
             fluid_dx: 2.0 * 1.35 / 64.0 * third * 3.0,
             ink_grid: [226, 162],
@@ -610,10 +630,7 @@ mod tests {
                 snapshots: 880,
                 contact_events: 4_321,
                 still_ink_fraction: 13_579.0 / 24_576.0 * third,
-                still_cinnabar_fraction: 7.0 / 24_576.0 * third,
                 still_gamut_mapped_pixels: 7,
-                frames_with_cinnabar: 13,
-                peak_frame_cinnabar_fraction: 351.0 / 2_431_464.0,
             },
             timings: EmberTimings {
                 fluid_seconds: 1_004.0 + third / 3.0,
@@ -625,13 +642,13 @@ mod tests {
         }
     }
 
-    /// A non-default configuration (both optional fields exercised).
+    /// A non-default configuration (the optional field exercised).
     fn config() -> EmberConfig {
         let mut config = EmberConfig::default();
-        config.look.fresh_tau = 0.25;
-        config.look.hold = 3.0;
+        config.look.fade_fraction = 0.25 / 7.0;
+        config.look.hold_fraction = 0.1;
         config.look.floor_tau = Some(3.0);
-        config.look.ember_tau = None;
+        config.tidal.max_aspect = 2.5;
         config
     }
 
@@ -815,7 +832,17 @@ mod tests {
         assert_eq!(keys(&json["timings_seconds"]), ["fluid", "ink", "shade", "sink", "total"]);
         assert_eq!(
             keys(&json["derived"]),
-            ["duration", "fluid_dx", "fluid_grid", "ink_grid", "projection", "valve_time"]
+            [
+                "duration",
+                "fade_time",
+                "fluid_dx",
+                "fluid_grid",
+                "hold_time",
+                "ink_grid",
+                "projection",
+                "tidal_reference",
+                "valve_time"
+            ]
         );
         assert_eq!(
             keys(&json["derived"]["projection"]),
@@ -826,13 +853,10 @@ mod tests {
             [
                 "contact_events",
                 "fluid_steps",
-                "frames_with_cinnabar",
                 "max_dt",
                 "max_flow_speed",
                 "min_dt",
-                "peak_frame_cinnabar_fraction",
                 "snapshots",
-                "still_cinnabar_fraction",
                 "still_gamut_mapped_pixels",
                 "still_ink_fraction"
             ]
@@ -859,25 +883,27 @@ mod tests {
         assert!(parse(&|_| {}).is_ok());
         assert_eq!(json["schema_version"], CERTIFICATE_SCHEMA_VERSION);
         // Any other version is reported as such, not as a malformed file …
-        for version in [0, 1, CERTIFICATE_SCHEMA_VERSION + 1] {
+        for version in [0, 1, 2, CERTIFICATE_SCHEMA_VERSION + 1] {
             let error = parse(&|v| v["schema_version"] = version.into()).expect_err("rejected");
             assert!(
                 matches!(error, CertificateError::UnsupportedSchema { found } if found == version),
                 "{error}"
             );
         }
-        // … a version-1 certificate (no frame-level cinnabar stats) included.
-        let version_1 = parse(&|v| {
-            v["schema_version"] = 1.into();
+        // … a published version-2 certificate of the vermilion look included.
+        let version_2 = parse(&|v| {
+            v["schema_version"] = 2.into();
+            v["algorithm"] = "ember-v1".into();
             let stats = v["stats"].as_object_mut().expect("object");
-            stats.remove("frames_with_cinnabar");
-            stats.remove("peak_frame_cinnabar_fraction");
+            stats.insert("frames_with_cinnabar".into(), 13.into());
+            stats.insert("peak_frame_cinnabar_fraction".into(), 0.001.into());
+            stats.insert("still_cinnabar_fraction".into(), 0.0.into());
         })
-        .expect_err("a version-1 certificate is rejected");
+        .expect_err("a version-2 certificate is rejected");
         assert_eq!(
-            version_1.to_string(),
+            version_2.to_string(),
             format!(
-                "ember certificate schema version 1 is not supported (this build reads version \
+                "ember certificate schema version 2 is not supported (this build reads version \
                  {CERTIFICATE_SCHEMA_VERSION})"
             )
         );
@@ -893,13 +919,12 @@ mod tests {
         .expect_err("missing field");
         assert!(missing.to_string().contains("still_rgb48le_sha256"), "{missing}");
         // Nullable fields are required too: without the key a certificate would read as
-        // still-only, or with the prototype's look instead of ember memory (or a fading floor).
+        // still-only, or without its fading floor.
         for (section, key) in [
             ("outputs", "frames_rgb48le_sha256"),
             ("look", "floor_tau"),
-            ("look", "ember_tau"),
-            ("stats", "frames_with_cinnabar"),
-            ("stats", "peak_frame_cinnabar_fraction"),
+            ("derived", "tidal_reference"),
+            ("stats", "still_ink_fraction"),
         ] {
             let error = parse(&|v| {
                 let object =
@@ -917,15 +942,13 @@ mod tests {
         })
         .expect("an explicit null is read");
         assert_eq!(still_only.outputs.frames_rgb48le_sha256, None);
-        let no_memory = parse(&|v| v["config"]["look"]["floor_tau"] = Value::Null).expect("null");
-        assert_eq!(
-            (no_memory.config.look.floor_tau, no_memory.config.look.ember_tau),
-            (None, None)
-        );
+        let no_fade = parse(&|v| v["config"]["look"]["floor_tau"] = Value::Null).expect("null");
+        assert_eq!(no_fade.config.look.floor_tau, None);
         let bits = parse(&|v| v["inputs"]["bodies"][0]["bits"]["mass"] = "0x12".into())
             .expect_err("bad bit pattern");
         assert!(bits.to_string().contains("\"0x12\" is not an f64 bit pattern"), "{bits}");
-        let config = parse(&|v| v["config"]["look"]["hold"] = "3".into()).expect_err("mistyped");
+        let config =
+            parse(&|v| v["config"]["look"]["hold_fraction"] = "3".into()).expect_err("mistyped");
         assert!(matches!(config, CertificateError::Json(_)), "{config}");
     }
 

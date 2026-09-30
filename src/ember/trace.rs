@@ -26,10 +26,16 @@
 //!
 //! # Soak zone and gate
 //!
-//! Within a step the parcel moves relative to body `i` along the straight segment
-//! `a = x - b_i(t1) → b = xn - b_i(t0)`, parametrised by `s ∈ [0, 1]` (`s = 0` at `t1`,
-//! `s = 1` at `t0`). It is inside the zone `|a + s(b - a)| < r` (`r = reach`) on the root interval
-//! `[s0, s1]` of `A s² + 2B s + C = 0` with `A = |b - a|²`, `B = a·(b - a)`, `C = |a|² - r²`.
+//! Body `i`'s soak zone is its elliptical outline (semi-axes `a_i, b_i` along its axis, see
+//! `orbit::Shape`) grown by the soak depth `d`, taken as the ellipse of semi-axes
+//! `a_i + d, b_i + d` (exact for a disc). Its *soak frame* rotates a world offset into the body's
+//! axes and scales each coordinate by the reciprocal of its semi-axis (`1/(a_i + d)`, computed
+//! once per body state), which maps the zone onto the unit circle. Within a step
+//! the parcel moves in body `i`'s soak frame along the straight segment
+//! `a = F_1(x - c_i(t1)) → b = F_0(xn - c_i(t0))` between the frames at the step ends,
+//! parametrised by `s ∈ [0, 1]` (`s = 0` at `t1`, `s = 1` at `t0`). It is inside the zone
+//! `|a + s(b - a)| < 1` on the root interval `[s0, s1]` of `A s² + 2B s + C = 0` with
+//! `A = |b - a|²`, `B = a·(b - a)`, `C = |a|² - 1`.
 //! The gate admits only fast-spinning water: with `|ω|` linear in `s` between its Catmull-Rom
 //! samples at the two step ends (`a1 = |ω(t1, x)|`, `a0 = |ω(t0, xn)|`), `|ω| > ω_c` on an
 //! interval `[g0, g1]`. The contact is `[s_lo, s_hi] = [max(s0, g0), min(s1, g1)]`, i.e. the
@@ -46,15 +52,15 @@
 //! [`Tracer`] implements the eager definition above with shortcuts that provably return the same
 //! bits (a test compares it with a literal reference implementation):
 //!
-//! * the vorticity gate is evaluated only when some disc interval is non-empty (a hit needs
+//! * the vorticity gate is evaluated only when some zone interval is non-empty (a hit needs
 //!   `s1 ≥ s_hi > s_lo ≥ s0`); `ω(t1, x)` is recomputed when it was not carried, which is the same
 //!   Catmull-Rom sample at the same point and snapshot;
 //! * a step does no contact work once every body has a record, when `t1 - dt > t_valve` (then
 //!   `t_lo ≥ t1 - dt` by monotone rounding, so nothing can record), or when `t1 < t_on` (every
 //!   record of this and all earlier steps would be `≤ t1 < t_on` and dropped);
-//! * a disc test with `disc ≤ 0` (or `A < 10⁻²⁰` and `C ≥ 0`) stops before the square root.
+//! * a zone test with `disc ≤ 0` (or `A < 10⁻²⁰` and `C ≥ 0`) stops before the square root.
 //!
-//! A far-from-body pre-filter for the disc test was measured to be worth at most ~9% of the trace
+//! A far-from-body pre-filter for the zone test was measured to be worth at most ~9% of the trace
 //! and would need a rounding-error proof to stay bit-exact, so every pending body is tested.
 //!
 //! # Performance
@@ -67,6 +73,7 @@
 
 use super::fluid::{FluidGrid, Snapshot};
 use super::math::{clamp_unit, max, min};
+use super::orbit::{BodyState, Shape};
 
 /// Squared step displacement (relative to a body) below which the parcel counts as not moving.
 const STILL_SEGMENT: f64 = 1e-20;
@@ -77,8 +84,8 @@ const GATE_EPSILON: f64 = 1e-12;
 /// When and where a parcel picks up ink.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ContactRules {
-    /// Soak-zone radius around every body centre (`body_radius + soak_depth`).
-    pub reach: f64,
+    /// Depth of the soak zone beyond every body's outline.
+    pub soak_depth: f64,
     /// Vorticity magnitude gate; `<= 0` disables the gate.
     pub vorticity_gate: f64,
     /// Pre-roll: a body's record (its latest accepted contact in the window) earlier than this
@@ -90,7 +97,7 @@ pub(crate) struct ContactRules {
 }
 
 /// The flow over one frame interval: `S + 1` snapshots at ascending times `τ_0 < … < τ_S` and the
-/// three body positions at each snapshot time.
+/// three bodies (centre and outline) at each snapshot time.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FlowWindow<'a> {
     /// The fluid grid all snapshots live on.
@@ -99,8 +106,8 @@ pub(crate) struct FlowWindow<'a> {
     /// intervals (docs/ember-design.md §5.1); a single snapshot is an empty window, through which
     /// tracing is the identity.
     pub snapshots: &'a [Snapshot],
-    /// `bodies[s][b]` = world position of body `b` at `snapshots[s].time`.
-    pub bodies: &'a [[[f64; 2]; 3]],
+    /// `bodies[s][b]` = body `b` at `snapshots[s].time`.
+    pub bodies: &'a [[BodyState; 3]],
 }
 
 /// Result of tracing one parcel back through a window.
@@ -312,6 +319,31 @@ impl Lattice {
     }
 }
 
+/// Maps a world offset from a body's centre into the body's soak frame, where its soak zone (the
+/// outline's semi-axes plus the soak depth) is the unit circle.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SoakFrame {
+    /// The body's first axis `(cos θ, sin θ)`.
+    axis: [f64; 2],
+    /// `1/(a + d)`, `1/(b + d)`.
+    inverse: [f64; 2],
+}
+
+impl SoakFrame {
+    /// The soak frame of `shape` with soak depth `soak` (`a + soak > 0` and `b + soak > 0`).
+    pub(crate) fn new(shape: &Shape, soak: f64) -> Self {
+        let inverse = [1.0 / (shape.semi[0] + soak), 1.0 / (shape.semi[1] + soak)];
+        Self { axis: shape.axis, inverse }
+    }
+
+    /// The soak-frame coordinates of the world offset `d`.
+    #[inline(always)]
+    fn apply(&self, d: [f64; 2]) -> [f64; 2] {
+        let [c, s] = self.axis;
+        [(c * d[0] + s * d[1]) * self.inverse[0], (-s * d[0] + c * d[1]) * self.inverse[1]]
+    }
+}
+
 /// Constants of one backward step over `[τ_{s-1}, τ_s]`.
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -327,10 +359,14 @@ struct Step {
     half_h: f64,
     /// `h/6`.
     sixth_h: f64,
-    /// Body positions at `t1`.
-    bodies1: [[f64; 2]; 3],
-    /// Body positions at `t0`.
-    bodies0: [[f64; 2]; 3],
+    /// Body centres at `t1`.
+    centres1: [[f64; 2]; 3],
+    /// Body centres at `t0`.
+    centres0: [[f64; 2]; 3],
+    /// Soak frames of the bodies at `t1`.
+    frames1: [SoakFrame; 3],
+    /// Soak frames of the bodies at `t0`.
+    frames0: [SoakFrame; 3],
     /// Whether a contact in this step can still produce a surviving record.
     can_record: bool,
 }
@@ -345,8 +381,6 @@ pub(crate) struct Tracer<'a> {
     snapshots: &'a [Snapshot],
     /// Steps in tracing order (latest interval first).
     steps: Vec<Step>,
-    /// `reach²`.
-    reach2: f64,
     /// The vorticity gate `ω_c`, or `None` when disabled.
     gate: Option<f64>,
     /// Pre-roll: records before this time are dropped.
@@ -393,8 +427,11 @@ impl<'a> Tracer<'a> {
                     h,
                     half_h: h / 2.0,
                     sixth_h: h / 6.0,
-                    bodies1: window.bodies[s],
-                    bodies0: window.bodies[s - 1],
+                    centres1: window.bodies[s].map(|b| b.position),
+                    centres0: window.bodies[s - 1].map(|b| b.position),
+                    frames1: window.bodies[s].map(|b| SoakFrame::new(&b.shape, rules.soak_depth)),
+                    frames0: window.bodies[s - 1]
+                        .map(|b| SoakFrame::new(&b.shape, rules.soak_depth)),
                     can_record: !after_valve && !before_pre_roll,
                 }
             })
@@ -403,7 +440,6 @@ impl<'a> Tracer<'a> {
             lattice: Lattice::new(&window.grid),
             snapshots,
             steps,
-            reach2: rules.reach * rules.reach,
             gate: (rules.vorticity_gate > 0.0).then_some(rules.vorticity_gate),
             t_on: rules.t_on,
             t_valve: rules.t_valve,
@@ -470,11 +506,11 @@ impl<'a> Tracer<'a> {
         let mut intervals: [Option<(f64, f64)>; 3] = [None; 3];
         for (body, interval) in intervals.iter_mut().enumerate() {
             if record[body].is_none() {
-                let (b1, b0) = (step.bodies1[body], step.bodies0[body]);
+                let (c1, c0) = (step.centres1[body], step.centres0[body]);
                 *interval = segment_interval(
-                    [x[0] - b1[0], x[1] - b1[1]],
-                    [xn[0] - b0[0], xn[1] - b0[1]],
-                    self.reach2,
+                    step.frames1[body].apply([x[0] - c1[0], x[1] - c1[1]]),
+                    step.frames0[body].apply([xn[0] - c0[0], xn[1] - c0[1]]),
+                    1.0,
                 );
             }
         }
@@ -590,9 +626,25 @@ pub(crate) mod tests {
         out
     }
 
-    /// Rules with the gate disabled, the valve open and no pre-roll.
+    /// Rules with the gate disabled, the valve open and no pre-roll. With point bodies
+    /// ([`points`]) the soak zone of every body is the disc of radius `reach` around its centre.
     fn open_rules(reach: f64) -> ContactRules {
-        ContactRules { reach, vorticity_gate: 0.0, t_on: f64::NEG_INFINITY, t_valve: f64::INFINITY }
+        ContactRules {
+            soak_depth: reach,
+            vorticity_gate: 0.0,
+            t_on: f64::NEG_INFINITY,
+            t_valve: f64::INFINITY,
+        }
+    }
+
+    /// Point bodies (outlines of zero size) at these centres: their soak zone is the disc of
+    /// radius `soak_depth`, the disc test of the prototype.
+    pub(crate) fn points(centres: &[[[f64; 2]; 3]]) -> Vec<[BodyState; 3]> {
+        let point = Shape { semi: [0.0, 0.0], axis: [1.0, 0.0], spin: 0.0, strain: 0.0 };
+        centres
+            .iter()
+            .map(|row| row.map(|position| BodyState { position, velocity: [0.0; 2], shape: point }))
+            .collect()
     }
 
     /// Bodies parked far outside the region under test.
@@ -647,7 +699,8 @@ pub(crate) mod tests {
         let snaps: Vec<Snapshot> =
             times.iter().map(|&t| snapshot(&g, t, |_, _| [u, v, 0.0])).collect();
         let bodies = vec![FAR; times.len()];
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         for start in [[0.3, 0.2], [-1.9, 1.4], [1.95, -1.45], [7.3, -5.1]] {
             let trace = trace_back(&window, &open_rules(0.1), start);
             // RK4 is exact for a steady uniform flow; the f32 samples round u and v.
@@ -666,7 +719,8 @@ pub(crate) mod tests {
         let snaps: Vec<Snapshot> =
             times.iter().map(|&t| snapshot(&g, t, |x, y| [-omega * y, omega * x, 0.0])).collect();
         let bodies = vec![FAR; times.len()];
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let (s, c) = math::sin_cos(-omega * 0.02);
         let mut rng = Lcg(3);
         for _ in 0..200 {
@@ -703,7 +757,8 @@ pub(crate) mod tests {
     fn disc_in_still_water_inks_its_swept_band_with_the_exit_time() {
         let g = grid(40, 30, 0.1);
         let (snaps, bodies) = sweeping_disc(&g);
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let r = 0.08;
         let tracer = Tracer::new(&window, &open_rules(r));
         let mut inked = 0;
@@ -736,7 +791,8 @@ pub(crate) mod tests {
     fn valve_clips_and_pre_roll_drops_records() {
         let g = grid(40, 30, 0.1);
         let (snaps, bodies) = sweeping_disc(&g);
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let r = 0.08;
         let rules = ContactRules { t_valve: 0.025, t_on: 0.012, ..open_rules(r) };
         let tracer = Tracer::new(&window, &rules);
@@ -792,7 +848,8 @@ pub(crate) mod tests {
         let rules = ContactRules { vorticity_gate: 40.0, ..open_rules(0.1) };
         let latest = |omega: &dyn Fn(f64) -> f64, from: f64, to: f64, rules: &ContactRules| {
             let (snaps, bodies) = gated(omega, from, to);
-            let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+            let outlines = points(&bodies);
+            let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
             trace_back(&window, rules, [0.0, 0.0]).contact[0]
         };
         // |ω| = 100(1 - τ) > 40 for τ < 0.6, either sign; the body sits on the parcel.
@@ -840,7 +897,7 @@ pub(crate) mod tests {
         let flow = [0.5, 0.25];
         let times: Vec<f64> = (0..=32u32).map(|s| f64::from(s) / 32.0).collect();
         let (reach, t_on, t_valve) = (0.3, 0.15, 0.8);
-        let rules = ContactRules { reach, vorticity_gate: 40.0, t_on, t_valve };
+        let rules = ContactRules { soak_depth: reach, vorticity_gate: 40.0, t_on, t_valve };
         let mut rng = Lcg(77);
         // (gate open for x > x_g?, x_g, body slot, disc position at t = 1, disc velocity). The
         // gate lines cut through the swept regions, so the gate decides many parcels.
@@ -867,7 +924,8 @@ pub(crate) mod tests {
                     row
                 })
                 .collect();
-            let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+            let outlines = points(&bodies);
+            let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
             let tracer = Tracer::new(&window, &rules);
             let w = [flow[0] - velocity[0], flow[1] - velocity[1]];
             // [miss, plain record, clipped by the valve, dropped by the pre-roll, gate decided]
@@ -937,7 +995,8 @@ pub(crate) mod tests {
         let snaps: Vec<Snapshot> =
             [0.0, 0.1, 0.2].iter().map(|&t| snapshot(&g, t, |_, _| [0.0, 0.0, 50.0])).collect();
         let bodies = vec![[[0.0, 0.0]; 3]; 3];
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let rules = ContactRules { vorticity_gate: 40.0, ..open_rules(0.5) };
         let tracer = Tracer::new(&window, &rules);
         // Far beyond i64 in grid units, in still water: the lookups wrap to some node, the parcel
@@ -956,7 +1015,8 @@ pub(crate) mod tests {
         // A non-finite velocity sample poisons exactly the pathlines that read it.
         let mut snaps = snaps;
         snaps[1].u[2 * g.nx + 5] = f32::INFINITY;
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let tracer = Tracer::new(&window, &rules);
         let node = |i: usize, j: usize| [g.x0() + j as f64 * g.dx, g.y0() + i as f64 * g.dx];
         assert!(!tracer.trace(node(2, 5)).origin.iter().all(|v| v.is_finite()));
@@ -1083,11 +1143,19 @@ pub(crate) mod tests {
                 (0.0, 1.0)
             };
             let dt = t1 - t0;
+            // The soak frame of a body state: rotate into its axes, then scale by the reciprocals
+            // 1/(semi + soak) (docs/ember-design.md §5.2 step 2).
+            let frame = |body: &BodyState, d: [f64; 2]| {
+                let [c, sn] = body.shape.axis;
+                let local = [c * d[0] + sn * d[1], -sn * d[0] + c * d[1]];
+                let inverse = body.shape.semi.map(|semi| 1.0 / (semi + rules.soak_depth));
+                [local[0] * inverse[0], local[1] * inverse[1]]
+            };
             for (i, record) in rec.iter_mut().enumerate() {
-                let (b1, b0) = (window.bodies[s][i], window.bodies[s - 1][i]);
-                let a = [x[0] - b1[0], x[1] - b1[1]];
-                let b = [xn[0] - b0[0], xn[1] - b0[1]];
-                let r = rules.reach;
+                let (b1, b0) = (&window.bodies[s][i], &window.bodies[s - 1][i]);
+                let a = frame(b1, [x[0] - b1.position[0], x[1] - b1.position[1]]);
+                let b = frame(b0, [xn[0] - b0.position[0], xn[1] - b0.position[1]]);
+                let r = 1.0;
                 let d = [b[0] - a[0], b[1] - a[1]];
                 let big_a = d[0] * d[0] + d[1] * d[1];
                 let big_b = a[0] * d[0] + a[1] * d[1];
@@ -1132,7 +1200,7 @@ pub(crate) mod tests {
         intervals: usize,
         speed: f64,
         scale: f64,
-    ) -> (Vec<Snapshot>, Vec<[[f64; 2]; 3]>) {
+    ) -> (Vec<Snapshot>, Vec<[BodyState; 3]>) {
         let tau = 2.0 * std::f64::consts::PI;
         let modes: Vec<[f64; 5]> = (0..6)
             .map(|_| {
@@ -1167,17 +1235,35 @@ pub(crate) mod tests {
                 })
             })
             .collect();
+        // Straight paths; every outline an ellipse (a disc for one body in four) whose axes turn
+        // and whose aspect changes from snapshot to snapshot.
         let mut body = || {
             let p = [rng.range(-1.0, 1.0), rng.range(-0.8, 0.8)];
             let vel = [rng.range(-3.0, 3.0), rng.range(-3.0, 3.0)];
-            (p, vel)
+            let radius = rng.range(0.0, 0.15);
+            let disc = rng.next() < 0.25;
+            let motion = [rng.range(0.0, 7.0), rng.range(-40.0, 40.0), rng.range(-9.0, 9.0)];
+            (p, vel, radius, disc, motion)
         };
         let paths = [body(), body(), body()];
         let bodies = times
             .iter()
             .map(|&time| {
-                paths.map(|(p, vel)| {
-                    [p[0] + vel[0] * (time - times[0]), p[1] + vel[1] * (time - times[0])]
+                let dt = time - times[0];
+                paths.map(|(p, vel, radius, disc, [angle, turn, stretch])| {
+                    let aspect = if disc { 1.0 } else { 2.0 + math::tanh(stretch * dt) };
+                    let (s, c) = math::sin_cos(angle + turn * dt);
+                    let k = aspect.sqrt();
+                    BodyState {
+                        position: [p[0] + vel[0] * dt, p[1] + vel[1] * dt],
+                        velocity: vel,
+                        shape: Shape {
+                            semi: [radius * k, radius / k],
+                            axis: [c, s],
+                            spin: turn,
+                            strain: 0.0,
+                        },
+                    }
                 })
             })
             .collect();
@@ -1203,7 +1289,7 @@ pub(crate) mod tests {
                 _ => t_last + 1.0,
             };
             let rules = ContactRules {
-                reach: rng.range(0.05, 0.3),
+                soak_depth: rng.range(0.05, 0.3),
                 vorticity_gate: if case % 4 == 1 { 0.0 } else { rng.range(-5.0, 80.0) },
                 t_on: pick(&mut rng),
                 t_valve: pick(&mut rng),
@@ -1217,9 +1303,10 @@ pub(crate) mod tests {
                         [rng.range(-0.6 * g.lx, 0.6 * g.lx), rng.range(-0.6 * g.ly, 0.6 * g.ly)]
                     } else {
                         let b = bodies[intervals][(k + lane) % 3];
-                        let r = rules.reach * rng.range(0.0, 2.0);
+                        let reach = b.shape.extent() + rules.soak_depth;
+                        let r = reach * rng.range(0.0, 1.5);
                         let (s, c) = math::sin_cos(rng.range(0.0, 7.0));
-                        [b[0] + r * c, b[1] + r * s]
+                        [b.position[0] + r * c, b.position[1] + r * s]
                     }
                 });
                 let lanes = tracer.trace_lanes(starts);
@@ -1232,8 +1319,8 @@ pub(crate) mod tests {
                 }
             }
         }
-        // The comparison must exercise contacts, not only misses.
-        assert!(contacts > traces / 8, "{contacts} contacts in {traces} traces");
+        // The comparison must exercise contacts (thousands of them), not only misses.
+        assert!(contacts > traces / 10, "{contacts} contacts in {traces} traces");
     }
 
     #[test]
@@ -1241,7 +1328,8 @@ pub(crate) mod tests {
         let g = grid(8, 8, 0.25);
         let snaps = vec![snapshot(&g, 1.0, |_, _| [1.0, 1.0, 100.0])];
         let bodies = vec![[[0.0, 0.0]; 3]];
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let trace = trace_back(&window, &open_rules(1.0), [0.1, 0.2]);
         assert_eq!(trace, Trace { origin: [0.1, 0.2], contact: [None; 3] });
     }
@@ -1252,7 +1340,8 @@ pub(crate) mod tests {
         let g = grid(8, 8, 0.25);
         let snaps = vec![snapshot(&g, 1.0, |_, _| [0.0; 3]), snapshot(&g, 1.0, |_, _| [0.0; 3])];
         let bodies = vec![[[0.0, 0.0]; 3]; 2];
-        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &bodies };
+        let outlines = points(&bodies);
+        let window = FlowWindow { grid: g, snapshots: &snaps, bodies: &outlines };
         let _ = Tracer::new(&window, &open_rules(1.0));
     }
 }

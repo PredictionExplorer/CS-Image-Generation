@@ -73,7 +73,7 @@ use super::math;
 
 /// Independent transforms computed side by side by the batched kernels: 4 × f64 is two NEON or
 /// one AVX2 register per operand and keeps a 1440-point batch (with its ping-pong buffer) within
-/// the L1/L2 caches. Measured faster than 2 or 8 on the production grid. Results do not depend on
+/// the L1/L2 caches. Measured faster than 2 or 8 on the 1440×1024 grid. Results do not depend on
 /// this value (lanes are independent), only speed does.
 pub(crate) const LANES: usize = 4;
 
@@ -1525,7 +1525,7 @@ mod tests {
     #[test]
     #[ignore = "timing report; run explicitly in release mode"]
     fn round_trip_timing() {
-        for (nx, ny) in [(1440, 1024), (720, 512)] {
+        for (nx, ny) in [(2160, 1536), (1440, 1024), (720, 512)] {
             let mut round_trip = bench::RoundTrip::new(nx, ny).expect("smooth");
             for _ in 0..5 {
                 round_trip.run();

@@ -1337,6 +1337,22 @@ pub struct EmberPreflight {
     pub frames: usize,
 }
 
+/// The three bodies' initial masses, which set the tidal field that stretches them in the ember
+/// edition ([`ember::EmberRequest::masses`]).
+///
+/// # Errors
+///
+/// [`ember::EmberError::DegenerateOrbit`] unless there are exactly three bodies.
+pub fn ember_masses(bodies: &[Body]) -> Result<[f64; 3]> {
+    match bodies {
+        [a, b, c] => Ok([a.mass, b.mass, c.mass]),
+        _ => Err(ember::EmberError::DegenerateOrbit {
+            reason: format!("the ember edition needs 3 bodies, got {}", bodies.len()),
+        }
+        .into()),
+    }
+}
+
 /// Checks, in a fraction of a second, that the ember edition can render the selected orbit at
 /// this output size with `config`, so that an orbit it would reject is known before the main
 /// render rather than in the ember stage, which runs last.
@@ -1358,6 +1374,7 @@ pub fn preflight_ember_edition(
     let frame_steps = ember_frame_schedule(steps);
     let preflight = check_ember_request(&EmberRequest {
         positions: &positions,
+        masses: ember_masses(bodies)?,
         frame_steps: &frame_steps,
         width,
         height,
@@ -1432,6 +1449,7 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
     let paper_seed = ember_paper_seed(request.seed_bytes);
     let ember_request = EmberRequest {
         positions: &positions,
+        masses: ember_masses(request.bodies)?,
         frame_steps: &frame_steps,
         width: request.width,
         height: request.height,
@@ -1582,23 +1600,19 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
         summary.frames_emitted,
     );
     info!(
-        "   => Ember still: sha256 {} — ink on {:.1}% of nodes, cinnabar on {:.2}%, {} \
-         gamut-mapped pixels",
+        "   => Ember look: ink black for {:.3} and fading with tau {:.3} fluid time units; tidal \
+         reference anisotropy {:.4e}",
+        summary.hold_time, summary.fade_time, summary.tidal_reference,
+    );
+    info!(
+        "   => Ember still: sha256 {} — ink on {:.1}% of nodes, {} gamut-mapped pixels",
         summary.still_sha256,
         100.0 * stats.still_ink_fraction,
-        100.0 * stats.still_cinnabar_fraction,
         stats.still_gamut_mapped_pixels,
     );
     if let Some(frames_sha256) = &summary.frames_sha256 {
         info!("   => Ember frames: sha256 {frames_sha256} (rgb48le stream)");
     }
-    // Still-only renders shade (and count) only the still.
-    let shaded_frames = summary.frames_emitted.max(1);
-    info!(
-        "   => Ember cinnabar: in {} of {shaded_frames} shaded frame(s), peak {:.2}% of nodes",
-        stats.frames_with_cinnabar,
-        100.0 * stats.peak_frame_cinnabar_fraction,
-    );
     info!(
         "   => Ember work: {} fluid steps (dt {:.2e}..{:.2e}, max flow speed {:.2}), {} \
          snapshots, {} contact events",
@@ -2342,6 +2356,9 @@ mod tests {
             frames_sha256: None,
             duration: 10.0,
             valve_time: 9.75,
+            hold_time: 0.25,
+            fade_time: 0.25,
+            tidal_reference: 1.0,
             fluid_grid: [16, 16],
             fluid_dx: 0.1,
             ink_grid: [8, 4],
@@ -2653,7 +2670,8 @@ mod tests {
     }
 
     /// The coarse but complete configuration of the golden test (`tests/ember_determinism.rs`),
-    /// with a longer fresh-ink memory: a 96×64 render of the tilted figure-eight takes seconds.
+    /// with a longer fresh-ink memory (a quarter of the orbit): a 96×64 render of the tilted
+    /// figure-eight takes seconds.
     fn tiny_ember_config() -> EmberConfig {
         let mut config = EmberConfig::default();
         config.fluid.rows = 64;
@@ -2665,8 +2683,8 @@ mod tests {
         config.contact.soak_depth = 0.12;
         config.contact.pre_roll = 1.0;
         config.contact.valve_lead = 0.2;
-        config.look.hold = 3.0;
-        config.look.fresh_tau = 0.25;
+        config.look.hold_fraction = 0.25;
+        config.look.fade_fraction = 0.25;
         config.paper.formation_modes = 64;
         config
     }
@@ -2861,13 +2879,17 @@ mod tests {
         assert!(!std::path::Path::new(&package.web_video).exists());
         assert!(!std::path::Path::new(&package.hq_video).exists());
         let stats = summary.stats;
-        assert_eq!(stats.frames_with_cinnabar, u64::from(stats.still_cinnabar_fraction > 0.0));
-        assert_eq!(stats.peak_frame_cinnabar_fraction, stats.still_cinnabar_fraction);
-        assert_eq!(certificate["stats"]["frames_with_cinnabar"], stats.frames_with_cinnabar);
+        assert!(stats.still_ink_fraction > 0.0 && stats.still_ink_fraction < 1.0, "{stats:?}");
+        assert_eq!(
+            certificate["stats"]["still_ink_fraction"].as_f64().map(f64::to_bits),
+            Some(stats.still_ink_fraction.to_bits())
+        );
+        assert_eq!(certificate["stats"]["contact_events"], stats.contact_events);
+        assert_eq!(certificate["algorithm"], ember::certificate::ALGORITHM_VERSION);
         // The certificate records the request: the configuration under test, the orbit, the
         // schedule of `main.mp4` and the package seed's own paper.
         let inputs = &certificate["inputs"];
-        assert_eq!(certificate["config"]["look"]["fresh_tau"], 0.25);
+        assert_eq!(certificate["config"]["look"]["fade_fraction"], 0.25);
         assert_eq!(certificate["config"]["fluid"]["rows"], 64);
         assert_eq!((&inputs["seed"], &inputs["steps"]), (&"46205528".into(), &3_000.into()));
         assert_eq!(inputs["frames"]["count"], ember_frame_schedule(3_000).len());
@@ -2910,12 +2932,8 @@ mod tests {
         assert_eq!(outputs["frames_rgb48le_sha256"], frames_sha256, "{outputs}");
         assert_eq!(outputs["frames_emitted"], frames);
         let stats = summary.stats;
-        assert!(stats.frames_with_cinnabar <= frames as u64, "{stats:?}");
-        assert!(stats.peak_frame_cinnabar_fraction >= stats.still_cinnabar_fraction, "{stats:?}");
-        assert_eq!(
-            certificate["stats"]["peak_frame_cinnabar_fraction"].as_f64().map(f64::to_bits),
-            Some(stats.peak_frame_cinnabar_fraction.to_bits())
-        );
+        assert!(stats.contact_events > 0, "the bodies inked the water: {stats:?}");
+        assert_eq!(certificate["stats"]["contact_events"], stats.contact_events);
 
         // Both videos exist and decode to exactly the scheduled frames.
         let [web, hq] = ember_video_options(true);

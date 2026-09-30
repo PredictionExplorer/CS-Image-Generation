@@ -41,14 +41,18 @@
 //!
 //!   (`e₁` is also flushed to zero when `D·h > 700`, where `e₂²` would be subnormal.)
 //! * **Bodies** (after each RK4 step, at the new time `t + h`). With `(u, v)` the velocity of
-//!   `ω̂`, each body `b` (centre `p_b`, velocity `V_b`, radius `R`, edge width `W`) has the mask
-//!   `c_b = ½·(1 - tanh((|x - p_b| - R)/W))` (Euclidean distance, no periodic wrap). With
-//!   `χ = max_b c_b` and the mask-weighted body velocity `ū = Σ c_b·V_b / max(Σ c_b, 10⁻¹²)`, the
-//!   implicit Brinkman step with `a = χ/η` (`η` = permeability as a fraction of the step) is
-//!   `u ← (u + a·ū)/(1 + a)`. The mask is evaluated only where `(d - R)/W < 20` (inside a node
-//!   box around each body): the neglected values would be below `5·10⁻¹⁸`, and in fact the pinned
-//!   libm's `tanh` already rounds to exactly `1` from `(d - R)/W ≈ 19.07` on, so the truncation
-//!   does not change a single bit (a unit test checks this).
+//!   `ω̂`, each body `b` (centre `p_b`, velocity `V_b`, elliptical outline with signed distance
+//!   `δ_b(x)` and deformation velocity `D_b(x)`, see `orbit::Shape`; edge width `W`) has the mask
+//!   `c_b = ½·(1 - tanh(δ_b(x - p_b)/W))` (no periodic wrap). With `χ = max_b c_b` and the
+//!   mask-weighted material velocity `ū = Σ c_b·(V_b + D_b) / max(Σ c_b, 10⁻¹²)`, the implicit
+//!   Brinkman step with `a = χ/η` (`η` = permeability as a fraction of the step) is
+//!   `u ← (u + a·ū)/(1 + a)`. For a disc `δ = |x - p| - R` and `D = 0`. The mask is evaluated only
+//!   where `δ/W < 20`, inside a node box around each body that reaches `extent + 20·W` from its
+//!   centre. The `δ/W` cut changes no bit: beyond it the values would be below `5·10⁻¹⁸`, and the
+//!   pinned libm's `tanh` already rounds to exactly `1` from `δ/W ≈ 19.07` on (a unit test checks
+//!   this). A disc's box holds every node with `δ/W < 20`; away from a stretched body's outline
+//!   Taubin's distance falls below the Euclidean one, so its box also drops mask values, all below
+//!   `2·10⁻¹³` at the defaults. The box is part of the definition (docs/ember-design.md §4.2).
 //! * **Projection and sponge.** `ω = IFFT(i·kx·FFT(v) - i·ky·FFT(u))·exp(-σ·h)` with
 //!   `σ(x, y) = σ₀·max(ramp(x; aspect + pad, lx/2 - 4dx), ramp(y; 1 + pad, ly/2 - 4dx))`,
 //!   `ramp(c; in, out) = s²(3 - 2s)`, `s = clamp((|c| - in)/(out - in), 0, 1)`, then
@@ -56,8 +60,8 @@
 //!   divergence-free fields.
 //! * **Step size.** `h = min(cfl·dx/max(u_max, s_bodies, 10⁻⁶), h_max)`, where `u_max` is the
 //!   largest penalised flow speed of the previous step and `s_bodies` the bodies' look-ahead speed
-//!   (`BodyMotion::speed_bound`: the largest sampled body speed over a short window ahead, the
-//!   prototype's rule); the final steps before a target time are adjusted so that the target is
+//!   (`BodyMotion::speed_bound`: the largest sampled material speed of any body, centre plus
+//!   deformation, over a short window ahead, the prototype's rule); the final steps before a target time are adjusted so that the target is
 //!   hit exactly (see [`WakeSolver::advance_to`]).
 //!
 //! 26 real two-dimensional transforms per step: 20 for the four advection evaluations (four
@@ -78,9 +82,9 @@
 //!   set-up is not exactly mirror-antisymmetric in `ω` while the sponge is on. Measured for one
 //!   disc moving along the axis (largest `|ω(x, y) + ω(x, -y)|` over the largest `|ω|`; with the
 //!   Nyquist `ky` zeroed it stays below `3·10⁻¹²`, accumulated round-off): `10⁻³` on the 48×32
-//!   test grid, whose sponge ramp is 1.4 cells wide; `3·10⁻⁸` on the 720×512 half-size grid
-//!   (ramp ~51 cells) and `10⁻¹⁰` on the 1440×1024 grid of the default configuration (ramp
-//!   ~106 cells), both with the default parameters after 0.1 time units.
+//!   test grid, whose sponge ramp is 1.4 cells wide; `3·10⁻⁸` on a 720×512 grid (ramp ~51 cells)
+//!   and `10⁻¹⁰` on a 1440×1024 grid (ramp ~106 cells), both with the default parameters after
+//!   0.1 time units. The default 2160×1536 grid's ramp is ~160 cells wide.
 //! * The sponge is a physical-space multiplication, so it changes the mean vorticity (the `k = 0`
 //!   mode) slightly; the velocity ignores that mode (`1/k² := 0`), the vorticity snapshots
 //!   include it — as in the prototype.
@@ -209,8 +213,6 @@ struct Params {
     cfl: f64,
     /// Largest step.
     max_dt: f64,
-    /// Body radius `R`.
-    radius: f64,
     /// Width `W` of the tanh edge of the body mask.
     mask_width: f64,
     /// Brinkman permeability `η` as a fraction of the step (`a = χ/η`).
@@ -425,8 +427,9 @@ struct BodyBox {
 }
 
 impl BodyBox {
-    /// The conservative node box of `state` (every node with `(d - R)/W < 20` is inside, plus a
-    /// cell of margin; the per-node test decides), or `None` if it misses the grid.
+    /// The node box of `state`: every node within `reach` (`extent + 20·W`) of its centre along
+    /// each axis, plus a cell of margin (the per-node test decides), or `None` if it misses the
+    /// grid. For a disc it holds every node with `δ/W < 20`.
     fn new(state: BodyState, nodes: &Nodes, dx: f64, reach: f64) -> Option<Self> {
         let range = |centre: f64, len: usize| -> Option<(usize, usize)> {
             let half = (len / 2) as f64;
@@ -443,7 +446,7 @@ impl BodyBox {
     }
 }
 
-/// Pseudo-spectral vorticity solver with Brinkman-penalised moving discs.
+/// Pseudo-spectral vorticity solver with Brinkman-penalised moving bodies.
 pub(crate) struct WakeSolver {
     /// The grid.
     grid: FluidGrid,
@@ -566,7 +569,6 @@ impl WakeSolver {
             params: Params {
                 cfl: config.cfl,
                 max_dt: config.max_dt,
-                radius: config.body_radius,
                 mask_width: config.mask_width,
                 eta_ratio: config.brinkman_eta_ratio,
             },
@@ -928,10 +930,11 @@ fn penalise(
     v: &mut [f64],
 ) -> u64 {
     let (nx, dx) = (grid.nx, grid.dx);
-    let (radius, width, eta) = (params.radius, params.mask_width, params.eta_ratio);
-    let reach = radius + MASK_CUTOFF * width;
-    let boxes: [Option<BodyBox>; 3] =
-        std::array::from_fn(|b| BodyBox::new(states[b], nodes, dx, reach));
+    let (width, eta) = (params.mask_width, params.eta_ratio);
+    let boxes: [Option<BodyBox>; 3] = std::array::from_fn(|b| {
+        let reach = states[b].shape.extent() + MASK_CUTOFF * width;
+        BodyBox::new(states[b], nodes, dx, reach)
+    });
     let Some(row_lo) = boxes.iter().flatten().map(|b| b.row_lo).min() else {
         return 0;
     };
@@ -958,15 +961,17 @@ fn penalise(
                     if !(body.col_lo..body.col_hi).contains(&col) {
                         continue;
                     }
-                    let (ddx, ddy) = (x - body.state.position[0], y - body.state.position[1]);
-                    let d = (ddx * ddx + ddy * ddy).sqrt();
-                    let z = (d - radius) / width;
+                    let shape = &body.state.shape;
+                    let d = [x - body.state.position[0], y - body.state.position[1]];
+                    let z = shape.signed_distance(d) / width;
                     if z < MASK_CUTOFF {
                         evaluations += 1;
                         let c = 0.5 * (1.0 - math::tanh(z));
+                        // The body's material velocity: its centre's plus its deformation's.
+                        let [du, dv] = shape.deformation_velocity(d);
                         sum += c;
-                        ub += c * body.state.velocity[0];
-                        vb += c * body.state.velocity[1];
+                        ub += c * (body.state.velocity[0] + du);
+                        vb += c * (body.state.velocity[1] + dv);
                         if c > chi {
                             chi = c;
                         }
@@ -989,6 +994,7 @@ fn penalise(
 #[allow(clippy::needless_range_loop)] // index loops mirror the formulas of the oracles
 mod tests {
     use super::*;
+    use crate::ember::orbit::Shape;
     use sha2::{Digest, Sha256};
 
     /// A small test configuration on a coarse grid: fat, resolved discs at low Reynolds number.
@@ -1032,6 +1038,7 @@ mod tests {
                     self.start[b][1] + self.velocity[b][1] * t,
                 ],
                 velocity: self.velocity[b],
+                shape: Shape::disc(test_config().body_radius),
             })
         }
 
@@ -1040,12 +1047,21 @@ mod tests {
         }
     }
 
-    /// Three discs on a circle, a third of a turn apart.
+    /// Three bodies on a circle, a third of a turn apart: discs (`aspect` 1), or ellipses of the
+    /// disc's area with their long axis along the path, turning with it.
     struct Circling {
         /// Circle radius.
         radius: f64,
         /// Angular speed.
         rate: f64,
+        /// Axis ratio of the bodies.
+        aspect: f64,
+    }
+
+    impl Circling {
+        fn discs(radius: f64, rate: f64) -> Self {
+            Self { radius, rate, aspect: 1.0 }
+        }
     }
 
     impl BodyMotion for Circling {
@@ -1053,15 +1069,46 @@ mod tests {
             std::array::from_fn(|b| {
                 let (s, c) = math::sin_cos(self.rate * t + TAU * b as f64 / 3.0);
                 let speed = self.radius * self.rate;
+                let r = test_config().body_radius;
+                let shape = if self.aspect == 1.0 {
+                    Shape::disc(r)
+                } else {
+                    let k = self.aspect.sqrt();
+                    Shape { semi: [r * k, r / k], axis: [-s, c], spin: self.rate, strain: 0.0 }
+                };
                 BodyState {
                     position: [self.radius * c, self.radius * s],
                     velocity: [-speed * s, speed * c],
+                    shape,
                 }
             })
         }
 
         fn speed_bound(&self, _t: f64) -> f64 {
-            self.radius * self.rate
+            let r = test_config().body_radius;
+            self.radius * self.rate + self.rate * r * self.aspect.sqrt()
+        }
+    }
+
+    /// One body parked at the origin with the given (fixed) outline; the others are absent.
+    struct Parked(Shape);
+
+    impl BodyMotion for Parked {
+        fn bodies_at(&self, _t: f64) -> [BodyState; 3] {
+            let far = |x: f64, y: f64| BodyState {
+                position: [x, y],
+                velocity: [0.0; 2],
+                shape: Shape::disc(test_config().body_radius),
+            };
+            [
+                BodyState { position: [0.0; 2], velocity: [0.0; 2], shape: self.0 },
+                far(1e7, 1e7),
+                far(-1e7, 1e7),
+            ]
+        }
+
+        fn speed_bound(&self, _t: f64) -> f64 {
+            self.0.deformation_speed()
         }
     }
 
@@ -1145,10 +1192,12 @@ mod tests {
     }
 
     #[test]
-    fn default_grid_is_1440_by_1024() {
-        let grid = FluidGrid::for_canvas(3456.0 / 2234.0, 1024, 0.35).expect("valid");
-        assert_eq!((grid.nx, grid.ny), (1440, 1024));
-        assert_eq!(grid.lx, 1440.0 * grid.dx);
+    fn default_grid_is_2160_by_1536() {
+        let config = crate::ember::config::EmberConfig::default().fluid;
+        let grid =
+            FluidGrid::for_canvas(3456.0 / 2234.0, config.rows, config.box_margin).expect("valid");
+        assert_eq!((grid.nx, grid.ny), (2160, 1536));
+        assert_eq!(grid.lx, 2160.0 * grid.dx);
         let small = test_grid();
         assert_eq!((small.nx, small.ny), (48, 32));
     }
@@ -1545,7 +1594,7 @@ mod tests {
         // mirror-symmetric instead of antisymmetric; the sponge multiplies that y-uniform
         // checkerboard and aliases a little of it into kept modes. On this coarse grid with a
         // 1.4-cell sponge ramp that is a 1e-3 relative asymmetry; the ramp spans ~51 cells on the
-        // 720×512 half-size grid (3e-8) and ~106 on the 1440×1024 default grid (1e-10); see the
+        // 720×512 grid (3e-8) and ~106 on a 1440×1024 grid (1e-10); see the
         // module documentation.)
         let mut config = test_config();
         config.sponge_rate = 0.0;
@@ -1702,13 +1751,12 @@ mod tests {
     const GOLDEN_SNAPSHOT: &str =
         "7b53a0914f4d9c821535a0ccf9b160b63377e7c0725dac75ff20b0da4bfc938a";
 
-    #[test]
-    fn snapshot_golden_hash() {
+    /// SHA-256 of the snapshot of a fixed run of `bodies` on the 48×32 box, and the stats.
+    fn snapshot_digest(bodies: &Circling) -> (String, FluidStats) {
         let grid = test_grid();
         let mut solver = WakeSolver::new(grid, &test_config(), 1.5).expect("valid");
-        let bodies = Circling { radius: 0.6, rate: 2.0 };
         for s in 1..=4 {
-            solver.advance_to(0.1 * f64::from(s), &bodies).expect("finite");
+            solver.advance_to(0.1 * f64::from(s), bodies).expect("finite");
         }
         let mut snap = Snapshot::zeros(&grid);
         solver.snapshot_into(&mut snap);
@@ -1719,8 +1767,62 @@ mod tests {
                 hasher.update(value.to_bits().to_le_bytes());
             }
         }
-        let digest = hex::encode(hasher.finalize());
-        assert_eq!(digest, GOLDEN_SNAPSHOT, "stats {:?}", solver.stats());
+        (hex::encode(hasher.finalize()), solver.stats())
+    }
+
+    #[test]
+    fn snapshot_golden_hash() {
+        let (digest, stats) = snapshot_digest(&Circling::discs(0.6, 2.0));
+        assert_eq!(digest, GOLDEN_SNAPSHOT, "stats {stats:?}");
+    }
+
+    /// Like [`GOLDEN_SNAPSHOT`], for turning ellipses of aspect 2.25: exercises the elliptical
+    /// signed distance and the deformation velocity of the penalisation.
+    const GOLDEN_STRETCHED_SNAPSHOT: &str =
+        "b776dbb1e10227930ed33e3c5270d22c2a375476ff90bd5c2688ef7d3f4e1472";
+
+    #[test]
+    fn stretched_snapshot_golden_hash() {
+        let (digest, stats) = snapshot_digest(&Circling { radius: 0.6, rate: 2.0, aspect: 2.25 });
+        assert_eq!(digest, GOLDEN_STRETCHED_SNAPSHOT, "stats {stats:?}");
+    }
+
+    /// A disc turning in place does not stir still water (its material does not rotate: the
+    /// deformation flow of a disc is zero), while an ellipse turning in place drives the water
+    /// inside it with its irrotational deformation flow.
+    #[test]
+    fn a_turning_ellipse_stirs_the_water_with_its_deformation_flow() {
+        let grid = test_grid();
+        let turning = |semi: [f64; 2]| Shape { semi, axis: [1.0, 0.0], spin: 3.0, strain: 0.0 };
+        let mut solver = WakeSolver::new(grid, &test_config(), 1.5).expect("valid");
+        solver.advance_to(0.3, &Parked(turning([0.3, 0.3]))).expect("finite");
+        let mut snap = Snapshot::zeros(&grid);
+        solver.snapshot_into(&mut snap);
+        assert!(snap.u.iter().chain(&snap.v).chain(&snap.w).all(|&x| x == 0.0), "still water");
+
+        let ellipse = turning([0.6, 0.15]);
+        let mut solver = WakeSolver::new(grid, &test_config(), 1.5).expect("valid");
+        solver.advance_to(0.3, &Parked(ellipse)).expect("finite");
+        solver.snapshot_into(&mut snap);
+        // Deep inside (at least two mask widths from the outline) the water moves with the body.
+        let (mut worst, mut peak, mut deep) = (0.0f64, 0.0f64, 0);
+        for i in 0..grid.ny {
+            for j in 0..grid.nx {
+                let p = [grid.x0() + j as f64 * grid.dx, grid.y0() + i as f64 * grid.dx];
+                if ellipse.signed_distance(p) > -0.2 {
+                    continue;
+                }
+                let [du, dv] = ellipse.deformation_velocity(p);
+                let n = i * grid.nx + j;
+                let (u, v) = (f64::from(snap.u[n]), f64::from(snap.v[n]));
+                let (eu, ev) = (u - du, v - dv);
+                worst = worst.max((eu * eu + ev * ev).sqrt());
+                peak = peak.max((du * du + dv * dv).sqrt());
+                deep += 1;
+            }
+        }
+        assert!(deep >= 4 && peak > 0.5, "{deep} deep nodes, peak {peak}");
+        assert!(worst < 0.1 * peak, "worst {worst} vs peak {peak}");
     }
 
     /// Release-mode timing of full solver steps at production sizes (run with
@@ -1730,10 +1832,10 @@ mod tests {
     fn step_timing() {
         let aspect = 3456.0 / 2234.0;
         let config = crate::ember::EmberConfig::default().fluid;
-        for rows in [1024, 512] {
+        for rows in [config.rows, 1024, 512] {
             let grid = FluidGrid::for_canvas(aspect, rows, config.box_margin).expect("valid");
             let mut solver = WakeSolver::new(grid, &config, aspect).expect("valid");
-            let bodies = Circling { radius: 0.7, rate: 1.0 / 0.7 };
+            let bodies = Circling::discs(0.7, 1.0 / 0.7);
             let mut t = 0.0;
             for _ in 0..3 {
                 t += 1e-3;
