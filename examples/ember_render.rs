@@ -23,7 +23,7 @@
 //!
 //! ```text
 //! cargo run --release --example ember_render -- render --bodies bodies.json --out /tmp/ember \
-//!     --resolution 1728x1117 --config '{"look": {"floor_tau": 3.0}}' --frame-every 100 --video
+//!     --resolution 1728x1117 --config '{"tidal": {"max_aspect": 2.0}}' --frame-every 100 --video
 //! ```
 //!
 //! `bodies.json` is either an ember certificate (its `inputs.bodies[*].bits` and `inputs.seed`)
@@ -151,9 +151,12 @@ fn verify(path: &Path) -> Result<bool> {
     // follows from the frames digest: without one (a still-only certificate) only the still is.
     let expected_frames = certificate.outputs.frames_rgb48le_sha256.as_deref();
     let expected_still = certificate.outputs.still_rgb48le_sha256.as_str();
-    let positions = get_positions(inputs.bodies(), inputs.steps).positions;
+    let bodies = inputs.bodies();
+    let masses = app::ember_masses(&bodies)?;
+    let positions = get_positions(bodies, inputs.steps).positions;
     let request = EmberRequest {
         positions: &positions,
+        masses,
         frame_steps: &frame_steps,
         width: inputs.width,
         height: inputs.height,
@@ -349,11 +352,13 @@ fn render_orbit(args: &RenderArgs<'_>) -> Result<bool> {
     let paper_seed = app::ember_paper_seed(&app::parse_seed(&seed)?);
     fs::create_dir_all(args.out.join("frames"))?;
 
+    let masses = app::ember_masses(&bodies)?;
     let positions = get_positions(bodies, args.steps).positions;
     let frame_steps = app::ember_frame_schedule(args.steps);
     let video_mode = args.video || args.frame_every > 0;
     let request = EmberRequest {
         positions: &positions,
+        masses,
         frame_steps: &frame_steps,
         width,
         height,

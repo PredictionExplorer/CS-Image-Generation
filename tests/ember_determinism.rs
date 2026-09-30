@@ -1,7 +1,7 @@
 //! Cross-architecture golden tests of the ember edition.
 //!
-//! A small but complete ember render (fluid, ink, embers, paper, shading, frame stream) of a
-//! fixed orbit is hashed and compared with digests recorded on another machine. CI runs this file
+//! A small but complete ember render (tidal bodies, fluid, ink, paper, shading, frame stream) of
+//! a fixed orbit is hashed and compared with digests recorded on another machine. CI runs this file
 //! on `x86_64` Linux and `aarch64` macOS, so any architecture-dependent arithmetic in the ember
 //! path fails here.
 //!
@@ -18,12 +18,11 @@
 //! ```
 //!
 //! check that all renders print the same values (with `--include-ignored` that includes the
-//! 40-thread render) and that the ignored `the_golden_still_shows_embers` passes (the golden
-//! render must keep exercising ember memory), copy the printed `GOLDEN_FRAMES_SHA256`,
-//! `GOLDEN_STILL_SHA256`, `GOLDEN_FRAMES_WITH_CINNABAR` and `GOLDEN_PEAK_CINNABAR_NODES` (the
-//! last two are printed by the video renders) into the constants below, bump
-//! `ember::certificate::ALGORITHM_VERSION`, and verify the new values on both architectures
-//! before committing. A change that alters rendered bits usually moves the unit goldens in
+//! 40-thread render) and that the ignored `the_golden_render_stretches_its_bodies` passes (the
+//! golden render must keep exercising the tidal shapes), copy the printed `GOLDEN_FRAMES_SHA256`,
+//! `GOLDEN_STILL_SHA256`, `GOLDEN_CONTACT_EVENTS` and `GOLDEN_STILL_INK_NODES` into the constants
+//! below, bump `ember::certificate::ALGORITHM_VERSION` if published editions change, and verify
+//! the new values on both architectures before committing. A change that alters rendered bits usually moves the unit goldens in
 //! `src/ember/*.rs` too (`cargo test --release --lib ember` prints each new value in its assertion
 //! message); re-bless them the same way.
 
@@ -35,15 +34,16 @@ use three_body_problem::sim::{Body, get_positions};
 
 /// SHA-256 of the golden render's `rgb48le` frame stream.
 const GOLDEN_FRAMES_SHA256: &str =
-    "41369c65797a5520aab7cc834ab12d04196d135fb08446d2ca98283b88b6800c";
+    "7fbc90645520c4fc98d6ba9ab04d3c6f7163ff430dde0feeb397871ed2ecec55";
 /// SHA-256 of the golden render's still as `rgb48le`.
 const GOLDEN_STILL_SHA256: &str =
-    "5f3cf8dede3609c845291c2f34c26d5a8ca467e720c6e8871dc992a4a87e1ee6";
-/// `stats.frames_with_cinnabar` of the golden video.
-const GOLDEN_FRAMES_WITH_CINNABAR: u64 = 15;
-/// Cinnabar nodes of the golden video's most vermilion frame:
-/// `stats.peak_frame_cinnabar_fraction` is this over the [`view_nodes`] visible ink nodes.
-const GOLDEN_PEAK_CINNABAR_NODES: u32 = 845;
+    "cc7427d5e0ed1092116c7f98a14b2f890e8f742b8b7080540394ab1f0488e3ef";
+/// `stats.contact_events` of the golden render (the same in video and still-only mode: every
+/// frame interval is remapped either way).
+const GOLDEN_CONTACT_EVENTS: u64 = 310_043;
+/// Inked nodes of the golden still: `stats.still_ink_fraction` is this over the [`view_nodes`]
+/// visible ink nodes.
+const GOLDEN_STILL_INK_NODES: u32 = 37_473;
 
 const WIDTH: u32 = 96;
 const HEIGHT: u32 = 64;
@@ -64,18 +64,14 @@ fn golden_bodies() -> Vec<Body> {
     ]
 }
 
-/// A coarse but complete configuration in which every stage runs (the gate, both pigments,
-/// ember memory, the valve). One render costs about 1.5 s of CPU time in release builds (Apple
-/// M4 Max: 1.5 s wall on one thread, 1 s on three; more threads barely help a 90 × 64 fluid
-/// grid, and on a loaded machine they make it slower).
+/// A coarse but complete configuration in which every stage runs (the tidal shapes, the gate,
+/// the hold and the fade, the solid bodies, the valve). One render costs a few seconds of CPU
+/// time in release builds; more threads barely help a 96 × 64 fluid grid.
 ///
-/// On a 64-row grid the (enlarged) discs cannot spin their boundary layers up to the production
-/// gate of |ω| = 40, so the gate is lowered; the three figure-eight bodies follow each other
-/// about two fluid time units apart, so the hold is lengthened (3.0) until their waters meet in
-/// vermilion. `fresh_tau` is lengthened with it (0.25, so `hold / fresh_tau = 12 ≤ ln 10⁶`): the
-/// ink fields flush freshness below 10⁻¹² to 0, and the hold gain `e^{hold/fresh_tau}` must not
-/// lift that cut above 10⁻⁶ of full strength, which the configuration's validation enforces.
-/// Ember memory is the production default.
+/// On a 64-row grid the (enlarged) bodies cannot spin their boundary layers up to the production
+/// gate of |ω| = 40, so the gate is lowered. The golden orbit is short (about two fluid units), so
+/// the hold and the fade are a quarter of it each: fresh black, fading grey and the floor wash
+/// all appear in the frames.
 fn golden_config() -> EmberConfig {
     let mut config = EmberConfig::default();
     config.fluid.rows = 64;
@@ -87,8 +83,8 @@ fn golden_config() -> EmberConfig {
     config.contact.soak_depth = 0.12;
     config.contact.pre_roll = 1.0;
     config.contact.valve_lead = 0.2;
-    config.look.hold = 3.0;
-    config.look.fresh_tau = 0.25;
+    config.look.hold_fraction = 0.25;
+    config.look.fade_fraction = 0.25;
     config.paper.formation_modes = 64;
     config
 }
@@ -110,10 +106,13 @@ struct GoldenRun {
 
 /// Renders the golden orbit with `config` in a rayon pool of `threads` threads.
 fn render(threads: usize, mode: EmberMode, config: &EmberConfig) -> GoldenRun {
-    let positions = get_positions(golden_bodies(), STEPS).positions;
+    let bodies = golden_bodies();
+    let masses = std::array::from_fn(|b| bodies[b].mass);
+    let positions = get_positions(bodies, STEPS).positions;
     let schedule = golden_schedule();
     let request = EmberRequest {
         positions: &positions,
+        masses,
         frame_steps: &schedule,
         width: WIDTH,
         height: HEIGHT,
@@ -148,44 +147,41 @@ fn view_nodes() -> u32 {
     WIDTH * HEIGHT * q * q
 }
 
-/// The cinnabar node count behind `stats.peak_frame_cinnabar_fraction`, recovered exactly: the
-/// render divides an integer node count by [`view_nodes`] once, so the nearest integer to the
-/// product is that count, and dividing it again must give back the recorded fraction bit for
-/// bit.
-fn peak_cinnabar_nodes(stats: &EmberStats) -> u32 {
+/// The inked node count behind `stats.still_ink_fraction`, recovered exactly: the render divides
+/// an integer node count by [`view_nodes`] once, so the nearest integer to the product is that
+/// count, and dividing it again must give back the recorded fraction bit for bit.
+fn still_ink_nodes(stats: &EmberStats) -> u32 {
     let view = f64::from(view_nodes());
-    let fraction = stats.peak_frame_cinnabar_fraction;
+    let fraction = stats.still_ink_fraction;
     let nodes = (fraction * view).round();
     assert!((0.0..=view).contains(&nodes), "{fraction} of {view} nodes");
     assert_eq!(
         (nodes / view).to_bits(),
         fraction.to_bits(),
-        "peak_frame_cinnabar_fraction {fraction} is not a node count over {view} nodes"
+        "still_ink_fraction {fraction} is not a node count over {view} nodes"
     );
     nodes as u32
 }
 
-/// Asserts that a render reproduces the golden digests and, for a video render, the golden
-/// frame-level statistics; or prints them all when blessing.
+/// Asserts that a render reproduces the golden digests and statistics (the frames digest for a
+/// video render); or prints them all when blessing.
 fn assert_golden(label: &str, summary: &EmberSummary) {
     let stats = &summary.stats;
     if blessing() {
         println!("{label}: GOLDEN_FRAMES_SHA256 = {:?}", summary.frames_sha256);
         println!("{label}: GOLDEN_STILL_SHA256 = {}", summary.still_sha256);
-        if summary.frames_sha256.is_some() {
-            println!("{label}: GOLDEN_FRAMES_WITH_CINNABAR = {}", stats.frames_with_cinnabar);
-            println!("{label}: GOLDEN_PEAK_CINNABAR_NODES = {}", peak_cinnabar_nodes(stats));
-        }
+        println!("{label}: GOLDEN_CONTACT_EVENTS = {}", stats.contact_events);
+        println!("{label}: GOLDEN_STILL_INK_NODES = {}", still_ink_nodes(stats));
         println!("{label}: stats = {stats:?}");
         return;
     }
     if let Some(frames) = summary.frames_sha256.as_deref() {
         assert_eq!(frames, GOLDEN_FRAMES_SHA256, "{label}: frame stream digest changed");
-        // The frame-level statistics are part of the certificate's deterministic contract too.
-        assert_eq!(stats.frames_with_cinnabar, GOLDEN_FRAMES_WITH_CINNABAR, "{label}: {stats:?}");
-        assert_eq!(peak_cinnabar_nodes(stats), GOLDEN_PEAK_CINNABAR_NODES, "{label}: {stats:?}");
     }
     assert_eq!(summary.still_sha256, GOLDEN_STILL_SHA256, "{label}: still digest changed");
+    // The statistics are part of the certificate's deterministic contract too.
+    assert_eq!(stats.contact_events, GOLDEN_CONTACT_EVENTS, "{label}: {stats:?}");
+    assert_eq!(still_ink_nodes(stats), GOLDEN_STILL_INK_NODES, "{label}: {stats:?}");
 }
 
 #[test]
@@ -198,18 +194,16 @@ fn the_golden_video_matches_on_every_architecture() {
     assert_eq!(run.summary.frames_emitted, run.frames.len());
     assert_eq!(run.frames.last().expect("frames"), &run.summary.still);
 
-    // The golden orbit actually draws: fluid, contacts, sumi and vermilion.
+    // The golden orbit actually draws: fluid, contacts and sumi, with tidally stretched bodies.
     let stats = run.summary.stats;
     assert!(stats.fluid_steps > 100, "{stats:?}");
     assert!(stats.contact_events > 0, "{stats:?}");
     assert!(stats.still_ink_fraction > 0.01, "{stats:?}");
-    assert!(stats.still_cinnabar_fraction > 0.0, "{stats:?}");
-    // Frame-level cinnabar coverage: the still is one of the frames with vermilion, and no
-    // frame can show less than none.
-    assert!(stats.frames_with_cinnabar >= 1, "{stats:?}");
-    assert!(stats.frames_with_cinnabar <= run.frames.len() as u64, "{stats:?}");
-    assert!(stats.peak_frame_cinnabar_fraction >= stats.still_cinnabar_fraction, "{stats:?}");
-    assert!(stats.peak_frame_cinnabar_fraction <= 1.0, "{stats:?}");
+    assert!(run.summary.tidal_reference > 0.0, "{}", run.summary.tidal_reference);
+    // The look's timing is a fraction of the orbit.
+    let duration = run.summary.duration;
+    assert_eq!(run.summary.hold_time, 0.25 * duration);
+    assert_eq!(run.summary.fade_time, 0.25 * duration);
     // The first frames precede the pre-roll: bare paper, identical to each other.
     assert_eq!(run.frames[0], run.frames[1]);
     assert_ne!(run.frames[0], run.summary.still);
@@ -221,10 +215,6 @@ fn still_only_mode_reproduces_the_golden_still() {
     assert!(run.frames.is_empty(), "still-only renders never call the sink");
     assert_eq!(run.summary.frames_emitted, 0);
     assert_eq!(run.summary.frames_sha256, None);
-    // Only the still is shaded, so only the still is counted.
-    let stats = run.summary.stats;
-    assert_eq!(stats.frames_with_cinnabar, u64::from(stats.still_cinnabar_fraction > 0.0));
-    assert_eq!(stats.peak_frame_cinnabar_fraction, stats.still_cinnabar_fraction);
     assert_golden("still only, 2 threads", &run.summary);
 }
 
@@ -243,24 +233,19 @@ fn a_large_pool_with_a_capped_fluid_pool_reproduces_every_bit() {
     assert_golden("video, 40 threads", &run.summary);
 }
 
-/// The golden still must show embers: vermilion that ember memory keeps after the fresh
-/// meetings have gone, so that the golden digests cover the ember arithmetic. Two renders, so it
-/// runs on request (`--include-ignored`, as the re-blessing instructions say).
+/// The golden render must exercise the tidal shapes: with rigid discs (`max_aspect = 1`) the
+/// same orbit draws a different still, so the golden digests cover the shape arithmetic. Two
+/// renders, so it runs on request (`--include-ignored`, as the re-blessing instructions say).
 #[test]
 #[ignore = "two extra renders; run when re-blessing the golden digests"]
-fn the_golden_still_shows_embers() {
-    let with_memory = render(2, EmberMode::StillOnly, &golden_config());
+fn the_golden_render_stretches_its_bodies() {
+    let stretched = render(2, EmberMode::StillOnly, &golden_config());
     let mut config = golden_config();
-    config.look.ember_tau = None;
-    let without = render(2, EmberMode::StillOnly, &config);
-    let (glowing, fresh) = (with_memory.summary.stats, without.summary.stats);
+    config.tidal.max_aspect = 1.0;
+    let discs = render(2, EmberMode::StillOnly, &config);
     println!(
-        "cinnabar fraction of the still: {} with ember memory, {} without",
-        glowing.still_cinnabar_fraction, fresh.still_cinnabar_fraction
+        "ink fraction of the still: {} stretched, {} as discs",
+        stretched.summary.stats.still_ink_fraction, discs.summary.stats.still_ink_fraction
     );
-    assert!(
-        glowing.still_cinnabar_fraction > fresh.still_cinnabar_fraction,
-        "ember memory adds no vermilion to the golden still: {glowing:?} vs {fresh:?}"
-    );
-    assert_ne!(with_memory.summary.still, without.summary.still);
+    assert_ne!(stretched.summary.still, discs.summary.still, "the shapes change nothing");
 }

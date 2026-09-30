@@ -20,7 +20,7 @@ use super::ink::{InkDecay, InkFields, NodeGrid, remap};
 use super::look::Look;
 use super::math;
 use super::optics::Optics;
-use super::orbit::{BodyMotion, BodyTrack};
+use super::orbit::{BodyMotion, BodyState, BodyTrack};
 use super::paper::{KozoSheet, check_fibre_count};
 use super::trace::{ContactRules, FlowWindow};
 use crate::sim::Sha3RandomByteStream;
@@ -30,10 +30,12 @@ const MAX_SIDE: u32 = 16_384;
 
 /// Most threads the fluid solver uses.
 ///
-/// Its transforms work on the rows and columns of a grid of about 1440×1024 nodes: too little
-/// work per task to feed very many threads. On a 64-core Threadripper PRO 9985WX one step took
-/// 23.6 ms with 16 or 32 threads, 26.4 ms with 64 and 32.2 ms with 128. The solver therefore runs
-/// in its own pool of at most this many threads, while the ink remap and the shading, which keep
+/// Its transforms work on the rows and columns of a grid of 2160×1536 nodes: too little work per
+/// task to feed very many threads. On a 64-core Threadripper PRO 9985WX one step of that grid
+/// took 55.8 ms with 16 threads, 48.9 ms with 32, 47.9 ms with 48, 50.2 ms with 64 and 63.6 ms
+/// with 96 (measured on the loaded production host; on the earlier 1440×1024 grid, idle: 23.6 ms
+/// with 16 or 32 threads, 26.4 ms with 64, 32.2 ms with 128). The solver therefore runs in its
+/// own pool of at most this many threads, while the ink remap and the shading, which keep
 /// scaling, use the caller's pool. Results never depend on the thread count.
 const FLUID_MAX_THREADS: usize = 32;
 
@@ -70,6 +72,9 @@ pub enum EmberMode {
 pub struct EmberRequest<'a> {
     /// Raw recorded orbit, `positions[body][knot]`: exactly three bodies, at least two knots.
     pub positions: &'a [Vec<Vector3<f64>>],
+    /// The bodies' masses (finite and positive), in the order of `positions`: they set the tidal
+    /// field that stretches the bodies.
+    pub masses: [f64; 3],
     /// Recorded knots to render as frames: strictly increasing, the last one must be the final
     /// knot (the still). Use the main video's checkpoints so both videos stay in step.
     pub frame_steps: &'a [usize],
@@ -127,10 +132,9 @@ pub struct EmberProjection {
 ///
 /// Node fractions count the visible ink nodes, `width·height·q²` (`q` =
 /// [`RasterConfig::supersample`](super::config::RasterConfig::supersample)), the margin
-/// excluded. A node "carries cinnabar" when the look gives it a positive cinnabar load (a fresh
-/// meeting or a glowing ember). Every count is an integer summed or maximised exactly, and every
-/// fraction is one such count divided by the node count, so the statistics are identical on
-/// every architecture and for every thread count.
+/// excluded. Every count is an integer summed exactly, and every fraction is one such count
+/// divided by the node count, so the statistics are identical on every architecture and for
+/// every thread count.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmberStats {
@@ -148,18 +152,8 @@ pub struct EmberStats {
     pub contact_events: u64,
     /// Fraction of the still's ink nodes carrying any ink.
     pub still_ink_fraction: f64,
-    /// Fraction of the still's ink nodes carrying cinnabar.
-    pub still_cinnabar_fraction: f64,
     /// Pixels of the still that needed gamut mapping.
     pub still_gamut_mapped_pixels: u64,
-    /// Shaded frames in which at least one visible ink node carries cinnabar: every frame in
-    /// [`EmberMode::Video`], only the still (so 0 or 1) in [`EmberMode::StillOnly`]. With
-    /// `still_cinnabar_fraction` it tells, without opening the media, whether the video shows
-    /// vermilion even when the still has none.
-    pub frames_with_cinnabar: u64,
-    /// Largest fraction, over the shaded frames, of the visible ink nodes carrying cinnabar
-    /// (equal to `still_cinnabar_fraction` in [`EmberMode::StillOnly`]).
-    pub peak_frame_cinnabar_fraction: f64,
 }
 
 /// Wall-clock timings of a render in seconds (informational, not deterministic).
@@ -205,6 +199,12 @@ pub struct EmberSummary {
     pub duration: f64,
     /// Fluid time at which the bodies stopped inking.
     pub valve_time: f64,
+    /// Time for which fresh ink stays black, in fluid units (`look.hold_fraction` of the orbit).
+    pub hold_time: f64,
+    /// E-folding time of the fade, in fluid units (`look.fade_fraction` of the orbit).
+    pub fade_time: f64,
+    /// The orbit's reference tidal anisotropy (see the tidal model in `orbit`).
+    pub tidal_reference: f64,
     /// Fluid grid `[nx, ny]`.
     pub fluid_grid: [usize; 2],
     /// Fluid grid spacing.
@@ -229,9 +229,9 @@ impl EmberSummary {
 
 /// Everything [`render_ember`] checks and derives before the fluid starts.
 ///
-/// Planning costs one projection of the orbit (about 50 ms for a million recorded steps) and
-/// allocates nothing proportional to the output, so callers can run it long before rendering to
-/// reject an orbit the edition cannot draw. [`render_ember`] plans the request itself; see
+/// Planning costs one projection of the orbit and its tables (about 0.1 s for a million recorded
+/// steps) and allocates nothing proportional to the output, so callers can run it long before
+/// rendering to reject an orbit the edition cannot draw. [`render_ember`] plans the request itself; see
 /// [`plan_ember`] for what a successful plan does and does not guarantee.
 #[derive(Debug)]
 pub struct EmberPlan {
@@ -296,7 +296,7 @@ pub fn plan_ember(request: &EmberRequest<'_>) -> EmberResult<EmberPlan> {
     validate_schedule(request.frame_steps, knots)?;
 
     let aspect = f64::from(request.width) / f64::from(request.height);
-    let track = BodyTrack::new(request.positions, aspect, config)?;
+    let track = BodyTrack::new(request.positions, request.masses, aspect, config)?;
     let t_valve = valve_time(track.duration(), config)?;
     let grid = FluidGrid::for_canvas(aspect, config.fluid.rows, config.fluid.box_margin)?;
     let nodes = NodeGrid::new(
@@ -306,7 +306,7 @@ pub fn plan_ember(request: &EmberRequest<'_>) -> EmberResult<EmberPlan> {
         config.raster.ink_margin,
     )?;
     let rules = ContactRules {
-        reach: config.fluid.body_radius + config.contact.soak_depth,
+        soak_depth: config.contact.soak_depth,
         vorticity_gate: config.contact.vorticity_gate,
         t_on: config.contact.pre_roll,
         t_valve,
@@ -354,7 +354,7 @@ pub fn render_ember(
         request.frame_steps.len()
     );
 
-    let look = Look::new(&config.look);
+    let look = Look::new(&config.look, duration);
     let optics = Optics::new();
     let mut paper_rng = Sha3RandomByteStream::new(request.paper_seed, 0.0, 1.0, 1.0, 1.0);
     let sheet = KozoSheet::generate(request.width, request.height, &config.paper, &mut paper_rng)?;
@@ -366,7 +366,7 @@ pub fn render_ember(
     let mut next_fields = InkFields::zeros(&nodes);
     let mut window = SnapshotWindow::new(&grid);
     in_pool(fluid_pool.as_ref(), || solver.snapshot_into(window.first_mut()));
-    window.first_bodies = positions_of(&track, 0.0);
+    window.first_bodies = track.bodies_at(0.0);
 
     let pixels = request.width as usize * request.height as usize;
     let mut rgb = vec![0u16; pixels * 3];
@@ -377,8 +377,6 @@ pub fn render_ember(
     let mut frames_emitted = 0;
     // Visible ink nodes (the margin excluded): the denominator of the node fractions.
     let view_nodes = (nodes.width * nodes.height * nodes.supersample * nodes.supersample) as f64;
-    // Most cinnabar nodes in one shaded frame (an exact integer maximum).
-    let mut peak_cinnabar_nodes = 0u64;
 
     let count = request.frame_steps.len();
     let mut previous_step = 0;
@@ -401,7 +399,7 @@ pub fn render_ember(
                 solver.advance_to(target, &track)?;
                 debug_assert_eq!(solver.time(), target, "the solver lands on snapshot times");
                 solver.snapshot_into(window.push());
-                window.push_bodies(positions_of(&track, target));
+                window.push_bodies(track.bodies_at(target));
             }
             Ok(())
         })?;
@@ -414,13 +412,11 @@ pub fn render_ember(
             let dt = t_frame - t_prev;
             let decay = InkDecay {
                 frame_time: t_frame,
-                fresh_tau: config.look.fresh_tau,
-                fresh_fade: math::exp(-dt / config.look.fresh_tau),
+                fade_tau: look.fade_tau(),
+                fresh_fade: math::exp(-dt / look.fade_tau()),
                 floor_fade: config.look.floor_tau.map_or(1.0, |tau| math::exp(-dt / tau)),
-                ember_fade: config.look.ember_tau.map_or(0.0, |tau| math::exp(-dt / tau)),
             };
-            let remap_stats =
-                remap(&fields, &mut next_fields, &nodes, &flow, &rules, &decay, &look);
+            let remap_stats = remap(&fields, &mut next_fields, &nodes, &flow, &rules, &decay);
             if remap_stats.non_finite_origins > 0 {
                 return Err(EmberError::NonFinite { stage: "ink trace", time: t_frame });
             }
@@ -438,11 +434,8 @@ pub fn render_ember(
             }
             encode_le(&rgb, &mut rgb48le);
             timings.shade_seconds += clock.elapsed().as_secs_f64();
-            stats.frames_with_cinnabar += u64::from(shade_stats.cinnabar_nodes > 0);
-            peak_cinnabar_nodes = peak_cinnabar_nodes.max(shade_stats.cinnabar_nodes);
             if is_last {
                 stats.still_ink_fraction = shade_stats.inked_nodes as f64 / view_nodes;
-                stats.still_cinnabar_fraction = shade_stats.cinnabar_nodes as f64 / view_nodes;
                 stats.still_gamut_mapped_pixels = shade_stats.gamut_mapped;
             }
             if request.mode == EmberMode::Video {
@@ -477,7 +470,6 @@ pub fn render_ember(
         }
     }
 
-    stats.peak_frame_cinnabar_fraction = peak_cinnabar_nodes as f64 / view_nodes;
     let fluid: FluidStats = solver.stats();
     stats.fluid_steps = fluid.steps;
     stats.min_dt = fluid.min_dt;
@@ -496,6 +488,9 @@ pub fn render_ember(
             .then(|| hex::encode(stream_hasher.finalize())),
         duration,
         valve_time: t_valve,
+        hold_time: look.hold(),
+        fade_time: look.fade_tau(),
+        tidal_reference: track.tidal_reference(),
         fluid_grid: [grid.nx, grid.ny],
         fluid_dx: grid.dx,
         ink_grid: [nodes.cols, nodes.rows],
@@ -549,15 +544,17 @@ fn validate_schedule(steps: &[usize], knots: usize) -> EmberResult<()> {
 /// S = max(⌈Δt / max_snapshot_interval⌉, ⌈max_b path_b / (max_snapshot_travel·body_radius)⌉, 1)
 /// ```
 ///
-/// with `Δt = knot_time(to) - knot_time(from)` and `path_b` body `b`'s path length along its
-/// recorded polyline, i.e. the sum of `|pos_b(knot_time(k)) - pos_b(knot_time(k - 1))|` over
-/// `k ∈ (from, to]` (not the displacement between the frames, which misses a body that turns
-/// back). No interval is then longer than `max_snapshot_interval` or lets a body move more than
+/// with `Δt = knot_time(to) - knot_time(from)` and `path_b` the farthest any material of body
+/// `b` can travel: the sum over `k ∈ (from, to]` of its centre's step
+/// `|pos_b(t_k) - pos_b(t_{k-1})|` along the recorded polyline (not the displacement between the
+/// frames, which misses a body that turns back) plus its outline's deformation speed at `t_{k-1}`
+/// times `t_k - t_{k-1}` (a tidally turning ellipse sweeps water even where its centre rests). No
+/// interval is then longer than `max_snapshot_interval` or lets a body move more than
 /// `max_snapshot_travel` radii. `from == to` returns 0: the frame shows the previous frame's
 /// time and nothing advances.
 ///
-/// `knot_time(k)` is the fluid time of recorded knot `k` (`BodyTrack::knot_time` in the
-/// pipeline; strictly increasing), and `motion` gives the body positions at those times.
+/// `knot_time(k)` is the fluid time `t_k` of recorded knot `k` (`BodyTrack::knot_time` in the
+/// pipeline; strictly increasing), and `motion` gives the bodies at those times.
 fn snapshot_intervals<M: BodyMotion + ?Sized>(
     motion: &M,
     knot_time: impl Fn(usize) -> f64,
@@ -571,23 +568,20 @@ fn snapshot_intervals<M: BodyMotion + ?Sized>(
     let dt = knot_time(to) - knot_time(from);
     let by_time = (dt / fluid.max_snapshot_interval).ceil();
     let mut path = [0.0f64; 3];
-    let mut previous = positions_of(motion, knot_time(from));
+    let mut previous = motion.bodies_at(knot_time(from));
     for k in from + 1..=to {
-        let current = positions_of(motion, knot_time(k));
-        for b in 0..3 {
-            let (dx, dy) = (current[b][0] - previous[b][0], current[b][1] - previous[b][1]);
-            path[b] += (dx * dx + dy * dy).sqrt();
+        let current = motion.bodies_at(knot_time(k));
+        let step = knot_time(k) - knot_time(k - 1);
+        for (length, (now, before)) in path.iter_mut().zip(current.iter().zip(&previous)) {
+            let (dx, dy) =
+                (now.position[0] - before.position[0], now.position[1] - before.position[1]);
+            *length += (dx * dx + dy * dy).sqrt() + before.shape.deformation_speed() * step;
         }
         previous = current;
     }
     let longest = path.iter().copied().fold(0.0, f64::max);
     let by_travel = (longest / (fluid.max_snapshot_travel * fluid.body_radius)).ceil();
     (by_time.max(by_travel).max(1.0)) as usize
-}
-
-/// World positions of the three bodies at fluid time `t`.
-fn positions_of<M: BodyMotion + ?Sized>(motion: &M, t: f64) -> [[f64; 2]; 3] {
-    motion.bodies_at(t).map(|body| body.position)
 }
 
 /// Little-endian bytes of 16-bit samples (explicit, so the stream is identical on any host).
@@ -603,12 +597,12 @@ fn encode_le(samples: &[u16], out: &mut [u8]) {
 struct SnapshotWindow {
     /// `snapshots[0]` is the previous frame's last snapshot; `len` are in use.
     snapshots: Vec<Snapshot>,
-    /// Body positions at each snapshot in use.
-    bodies: Vec<[[f64; 2]; 3]>,
+    /// The bodies at each snapshot in use.
+    bodies: Vec<[BodyState; 3]>,
     /// Snapshots in use.
     len: usize,
-    /// Body positions of `snapshots[0]` (set before the first frame).
-    first_bodies: [[f64; 2]; 3],
+    /// The bodies at `snapshots[0]` (set before the first frame).
+    first_bodies: [BodyState; 3],
     grid: FluidGrid,
 }
 
@@ -618,7 +612,7 @@ impl SnapshotWindow {
             snapshots: vec![Snapshot::zeros(grid)],
             bodies: Vec::new(),
             len: 1,
-            first_bodies: [[0.0; 2]; 3],
+            first_bodies: [BodyState::default(); 3],
             grid: *grid,
         }
     }
@@ -643,7 +637,7 @@ impl SnapshotWindow {
         &mut self.snapshots[self.len - 1]
     }
 
-    fn push_bodies(&mut self, bodies: [[f64; 2]; 3]) {
+    fn push_bodies(&mut self, bodies: [BodyState; 3]) {
         self.bodies.push(bodies);
     }
 
@@ -651,7 +645,7 @@ impl SnapshotWindow {
         &self.snapshots[..self.len]
     }
 
-    fn bodies(&self) -> &[[[f64; 2]; 3]] {
+    fn bodies(&self) -> &[[BodyState; 3]] {
         &self.bodies
     }
 
@@ -684,7 +678,6 @@ impl PaperCache {
 #[derive(Clone, Copy, Debug)]
 struct ShadeStats {
     inked_nodes: u64,
-    cinnabar_nodes: u64,
     gamut_mapped: u64,
     finite: bool,
 }
@@ -710,8 +703,7 @@ impl Shader<'_> {
             .par_chunks_mut(nodes.width * 3)
             .enumerate()
             .map(|(row, out)| {
-                let mut stats =
-                    ShadeStats { inked_nodes: 0, cinnabar_nodes: 0, gamut_mapped: 0, finite: true };
+                let mut stats = ShadeStats { inked_nodes: 0, gamut_mapped: 0, finite: true };
                 for col in 0..nodes.width {
                     let pixel = row * nodes.width + col;
                     let paper = self.sheet.sample(pixel);
@@ -721,22 +713,20 @@ impl Shader<'_> {
                         let base =
                             (nodes.margin + q * row + i) * nodes.cols + nodes.margin + q * col;
                         for n in base..base + q {
-                            let loads = self.look.loads(
+                            let carbon = self.look.carbon(
                                 fields.presence[n],
                                 [
                                     fields.freshness[0][n],
                                     fields.freshness[1][n],
                                     fields.freshness[2][n],
                                 ],
-                                fields.ember[n],
                             );
-                            let sample = if loads.is_bare() {
+                            let sample = if carbon == 0.0 {
                                 self.paper.xyz[pixel]
                             } else {
                                 bare = false;
                                 stats.inked_nodes += 1;
-                                stats.cinnabar_nodes += u64::from(loads.cinnabar > 0.0);
-                                self.optics.reflect_xyz(loads, paper)
+                                self.optics.reflect_xyz(carbon, paper)
                             };
                             for (acc, value) in xyz.iter_mut().zip(sample) {
                                 *acc += value;
@@ -758,10 +748,9 @@ impl Shader<'_> {
             })
             .collect();
         rows.into_iter().fold(
-            ShadeStats { inked_nodes: 0, cinnabar_nodes: 0, gamut_mapped: 0, finite: true },
+            ShadeStats { inked_nodes: 0, gamut_mapped: 0, finite: true },
             |acc, row| ShadeStats {
                 inked_nodes: acc.inked_nodes + row.inked_nodes,
-                cinnabar_nodes: acc.cinnabar_nodes + row.cinnabar_nodes,
                 gamut_mapped: acc.gamut_mapped + row.gamut_mapped,
                 finite: acc.finite && row.finite,
             },
@@ -772,7 +761,7 @@ impl Shader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ember::orbit::BodyState;
+    use crate::ember::orbit::{BodyState, Shape};
 
     /// Fluid time between consecutive recorded knots of the synthetic motions.
     const KNOT_DT: f64 = 1e-3;
@@ -796,7 +785,11 @@ mod tests {
                 let (s, sign) =
                     if b == 0 && t > self.turn { (2.0 * self.turn - t, -1.0) } else { (t, 1.0) };
                 let [vx, vy] = self.velocity[b];
-                BodyState { position: [vx * s, vy * s], velocity: [sign * vx, sign * vy] }
+                BodyState {
+                    position: [vx * s, vy * s],
+                    velocity: [sign * vx, sign * vy],
+                    shape: Shape::disc(0.05),
+                }
             })
         }
 
@@ -815,22 +808,46 @@ mod tests {
     fn snapshot_travel_bound_binds_for_a_fast_body_along_its_path() {
         let fluid = EmberConfig::default().fluid;
         // Knots 0..=137: Δt = 0.137, so the time bound is ⌈0.137/0.0025⌉ = ⌈54.8⌉ = 55. Body 0
-        // travels 21.3·0.137 = 2.9181 along its path, so the travel bound (0.5 radii of 0.05) is
-        // ⌈2.9181/0.025⌉ = ⌈116.72⌉ = 117. Its displacement, 21.3·(0.14 - 0.137) = 0.0639, would
-        // need only ⌈2.56⌉ = 3.
-        assert_eq!((fluid.max_snapshot_interval, fluid.max_snapshot_travel), (2.5e-3, 0.5));
+        // travels 21.3·0.137 = 2.9181 along its path, so the travel bound (0.28 radii of 0.05) is
+        // ⌈2.9181/0.014⌉ = ⌈208.4⌉ = 209. Its displacement, 21.3·(0.14 - 0.137) = 0.0639, would
+        // need only ⌈4.56⌉ = 5.
+        assert_eq!((fluid.max_snapshot_interval, fluid.max_snapshot_travel), (2.5e-3, 0.28));
         assert_eq!(fluid.body_radius, 0.05);
         let intervals = snapshot_intervals(&fast_shuttle(), knot_time, 0, 137, &fluid);
-        assert_eq!(intervals, 117);
-        // A later frame counts only its own knots: 21.3·0.05/0.025 = 42.6 → 43 (time bound ≈ 20).
-        assert_eq!(snapshot_intervals(&fast_shuttle(), knot_time, 40, 90, &fluid), 43);
+        assert_eq!(intervals, 209);
+        // A later frame counts only its own knots: 21.3·0.05/0.014 = 76.1 → 77 (time bound ≈ 20).
+        assert_eq!(snapshot_intervals(&fast_shuttle(), knot_time, 40, 90, &fluid), 77);
+    }
+
+    /// A body that turns in place still sweeps water: its outline's deformation speed counts.
+    #[test]
+    fn snapshot_travel_bound_counts_a_turning_outline() {
+        struct Spinner(Shape);
+        impl BodyMotion for Spinner {
+            fn bodies_at(&self, _t: f64) -> [BodyState; 3] {
+                [BodyState { position: [0.0; 2], velocity: [0.0; 2], shape: self.0 }; 3]
+            }
+
+            fn speed_bound(&self, _t: f64) -> f64 {
+                self.0.deformation_speed()
+            }
+        }
+        let fluid = EmberConfig::default().fluid;
+        // Aspect 2.25 at the disc's area, turning at 200 rad per fluid unit:
+        // k = 200·(a² - b²)/(a² + b²) ≈ 134.0, deformation speed k·a ≈ 10.05. Over Δt = 0.137
+        // that is ≈ 1.377 of travel, ⌈98.4⌉ = 99 intervals, while the centres never move.
+        let (a, b) = (0.075, 0.05 * 0.05 / 0.075);
+        let shape = Shape { semi: [a, b], axis: [1.0, 0.0], spin: 200.0, strain: 0.0 };
+        assert!((shape.deformation_speed() - 10.0515).abs() < 1e-4);
+        assert_eq!(snapshot_intervals(&Spinner(shape), knot_time, 0, 137, &fluid), 99);
+        assert_eq!(snapshot_intervals(&Spinner(Shape::disc(0.05)), knot_time, 0, 137, &fluid), 55);
     }
 
     #[test]
     fn snapshot_time_bound_binds_for_slow_bodies() {
         let fluid = EmberConfig::default().fluid;
         let slow = Shuttle { velocity: [[0.3, 0.4], [0.4, 0.0], [0.0, -0.3]], turn: 1.0 };
-        // Δt = 0.137: ⌈54.8⌉ = 55 by time; the fastest path, 0.5·0.137 = 0.0685, needs ⌈2.74⌉ = 3.
+        // Δt = 0.137: ⌈54.8⌉ = 55 by time; the fastest path, 0.5·0.137 = 0.0685, needs ⌈4.89⌉ = 5.
         assert_eq!(snapshot_intervals(&slow, knot_time, 0, 137, &fluid), 55);
         // A single short knot interval still gets one snapshot interval.
         assert_eq!(snapshot_intervals(&slow, knot_time, 5, 6, &fluid), 1);
@@ -895,6 +912,7 @@ mod tests {
         let frame_steps = crate::render::main_video_checkpoints(steps);
         let request = |config| EmberRequest {
             positions: &positions,
+            masses: [1.0; 3],
             frame_steps: &frame_steps,
             width: 96,
             height: 64,

@@ -1,10 +1,10 @@
 //! Configuration of the ember edition.
 //!
-//! [`EmberConfig::default`] is the production look: the museum-lab prototype's vermilion look
-//! ("the ember alone") plus ember memory (`look.ember_tau = 1.0`), the product's one addition.
-//! Every field is recorded in the per-package certificate (`metadata/ember.json`), because the
-//! rendered bits are a pure function of the orbit, the output size, the paper seed and this
-//! configuration.
+//! [`EmberConfig::default`] is the production look: pine-soot sumi on kozo, laid by three
+//! tidally stretched bodies, black while fresh and fading to a pale grey wash over about six
+//! seconds of the film. Every field is recorded in the per-package certificate
+//! (`metadata/ember.json`), because the rendered bits are a pure function of the orbit, the
+//! output size, the paper seed and this configuration.
 //!
 //! Units: lengths are fluid/world units (the canvas spans `y ∈ [-1, 1]`), times are fluid time
 //! units (the median body speed is [`FluidConfig::reference_speed`]), paper sizes are millimetres
@@ -25,7 +25,9 @@ pub struct EmberConfig {
     pub projection: ProjectionConfig,
     /// When and where water picks up ink.
     pub contact: ContactConfig,
-    /// Tone law and the vermilion accent.
+    /// The bodies' tidal stretching.
+    pub tidal: TidalConfig,
+    /// Tone law.
     pub look: LookConfig,
     /// The kozo sheet.
     pub paper: PaperConfig,
@@ -46,7 +48,7 @@ pub struct FluidConfig {
     pub reynolds: f64,
     /// Median body speed; sets the orbit-to-fluid time map.
     pub reference_speed: f64,
-    /// Radius of every body disc.
+    /// Radius of the disc of equal area to every body (the bodies are ellipses of this area).
     pub body_radius: f64,
     /// Courant number of the adaptive time step.
     pub cfl: f64,
@@ -64,7 +66,8 @@ pub struct FluidConfig {
     pub hyperviscosity: f64,
     /// Largest fluid-time gap between consecutive velocity snapshots used for tracing.
     pub max_snapshot_interval: f64,
-    /// Largest body travel between consecutive snapshots, in body radii.
+    /// Largest body travel between consecutive snapshots, in body radii (`body_radius`); with
+    /// stretched bodies this should stay below the short semi-axis `R/√max_aspect`.
     pub max_snapshot_travel: f64,
 }
 
@@ -91,20 +94,38 @@ pub struct ContactConfig {
     pub valve_lead: f64,
 }
 
-/// Tone law and vermilion accent. The default is the museum-lab look `vermilion` ("the ember
-/// alone": `ember(1.2, 0.06, p_min = 0.3)` over the reservoir feed
-/// `ExpFeed(tau = 0.12, floor = 0.0004)` with a 0.5 hold) plus ember memory
-/// (`ember_tau = 1.0`).
+/// Tidal stretching of the bodies (docs/ember-design.md §3.10): each body is an ellipse of the
+/// disc's area, stretched along the principal axis of the other two bodies' tidal field.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TidalConfig {
+    /// Largest axis ratio `a/b`; 1 keeps the bodies discs.
+    pub max_aspect: f64,
+    /// Quantile of the orbit's tidal anisotropy at which a body shows half its extra stretch:
+    /// 0.95 keeps the bodies nearly round most of the time and stretches them at the closest
+    /// 5% of moments.
+    pub stretch_quantile: f64,
+    /// Plummer softening length of the tidal field (world units).
+    pub softening: f64,
+}
+
+/// Tone law: the museum-lab reservoir feed with a hold, timed as a fraction of the film.
+///
+/// A parcel's ink is full strength for `hold_fraction·T` after a body last inked it, then decays
+/// with the e-folding time `fade_fraction·T` towards the `floor` wash, where `T` is the orbit's
+/// duration in fluid units. The film shows the whole orbit, so these are fractions of the film:
+/// the defaults hold for 0.8 s and fade with a 0.75 s time constant in a 30-second film, and the
+/// ink reaches the floor about six seconds after it was laid, on every orbit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LookConfig {
     /// Carbon load of ink older than the reservoir memory (the palest wash).
     pub floor: f64,
-    /// E-folding age of the reservoir feed.
-    pub fresh_tau: f64,
-    /// Age below which ink is full strength. At most `ln(10⁶) ≈ 13.8` times `fresh_tau` (see
-    /// [`EmberConfig::validate`]).
-    pub hold: f64,
+    /// E-folding time of the fade, as a fraction of the orbit's duration.
+    pub fade_fraction: f64,
+    /// Time for which fresh ink stays full strength, as a fraction of the orbit's duration. At
+    /// most `ln(10⁶) ≈ 13.8` times `fade_fraction` (see [`EmberConfig::validate`]).
+    pub hold_fraction: f64,
     /// Optional e-folding age of the presence `P`: the floor wash fades with it, and so (the
     /// tone law caps every strength at `P`) does the whole deposit. `None` keeps it forever.
     ///
@@ -112,21 +133,6 @@ pub struct LookConfig {
     /// a certificate cannot silently lose the setting.
     #[serde(deserialize_with = "Option::deserialize")]
     pub floor_tau: Option<f64>,
-    /// Ember memory: cinnabar that formed where two fresh inks met lingers in the water and cools
-    /// with this e-folding age, showing (crisply) while hotter than `meeting_threshold`. `None`
-    /// is the prototype's rule (vermilion only while both inks are fresh), under which the
-    /// step-1M still of most orbits has no vermilion at all.
-    ///
-    /// Required in JSON (as `null` or a number): a missing key is an error rather than the
-    /// prototype's rule.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub ember_tau: Option<f64>,
-    /// Cinnabar load per unit of shared fresh ink.
-    pub cinnabar_strength: f64,
-    /// Fraction of the carbon kept where cinnabar is laid down.
-    pub carbon_keep: f64,
-    /// Two bodies' ink must both exceed this strength for cinnabar to appear.
-    pub meeting_threshold: f64,
 }
 
 /// The kozo sheet: formation (flocs) and visible fibres.
@@ -196,12 +202,12 @@ pub struct RasterConfig {
 }
 
 impl Default for EmberConfig {
-    /// The production look: the museum-lab prototype's vermilion look ("the ember alone") on the
-    /// masters' fluid, plus ember memory (`look.ember_tau = Some(1.0)`).
+    /// The production look: sumi laid by tidally stretched bodies, fading to grey over about six
+    /// seconds of the film, on the masters' fluid resolved 1.5 times more finely.
     fn default() -> Self {
         Self {
             fluid: FluidConfig {
-                rows: 1024,
+                rows: 1536,
                 box_margin: 0.35,
                 reynolds: 300.0,
                 reference_speed: 1.0,
@@ -214,7 +220,7 @@ impl Default for EmberConfig {
                 sponge_pad: 0.06,
                 hyperviscosity: 144.0,
                 max_snapshot_interval: 2.5e-3,
-                max_snapshot_travel: 0.5,
+                max_snapshot_travel: 0.28,
             },
             projection: ProjectionConfig { fill: 0.78 },
             contact: ContactConfig {
@@ -223,15 +229,12 @@ impl Default for EmberConfig {
                 pre_roll: 0.5,
                 valve_lead: 0.25,
             },
+            tidal: TidalConfig { max_aspect: 3.0, stretch_quantile: 0.95, softening: 0.1 },
             look: LookConfig {
                 floor: 0.0004,
-                fresh_tau: 0.12,
-                hold: 0.5,
+                fade_fraction: 0.75 / 30.0,
+                hold_fraction: 0.8 / 30.0,
                 floor_tau: None,
-                ember_tau: Some(1.0),
-                cinnabar_strength: 1.2,
-                carbon_keep: 0.06,
-                meeting_threshold: 0.3,
             },
             paper: PaperConfig {
                 sheet_width_mm: 1490.0,
@@ -258,7 +261,7 @@ impl Default for EmberConfig {
                     margin_mm: 15.0,
                 },
             },
-            raster: RasterConfig { supersample: 2, ink_margin: 0.15 },
+            raster: RasterConfig { supersample: 3, ink_margin: 0.15 },
         }
     }
 }
@@ -284,11 +287,11 @@ fn non_negative(value: f64, parameter: &str) -> EmberResult<()> {
 
 /// Largest strength the ink fields' freshness flush may cut from the tone law. Freshness below
 /// [`ink::FLUSH`] is stored as exactly 0, and the look multiplies freshness by
-/// `g = exp(hold / fresh_tau)`, so ink crossing the flush loses `g·FLUSH` of strength in one
-/// step; beyond this, ink younger than `hold` would drop from full strength to the floor wash.
+/// `g = exp(hold / tau)`, so ink crossing the flush loses `g·FLUSH` of strength in one step;
+/// beyond this, ink younger than the hold would drop from full strength to the floor wash.
 const MAX_FLUSHED_STRENGTH: f64 = 1e-6;
 
-/// Largest supported `look.hold / look.fresh_tau`: `ln(MAX_FLUSHED_STRENGTH / FLUSH)`
+/// Largest supported `look.hold_fraction / look.fade_fraction`: `ln(MAX_FLUSHED_STRENGTH / FLUSH)`
 /// `= -ln(FLUSH) - ln(10⁶) ≈ 13.8` (through `math`, so every CPU accepts the same configs).
 fn max_hold_ratio() -> f64 {
     math::ln(MAX_FLUSHED_STRENGTH) - math::ln(ink::FLUSH)
@@ -337,37 +340,45 @@ impl EmberConfig {
         non_negative(c.pre_roll, "contact.pre_roll")?;
         non_negative(c.valve_lead, "contact.valve_lead")?;
 
+        let t = &self.tidal;
+        check(
+            t.max_aspect.is_finite() && (1.0..=10.0).contains(&t.max_aspect),
+            "tidal.max_aspect",
+            "must lie in [1, 10]",
+        )?;
+        check(
+            t.stretch_quantile.is_finite() && t.stretch_quantile > 0.0 && t.stretch_quantile <= 1.0,
+            "tidal.stretch_quantile",
+            "must lie in (0, 1]",
+        )?;
+        positive(t.softening, "tidal.softening")?;
+
         let l = &self.look;
         unit(l.floor, "look.floor")?;
         check(l.floor < 1.0, "look.floor", "must be < 1")?;
-        positive(l.fresh_tau, "look.fresh_tau")?;
-        non_negative(l.hold, "look.hold")?;
+        check(
+            l.fade_fraction.is_finite() && l.fade_fraction > 0.0 && l.fade_fraction <= 1.0,
+            "look.fade_fraction",
+            "must lie in (0, 1]",
+        )?;
+        unit(l.hold_fraction, "look.hold_fraction")?;
         let max_ratio = max_hold_ratio();
         check(
-            l.hold / l.fresh_tau <= max_ratio,
-            "look.hold",
+            l.hold_fraction / l.fade_fraction <= max_ratio,
+            "look.hold_fraction",
             &format!(
-                "hold / fresh_tau is {ratio} but must be <= {max_ratio:.3}: freshness below \
-                 {flush:e} is flushed to 0, which cuts exp(hold / fresh_tau)·{flush:e} of \
-                 strength at once (at most {MAX_FLUSHED_STRENGTH:e} is allowed), so ink younger \
-                 than the hold would drop from full strength to the floor wash; lower hold or \
-                 raise fresh_tau",
-                ratio = l.hold / l.fresh_tau,
+                "hold_fraction / fade_fraction is {ratio} but must be <= {max_ratio:.3}: \
+                 freshness below {flush:e} is flushed to 0, which cuts exp(hold / tau)·{flush:e} \
+                 of strength at once (at most {MAX_FLUSHED_STRENGTH:e} is allowed), so ink \
+                 younger than the hold would drop from full strength to the floor wash; lower \
+                 hold_fraction or raise fade_fraction",
+                ratio = l.hold_fraction / l.fade_fraction,
                 flush = ink::FLUSH,
             ),
         )?;
         if let Some(tau) = l.floor_tau {
             positive(tau, "look.floor_tau")?;
         }
-        if let Some(tau) = l.ember_tau {
-            positive(tau, "look.ember_tau")?;
-        }
-        non_negative(l.cinnabar_strength, "look.cinnabar_strength")?;
-        unit(l.carbon_keep, "look.carbon_keep")?;
-        unit(l.meeting_threshold, "look.meeting_threshold")?;
-        // The ink fields cannot tell which bodies ever inked old water, so every body contributes
-        // the floor wash to the meeting test; that is exact only while the floor cannot meet.
-        check(l.floor <= l.meeting_threshold, "look.meeting_threshold", "must be >= look.floor")?;
 
         let paper = &self.paper;
         positive(paper.sheet_width_mm, "paper.sheet_width_mm")?;
@@ -436,8 +447,10 @@ mod tests {
     }
 
     #[test]
-    fn default_config_matches_the_museum_lab_vermilion_master() {
+    fn default_config_is_the_tidal_sumi_look() {
         let c = EmberConfig::default();
+        // The masters' physics, resolved 1.5 times more finely.
+        assert_eq!(c.fluid.rows, 1536);
         assert_eq!(c.fluid.reynolds, 300.0);
         assert_eq!(c.fluid.body_radius, 0.05);
         assert_eq!(c.fluid.mask_width, 0.004);
@@ -445,41 +458,45 @@ mod tests {
         assert_eq!(c.contact.vorticity_gate, 40.0);
         assert_eq!(c.contact.valve_lead, 0.25);
         assert_eq!(c.contact.pre_roll, 0.5);
-        assert_eq!(c.look.fresh_tau, 0.12);
+        // Tidally stretched bodies, up to 3:1 at the closest 5% of moments.
+        assert_eq!(c.tidal.max_aspect, 3.0);
+        assert_eq!(c.tidal.stretch_quantile, 0.95);
+        assert_eq!(c.tidal.softening, 0.1);
+        // Black for 0.8 s, then a 0.75 s e-folding fade, in a 30-second film.
         assert_eq!(c.look.floor, 0.0004);
-        assert_eq!(c.look.cinnabar_strength, 1.2);
-        assert_eq!(c.look.carbon_keep, 0.06);
-        assert_eq!(c.look.meeting_threshold, 0.3);
-        // The product's one addition to the prototype's look: embers glow on.
-        assert_eq!(c.look.ember_tau, Some(1.0));
+        assert_eq!(c.look.hold_fraction * 30.0, 0.8);
+        assert_eq!(c.look.fade_fraction * 30.0, 0.75);
+        assert_eq!(c.look.floor_tau, None);
+        // Nine ink nodes per output pixel.
+        assert_eq!(c.raster.supersample, 3);
+        // Snapshots close enough that a body moves under half its shortest semi-axis.
+        let shortest = c.fluid.body_radius / c.tidal.max_aspect.sqrt();
+        assert!(c.fluid.max_snapshot_travel * c.fluid.body_radius < 0.5 * shortest);
     }
 
     #[test]
     fn invalid_values_name_the_parameter() {
-        let mut c = EmberConfig::default();
-        c.fluid.cfl = 0.0;
-        let err = c.validate().unwrap_err().to_string();
-        assert!(err.contains("fluid.cfl"), "{err}");
-
-        let mut c = EmberConfig::default();
-        c.raster.supersample = 0;
-        assert!(c.validate().unwrap_err().to_string().contains("raster.supersample"));
-
-        let mut c = EmberConfig::default();
-        c.look.floor_tau = Some(f64::NAN);
-        assert!(c.validate().unwrap_err().to_string().contains("look.floor_tau"));
-
-        let mut c = EmberConfig::default();
-        c.raster.ink_margin = c.fluid.box_margin;
-        assert!(c.validate().unwrap_err().to_string().contains("raster.ink_margin"));
-
-        let mut c = EmberConfig::default();
-        c.look.meeting_threshold = c.look.floor / 2.0;
-        assert!(c.validate().unwrap_err().to_string().contains("look.meeting_threshold"));
+        let cases: [(&str, fn(&mut EmberConfig)); 9] = [
+            ("fluid.cfl", |c| c.fluid.cfl = 0.0),
+            ("raster.supersample", |c| c.raster.supersample = 0),
+            ("look.floor_tau", |c| c.look.floor_tau = Some(f64::NAN)),
+            ("raster.ink_margin", |c| c.raster.ink_margin = c.fluid.box_margin),
+            ("tidal.max_aspect", |c| c.tidal.max_aspect = 0.5),
+            ("tidal.stretch_quantile", |c| c.tidal.stretch_quantile = 0.0),
+            ("tidal.softening", |c| c.tidal.softening = 0.0),
+            ("look.fade_fraction", |c| c.look.fade_fraction = 0.0),
+            ("look.hold_fraction", |c| c.look.hold_fraction = -0.1),
+        ];
+        for (parameter, break_it) in cases {
+            let mut c = EmberConfig::default();
+            break_it(&mut c);
+            let err = c.validate().expect_err(parameter).to_string();
+            assert!(err.contains(parameter), "{parameter}: {err}");
+        }
     }
 
-    /// `hold / fresh_tau` is bounded by what the ink's freshness flush allows: at the bound the
-    /// flush cuts `g·FLUSH = 10⁻⁶` of strength; the production look is far below it.
+    /// `hold_fraction / fade_fraction` is bounded by what the ink's freshness flush allows: at the
+    /// bound the flush cuts `g·FLUSH = 10⁻⁶` of strength; the production look is far below it.
     #[test]
     fn hold_is_bounded_by_the_freshness_flush() {
         let max_ratio = max_hold_ratio();
@@ -488,18 +505,15 @@ mod tests {
         assert!((flushed - MAX_FLUSHED_STRENGTH).abs() < 1e-18, "{flushed}");
 
         let production = EmberConfig::default();
-        assert!(production.look.hold / production.look.fresh_tau < max_ratio / 3.0);
+        assert!(production.look.hold_fraction / production.look.fade_fraction < max_ratio / 3.0);
 
         let mut c = EmberConfig::default();
-        c.look.hold = max_ratio * c.look.fresh_tau * (1.0 - 1e-12);
+        c.look.hold_fraction = max_ratio * c.look.fade_fraction * (1.0 - 1e-12);
         c.validate().expect("just below the bound validates");
-        // A look-development fixture that used to validate: hold 3.0 over fresh_tau 0.12 (25×).
-        c.look.hold = 3.0;
+        c.look.hold_fraction = 15.0 * c.look.fade_fraction;
         let err = c.validate().unwrap_err().to_string();
-        assert!(err.contains("look.hold") && err.contains("flushed"), "{err}");
-        c.look.fresh_tau = 0.25; // 12×
-        c.validate().expect("hold 3.0 over fresh_tau 0.25 validates");
-        c.look.hold = 0.0;
+        assert!(err.contains("look.hold_fraction") && err.contains("flushed"), "{err}");
+        c.look.hold_fraction = 0.0;
         c.validate().expect("no hold validates");
     }
 
@@ -511,28 +525,26 @@ mod tests {
         assert_eq!(back, config);
         let typo = json.replace("\"cfl\"", "\"cfll\"");
         assert!(serde_json::from_str::<EmberConfig>(&typo).is_err(), "unknown fields are errors");
+        // A certificate of the retired vermilion look does not read as this configuration.
+        let mut old = serde_json::to_value(&config).expect("serialises");
+        old["look"]["ember_tau"] = serde_json::json!(1.0);
+        assert!(serde_json::from_value::<EmberConfig>(old).is_err());
     }
 
-    /// `floor_tau` and `ember_tau` are optional values but required keys: `null` reads as
-    /// `None`, a missing key is an error naming it (serde would otherwise default it to `None`,
-    /// silently turning a look with ember memory into the prototype's).
+    /// `floor_tau` is an optional value but a required key: `null` reads as `None`, a missing key
+    /// is an error naming it (serde would otherwise default it silently).
     #[test]
-    fn the_optional_look_fields_are_required_keys() {
+    fn the_optional_look_field_is_a_required_key() {
         let json = serde_json::to_value(EmberConfig::default()).expect("serialises");
-        for key in ["floor_tau", "ember_tau"] {
-            let mut explicit_null = json.clone();
-            explicit_null["look"][key] = serde_json::Value::Null;
-            let back: EmberConfig = serde_json::from_value(explicit_null).expect("null is None");
-            assert_eq!(
-                if key == "floor_tau" { back.look.floor_tau } else { back.look.ember_tau },
-                None
-            );
+        let mut explicit_null = json.clone();
+        explicit_null["look"]["floor_tau"] = serde_json::Value::Null;
+        let back: EmberConfig = serde_json::from_value(explicit_null).expect("null is None");
+        assert_eq!(back.look.floor_tau, None);
 
-            let mut missing = json.clone();
-            missing["look"].as_object_mut().expect("look object").remove(key);
-            let error = serde_json::from_value::<EmberConfig>(missing).expect_err("missing key");
-            assert!(error.to_string().contains(&format!("missing field `{key}`")), "{error}");
-        }
+        let mut missing = json;
+        missing["look"].as_object_mut().expect("look object").remove("floor_tau");
+        let error = serde_json::from_value::<EmberConfig>(missing).expect_err("missing key");
+        assert!(error.to_string().contains("missing field `floor_tau`"), "{error}");
     }
 
     #[test]

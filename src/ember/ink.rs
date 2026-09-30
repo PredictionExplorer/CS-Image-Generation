@@ -1,16 +1,14 @@
 //! Ink fields on the supersampled node grid and their per-frame remap.
 //!
 //! Ink lives on a raster of *nodes* (`q×q` per output pixel plus a margin beyond the canvas). Each
-//! node carries five `f32` fields (structure of arrays):
+//! node carries four `f32` fields (structure of arrays):
 //!
 //! * presence `P ∈ [0, 1]`: the node's water was inked by some body (1 for unmixed inked water;
 //!   fractional where inked and clear water have been mixed at the node scale);
-//! * freshness `E_i ∈ [0, 1]`, one per body: `E_i = exp(-(t - t*_i)/τ_fresh)` for the latest
-//!   contact `t*_i` of the water with body `i` (0 if it never met body `i`);
-//! * ember `K ∈ [0, 1]`: the cinnabar precipitated where two bodies' fresh inks met (in the units
-//!   of the look's meeting strength, see `look`), carried and cooled by the flow.
+//! * freshness `E_i ∈ [0, 1]`, one per body: `E_i = exp(-(t - t*_i)/τ)` for the latest contact
+//!   `t*_i` of the water with body `i` (0 if it never met body `i`), `τ` the look's fade time.
 //!
-//! All are linear in the pigment concentrations, so interpolating them models physical dilution.
+//! Both are linear in the pigment concentration, so interpolating them models physical dilution.
 //!
 //! # Remap (characteristic mapping, docs/ember-design.md §5.3)
 //!
@@ -22,22 +20,19 @@
 //! ```text
 //! P'(n)   = 1                                      if any body recorded a contact
 //!         = P(X_n) · floor_fade                    otherwise
-//! E'_i(n) = exp(-(t_frame - t*_i)/τ_fresh)         if body i recorded
+//! E'_i(n) = exp(-(t_frame - t*_i)/τ)               if body i recorded
 //!         = E_i(X_n) · fresh_fade                  otherwise
-//! K'(n)   = max(meeting(P'(n), E'(n)), K(X_n) · ember_fade)     with ember memory
-//!         = 0                                                    without (ember_fade = 0)
 //! ```
 //!
-//! with `fresh_fade = exp(-(t_frame - t_prev)/τ_fresh)` (ageing by the interval) and
-//! `floor_fade` the optional slow fade of the floor wash; `meeting` is the cinnabar forming now
-//! (computed from the `f32`-rounded `P'`, `E'`, exactly as the shader sees them) and `ember_fade`
-//! the ember's cooling. Without ember memory the ember field stays exactly 0, so the shader's
-//! loads are, bit for bit, the prototype's rule evaluated on the stored `(P, E)` (see `look`);
-//! storing `f32(meeting)` instead would round up above `meeting` at some meeting nodes and shift
-//! their loads by an ulp. (The stored `E` itself is the prototype's exact freshness only up to
-//! its `f32` rounding and the per-frame ageing by `fresh_fade`: the same law, not the same bits.)
+//! with `fresh_fade = exp(-(t_frame - t_prev)/τ)` (ageing by the interval) and `floor_fade` the
+//! optional slow fade of the floor wash. (The stored `E` is the exact freshness up to its `f32`
+//! rounding and the per-frame ageing by `fresh_fade`.)
 //!
-//! `P(X_n)`, `E_i(X_n)`, `K(X_n)` are read from the previous fields by **clamped Catmull-Rom**
+//! **The bodies are solid.** A node inside a body's outline at the frame time holds no water and
+//! stores `P' = E'_i = 0`: a body's interior is never ink, so the flow cannot carry ink into it
+//! and leak it back into the wakes, and a body always reads as bare paper.
+//!
+//! `P(X_n)`, `E_i(X_n)` are read from the previous fields by **clamped Catmull-Rom**
 //! interpolation on the node grid: 4×4 taps, taps outside the grid read 0 (never-inked water
 //! beyond the margin), and the result is clamped to the range of the inner 2×2 taps (monotone: no
 //! overshoot, no negative ink). Fields that a contact overwrites are not sampled. Values below
@@ -60,14 +55,14 @@
 use rayon::prelude::*;
 
 use super::error::{EmberError, EmberResult};
-use super::look::Look;
 use super::math::{self, max, min};
+use super::orbit::BodyState;
 use super::trace::{ContactRules, FlowWindow, Trace, Tracer, catmull_rom_weights};
 
-/// Presence, freshness and ember below this are flushed to exactly zero (no subnormals, and old
-/// ink does not linger as noise). The look's hold amplifies freshness by `g = exp(hold /
-/// fresh_tau)`, so the flush cuts up to `g·FLUSH` of strength at once; config validation bounds
-/// `g` accordingly ([`crate::ember::EmberConfig::validate`]).
+/// Presence and freshness below this are flushed to exactly zero (no subnormals, and old ink does
+/// not linger as noise). The look's hold amplifies freshness by `g = exp(hold / τ)`, so the flush
+/// cuts up to `g·FLUSH` of strength at once; config validation bounds `g` accordingly
+/// ([`crate::ember::EmberConfig::validate`]).
 pub(crate) const FLUSH: f64 = 1e-12;
 
 /// Nodes traced together in lock step (independent dependency chains for the out-of-order core).
@@ -149,34 +144,25 @@ impl NodeGrid {
     }
 }
 
-/// Presence, per-body freshness and ember of the ink carried by every node (structure of arrays,
-/// `f32`).
+/// Presence and per-body freshness of the ink carried by every node (structure of arrays, `f32`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct InkFields {
     /// `P ∈ [0, 1]`: the node's water has been inked by some body (diluted by mixing).
     pub presence: Vec<f32>,
-    /// `E_i ∈ [0, 1]`: `exp(-(t - t*_i)/fresh_tau)` for the latest contact `t*_i` with body `i`.
+    /// `E_i ∈ [0, 1]`: `exp(-(t - t*_i)/τ)` for the latest contact `t*_i` with body `i`.
     pub freshness: [Vec<f32>; 3],
-    /// `K ∈ [0, 1]`: cinnabar precipitated where two bodies' fresh inks met, cooling with age.
-    pub ember: Vec<f32>,
 }
 
 impl InkFields {
     /// Fields of never-inked water.
     pub(crate) fn zeros(grid: &NodeGrid) -> Self {
         let n = grid.len();
-        Self {
-            presence: vec![0.0; n],
-            freshness: [vec![0.0; n], vec![0.0; n], vec![0.0; n]],
-            ember: vec![0.0; n],
-        }
+        Self { presence: vec![0.0; n], freshness: [vec![0.0; n], vec![0.0; n], vec![0.0; n]] }
     }
 
-    /// Whether all five fields hold exactly `len` nodes.
+    /// Whether all four fields hold exactly `len` nodes.
     fn has_len(&self, len: usize) -> bool {
-        self.presence.len() == len
-            && self.ember.len() == len
-            && self.freshness.iter().all(|field| field.len() == len)
+        self.presence.len() == len && self.freshness.iter().all(|field| field.len() == len)
     }
 }
 
@@ -185,16 +171,12 @@ impl InkFields {
 pub(crate) struct InkDecay {
     /// Fluid time of the frame (window end).
     pub frame_time: f64,
-    /// `fresh_tau` of the look.
-    pub fresh_tau: f64,
-    /// `exp(-(frame_time - window_start)/fresh_tau)`.
+    /// The look's fade time `τ` (fluid units).
+    pub fade_tau: f64,
+    /// `exp(-(frame_time - window_start)/τ)`.
     pub fresh_fade: f64,
     /// `exp(-(frame_time - window_start)/floor_tau)`, or 1 when the floor never fades.
     pub floor_fade: f64,
-    /// `exp(-(frame_time - window_start)/ember_tau)`, or 0 without ember memory: the remap then
-    /// stores `K = 0` everywhere, and the look's cinnabar exists only where two fresh inks meet
-    /// now, as in the prototype.
-    pub ember_fade: f64,
 }
 
 /// Deterministic statistics of one remap (integer counts: exact under any reduction order).
@@ -222,7 +204,8 @@ impl RemapStats {
 
 /// Advances the ink fields from the window start to the window end: every node of `next` is traced
 /// back through `window`, records fresh contacts, and otherwise inherits the (clamped Catmull-Rom
-/// interpolated, decayed) value of `prev` at its origin; `look` decides where cinnabar forms.
+/// interpolated, decayed) value of `prev` at its origin. Nodes inside a body at the window end
+/// hold no water and store zeros.
 ///
 /// Rows are processed in parallel; the result does not depend on the number of threads.
 ///
@@ -240,11 +223,12 @@ pub(crate) fn remap(
     window: &FlowWindow<'_>,
     rules: &ContactRules,
     decay: &InkDecay,
-    look: &Look,
 ) -> RemapStats {
     let n = grid.len();
     assert!(prev.has_len(n) && next.has_len(n), "ink fields must match the node grid");
-    let remapper = Remapper { grid, tracer: Tracer::new(window, rules), prev, decay: *decay, look };
+    let solid = *window.bodies.last().expect("a flow window has at least one snapshot");
+    let remapper =
+        Remapper { grid, tracer: Tracer::new(window, rules), prev, decay: *decay, solid };
     let cols = grid.cols;
     let [e0, e1, e2] = &mut next.freshness;
     (
@@ -252,12 +236,19 @@ pub(crate) fn remap(
         e0.par_chunks_mut(cols),
         e1.par_chunks_mut(cols),
         e2.par_chunks_mut(cols),
-        next.ember.par_chunks_mut(cols),
     )
         .into_par_iter()
         .enumerate()
-        .map(|(r, (presence, e0, e1, e2, ember))| remapper.row(r, presence, [e0, e1, e2], ember))
+        .map(|(r, (presence, e0, e1, e2))| remapper.row(r, presence, [e0, e1, e2]))
         .reduce(RemapStats::default, RemapStats::merge)
+}
+
+/// Whether the world point `p` lies inside any of the `bodies`' outlines.
+#[inline(always)]
+fn inside_a_body(bodies: &[BodyState; 3], p: [f64; 2]) -> bool {
+    bodies
+        .iter()
+        .any(|body| body.shape.contains([p[0] - body.position[0], p[1] - body.position[1]]))
 }
 
 /// Everything one remap needs, shared by all rows.
@@ -270,8 +261,8 @@ struct Remapper<'a> {
     prev: &'a InkFields,
     /// Decay factors of this frame.
     decay: InkDecay,
-    /// Where cinnabar forms.
-    look: &'a Look,
+    /// The bodies at the window end: their interiors hold no water.
+    solid: [BodyState; 3],
 }
 
 impl Remapper<'_> {
@@ -280,22 +271,19 @@ impl Remapper<'_> {
     /// Nodes are traced [`LANES`] at a time (lanes are independent, so this only changes the
     /// instruction schedule, not a single bit); the `cols mod LANES` nodes left at the end of the
     /// row are traced one by one.
-    fn row(
-        &self,
-        r: usize,
-        presence: &mut [f32],
-        freshness: [&mut [f32]; 3],
-        ember: &mut [f32],
-    ) -> RemapStats {
+    fn row(&self, r: usize, presence: &mut [f32], freshness: [&mut [f32]; 3]) -> RemapStats {
         let [e0, e1, e2] = freshness;
         let cols = presence.len();
         let mut stats = RemapStats::default();
         let mut store = |c: usize, trace: &Trace| {
-            let (values, inked) = self.node(trace);
-            (presence[c], e0[c], e1[c], e2[c], ember[c]) =
-                (values[0], values[1], values[2], values[3], values[4]);
-            stats.contacted_nodes += u64::from(inked);
             stats.non_finite_origins += u64::from(!trace.origin.iter().all(|v| v.is_finite()));
+            if inside_a_body(&self.solid, self.grid.world(r, c)) {
+                (presence[c], e0[c], e1[c], e2[c]) = (0.0, 0.0, 0.0, 0.0);
+                return;
+            }
+            let (values, inked) = self.node(trace);
+            (presence[c], e0[c], e1[c], e2[c]) = (values[0], values[1], values[2], values[3]);
+            stats.contacted_nodes += u64::from(inked);
         };
         let grouped = cols - cols % LANES;
         for c0 in (0..grouped).step_by(LANES) {
@@ -310,13 +298,12 @@ impl Remapper<'_> {
         stats
     }
 
-    /// `([P', E'_0, E'_1, E'_2, K'], any contact)` of a node from its backward trace.
+    /// `([P', E'_0, E'_1, E'_2], any contact)` of a water node from its backward trace.
     #[inline(always)]
-    fn node(&self, trace: &Trace) -> ([f32; 5], bool) {
+    fn node(&self, trace: &Trace) -> ([f32; 4], bool) {
         let d = &self.decay;
         let inked = trace.contact.iter().any(Option::is_some);
-        let carries_ember = d.ember_fade > 0.0;
-        let stencil = if !inked || carries_ember || trace.contact.iter().any(Option::is_none) {
+        let stencil = if !inked || trace.contact.iter().any(Option::is_none) {
             NodeStencil::at(self.grid, trace.origin)
         } else {
             NodeStencil::Outside // every field is overwritten; nothing is sampled
@@ -327,17 +314,10 @@ impl Remapper<'_> {
             flush(stencil.sample(&self.prev.presence, self.grid.cols) * d.floor_fade)
         };
         let fresh: [f64; 3] = std::array::from_fn(|i| match trace.contact[i] {
-            Some(t) => flush(math::exp(-(d.frame_time - t) / d.fresh_tau)),
+            Some(t) => flush(math::exp(-(d.frame_time - t) / d.fade_tau)),
             None => flush(stencil.sample(&self.prev.freshness[i], self.grid.cols) * d.fresh_fade),
         });
-        let (presence, fresh) = (presence as f32, fresh.map(|e| e as f32));
-        let ember = if carries_ember {
-            let carried = flush(stencil.sample(&self.prev.ember, self.grid.cols) * d.ember_fade);
-            max(self.look.meeting(presence, fresh), carried) as f32
-        } else {
-            0.0 // no memory: with `K = 0` the loads are the prototype's rule on (P, E) (module docs)
-        };
-        ([presence, fresh[0], fresh[1], fresh[2], ember], inked)
+        ([presence as f32, fresh[0] as f32, fresh[1] as f32, fresh[2] as f32], inked)
     }
 }
 
@@ -456,7 +436,8 @@ fn clamped_catmull_rom(row: impl Fn(usize) -> [f64; 4], a: [f64; 4], b: [f64; 4]
 mod tests {
     use super::super::fluid::{FluidGrid, Snapshot};
     use super::super::math;
-    use super::super::trace::tests::{Lcg, grid, random_window, reference_trace, snapshot};
+    use super::super::orbit::Shape;
+    use super::super::trace::tests::{Lcg, grid, points, random_window, reference_trace, snapshot};
     use super::*;
 
     /// Bodies parked far outside the region under test.
@@ -464,16 +445,11 @@ mod tests {
 
     /// Rules under which nothing can record (the valve closed before the window).
     fn no_contact() -> ContactRules {
-        ContactRules { reach: 0.1, vorticity_gate: 0.0, t_on: 0.0, t_valve: -1.0 }
+        ContactRules { soak_depth: 0.1, vorticity_gate: 0.0, t_on: 0.0, t_valve: -1.0 }
     }
 
     fn decay(frame_time: f64, fresh_fade: f64, floor_fade: f64) -> InkDecay {
-        InkDecay { frame_time, fresh_tau: 0.12, fresh_fade, floor_fade, ember_fade: 0.0 }
-    }
-
-    /// The production look.
-    fn look() -> Look {
-        Look::new(&crate::ember::config::EmberConfig::default().look)
+        InkDecay { frame_time, fade_tau: 0.12, fresh_fade, floor_fade }
     }
 
     /// Fields `P = p(x, y)`, `E_i = e_i(x, y)` sampled at the node positions (as `f32`).
@@ -506,7 +482,7 @@ mod tests {
         dt: f64,
         steps: usize,
         field: impl Fn(f64, f64) -> [f64; 2] + Copy,
-    ) -> (Vec<Snapshot>, Vec<[[f64; 2]; 3]>) {
+    ) -> (Vec<Snapshot>, Vec<[BodyState; 3]>) {
         let snaps = (0..=steps)
             .map(|s| {
                 snapshot(fluid, dt * s as f64 / steps as f64, |x, y| {
@@ -515,7 +491,7 @@ mod tests {
                 })
             })
             .collect();
-        (snaps, vec![FAR; steps + 1])
+        (snaps, points(&vec![FAR; steps + 1]))
     }
 
     #[test]
@@ -579,8 +555,7 @@ mod tests {
         };
         let prev = fields(&nodes, blob);
         let mut next = InkFields::zeros(&nodes);
-        let stats =
-            remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 0.9, 0.95), &look());
+        let stats = remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 0.9, 0.95));
         assert_eq!(stats.contacted_nodes, 0);
         for r in 2..nodes.rows {
             for c in 3..nodes.cols {
@@ -612,7 +587,7 @@ mod tests {
         };
         let prev = fields(&nodes, pattern);
         let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 1.0, 1.0), &look());
+        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 1.0, 1.0));
         let (s, c) = math::sin_cos(-omega * dt);
         let mut worst = 0.0f64;
         for r in 0..nodes.rows {
@@ -646,17 +621,17 @@ mod tests {
         let snaps: Vec<Snapshot> =
             times.iter().map(|&t| snapshot(&fluid, t, |_, _| [0.0; 3])).collect();
         // Body 0 sweeps from (-0.5, 0) to (0.5, 0); the others stay far away.
-        let bodies: Vec<[[f64; 2]; 3]> =
+        let centres: Vec<[[f64; 2]; 3]> =
             times.iter().map(|&t| [[-0.5 + 25.0 * (t - 0.6), 0.0], FAR[1], FAR[2]]).collect();
+        let bodies = points(&centres);
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let r = 0.08;
         let rules =
-            ContactRules { reach: r, vorticity_gate: 0.0, t_on: 0.5, t_valve: f64::INFINITY };
+            ContactRules { soak_depth: r, vorticity_gate: 0.0, t_on: 0.5, t_valve: f64::INFINITY };
         let prev = fields(&nodes, |_, _| [0.0, 0.0, 0.3, 0.0]);
         let mut next = InkFields::zeros(&nodes);
         let t_frame = 0.64;
-        let stats =
-            remap(&prev, &mut next, &nodes, &window, &rules, &decay(t_frame, 0.5, 1.0), &look());
+        let stats = remap(&prev, &mut next, &nodes, &window, &rules, &decay(t_frame, 0.5, 1.0));
         let mut band = 0;
         for row in 0..nodes.rows {
             for col in 0..nodes.cols {
@@ -700,7 +675,7 @@ mod tests {
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let prev = fields(&nodes, |_, _| [1.0; 4]);
         let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 0.5, 0.25), &look());
+        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 0.5, 0.25));
         for r in 0..nodes.rows {
             for c in 0..nodes.cols {
                 let n = r * nodes.cols + c;
@@ -725,7 +700,7 @@ mod tests {
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let prev = fields(&nodes, |x, _| if x < 0.0 { [1.0, 1.0, 0.0, 0.0] } else { [0.0; 4] });
         let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 1.0, 1.0), &look());
+        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 1.0, 1.0));
         let step = nodes.cols / 2;
         let row = &next.presence[5 * nodes.cols..6 * nodes.cols];
         assert!(row.iter().all(|&p| (0.0..=1.0).contains(&p)));
@@ -742,7 +717,7 @@ mod tests {
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let prev = fields(&nodes, |_, _| [1.5e-12, 1.5e-12, 3e-12, 1.0]);
         let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(0.01, 0.5, 0.5), &look());
+        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(0.01, 0.5, 0.5));
         assert!(next.presence.iter().all(|&p| p.to_bits() == 0));
         assert!(next.freshness[0].iter().all(|&e| e.to_bits() == 0));
         assert!(next.freshness[1].iter().all(|&e| e == (f64::from(3e-12f32) * 0.5) as f32));
@@ -781,8 +756,8 @@ mod tests {
         }
     }
 
-    /// docs/ember-design.md §5.3 (plus the ember) node by node with the eager reference tracer
-    /// and the literal sampler.
+    /// docs/ember-design.md §5.3 node by node with the eager reference tracer, the literal
+    /// sampler and the literal inside-a-body test.
     fn reference_remap(
         prev: &InkFields,
         nodes: &NodeGrid,
@@ -796,7 +771,18 @@ mod tests {
         for r in 0..nodes.rows {
             for c in 0..nodes.cols {
                 let n = r * nodes.cols + c;
-                let trace = reference_trace(window, rules, nodes.world(r, c));
+                let p = nodes.world(r, c);
+                let trace = reference_trace(window, rules, p);
+                let solid = window.bodies[window.bodies.len() - 1].iter().any(|body| {
+                    let [a, b] = body.shape.semi;
+                    let [cs, sn] = body.shape.axis;
+                    let d = [p[0] - body.position[0], p[1] - body.position[1]];
+                    let (x, y) = (cs * d[0] + sn * d[1], -sn * d[0] + cs * d[1]);
+                    a > 0.0 && b > 0.0 && (x / a) * (x / a) + (y / b) * (y / b) < 1.0
+                });
+                if solid {
+                    continue; // no water: the fields stay zero, and no contact counts
+                }
                 let any = trace.contact.iter().any(Option::is_some);
                 contacted += u64::from(any);
                 let p = reference_sample(nodes, &prev.presence, trace.origin);
@@ -804,19 +790,10 @@ mod tests {
                 for i in 0..3 {
                     let e = reference_sample(nodes, &prev.freshness[i], trace.origin);
                     out.freshness[i][n] = match trace.contact[i] {
-                        Some(t) => fl(math::exp(-(d.frame_time - t) / d.fresh_tau)) as f32,
+                        Some(t) => fl(math::exp(-(d.frame_time - t) / d.fade_tau)) as f32,
                         None => fl(e * d.fresh_fade) as f32,
                     };
                 }
-                let fresh = [out.freshness[0][n], out.freshness[1][n], out.freshness[2][n]];
-                out.ember[n] = if d.ember_fade > 0.0 {
-                    let forming = look().meeting(out.presence[n], fresh);
-                    let carried =
-                        fl(reference_sample(nodes, &prev.ember, trace.origin) * d.ember_fade);
-                    forming.max(carried) as f32
-                } else {
-                    0.0
-                };
             }
         }
         (out, contacted)
@@ -840,114 +817,17 @@ mod tests {
             for i in 0..3 {
                 out.freshness[i][n] = value(i + 1);
             }
-            out.ember[n] = value(4);
         }
         out
     }
 
-    /// Bits of all five fields: presence, freshness, ember.
+    /// Bits of all four fields: presence, then freshness.
     fn field_bits(f: &InkFields) -> Vec<u32> {
         let mut all: Vec<u32> = f.presence.iter().map(|v| v.to_bits()).collect();
         for field in &f.freshness {
             all.extend(field.iter().map(|v| v.to_bits()));
         }
-        all.extend(f.ember.iter().map(|v| v.to_bits()));
         all
-    }
-
-    #[test]
-    fn embers_are_carried_by_the_flow_and_cool() {
-        let nodes = NodeGrid::new(24, 16, 2, 0.1).unwrap();
-        let fluid = fluid_for(nodes.aspect);
-        let h = nodes.spacing;
-        let dt = 0.02;
-        let (snaps, bodies) = steady(&fluid, dt, 2, |_, _| [4.0 * h / dt, 0.0]);
-        let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
-        // An ember strip on otherwise clear water (no fresh ink, so nothing forms now).
-        let mut prev = InkFields::zeros(&nodes);
-        for r in 0..nodes.rows {
-            for c in 20..26 {
-                prev.ember[r * nodes.cols + c] = 0.8;
-            }
-        }
-        let with_memory = InkDecay { ember_fade: 0.5, ..decay(dt, 0.9, 1.0) };
-        let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &with_memory, &look());
-        for r in 0..nodes.rows {
-            for c in 0..nodes.cols {
-                let expected = if (24..30).contains(&c) { 0.4 } else { 0.0 };
-                let got = f64::from(next.ember[r * nodes.cols + c]);
-                assert!((got - expected).abs() < 1e-6, "{r} {c}: {got}");
-            }
-        }
-        // Without memory the strip vanishes: cinnabar exists only where fresh inks meet now.
-        let mut next = InkFields::zeros(&nodes);
-        remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(dt, 0.9, 1.0), &look());
-        assert!(next.ember.iter().all(|&k| k == 0.0));
-        // Fresh meeting water forms cinnabar either way, and a brighter ember cannot be lost.
-        let meeting = fields(&nodes, |_, _| [1.0, 1.0, 1.0, 0.0]);
-        let mut next = InkFields::zeros(&nodes);
-        remap(&meeting, &mut next, &nodes, &window, &no_contact(), &with_memory, &look());
-        let forming = look().meeting(1.0, [0.9, 0.9, 0.0]) as f32;
-        assert!(forming > 0.3);
-        let inner = (nodes.rows / 2) * nodes.cols + nodes.cols / 2;
-        assert_eq!(next.ember[inner], forming);
-    }
-
-    /// Without ember memory the ember field is exactly 0 everywhere — also where fresh inks meet
-    /// now and where the previous fields held hot embers — so the shader sees `K = 0` and its
-    /// loads are the prototype's rule on the stored `(P, E)`, bit for bit (`look`'s
-    /// `without_an_ember_the_loads_are_the_prototype_rule_bit_for_bit`). The rule this replaces
-    /// stored `f32(meeting)`, which rounds up above the meeting at some nodes and shifts their
-    /// loads; the fixture has such nodes, so it would catch a regression.
-    #[test]
-    fn without_ember_memory_the_ember_field_stays_zero() {
-        let mut rng = Lcg(2024);
-        let nodes = NodeGrid::new(24, 16, 2, 0.12).unwrap();
-        let fluid = grid(48, 32, 0.08);
-        let (snaps, bodies) = random_window(&mut rng, &fluid, 3, 6.0, 60.0);
-        let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
-        let rules = ContactRules {
-            reach: 0.3,
-            vorticity_gate: 0.0,
-            t_on: f64::NEG_INFINITY,
-            t_valve: f64::INFINITY,
-        };
-        // Inked water where the inks of bodies 0 and 1 have aged past the hold: after this
-        // frame's fade `g·E ∈ (0.41, 0.93)`, so they meet with strengths strictly between the
-        // threshold and 1 that `f32` rounds either way. Hot embers everywhere.
-        let mut prev = InkFields::zeros(&nodes);
-        for n in 0..nodes.len() {
-            prev.presence[n] = 1.0;
-            prev.freshness[0][n] = rng.range(0.008, 0.018) as f32;
-            prev.freshness[1][n] = rng.range(0.008, 0.018) as f32;
-            prev.ember[n] = rng.range(0.5, 1.0) as f32;
-        }
-        let without = decay(snaps[snaps.len() - 1].time, 0.8, 1.0);
-        assert_eq!(without.ember_fade, 0.0);
-        let look = look();
-        let mut next = InkFields::zeros(&nodes);
-        let stats = remap(&prev, &mut next, &nodes, &window, &rules, &without, &look);
-        assert!(stats.contacted_nodes > 50, "{stats:?}");
-        assert!(next.ember.iter().all(|k| k.to_bits() == 0), "K = +0 at every node");
-        let (mut meetings, mut rounded_up) = (0, 0);
-        for n in 0..nodes.len() {
-            let fresh = [next.freshness[0][n], next.freshness[1][n], next.freshness[2][n]];
-            let best = look.meeting(next.presence[n], fresh);
-            meetings += usize::from(best > 0.0);
-            let old_rule = look.loads(next.presence[n], fresh, best as f32);
-            rounded_up += usize::from(old_rule != look.loads(next.presence[n], fresh, 0.0));
-        }
-        assert!(meetings > nodes.len() / 2, "inks meet in the fixture: {meetings}");
-        assert!(rounded_up > meetings / 10, "the fixture exposes the old rule: {rounded_up}");
-        // The same window with memory keeps (and forms) embers.
-        let with = InkDecay { ember_fade: 0.9, ..without };
-        let mut glowing = InkFields::zeros(&nodes);
-        remap(&prev, &mut glowing, &nodes, &window, &rules, &with, &look);
-        assert!(glowing.ember.iter().filter(|&&k| k > 0.3).count() > 100);
-        // Presence and freshness do not depend on the ember memory.
-        assert_eq!(glowing.presence, next.presence);
-        assert_eq!(glowing.freshness, next.freshness);
     }
 
     #[test]
@@ -967,19 +847,15 @@ mod tests {
             let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
             let last = snaps.len() - 1;
             let rules = ContactRules {
-                reach: rng.range(0.1, 0.4),
+                soak_depth: rng.range(0.02, 0.3),
                 vorticity_gate: if case == 3 { 0.0 } else { 40.0 },
                 t_on: snaps[0].time + (snaps[last].time - snaps[0].time) * rng.range(-0.5, 0.5),
                 t_valve: snaps[0].time + (snaps[last].time - snaps[0].time) * rng.range(0.5, 1.5),
             };
-            let d = InkDecay {
-                // Both with and without ember memory (which forces sampling every node).
-                ember_fade: if case % 3 == 0 { 0.0 } else { 0.9 },
-                ..decay(snaps[last].time, 0.8, if case % 2 == 0 { 1.0 } else { 0.97 })
-            };
+            let d = decay(snaps[last].time, 0.8, if case % 2 == 0 { 1.0 } else { 0.97 });
             let prev = patchy_fields(&nodes, &mut rng);
             let mut next = InkFields::zeros(&nodes);
-            let stats = remap(&prev, &mut next, &nodes, &window, &rules, &d, &look());
+            let stats = remap(&prev, &mut next, &nodes, &window, &rules, &d);
             let (expected, contacted) = reference_remap(&prev, &nodes, &window, &rules, &d);
             assert!(field_bits(&next) == field_bits(&expected), "case {case}");
             assert_eq!(stats, RemapStats { contacted_nodes: contacted, non_finite_origins: 0 });
@@ -1008,15 +884,7 @@ mod tests {
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let prev = fields(&nodes, |_, _| [0.5; 4]);
         let mut next = InkFields::zeros(&nodes);
-        let stats = remap(
-            &prev,
-            &mut next,
-            &nodes,
-            &window,
-            &no_contact(),
-            &decay(0.01, 0.8, 0.9),
-            &look(),
-        );
+        let stats = remap(&prev, &mut next, &nodes, &window, &no_contact(), &decay(0.01, 0.8, 0.9));
         // The parcels drift left by 0.003: every node at x < 0 reads the NaN column block, every
         // node at x > 1 the infinite one; the four columns in between are healthy.
         assert_eq!(stats, RemapStats { contacted_nodes: 0, non_finite_origins: 8 * (6 + 2) });
@@ -1035,18 +903,17 @@ mod tests {
     }
 
     /// Cross-architecture canary: SHA-256 of the output bits of one remap on a fixed random window
-    /// (plus its contact count). The fixture goes through `math::sin_cos` (libm) and `f32`
-    /// rounding; the remap exercises RK4 with bilinear lookups, Catmull-Rom vorticity, the gate,
-    /// the disc test, the valve and the pre-roll, `math::exp`, the clamped Catmull-Rom sampler,
-    /// the flush, the ember (the look's meeting) and the row tail. One changed bit anywhere, on any
-    /// CPU, changes the hash. Re-bless only for an intended change of the remap, of the look's
-    /// meeting or of the shared test fixtures, and say why. Last re-blessed for the look's tone
-    /// law `h_i = min(P, g·E_i)` (linear under dilution), which changes the embers that form in
-    /// the fixture's diluted meeting water.
+    /// (plus its contact count). The fixture goes through `math::sin_cos` and `math::tanh`
+    /// (libm) and `f32` rounding; the remap exercises RK4 with bilinear lookups, Catmull-Rom
+    /// vorticity, the gate, the elliptical soak-zone test, the valve and the pre-roll, `math::exp`,
+    /// the clamped Catmull-Rom sampler, the flush, the solid bodies and the row tail. One changed
+    /// bit anywhere, on any CPU, changes the hash. Re-bless only for an intended change of the
+    /// remap or of the shared test fixtures, and say why. Last re-blessed for `ember-v2`: the
+    /// ember field is gone, the bodies are ellipses and their interiors are solid.
     #[test]
     fn remap_output_matches_the_golden_hash() {
         use sha2::{Digest, Sha256};
-        const GOLDEN: &str = "04dc76581ff10c1acb4026175d358ccf2269d6d8b21a83f68899d8d34ad79802";
+        const GOLDEN: &str = "3ed4290997b79fb2453ebc7276d528cd6f3e9f0545b3231699c52bfd32725afe";
         let mut rng = Lcg(4242);
         let nodes = NodeGrid::new(25, 16, 2, 0.12).unwrap();
         assert_eq!(nodes.cols % LANES, 2);
@@ -1055,15 +922,14 @@ mod tests {
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let (first, last) = (snaps[0].time, snaps[3].time);
         let rules = ContactRules {
-            reach: 0.3,
+            soak_depth: 0.3,
             vorticity_gate: 40.0,
             t_on: first + 0.3 * (last - first),
             t_valve: first + 0.8 * (last - first),
         };
         let prev = patchy_fields(&nodes, &mut rng);
         let mut next = InkFields::zeros(&nodes);
-        let memory = InkDecay { ember_fade: 0.8, ..decay(last, 0.8, 0.97) };
-        let stats = remap(&prev, &mut next, &nodes, &window, &rules, &memory, &look());
+        let stats = remap(&prev, &mut next, &nodes, &window, &rules, &decay(last, 0.8, 0.97));
         assert_eq!(stats.non_finite_origins, 0);
         assert!(stats.contacted_nodes > 50, "{stats:?}");
         let mut hasher = Sha256::new();
@@ -1082,7 +948,7 @@ mod tests {
         let (snaps, bodies) = random_window(&mut rng, &fluid, 3, 2.0, 60.0);
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
         let rules = ContactRules {
-            reach: 0.3,
+            soak_depth: 0.3,
             vorticity_gate: 40.0,
             t_on: f64::NEG_INFINITY,
             t_valve: f64::INFINITY,
@@ -1093,7 +959,7 @@ mod tests {
             let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
             pool.install(|| {
                 let mut next = InkFields::zeros(&nodes);
-                let stats = remap(&prev, &mut next, &nodes, &window, &rules, &d, &look());
+                let stats = remap(&prev, &mut next, &nodes, &window, &rules, &d);
                 (next, stats)
             })
         };
@@ -1108,18 +974,20 @@ mod tests {
         }
     }
 
-    /// Throughput of the remap on a production-like frame: a ~2100×1430 node grid over the
-    /// 1440×1024 fluid grid, a smooth divergence-free flow with |u| ~ 1–3 and three snapshot
-    /// intervals of 0.0026. Run with
+    /// Throughput of the remap on a production-like frame: 3×3 nodes per pixel of a 960×620 view
+    /// (plus the ink margin) over the default fluid grid, a smooth divergence-free flow with
+    /// |u| ~ 1–3 and three snapshot intervals of 0.0026. Run with
     /// `cargo test --release --lib ember::ink::tests::remap_throughput -- --ignored --nocapture`.
     #[test]
     #[ignore = "benchmark"]
     fn remap_throughput() {
         use std::time::Instant;
         let (width, height) = (960u32, 620u32);
-        let nodes = NodeGrid::new(width, height, 2, 0.15).unwrap();
+        let defaults = crate::ember::EmberConfig::default();
+        let nodes = NodeGrid::new(width, height, defaults.raster.supersample, 0.15).unwrap();
         let aspect = f64::from(width) / f64::from(height);
-        let fluid = FluidGrid::for_canvas(aspect, 1024, 0.35).unwrap();
+        let fluid =
+            FluidGrid::for_canvas(aspect, defaults.fluid.rows, defaults.fluid.box_margin).unwrap();
         let tau = 2.0 * std::f64::consts::PI;
         let mut rng = Lcg(1);
         // Stream function ψ = Σ A sin(k·x + φ + ct) over periodic modes; u = ∂ψ/∂y, v = -∂ψ/∂x.
@@ -1160,22 +1028,21 @@ mod tests {
             "flow built in {:.2}s: mean |u| {mean:.2}, max {peak:.2}",
             started.elapsed().as_secs_f64()
         );
-        let bodies: Vec<[[f64; 2]; 3]> = times
-            .iter()
-            .map(|&t| {
-                let s = (t - 3.0) * 2.0;
-                [[-0.6 + s, 0.2], [0.5, -0.3 + s], [0.1 - s, 0.5 - s]]
-            })
-            .collect();
+        let bodies: Vec<[BodyState; 3]> =
+            times
+                .iter()
+                .map(|&t| {
+                    let s = (t - 3.0) * 2.0;
+                    [[-0.6 + s, 0.2], [0.5, -0.3 + s], [0.1 - s, 0.5 - s]].map(|position| {
+                        BodyState { position, velocity: [2.0, 0.0], shape: Shape::disc(0.05) }
+                    })
+                })
+                .collect();
         let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
-        let rules = ContactRules { reach: 0.08, vorticity_gate: 40.0, t_on: 0.5, t_valve: 10.0 };
-        let d = InkDecay {
-            frame_time: times[3],
-            fresh_tau: 0.12,
-            fresh_fade: 0.94,
-            floor_fade: 1.0,
-            ember_fade: 0.8,
-        };
+        let rules =
+            ContactRules { soak_depth: 0.03, vorticity_gate: 40.0, t_on: 0.5, t_valve: 10.0 };
+        let d =
+            InkDecay { frame_time: times[3], fade_tau: 0.12, fresh_fade: 0.94, floor_fade: 1.0 };
         // Blocky fields (uniform patches: the clamp shortcut applies almost everywhere) and noisy
         // fields (every sample needs all sixteen taps: the worst case).
         let mut blocky = InkFields::zeros(&nodes);
@@ -1208,8 +1075,7 @@ mod tests {
                 let mut stats = RemapStats::default();
                 for _ in 0..3 {
                     let clock = Instant::now();
-                    stats = pool
-                        .install(|| remap(prev, &mut next, &nodes, &window, &rules, &d, &look()));
+                    stats = pool.install(|| remap(prev, &mut next, &nodes, &window, &rules, &d));
                     best = best.min(clock.elapsed().as_secs_f64());
                 }
                 println!(

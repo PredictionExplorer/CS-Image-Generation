@@ -1,24 +1,24 @@
-//! Spectral shading of sumi and cinnabar on kozo, and the display encoding.
+//! Spectral shading of sumi on kozo, and the display encoding.
 //!
 //! # Reflectance (36 bands, λ = 380, 390, …, 730 nm)
 //!
 //! The ink sits *in* the paper's fibres (Duncan additivity of absorption `K` and scattering `S`,
-//! per unit sheet thickness, semi-infinite sheet). For pigment loads `L0` (pine soot) and `L1`
-//! (cinnabar), paper mottle `m` and ink gain `g` of the sample's pixel:
+//! per unit sheet thickness, semi-infinite sheet). For the pine-soot load `L`, paper mottle `m`
+//! and ink gain `g` of the sample's pixel:
 //!
 //! ```text
-//! k_ink = L0·k_soot + L1·k_cin + (m - 1)·K_p      (mottle: flocs carry more pulp absorbers)
-//! s_ink = L0·s_soot + L1·s_cin
+//! k_ink = L·k_soot + (m - 1)·K_p                  (mottle: flocs carry more pulp absorbers)
+//! s_ink = L·s_soot
 //! K     = K_p + g·k_ink,   S = S_p + g·s_ink      (S_p = 1: the Kubelka–Munk unit)
 //! R∞    = 1 / (1 + a + sqrt(a·(a + 2))),  a = K/S   (semi-infinite Kubelka–Munk, stable form)
 //! R     = ks + (1 - k1)(1 - k2)·R∞ / (1 - k2·R∞)  (Saunderson surface; ks = matte black floor)
-//! R    -= (ks - ks_film)·(1 - exp(-max(L0 + L1, 0)/c_film))   (nikawa film over dense ink)
+//! R    -= (ks - ks_film)·(1 - exp(-max(L, 0)/c_film))   (nikawa film over dense ink)
 //! XYZ   = Σ_b R_b·W_b                               (gallery light, perfect diffuser Y = 1)
 //! ```
 //!
-//! `k_soot = SOOT_PINE_K·STRENGTH_SOOT_PINE` etc.: the strength scales make one load unit of
-//! every pigment optically as strong as one unit of neutral carbon (peak optical density 0.5 over
-//! kozo). The paper's `K_p` is derived once from its observed reflectance by the inverse
+//! `k_soot = SOOT_PINE_K·STRENGTH_SOOT_PINE`, `s_soot` likewise: the strength scale makes one load
+//! unit of pine soot optically as strong as one unit of neutral carbon (peak optical density 0.5
+//! over kozo). The paper's `K_p` is derived once from its observed reflectance by the inverse
 //! Saunderson correction and the Kubelka–Munk remission function,
 //!
 //! ```text
@@ -37,8 +37,8 @@
 //! division and one square root per band instead of three divisions. It agrees with the
 //! prototype's `saunderson(km_r_inf(K, S))` to a few ULP (the golden tests hold it to 1e-12).
 //!
-//! Preconditions: `L0, L1 ≥ 0`, `g ≥ 0` and `K ≥ 0`. Since
-//! `K = K_p·(1 - g·(1 - m)) + g·(L0·k_soot + L1·k_cin)` with non-negative tables, `K ≥ 0` is
+//! Preconditions: `L ≥ 0`, `g ≥ 0` and `K ≥ 0`. Since
+//! `K = K_p·(1 - g·(1 - m)) + g·L·k_soot` with a non-negative table, `K ≥ 0` is
 //! guaranteed by `g·(1 - m) ≤ 1` (sufficient, not necessary), which the kozo sheet ensures
 //! (`m ≥ 0.3`, `g ≤ 1`, so `g·(1 - m) ≤ 0.7`). Then `S ≥ 1`, every band lies in `(0, 1)` and the
 //! XYZ is finite.
@@ -56,7 +56,7 @@
 //!    chroma compression in `OKLab`. The colour goes to D65 XYZ with the inverse of the prototype's
 //!    IEC sRGB matrix, to `OKLab` (`lab = M2·cbrt(max(M1·xyz, 0))`), and the chroma scale
 //!    `μ ∈ [0, 1]` is bisected 24 times, keeping the largest in-gamut `lo`; the result is clipped
-//!    to `[0, 1]`. (It never triggered on the prototype's vermilion master.)
+//!    to `[0, 1]`. (Neutral soot on warm paper stays inside sRGB; the map is a safeguard.)
 //! 4. **Transfer function**: clip to `[0, 1]`, `v = x ≤ 0.0031308 ? 12.92·x : 1.055·x^(1/2.4) -
 //!    0.055` (IEC 61966-2-1), clip to `[0, 1]`, and `round(v·65535)` as a 16-bit code.
 //!
@@ -67,7 +67,6 @@
 //! which LLVM may vectorise without changing a bit. Matrix inverses are computed once from the
 //! embedded coefficients with explicit cofactor formulas.
 
-use super::look::InkLoads;
 use super::math::{self, clamp_unit};
 use super::paper::PaperSample;
 
@@ -91,8 +90,6 @@ const KS_FILM: f64 = 0.005;
 const C_FILM: f64 = 0.35;
 /// Equal-strength scale of pine soot (its `k`, `s` per unit load are multiplied by this).
 const STRENGTH_SOOT_PINE: f64 = 1.2440916174042291;
-/// Equal-strength scale of cinnabar.
-const STRENGTH_CINNABAR: f64 = 10.962081999030831;
 /// Luminance factor of the display black the medium black is mapped to.
 const BPC_DEST_Y: f64 = 0.004;
 /// Linear-sRGB tolerance of the gamut test: in gamut ⇔ every channel in `[-tol, 1 + tol]`.
@@ -252,88 +249,6 @@ const SOOT_PINE_S: [f64; BANDS] = [
     2.763298780012723,
 ];
 
-/// Absorption `k` of one unit load of cinnabar (mercury sulphide, vermilion) per band, before
-/// [`STRENGTH_CINNABAR`]: n = 2.97 with an Urbach edge at 2.16 eV (20 meV), `d_g` = 1.5 µm,
-/// `σ_g` = 1.6, in nikawa (n = 1.53); normalised to a peak optical density of 1.2 over kozo.
-const CINNABAR_K: [f64; BANDS] = [
-    5.883640536433381,
-    5.9001238647210945,
-    5.916480378889973,
-    5.932733801510417,
-    5.948913651773503,
-    5.965064378377791,
-    5.981245434379552,
-    5.997537634937342,
-    6.014042452537628,
-    6.030883984081062,
-    6.04819595697182,
-    6.066108710202803,
-    6.084705107588323,
-    6.103971971399193,
-    6.123692267423743,
-    6.143267985378724,
-    6.161287458394268,
-    6.1740270796609025,
-    6.170519493947712,
-    6.110864778401082,
-    4.791469506059238,
-    1.5924753862169638,
-    0.3738384589165978,
-    0.0744522020922602,
-    0.01781939584168988,
-    0.0033426303376345554,
-    0.002103463117386933,
-    0.00022990989809455184,
-    3.804157077957927e-05,
-    8.720929214439897e-06,
-    1.942578124610887e-06,
-    6.440382765255111e-07,
-    1.781096734432841e-07,
-    4.786699932841593e-08,
-    1.306935566219167e-08,
-    4.222926665357546e-09,
-];
-
-/// Scattering `s` of one unit load of cinnabar per band, before [`STRENGTH_CINNABAR`].
-const CINNABAR_S: [f64; BANDS] = [
-    0.2906073322749169,
-    0.29177134163708757,
-    0.29294064307662976,
-    0.2941085567661935,
-    0.2952650403069931,
-    0.29639571671685117,
-    0.2974804055460042,
-    0.29849217986293236,
-    0.29939657066456915,
-    0.3001524120751354,
-    0.300714760292968,
-    0.3010416761100401,
-    0.3011060833102571,
-    0.3009138491143149,
-    0.30053123397110515,
-    0.30012988639878563,
-    0.3000898422020189,
-    0.3013090692966174,
-    0.30632411153187694,
-    0.32378889881041834,
-    0.6105444429195179,
-    1.3599823275897949,
-    1.6998314815182751,
-    1.8148212194480737,
-    1.8084836767246841,
-    1.8318754102462063,
-    1.8882261937351197,
-    1.8467662631796544,
-    1.853425579026124,
-    1.8746603622081819,
-    1.8340023499129903,
-    1.8870868014918976,
-    1.874705729109791,
-    1.8886239399217657,
-    1.8980040423446594,
-    1.8747615089072598,
-];
-
 /// Tristimulus weights `(W_X, W_Y, W_Z)` per band under the gallery light (CIE LED-V1, CIE 1931
 /// 2° observer): `XYZ = Σ_b R_b·W_b`. Each weight is the exact 1 nm integral (360–830 nm) of the
 /// piecewise-linear spectrum through the band values against the CMFs and the 1 nm illuminant,
@@ -409,10 +324,6 @@ pub(crate) struct Optics {
     soot_k: [f64; BANDS],
     /// Pine-soot scattering per unit load, strength-scaled.
     soot_s: [f64; BANDS],
-    /// Cinnabar absorption per unit load, strength-scaled.
-    cinnabar_k: [f64; BANDS],
-    /// Cinnabar scattering per unit load, strength-scaled.
-    cinnabar_s: [f64; BANDS],
     /// Tristimulus weights, structure of arrays: `weight[channel][band]` (X, Y, Z).
     weight: [[f64; BANDS]; 3],
     /// Black-point compensation.
@@ -438,8 +349,6 @@ impl Optics {
             paper_k: KOZO_R_OBS.map(paper_absorption),
             soot_k: scaled(SOOT_PINE_K, STRENGTH_SOOT_PINE),
             soot_s: scaled(SOOT_PINE_S, STRENGTH_SOOT_PINE),
-            cinnabar_k: scaled(CINNABAR_K, STRENGTH_CINNABAR),
-            cinnabar_s: scaled(CINNABAR_S, STRENGTH_CINNABAR),
             weight,
             black_point: BlackPoint::new(WHITE_XYZ, MEDIUM_BLACK_XYZ, BPC_DEST_Y),
             gamut: GamutMap::new(),
@@ -448,15 +357,14 @@ impl Optics {
 
     /// Gallery-light XYZ (perfect diffuser `Y = 1`) of one ink sample on paper, nikawa film
     /// included. See the module docs for the model and its preconditions.
-    pub(crate) fn reflect_xyz(&self, loads: InkLoads, paper: PaperSample) -> [f64; 3] {
-        let total = loads.carbon + loads.cinnabar;
-        let film = if total > 0.0 { 1.0 - math::exp(-total / C_FILM) } else { 0.0 };
-        self.reflect_with_film(loads, paper, film)
+    pub(crate) fn reflect_xyz(&self, carbon: f64, paper: PaperSample) -> [f64; 3] {
+        let film = if carbon > 0.0 { 1.0 - math::exp(-carbon / C_FILM) } else { 0.0 };
+        self.reflect_with_film(carbon, paper, film)
     }
 
     /// Gallery-light XYZ of bare paper (`reflect_xyz` with zero loads).
     pub(crate) fn paper_xyz(&self, paper: PaperSample) -> [f64; 3] {
-        self.reflect_xyz(InkLoads::default(), paper)
+        self.reflect_xyz(0.0, paper)
     }
 
     /// Black-point compensation, CAT16 adaptation to D65, gamut mapping and the sRGB transfer
@@ -475,16 +383,14 @@ impl Optics {
     /// The band loop has no branches and works on fixed-size arrays so it vectorises; the three
     /// band sums use [`dot_bands`]' fixed order.
     #[allow(clippy::needless_range_loop)] // indexed loops over fixed-size tables vectorise best
-    fn reflect_with_film(&self, loads: InkLoads, paper: PaperSample, film: f64) -> [f64; 3] {
-        let (carbon, cinnabar) = (loads.carbon, loads.cinnabar);
+    fn reflect_with_film(&self, carbon: f64, paper: PaperSample, film: f64) -> [f64; 3] {
         let mottle = paper.mottle - 1.0;
         let gain = paper.ink_gain;
         let surface_drop = (KS_MATTE - KS_FILM) * film;
         let mut reflectance = [0.0f64; BANDS];
         for b in 0..BANDS {
-            let k_ink =
-                carbon * self.soot_k[b] + cinnabar * self.cinnabar_k[b] + mottle * self.paper_k[b];
-            let s_ink = carbon * self.soot_s[b] + cinnabar * self.cinnabar_s[b];
+            let k_ink = carbon * self.soot_k[b] + mottle * self.paper_k[b];
+            let s_ink = carbon * self.soot_s[b];
             let k = self.paper_k[b] + gain * k_ink;
             let s = PAPER_S + gain * s_ink;
             let body =
@@ -726,8 +632,6 @@ mod tests {
         ("KOZO_R_OBS", [28.538941910095794, 22.82858298689451, 554.0600386645627]),
         ("SOOT_PINE_K", [1779.5007030776358, 87969.51223229148, 33071.391180810824]),
         ("SOOT_PINE_S", [91.03687264964346, 231.24989075791925, 1746.9814980454573]),
-        ("CINNABAR_K", [127.61308747187555, 754.9259974665313, 1424.9804397485054]),
-        ("CINNABAR_S", [33.83836093824971, 51.87684741712317, 871.6844630154397]),
         ("W_GALLERY", [2.474201134910939, 0.18242354394043814, 142.95137618120154]),
         ("WHITE_XYZ", [2.474201134910939, 2.386954458006267, 4.173392637727005]),
         ("M_TOTAL", [4.248685061351155, 30.132555234440837, 29.497663660568968]),
@@ -755,8 +659,6 @@ mod tests {
             "KOZO_R_OBS" => KOZO_R_OBS.to_vec(),
             "SOOT_PINE_K" => SOOT_PINE_K.to_vec(),
             "SOOT_PINE_S" => SOOT_PINE_S.to_vec(),
-            "CINNABAR_K" => CINNABAR_K.to_vec(),
-            "CINNABAR_S" => CINNABAR_S.to_vec(),
             "W_GALLERY" => flat(&W_GALLERY),
             "WHITE_XYZ" => WHITE_XYZ.to_vec(),
             "M_TOTAL" => flat(&M_TOTAL),
@@ -788,20 +690,18 @@ mod tests {
         out
     }
 
-    fn sample(carbon: f64, cinnabar: f64, mottle: f64, ink_gain: f64) -> (InkLoads, PaperSample) {
-        (InkLoads { carbon, cinnabar }, PaperSample { mottle, ink_gain })
+    fn sample(carbon: f64, mottle: f64, ink_gain: f64) -> (f64, PaperSample) {
+        (carbon, PaperSample { mottle, ink_gain })
     }
 
     /// Straightforward per-band evaluation of the prototype's formulas (R∞, then Saunderson),
     /// band sums sequential: the reference for the optimised kernel.
     #[allow(clippy::needless_range_loop)] // mirrors the kernel's per-band indexing
-    fn reference_xyz(optics: &Optics, loads: InkLoads, paper: PaperSample, film: f64) -> [f64; 3] {
+    fn reference_xyz(optics: &Optics, carbon: f64, paper: PaperSample, film: f64) -> [f64; 3] {
         let mut xyz = [0.0f64; 3];
         for b in 0..BANDS {
-            let k_ink = loads.carbon * optics.soot_k[b]
-                + loads.cinnabar * optics.cinnabar_k[b]
-                + (paper.mottle - 1.0) * optics.paper_k[b];
-            let s_ink = loads.carbon * optics.soot_s[b] + loads.cinnabar * optics.cinnabar_s[b];
+            let k_ink = carbon * optics.soot_k[b] + (paper.mottle - 1.0) * optics.paper_k[b];
+            let s_ink = carbon * optics.soot_s[b];
             let k = optics.paper_k[b] + paper.ink_gain * k_ink;
             let s = 1.0 + paper.ink_gain * s_ink;
             let a = k / s;
@@ -818,7 +718,7 @@ mod tests {
 
     #[test]
     fn table_checksums() {
-        assert_eq!(CHECKSUMS.len(), 14);
+        assert_eq!(CHECKSUMS.len(), 12);
         for (name, expected) in CHECKSUMS {
             let values = table(name);
             assert_eq!(checksum(&values), *expected, "table {name} differs from the porting spec");
@@ -850,7 +750,6 @@ mod tests {
         for b in 0..BANDS {
             assert!(KOZO_R_OBS[b] > KS_MATTE && KOZO_R_OBS[b] < 1.0);
             assert!(SOOT_PINE_K[b] > 0.0 && SOOT_PINE_S[b] > 0.0);
-            assert!(CINNABAR_K[b] > 0.0 && CINNABAR_S[b] > 0.0);
         }
     }
 
@@ -907,7 +806,7 @@ mod tests {
         }
         let paper = optics.paper_xyz(PaperSample::default());
         assert!(max_rel(paper, expected) <= 1e-13, "{paper:?} vs {expected:?}");
-        assert_eq!(paper, optics.reflect_xyz(InkLoads::default(), PaperSample::default()));
+        assert_eq!(paper, optics.reflect_xyz(0.0, PaperSample::default()));
         // Without ink the ink gain is irrelevant.
         let gained = optics.paper_xyz(PaperSample { mottle: 1.0, ink_gain: 0.37 });
         assert!(max_rel(gained, paper) <= 1e-15);
@@ -916,24 +815,22 @@ mod tests {
     /// The golden values of docs/ember-design.md §7 (computed by the prototype's float64 path).
     #[test]
     fn golden_table() {
-        /// `((carbon, cinnabar), mottle, ink gain, XYZ, 16-bit code, sRGB8)`.
-        type Golden = ((f64, f64), f64, f64, [f64; 3], [u16; 3], [u8; 3]);
+        /// `(carbon, mottle, ink gain, XYZ, 16-bit code, sRGB8)`.
+        type Golden = (f64, f64, f64, [f64; 3], [u16; 3], [u8; 3]);
         #[rustfmt::skip]
-        let golden: [Golden; 10] = [
-            ((0.0, 0.0), 1.0, 1.0, [0.9402834114004027, 0.8278798068379165, 0.25613089936975747], [61730, 60126, 56837], [240, 234, 221]),
-            ((1.0, 0.0), 1.0, 1.0, [0.020521034654061254, 0.01814195130463335, 0.006133908911087946], [5487, 5201, 4910], [21, 20, 19]),
-            ((0.06, 1.2), 1.0, 1.0, [0.23182060787844666, 0.11761247536190546, 0.005893647895779405], [45498, 8735, 4102], [177, 34, 16]),
-            ((0.06, 0.36), 1.0, 1.0, [0.1553078585890647, 0.08612930392130692, 0.008443525495676164], [36552, 10548, 7594], [142, 41, 30]),
-            ((0.1, 0.0), 1.0, 1.0, [0.055784391761169054, 0.04952957037451743, 0.017225604415632652], [14334, 14262, 14223], [56, 55, 55]),
-            ((0.01, 0.0), 1.0, 1.0, [0.2097779838271311, 0.18654086630062808, 0.06522611495495041], [30034, 30036, 30039], [117, 117, 117]),
-            ((0.002, 0.0), 1.0, 1.0, [0.4330375076985446, 0.38492773329308283, 0.1328277885679573], [42568, 42504, 42225], [166, 165, 164]),
-            ((0.0004, 0.0), 1.0, 1.0, [0.671475105314176, 0.5961081472721036, 0.19987477811714788], [52265, 51966, 50917], [203, 202, 198]),
-            ((1.0, 0.0), 1.2, 0.7, [0.02188044939077052, 0.019352530570086512, 0.006564053822515822], [6060, 5804, 5549], [24, 23, 22]),
-            ((0.01, 0.0), 0.4, 0.5, [0.2973610590397358, 0.26442950408735566, 0.09234109757079008], [35599, 35601, 35579], [139, 139, 138]),
+        let golden: [Golden; 8] = [
+            (0.0, 1.0, 1.0, [0.9402834114004027, 0.8278798068379165, 0.25613089936975747], [61730, 60126, 56837], [240, 234, 221]),
+            (1.0, 1.0, 1.0, [0.020521034654061254, 0.01814195130463335, 0.006133908911087946], [5487, 5201, 4910], [21, 20, 19]),
+            (0.1, 1.0, 1.0, [0.055784391761169054, 0.04952957037451743, 0.017225604415632652], [14334, 14262, 14223], [56, 55, 55]),
+            (0.01, 1.0, 1.0, [0.2097779838271311, 0.18654086630062808, 0.06522611495495041], [30034, 30036, 30039], [117, 117, 117]),
+            (0.002, 1.0, 1.0, [0.4330375076985446, 0.38492773329308283, 0.1328277885679573], [42568, 42504, 42225], [166, 165, 164]),
+            (0.0004, 1.0, 1.0, [0.671475105314176, 0.5961081472721036, 0.19987477811714788], [52265, 51966, 50917], [203, 202, 198]),
+            (1.0, 1.2, 0.7, [0.02188044939077052, 0.019352530570086512, 0.006564053822515822], [6060, 5804, 5549], [24, 23, 22]),
+            (0.01, 0.4, 0.5, [0.2973610590397358, 0.26442950408735566, 0.09234109757079008], [35599, 35601, 35579], [139, 139, 138]),
         ];
         let optics = Optics::new();
-        for ((carbon, cinnabar), mottle, ink_gain, xyz, code16, srgb8) in golden {
-            let (loads, paper) = sample(carbon, cinnabar, mottle, ink_gain);
+        for (carbon, mottle, ink_gain, xyz, code16, srgb8) in golden {
+            let (loads, paper) = sample(carbon, mottle, ink_gain);
             let got = optics.reflect_xyz(loads, paper);
             // Contract: 1e-5; the kernel matches the float64 prototype to rounding.
             assert!(max_rel(got, xyz) <= 1e-12, "{loads:?} {paper:?}: {got:?} vs {xyz:?}");
@@ -952,15 +849,13 @@ mod tests {
     #[test]
     fn optimised_kernel_matches_the_reference_formulas() {
         let optics = Optics::new();
-        for &carbon in &[0.0, 0.0004, 0.01, 0.3, 1.0, 8.0, 40.0] {
-            for &cinnabar in &[0.0, 0.05, 1.2, 12.0] {
-                for &(mottle, ink_gain) in &[(1.0, 1.0), (0.3, 1.0), (3.0, 0.2), (1.2, 0.7)] {
-                    let (loads, paper) = sample(carbon, cinnabar, mottle, ink_gain);
-                    for film in [0.0, 0.25, 1.0] {
-                        let got = optics.reflect_with_film(loads, paper, film);
-                        let want = reference_xyz(&optics, loads, paper, film);
-                        assert!(max_rel(got, want) <= 1e-13, "{loads:?} {paper:?}");
-                    }
+        for &carbon in &[0.0, 0.0004, 0.01, 0.05, 0.3, 1.0, 8.0, 40.0] {
+            for &(mottle, ink_gain) in &[(1.0, 1.0), (0.3, 1.0), (3.0, 0.2), (1.2, 0.7)] {
+                let (loads, paper) = sample(carbon, mottle, ink_gain);
+                for film in [0.0, 0.25, 1.0] {
+                    let got = optics.reflect_with_film(loads, paper, film);
+                    let want = reference_xyz(&optics, loads, paper, film);
+                    assert!(max_rel(got, want) <= 1e-13, "{loads:?} {paper:?}");
                 }
             }
         }
@@ -969,7 +864,7 @@ mod tests {
     #[test]
     fn black_point_compensation_uses_the_medium_black() {
         let optics = Optics::new();
-        let (loads, paper) = sample(MEDIUM_BLACK_LOAD, 0.0, 1.0, 1.0);
+        let (loads, paper) = sample(MEDIUM_BLACK_LOAD, 1.0, 1.0);
         // The definition: full film (render.medium_black subtracts ks - ks_film outright).
         let black = optics.reflect_with_film(loads, paper, 1.0);
         assert!(max_rel(black, MEDIUM_BLACK_XYZ) <= 1e-13, "{black:?}");
@@ -1066,9 +961,11 @@ mod tests {
             }
         }
         assert!(mapped_count >= 3, "only {mapped_count} spectral colours needed mapping");
-        // In-gamut colours are untouched by the encoder path.
-        let (loads, paper) = sample(0.06, 1.2, 1.0, 1.0);
-        assert!(!optics.encode_srgb16(optics.reflect_xyz(loads, paper)).1);
+        // Soot on kozo is untouched by the encoder path at every load.
+        for carbon in [0.0, 0.0004, 0.01, 0.1, 1.0, 8.0] {
+            let (loads, paper) = sample(carbon, 1.0, 1.0);
+            assert!(!optics.encode_srgb16(optics.reflect_xyz(loads, paper)).1, "{carbon}");
+        }
     }
 
     #[test]
@@ -1079,24 +976,18 @@ mod tests {
         let mut carbon = 1e-4;
         for _ in 0..60 {
             carbon *= 1.25;
-            let y = optics.reflect_xyz(InkLoads { carbon, cinnabar: 0.0 }, paper)[1];
+            let y = optics.reflect_xyz(carbon, paper)[1];
             assert!(y < previous, "load {carbon}");
             assert!(y > 0.0);
             previous = y;
         }
         // Infinitely dense soot bottoms out at the filmed floor plus its own volume scattering.
-        let dense = optics.reflect_xyz(InkLoads { carbon: 1e6, cinnabar: 0.0 }, paper)[1];
+        let dense = optics.reflect_xyz(1e6, paper)[1];
         assert!(dense > KS_FILM && dense < 0.02, "{dense}");
-        // Cinnabar reflects red: X/Y well above paper's.
-        let red = optics.reflect_xyz(InkLoads { carbon: 0.0, cinnabar: 1.2 }, paper);
         let white = optics.paper_xyz(paper);
-        assert!(red[0] / red[1] > 1.5 * white[0] / white[1]);
         // Fibres shed ink: a lower ink gain is lighter.
-        let full = optics.reflect_xyz(InkLoads { carbon: 0.1, cinnabar: 0.0 }, paper)[1];
-        let shed = optics.reflect_xyz(
-            InkLoads { carbon: 0.1, cinnabar: 0.0 },
-            PaperSample { ink_gain: 0.5, ..paper },
-        )[1];
+        let full = optics.reflect_xyz(0.1, paper)[1];
+        let shed = optics.reflect_xyz(0.1, PaperSample { ink_gain: 0.5, ..paper })[1];
         assert!(shed > full);
         // More paper absorbers (mottle > 1) darken bare paper.
         let mottled = optics.paper_xyz(PaperSample { mottle: 1.5, ink_gain: 1.0 })[1];
@@ -1109,19 +1000,17 @@ mod tests {
         let optics = Optics::new();
         let mut hasher = Sha256::new();
         for &carbon in &[0.0, 0.0004, 0.003, 0.06, 0.4, 1.0, 3.0] {
-            for &cinnabar in &[0.0, 0.1, 0.36, 1.2] {
-                for &(mottle, ink_gain) in &[(1.0, 1.0), (0.7, 0.95), (1.3, 0.8)] {
-                    let (loads, paper) = sample(carbon, cinnabar, mottle, ink_gain);
-                    let xyz = optics.reflect_xyz(loads, paper);
-                    for v in xyz {
-                        hasher.update(v.to_bits().to_le_bytes());
-                    }
-                    let (code, mapped) = optics.encode_srgb16(xyz);
-                    for c in code {
-                        hasher.update(c.to_le_bytes());
-                    }
-                    hasher.update([u8::from(mapped)]);
+            for &(mottle, ink_gain) in &[(1.0, 1.0), (0.7, 0.95), (1.3, 0.8)] {
+                let (loads, paper) = sample(carbon, mottle, ink_gain);
+                let xyz = optics.reflect_xyz(loads, paper);
+                for v in xyz {
+                    hasher.update(v.to_bits().to_le_bytes());
                 }
+                let (code, mapped) = optics.encode_srgb16(xyz);
+                for c in code {
+                    hasher.update(c.to_le_bytes());
+                }
+                hasher.update([u8::from(mapped)]);
             }
         }
         for row in &W_GALLERY {
@@ -1134,8 +1023,9 @@ mod tests {
         assert_eq!(hex::encode(hasher.finalize()), GOLDEN_SHA256);
     }
 
-    /// See [`golden_bits`]. A change means the shading or encoding changed on this machine.
-    const GOLDEN_SHA256: &str = "f61d0a6f4692502f0d9333a3c14edff50e5d68c674f2707932bd20f9e242a5b4";
+    /// See [`golden_bits`]. A change means the shading or encoding changed on this machine. Last
+    /// re-blessed for `ember-v2`: the shading takes the pine-soot load alone (no vermilion).
+    const GOLDEN_SHA256: &str = "4d5efc2dab538bddbce0541f2614bde1b76b6669d8180dfe98eb4df57054a45a";
 
     /// Timing probe (not run by default):
     /// `cargo test --release --lib ember::optics::tests::timing -- --ignored --nocapture`.
@@ -1146,15 +1036,10 @@ mod tests {
         use std::time::Instant;
         let optics = Optics::new();
         let n = 4_000_000usize;
-        let inputs: Vec<(InkLoads, PaperSample)> = (0..n)
+        let inputs: Vec<(f64, PaperSample)> = (0..n)
             .map(|i| {
                 let t = (i % 1000) as f64 / 1000.0;
-                sample(
-                    0.5 * t,
-                    if i % 3 == 0 { 0.4 * t } else { 0.0 },
-                    0.9 + 0.2 * t,
-                    1.0 - 0.1 * t,
-                )
+                sample(0.5 * t, 0.9 + 0.2 * t, 1.0 - 0.1 * t)
             })
             .collect();
         let start = Instant::now();
