@@ -210,25 +210,10 @@ fn verify(path: &Path) -> Result<bool> {
         },
     };
     let summary = render_ember(&request, &mut |_| Ok(()))?;
-    let checks = [
-        ("still", Some(outputs.still_rgb48le_sha256.as_str()), Some(&summary.still_sha256)),
-        ("frames", expected_frames, summary.frames_sha256.as_ref()),
-        ("slow", expected_slow, summary.slow_frames_sha256.as_ref()),
-    ];
-    let mut verified = true;
-    for (name, expected, rendered) in checks {
-        let Some(expected) = expected else {
-            println!("{name:<8} (not recorded)");
-            continue;
-        };
-        let matches = rendered.is_some_and(|digest| digest == expected);
-        verified &= matches;
-        println!(
-            "{name:<8} {}  {}",
-            if matches { "MATCH   " } else { "MISMATCH" },
-            rendered.map_or("(not rendered)", String::as_str),
-        );
-    }
+    let still = Some(outputs.still_rgb48le_sha256.as_str());
+    let mut verified = digest_matches("still", still, Some(&summary.still_sha256));
+    verified &= digest_matches("frames", expected_frames, summary.frames_sha256.as_deref());
+    verified &= digest_matches("slow", expected_slow, summary.slow_frames_sha256.as_deref());
     // What else the certificate says of the render: a certificate whose digests match but whose
     // counts, derived quantities or statistics are not this render's misstates it.
     let rerendered = EmberCertificate::new(
@@ -273,6 +258,22 @@ fn verify(path: &Path) -> Result<bool> {
         summary.timings.total_seconds
     );
     Ok(verified)
+}
+
+/// Prints the re-rendered digest `name` and whether it is the recorded one. `true` if it is, or
+/// if the certificate records none (a film that was not rendered).
+fn digest_matches(name: &str, recorded: Option<&str>, rendered: Option<&str>) -> bool {
+    let Some(recorded) = recorded else {
+        println!("{name:<8} (not recorded)");
+        return true;
+    };
+    let matches = rendered == Some(recorded);
+    println!(
+        "{name:<8} {}  {}",
+        if matches { "MATCH   " } else { "MISMATCH" },
+        rendered.unwrap_or("(not rendered)"),
+    );
+    matches
 }
 
 /// Everything that stops this build from reproducing and verifying `certificate`, found before
