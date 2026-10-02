@@ -3250,7 +3250,7 @@ mod tests {
         let outputs = &certificate["outputs"];
         assert!(outputs["frames_rgb48le_sha256"].is_null(), "{outputs}");
         assert_eq!((outputs["frames_emitted"].as_u64(), summary.frames_emitted), (Some(0), 0));
-        assert!(outputs["slow_frames_rgb48le_sha256"].is_null(), "{outputs}");
+        assert!(outputs["slow_frames_rgb48le_sha256"].is_null());
         assert_eq!(
             (outputs["slow_frames_emitted"].as_u64(), summary.slow_frames_emitted),
             (Some(0), 0)
@@ -3317,7 +3317,7 @@ mod tests {
             (frames - 1 - summary.slow_first_frame) * EMBER_SLOW_FACTOR as usize + 1
         );
         let slow_sha256 = summary.slow_frames_sha256.as_deref().expect("the slow film is hashed");
-        assert_eq!(outputs["slow_frames_rgb48le_sha256"], slow_sha256, "{outputs}");
+        assert_eq!(outputs["slow_frames_rgb48le_sha256"], slow_sha256);
         assert_eq!(outputs["slow_frames_emitted"], slow_frames);
         assert_eq!(certificate["inputs"]["frames"]["slow_factor"], EMBER_SLOW_FACTOR);
         assert_eq!(certificate["derived"]["slow_first_frame"], summary.slow_first_frame);
