@@ -51,7 +51,9 @@ use clap::{Parser, Subcommand};
 use nalgebra::Vector3;
 use serde_json::Value;
 use three_body_problem::app;
-use three_body_problem::ember::certificate::{self, CertificateContext, EmberCertificate};
+use three_body_problem::ember::certificate::{
+    self, CertificateDerived, CertificateOutputs, EmberCertificate,
+};
 use three_body_problem::ember::{
     EmberConfig, EmberError, EmberFrame, EmberMode, EmberRequest, EmberSummary, View, render_ember,
 };
@@ -191,7 +193,7 @@ fn verify(path: &Path) -> Result<bool> {
     let expected_slow = outputs.slow_frames_rgb48le_sha256.as_deref();
     let bodies = inputs.bodies();
     let masses = app::ember_masses(&bodies)?;
-    let positions = get_positions(bodies.clone(), inputs.steps).positions;
+    let positions = get_positions(bodies, inputs.steps).positions;
     let request = EmberRequest {
         positions: &positions,
         dt: inputs.dt,
@@ -215,22 +217,8 @@ fn verify(path: &Path) -> Result<bool> {
     verified &= digest_matches("frames", expected_frames, summary.frames_sha256.as_deref());
     verified &= digest_matches("slow", expected_slow, summary.slow_frames_sha256.as_deref());
     // What else the certificate says of the render: a certificate whose digests match but whose
-    // counts, derived quantities or statistics are not this render's misstates it.
-    let rerendered = EmberCertificate::new(
-        &CertificateContext {
-            seed: &inputs.seed,
-            steps: inputs.steps,
-            dt: inputs.dt,
-            bodies: &bodies,
-            view: &inputs.view,
-            frame_steps: &frame_steps,
-            frame_rate: inputs.frames.frame_rate,
-            paper_seed: &paper_seed,
-            config: &certificate.config,
-        },
-        &summary,
-    );
-    // The frame counts of the outputs (their digests are compared above).
+    // counts, derived quantities or statistics are not this render's misstates it. The frame
+    // counts stand for the outputs here (their digests are compared above).
     let counts = |outputs: &Value| {
         serde_json::json!({
             "frames_emitted": outputs["frames_emitted"],
@@ -238,9 +226,9 @@ fn verify(path: &Path) -> Result<bool> {
         })
     };
     let rendered = serde_json::json!({
-        "outputs": rerendered.outputs,
-        "derived": rerendered.derived,
-        "stats": rerendered.stats,
+        "outputs": CertificateOutputs::from(&summary),
+        "derived": CertificateDerived::from(&summary),
+        "stats": summary.stats,
     });
     let sections = ["outputs", "derived", "stats"].map(|name| {
         let section = |document: &Value| match name {

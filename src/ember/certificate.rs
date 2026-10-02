@@ -329,6 +329,23 @@ pub struct CertificateDerived {
     pub slow_first_frame: usize,
 }
 
+/// The derived quantities of a render.
+impl From<&EmberSummary> for CertificateDerived {
+    fn from(summary: &EmberSummary) -> Self {
+        Self {
+            duration: summary.duration,
+            valve_time: summary.valve_time,
+            hold_time: summary.hold_time,
+            fade_time: summary.fade_time,
+            tidal_reference: summary.tidal_reference,
+            fluid_grid: summary.fluid_grid,
+            fluid_dx: summary.fluid_dx,
+            ink_grid: summary.ink_grid,
+            slow_first_frame: summary.slow_first_frame,
+        }
+    }
+}
+
 /// Digests of the rendered pixels.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -352,6 +369,20 @@ pub struct CertificateOutputs {
     pub still_rgb48le_sha256: String,
     /// Colour encoding of all three ([`PIXEL_ENCODING`]).
     pub encoding: String,
+}
+
+/// The digests and frame counts of a render.
+impl From<&EmberSummary> for CertificateOutputs {
+    fn from(summary: &EmberSummary) -> Self {
+        Self {
+            frames_rgb48le_sha256: summary.frames_sha256.clone(),
+            frames_emitted: summary.frames_emitted,
+            slow_frames_rgb48le_sha256: summary.slow_frames_sha256.clone(),
+            slow_frames_emitted: summary.slow_frames_emitted,
+            still_rgb48le_sha256: summary.still_sha256.clone(),
+            encoding: PIXEL_ENCODING.to_owned(),
+        }
+    }
 }
 
 impl CertificateOutputs {
@@ -553,25 +584,8 @@ impl EmberCertificate {
                 ),
             },
             config: context.config.clone(),
-            derived: CertificateDerived {
-                duration: summary.duration,
-                valve_time: summary.valve_time,
-                hold_time: summary.hold_time,
-                fade_time: summary.fade_time,
-                tidal_reference: summary.tidal_reference,
-                fluid_grid: summary.fluid_grid,
-                fluid_dx: summary.fluid_dx,
-                ink_grid: summary.ink_grid,
-                slow_first_frame: summary.slow_first_frame,
-            },
-            outputs: CertificateOutputs {
-                frames_rgb48le_sha256: summary.frames_sha256.clone(),
-                frames_emitted: summary.frames_emitted,
-                slow_frames_rgb48le_sha256: summary.slow_frames_sha256.clone(),
-                slow_frames_emitted: summary.slow_frames_emitted,
-                still_rgb48le_sha256: summary.still_sha256.clone(),
-                encoding: PIXEL_ENCODING.to_owned(),
-            },
+            derived: CertificateDerived::from(summary),
+            outputs: CertificateOutputs::from(summary),
             stats: summary.stats,
             build: CertificateBuild::current(),
             timings_seconds: summary.timings,
