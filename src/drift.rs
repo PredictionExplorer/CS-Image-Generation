@@ -434,6 +434,70 @@ mod tests {
         assert_eq!(positions, positions_clone);
     }
 
+    /// Every drift returns what it added to the positions, which the ember edition re-applies:
+    /// `None` on each path that leaves them alone, whatever was configured.
+    #[test]
+    fn every_drift_reports_what_it_added() {
+        let dt = 0.001;
+        let original = test_bodies();
+        let elliptical = |scale, arc, positions: &mut Vec<Vec<Vector3<f64>>>| {
+            let params = DriftParameters::new(scale, arc, 0.3);
+            EllipticalDrift::new(&mut make_rng(), params).apply(positions, dt)
+        };
+
+        // Paths that add nothing.
+        let mut positions = original.clone();
+        assert_eq!(NoDrift.apply(&mut positions, dt), AppliedDrift::None);
+        assert_eq!(elliptical(1.0, 0.0, &mut positions), AppliedDrift::None, "no arc");
+        assert_eq!(elliptical(0.0, 0.5, &mut positions), AppliedDrift::None, "no scale");
+        assert_eq!(positions, original);
+        let mut single: Vec<Vec<Vector3<f64>>> =
+            original.iter().map(|body| body[..1].to_vec()).collect();
+        assert_eq!(elliptical(1.0, 0.5, &mut single), AppliedDrift::None, "a single step");
+        let mut empty: Vec<Vec<Vector3<f64>>> = Vec::new();
+        assert_eq!(elliptical(1.0, 0.5, &mut empty), AppliedDrift::None);
+        assert_eq!(
+            LinearDrift::new(&mut make_rng(), 1.0).apply(&mut empty, dt),
+            AppliedDrift::None
+        );
+
+        // A linear drift adds `(velocity·k)·dt` to every body at step `k`.
+        let mut positions = original.clone();
+        let AppliedDrift::Linear { velocity } =
+            LinearDrift::new(&mut make_rng(), 2.0).apply(&mut positions, dt)
+        else {
+            panic!("a linear drift reports its velocity");
+        };
+        for (body, moved) in original.iter().zip(&positions) {
+            for (step, (before, after)) in body.iter().zip(moved).enumerate() {
+                assert_eq!(*after, before + velocity * (step as f64) * dt, "step {step}");
+            }
+        }
+
+        // An elliptical drift reports the ellipse it followed; the offset is the same for the
+        // three bodies and is not zero at step 0.
+        let mut positions = original.clone();
+        let AppliedDrift::Elliptical { mean_motion, eccentricity, semi_major, semi_minor, .. } =
+            elliptical(1.0, 0.5, &mut positions)
+        else {
+            panic!("an elliptical drift reports its ellipse");
+        };
+        assert_eq!(eccentricity, 0.3);
+        assert!(semi_major > semi_minor && semi_minor > 0.0, "{semi_major} {semi_minor}");
+        // Half a turn over the two intervals of the three recorded steps.
+        assert!((mean_motion * (2.0 * dt) - PI).abs() < 1e-9, "{mean_motion}");
+        let offsets: Vec<Vector3<f64>> =
+            (0..3).map(|body| positions[body][0] - original[body][0]).collect();
+        assert!(offsets[0].norm() > 1e-3, "{:?}", offsets[0]);
+        assert!(
+            (offsets[0] - offsets[1]).norm() < 1e-12 && (offsets[0] - offsets[2]).norm() < 1e-12
+        );
+
+        let mut positions = original.clone();
+        let brownian = BrownianDrift::new(&mut make_rng(), 1.0, 3).apply(&mut positions, dt);
+        assert_eq!(brownian, AppliedDrift::Brownian);
+    }
+
     #[test]
     fn test_parse_drift_mode_none() {
         let mut rng = make_rng();
