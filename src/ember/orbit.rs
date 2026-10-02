@@ -1,30 +1,12 @@
-//! From the recorded 3-D orbit to three tidally stretched bodies moving on the canvas.
+//! From the canvas track to three tidally stretched bodies moving through the fluid.
 //!
-//! The ember edition stirs the fluid with the three bodies of the selected orbit, seen from the
-//! plane of their principal motion. This module turns the raw integrator positions
-//! `p[body][knot] ∈ ℝ³` (`N` knots per body, knot `N-1` is the final step) into three moving
-//! bodies in world coordinates, maps orbit knots to fluid time, and gives each body the elliptical
-//! outline that the tidal field of the other two stretches it into ([`Tidal`], [`Shape`]). It ports the museum-lab
-//! `estuary/source.py` projection (`Source.read`, `Source.sample`) and the `wake/ns.py` time map
-//! (`Bodies`, `median_fraction_speed`); docs/ember-design.md §3 is the binding recipe.
-//!
-//! # Principal plane
-//!
-//! 1. Bounding box of all `3N` points: `origin = (low + high)/2`, `extent = max_axis(high - low)`.
-//! 2. Normalised points `q = (p - origin)/extent`; their mean `μ` and covariance
-//!    `C = Σ (q - μ)(q - μ)ᵀ / 3N`, both summed in scan order (knot-major, then body) with
-//!    Neumaier-compensated summation.
-//! 3. Eigen-decomposition of `C` by cyclic Jacobi rotations (fixed pivot order `(0,1), (0,2),
-//!    (1,2)`), eigenpairs sorted by eigenvalue, descending. The orbit must span a plane:
-//!    `λ₁ > 10⁻¹² λ₀`.
-//! 4. Axis signs are fixed by the *anchor rule*: along axis `a` the first point in scan order whose
-//!    `|v| = |(q - μ)·e_a|` reaches `max|v|·(1 - 10⁻¹²)` must have `v > 0`. This makes the
-//!    projection independent of the eigensolver's arbitrary signs.
-//! 5. `P = ((q - μ)·e₀, (q - μ)·e₁)`; with `centre = (min P + max P)/2` and
-//!    `half = (max P - min P)/2`, the world position of a knot is
-//!    `pos = (P - centre)·scale`, `scale = fill / max(half_x/aspect, half_y)`, so the orbit spans
-//!    `±fill·aspect` in `x` or `±fill` in `y` (whichever binds) on the canvas
-//!    `[-aspect, aspect] × [-1, 1]`.
+//! The ember edition stirs the fluid with the three bodies of the selected orbit, seen exactly as
+//! the main edition shows them: `view` turns the raw integrator positions into the canvas track
+//! `pos[body][knot]` (`N` knots per body, knot `N-1` is the final step) on the canvas
+//! `[-aspect, aspect] × [-1, 1]`. This module maps the knots to fluid time and gives each body
+//! the elliptical outline that the tidal field of the other two stretches it into ([`Tidal`],
+//! [`Shape`]). The time map ports the museum-lab `wake/ns.py` (`Bodies`,
+//! `median_fraction_speed`); docs/ember-design.md §3 is the binding recipe.
 //!
 //! # Time map
 //!
@@ -52,12 +34,9 @@
 //!
 //! Everything is sequential, fixed-order `f64` arithmetic using only `+ - × ÷ √` and comparisons;
 //! the median and the tidal reference are order statistics (exact for any selection algorithm).
-//! Given the same input bits, every CPU produces the same projection, duration, positions and
-//! shapes.
+//! Given the same input bits, every CPU produces the same duration, positions and shapes.
 
 use std::fmt;
-
-use nalgebra::Vector3;
 
 use super::config::EmberConfig;
 use super::error::{EmberError, EmberResult};
@@ -82,18 +61,6 @@ const LOOK_AHEAD: usize = 400;
 
 /// Entries per block of the block-maximum index over the speed table.
 const SPEED_BLOCK: usize = 64;
-
-/// Upper bound of Jacobi sweeps (convergence is quadratic; 3×3 needs well under ten).
-const JACOBI_SWEEPS: usize = 64;
-
-/// Off-diagonal magnitude below which the Jacobi iteration stops.
-const JACOBI_TOLERANCE: f64 = 1e-300;
-
-/// The second principal variance must exceed this fraction of the first (the orbit spans a plane).
-const PLANE_RATIO: f64 = 1e-12;
-
-/// Relative tolerance of the anchor rule's "maximal projection" test.
-const ANCHOR_TOLERANCE: f64 = 1e-12;
 
 /// Uniform fluid-time intervals on `[0, T]` at which every body's tidal anisotropy is sampled
 /// for its reference quantile (`3 × 4001` samples).
@@ -208,6 +175,22 @@ impl Shape {
 /// Below this normalised radius the signed distance takes its centre value (avoids 0/0).
 const CENTRE_EPSILON: f64 = 1e-12;
 
+/// Planning figures of a track ([`BodyTrack::survey`]): what an orbit will cost and how it sits
+/// on the canvas, known before any fluid is simulated.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TrackSurvey {
+    /// Fluid steps the solver's step rule takes on the bodies' own speeds (a lower bound of a
+    /// render's: the stirred water is faster in places).
+    pub fluid_steps: f64,
+    /// Fastest material speed of a body, in units of the reference speed.
+    pub peak_speed: f64,
+    /// Smallest distance of a body's centre from the canvas edge, over the knots.
+    pub edge_clearance: f64,
+    /// Fraction of the orbit (sampled at uniform times) during which two bodies' centres are
+    /// closer than two body radii.
+    pub overlap_fraction: f64,
+}
+
 /// Motion of the three bodies through the fluid.
 pub(crate) trait BodyMotion: Sync {
     /// The three bodies at fluid time `t`.
@@ -227,26 +210,11 @@ pub(crate) trait BodyMotion: Sync {
     fn speed_bound(&self, t: f64) -> f64;
 }
 
-/// Projection parameters, recorded in the certificate.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Projection {
-    /// Centre of the orbit's bounding box (3-D, original units).
-    pub origin: [f64; 3],
-    /// Largest bounding-box side (3-D, original units).
-    pub extent: f64,
-    /// First two principal axes (unit vectors in normalised 3-D space).
-    pub axes: [[f64; 3]; 2],
-    /// World units per normalised projected unit.
-    pub scale: f64,
-    /// Principal variances, descending.
-    pub variances: [f64; 3],
-}
-
-/// The orbit as three moving bodies: PCA-projected knots, the orbit-to-fluid time map and the
-/// tidal model that shapes the bodies.
+/// The orbit as three moving bodies: the canvas knots, the orbit-to-fluid time map and the tidal
+/// model that shapes the bodies.
 ///
 /// Invariants (established by [`BodyTrack::new`]): exactly three bodies with `N ≥ 2` finite
-/// projected knots each, `0 < T < ∞`, and a finite speed table of `400_001` entries. The table
+/// knots each, `0 < T < ∞`, and a finite speed table of `400_001` entries. The table
 /// samples the fastest body's speed at uniform times; [`BodyMotion::speed_bound`] is its maximum
 /// over a look-ahead window (the prototype's CFL rule, not a strict bound on the motion).
 pub(crate) struct BodyTrack {
@@ -258,12 +226,10 @@ pub(crate) struct BodyTrack {
     knots: usize,
     /// `N - 1` as `f64` (exact for any realistic `N`).
     last: f64,
-    /// Projected world `x` of every knot, `xs[body][knot]` (structure of arrays).
+    /// Canvas `x` of every knot, `xs[body][knot]` (structure of arrays).
     xs: [Vec<f64>; BODIES],
-    /// Projected world `y` of every knot, `ys[body][knot]`.
+    /// Canvas `y` of every knot, `ys[body][knot]`.
     ys: [Vec<f64>; BODIES],
-    /// How the knots were projected.
-    projection: Projection,
     /// `speed[i]` = largest body speed at `t_i = T·i/400000`, `i ∈ [0, 400000]` (samples: with
     /// more than `400_000` segments, some segments are never sampled).
     speed: Vec<f64>,
@@ -277,107 +243,49 @@ impl fmt::Debug for BodyTrack {
         f.debug_struct("BodyTrack")
             .field("duration", &self.duration)
             .field("knots", &self.knots)
-            .field("projection", &self.projection)
             .finish_non_exhaustive()
     }
 }
 
 impl BodyTrack {
-    /// Projects `positions[body][knot]` (exactly 3 bodies, at least 2 knots) onto the canvas of the
-    /// given aspect and derives the fluid duration from the median body speed.
+    /// The track of three bodies whose canvas positions at the recorded knots are
+    /// `track[body][knot]` (`View::canvas_track`), with the fluid duration derived from the median
+    /// body speed.
     ///
-    /// Errors: [`EmberError::DegenerateOrbit`] for a wrong body count, unequal or too short
-    /// recordings, non-finite coordinates, a collapsed bounding box, an orbit that does not span a
-    /// plane, or a median body speed of zero; [`EmberError::InvalidConfig`] for a non-positive
-    /// aspect, fill or reference speed.
+    /// Errors: [`EmberError::DegenerateOrbit`] for unequal or too short recordings, non-finite
+    /// coordinates or a median body speed of zero; [`EmberError::InvalidConfig`] for a
+    /// non-positive reference speed or mass.
     pub(crate) fn new(
-        positions: &[Vec<Vector3<f64>>],
+        track: [Vec<[f64; 2]>; BODIES],
         masses: [f64; 3],
-        aspect: f64,
         config: &EmberConfig,
     ) -> EmberResult<Self> {
-        let fill = config.projection.fill;
         let reference_speed = config.fluid.reference_speed;
-        require_positive(aspect, "aspect")?;
-        require_positive(fill, "projection.fill")?;
         require_positive(reference_speed, "fluid.reference_speed")?;
-        let (bodies, knots) = validate_shape(positions)?;
-
-        let (origin, extent) = bounding_box(bodies)?;
-        let normalise = |p: &Vector3<f64>| {
-            [(p.x - origin[0]) / extent, (p.y - origin[1]) / extent, (p.z - origin[2]) / extent]
-        };
-        let count = (BODIES * knots) as f64;
-
-        // Mean and covariance of the normalised points, compensated, in scan order.
-        let mut sums = [Neumaier::default(); 3];
-        for p in scan(bodies) {
-            let q = normalise(p);
-            for (sum, value) in sums.iter_mut().zip(q) {
-                sum.add(value);
-            }
-        }
-        let mean = sums.map(|sum| sum.total() / count);
-        let centred = |p: &Vector3<f64>| {
-            let q = normalise(p);
-            [q[0] - mean[0], q[1] - mean[1], q[2] - mean[2]]
-        };
-        let mut products = [Neumaier::default(); 6];
-        for p in scan(bodies) {
-            let c = centred(p);
-            let terms =
-                [c[0] * c[0], c[0] * c[1], c[0] * c[2], c[1] * c[1], c[1] * c[2], c[2] * c[2]];
-            for (sum, term) in products.iter_mut().zip(terms) {
-                sum.add(term);
-            }
-        }
-        let [c00, c01, c02, c11, c12, c22] = products.map(|sum| sum.total() / count);
-        let covariance = [[c00, c01, c02], [c01, c11, c12], [c02, c12, c22]];
-
-        let (variances, vectors) = principal_axes(&covariance);
-        if !(variances.iter().all(|v| v.is_finite())
-            && variances[0] > 0.0
-            && variances[1] > variances[0] * PLANE_RATIO)
-        {
+        let knots = track[0].len();
+        if track.iter().any(|body| body.len() != knots) {
             return degenerate(format!(
-                "the orbit does not span a plane (principal variances {variances:?})"
+                "bodies have different recording lengths ({}, {}, {})",
+                track[0].len(),
+                track[1].len(),
+                track[2].len()
             ));
         }
-
-        // Hygiene: unit e₀, and e₁ orthogonalised against it (Gram–Schmidt).
-        let e0 = normalised(vectors[0]);
-        let e1 = normalised(sub(vectors[1], scaled(e0, dot(e0, vectors[1]))));
-        let mut axes = [e0, e1];
-        orient_by_anchor(bodies, &centred, &mut axes)?;
-
-        // Project, then centre and scale onto the canvas.
-        let mut xs: [Vec<f64>; BODIES] = std::array::from_fn(|_| Vec::with_capacity(knots));
-        let mut ys: [Vec<f64>; BODIES] = std::array::from_fn(|_| Vec::with_capacity(knots));
-        let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-        for (k, p) in scan(bodies).enumerate() {
-            let c = centred(p);
-            let projected = [dot(c, axes[0]), dot(c, axes[1])];
-            for axis in 0..2 {
-                low[axis] = min(low[axis], projected[axis]);
-                high[axis] = max(high[axis], projected[axis]);
-            }
-            let body = k % BODIES;
-            xs[body].push(projected[0]);
-            ys[body].push(projected[1]);
+        if knots < 2 {
+            return degenerate(format!("{knots} recorded knots; at least 2 are needed"));
         }
-        let centre = [0.5 * low[0] + 0.5 * high[0], 0.5 * low[1] + 0.5 * high[1]];
-        let half = [(high[0] - low[0]) * 0.5, (high[1] - low[1]) * 0.5];
-        let scale = fill / max(half[0] / aspect, half[1]);
-        if !(scale.is_finite() && scale > 0.0) {
-            return degenerate(format!("projection scale {scale} is not finite and positive"));
-        }
-        for (column, offset) in [(&mut xs, centre[0]), (&mut ys, centre[1])] {
-            for values in column.iter_mut() {
-                for value in values.iter_mut() {
-                    *value = (*value - offset) * scale;
-                }
+        for (body, points) in track.iter().enumerate() {
+            if let Some(knot) = points.iter().position(|p| !(p[0].is_finite() && p[1].is_finite()))
+            {
+                return degenerate(format!(
+                    "body {body} has a non-finite canvas position {:?} at knot {knot}",
+                    points[knot]
+                ));
             }
         }
+        let xs = track.each_ref().map(|points| points.iter().map(|p| p[0]).collect());
+        let ys = track.each_ref().map(|points| points.iter().map(|p| p[1]).collect());
+        drop(track);
 
         let tidal = Tidal::new(masses, config)?;
         let mut track = Self {
@@ -387,7 +295,6 @@ impl BodyTrack {
             last: (knots - 1) as f64,
             xs,
             ys,
-            projection: Projection { origin, extent, axes, scale, variances },
             speed: Vec::new(),
             speed_blocks: Vec::new(),
         };
@@ -407,6 +314,41 @@ impl BodyTrack {
     /// Fluid time of the last recorded knot (`T`).
     pub(crate) fn duration(&self) -> f64 {
         self.duration
+    }
+
+    /// Planning figures of this track on the canvas of the given aspect, for a fluid grid of
+    /// spacing `dx` (see [`TrackSurvey`]).
+    pub(crate) fn survey(&self, aspect: f64, dx: f64, config: &EmberConfig) -> TrackSurvey {
+        let fluid = &config.fluid;
+        // The solver's step rule (`fluid`: h = min(cfl·dx/speed, max_dt)) over the speed table.
+        let table_step = self.duration / SPEED_INTERVALS as f64;
+        let (mut fluid_steps, mut peak) = (0.0, 0.0);
+        for &speed in &self.speed[..SPEED_INTERVALS] {
+            fluid_steps += table_step / min(fluid.cfl * dx / max(speed, 1e-6), fluid.max_dt);
+            peak = max(peak, speed);
+        }
+        let mut edge_clearance = f64::INFINITY;
+        for (xs, ys) in self.xs.iter().zip(&self.ys) {
+            for (x, y) in xs.iter().zip(ys) {
+                edge_clearance = min(edge_clearance, min(aspect - x.abs(), 1.0 - y.abs()));
+            }
+        }
+        let touching = 2.0 * fluid.body_radius;
+        let overlapping = (0..=TIDAL_INTERVALS)
+            .filter(|&i| {
+                let p = self.positions_at(self.uniform_time(i, TIDAL_INTERVALS));
+                [(0, 1), (0, 2), (1, 2)].iter().any(|&(a, b)| {
+                    let (dx, dy) = (p[a][0] - p[b][0], p[a][1] - p[b][1]);
+                    dx * dx + dy * dy < touching * touching
+                })
+            })
+            .count();
+        TrackSurvey {
+            fluid_steps,
+            peak_speed: peak / fluid.reference_speed,
+            edge_clearance,
+            overlap_fraction: overlapping as f64 / (TIDAL_INTERVALS + 1) as f64,
+        }
     }
 
     /// Number of recorded knots `N` (test-only: the pipeline knows `N` from the recording before
@@ -437,11 +379,6 @@ impl BodyTrack {
     /// The orbit's reference tidal anisotropy `Δ_ref` (see [`Tidal`]).
     pub(crate) fn tidal_reference(&self) -> f64 {
         self.tidal.reference
-    }
-
-    /// Projection parameters.
-    pub(crate) fn projection(&self) -> &Projection {
-        &self.projection
     }
 
     /// World position of `body` at recorded knot `knot` (both in range).
@@ -741,207 +678,6 @@ fn require_positive(value: f64, parameter: &str) -> EmberResult<()> {
     }
 }
 
-/// Checks the recording's shape: exactly three bodies with the same number `N ≥ 2` of knots.
-fn validate_shape(
-    positions: &[Vec<Vector3<f64>>],
-) -> EmberResult<([&[Vector3<f64>]; BODIES], usize)> {
-    let [a, b, c] = positions else {
-        return degenerate(format!("expected 3 bodies, got {}", positions.len()));
-    };
-    let knots = a.len();
-    if b.len() != knots || c.len() != knots {
-        return degenerate(format!(
-            "bodies have different recording lengths ({}, {}, {})",
-            a.len(),
-            b.len(),
-            c.len()
-        ));
-    }
-    if knots < 2 {
-        return degenerate(format!("{knots} recorded knots; at least 2 are needed"));
-    }
-    Ok(([a, b, c], knots))
-}
-
-/// All `3N` points in scan order: knot-major, then body.
-fn scan(bodies: [&[Vector3<f64>]; BODIES]) -> impl Iterator<Item = &Vector3<f64>> {
-    let [a, b, c] = bodies;
-    a.iter().zip(b).zip(c).flat_map(|((p, q), r)| [p, q, r])
-}
-
-/// Centre and largest side of the bounding box of all points; rejects non-finite coordinates and
-/// a collapsed box.
-fn bounding_box(bodies: [&[Vector3<f64>]; BODIES]) -> EmberResult<([f64; 3], f64)> {
-    let (mut low, mut high) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-    for (index, p) in scan(bodies).enumerate() {
-        let p = [p.x, p.y, p.z];
-        if !p.iter().all(|v| v.is_finite()) {
-            return degenerate(format!(
-                "body {} has a non-finite position {p:?} at knot {}",
-                index % BODIES,
-                index / BODIES
-            ));
-        }
-        for axis in 0..3 {
-            low[axis] = min(low[axis], p[axis]);
-            high[axis] = max(high[axis], p[axis]);
-        }
-    }
-    let origin = std::array::from_fn(|axis| low[axis] * 0.5 + high[axis] * 0.5);
-    let extent = (0..3).map(|axis| high[axis] - low[axis]).fold(0.0, max);
-    if !(extent.is_finite() && extent > 0.0) {
-        return degenerate(format!("bounding box extent {extent} is not finite and positive"));
-    }
-    Ok((origin, extent))
-}
-
-/// Flips each axis so that its anchor (the first point in scan order whose projection magnitude
-/// reaches `max·(1 - 10⁻¹²)`) projects positively.
-fn orient_by_anchor(
-    bodies: [&[Vector3<f64>]; BODIES],
-    centred: &impl Fn(&Vector3<f64>) -> [f64; 3],
-    axes: &mut [[f64; 3]; 2],
-) -> EmberResult<()> {
-    let mut largest = [0.0f64; 2];
-    for p in scan(bodies) {
-        let c = centred(p);
-        for (m, axis) in largest.iter_mut().zip(axes.iter()) {
-            *m = max(*m, dot(c, *axis).abs());
-        }
-    }
-    if !(largest[0] > 0.0 && largest[1] > 0.0) {
-        return degenerate("no point projects onto a principal axis".into());
-    }
-    let threshold = largest.map(|m| m * (1.0 - ANCHOR_TOLERANCE));
-    let mut anchor: [Option<f64>; 2] = [None, None];
-    for p in scan(bodies) {
-        let c = centred(p);
-        for a in 0..2 {
-            if anchor[a].is_none() {
-                let v = dot(c, axes[a]);
-                if v.abs() >= threshold[a] {
-                    anchor[a] = Some(v);
-                }
-            }
-        }
-        if anchor.iter().all(Option::is_some) {
-            break;
-        }
-    }
-    for (axis, v) in axes.iter_mut().zip(anchor) {
-        // The anchor exists: the point attaining `largest` passes its own threshold.
-        if v.is_some_and(|v| v < 0.0) {
-            *axis = axis.map(|x| -x);
-        }
-    }
-    Ok(())
-}
-
-/// Eigen-decomposition of a symmetric 3×3 matrix by cyclic Jacobi rotations.
-///
-/// Pivots are visited in the fixed order `(0,1), (0,2), (1,2)`. Each rotation annihilates `a_pq`:
-/// `θ = (a_qq - a_pp)/(2 a_pq)`, `t = sign(θ)/(|θ| + √(θ²+1))` (the smaller root of
-/// `t² + 2θt - 1 = 0`, `sign(0) = +1`), `c = 1/√(t²+1)`, `s = t·c`, and `A ← JᵀAJ`, `V ← VJ` with
-/// `J_pp = J_qq = c`, `J_pq = s`, `J_qp = -s`. Sweeps stop once every off-diagonal magnitude is at
-/// most `10⁻³⁰⁰` (or after 64 sweeps). For `|θ| > ~10¹⁵⁴`, `θ²` overflows, `t` becomes `0` and
-/// `a_pq` (relatively below `10⁻¹⁵⁴` of the diagonal gap) is simply dropped.
-///
-/// Returns eigenvalues sorted descending (`total_cmp`, ties by original index) and the matching
-/// unit eigenvectors.
-fn principal_axes(matrix: &[[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
-    let mut a = *matrix;
-    let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    for _ in 0..JACOBI_SWEEPS {
-        if a[0][1].abs() <= JACOBI_TOLERANCE
-            && a[0][2].abs() <= JACOBI_TOLERANCE
-            && a[1][2].abs() <= JACOBI_TOLERANCE
-        {
-            break;
-        }
-        for (p, q) in [(0, 1), (0, 2), (1, 2)] {
-            let apq = a[p][q];
-            if apq == 0.0 {
-                continue;
-            }
-            let theta = (a[q][q] - a[p][p]) / (2.0 * apq);
-            let sign = if theta < 0.0 { -1.0 } else { 1.0 };
-            let t = sign / (theta.abs() + (theta * theta + 1.0).sqrt());
-            let c = 1.0 / (t * t + 1.0).sqrt();
-            let s = t * c;
-            let r = 3 - p - q;
-            let (arp, arq) = (a[r][p], a[r][q]);
-            let (new_rp, new_rq) = (c * arp - s * arq, s * arp + c * arq);
-            a[r][p] = new_rp;
-            a[p][r] = new_rp;
-            a[r][q] = new_rq;
-            a[q][r] = new_rq;
-            a[p][p] -= t * apq;
-            a[q][q] += t * apq;
-            a[p][q] = 0.0;
-            a[q][p] = 0.0;
-            for row in &mut v {
-                let (vp, vq) = (row[p], row[q]);
-                row[p] = c * vp - s * vq;
-                row[q] = s * vp + c * vq;
-            }
-        }
-    }
-    let mut order = [0usize, 1, 2];
-    order.sort_by(|&i, &j| a[j][j].total_cmp(&a[i][i]).then(i.cmp(&j)));
-    let values = order.map(|i| a[i][i]);
-    let vectors = order.map(|i| [v[0][i], v[1][i], v[2][i]]);
-    (values, vectors)
-}
-
-/// Neumaier's compensated summation (improved Kahan–Babuška): sequential and exactly
-/// reproducible, with an error bound independent of the number of terms.
-#[derive(Clone, Copy, Debug, Default)]
-struct Neumaier {
-    /// Running (rounded) sum.
-    sum: f64,
-    /// Accumulated rounding errors of `sum`.
-    compensation: f64,
-}
-
-impl Neumaier {
-    /// Adds `x`, capturing the rounding error of the addition exactly.
-    fn add(&mut self, x: f64) {
-        let t = self.sum + x;
-        if self.sum.abs() >= x.abs() {
-            self.compensation += (self.sum - t) + x;
-        } else {
-            self.compensation += (x - t) + self.sum;
-        }
-        self.sum = t;
-    }
-
-    /// The compensated total.
-    fn total(self) -> f64 {
-        self.sum + self.compensation
-    }
-}
-
-/// `a·b` (left to right).
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-/// `a - b`.
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-/// `s·a`.
-fn scaled(a: [f64; 3], s: f64) -> [f64; 3] {
-    a.map(|x| x * s)
-}
-
-/// `a/|a|`.
-fn normalised(a: [f64; 3]) -> [f64; 3] {
-    let norm = dot(a, a).sqrt();
-    a.map(|x| x / norm)
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::math;
@@ -959,35 +695,35 @@ mod tests {
 
     const TAU: f64 = 2.0 * std::f64::consts::PI;
 
-    /// An orthonormal pair `(u, v)` spanning a generically tilted plane, and its normal.
-    fn tilted_plane() -> ([f64; 3], [f64; 3], [f64; 3]) {
-        let (sa, ca) = math::sin_cos(0.7);
-        let (sb, cb) = math::sin_cos(-1.1);
-        let u = [ca, sa * cb, sa * sb];
-        let raw = [-0.3, 0.8, -0.45];
-        let v = normalised(sub(raw, scaled(u, dot(u, raw))));
-        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-        (u, v, n)
+    /// A canvas track.
+    type Track = [Vec<[f64; 2]>; BODIES];
+
+    /// Three bodies on the circle of radius `radius` about the origin, a third of a turn apart,
+    /// `n` knots over one revolution (`θ_k = 2πk/(n-1)`).
+    fn circle(n: usize, radius: f64) -> Track {
+        std::array::from_fn(|b| {
+            (0..n)
+                .map(|k| {
+                    let theta = TAU * k as f64 / (n - 1) as f64 + TAU * b as f64 / 3.0;
+                    let (s, c) = math::sin_cos(theta);
+                    [radius * c, radius * s]
+                })
+                .collect()
+        })
     }
 
-    /// Three bodies on the ellipse `o + A cos θ u + B sin θ v`, phases `2πb/3`, `N` knots over one
-    /// revolution (`θ_k = 2πk/(N-1)`).
-    fn ellipse(n: usize, major: f64, minor: f64) -> Vec<Vec<Vector3<f64>>> {
-        let (u, v, _) = tilted_plane();
-        let o = [120.0, -35.0, 7.5];
-        (0..3usize)
-            .map(|b| {
-                (0..n)
-                    .map(|k| {
-                        let theta = TAU * k as f64 / (n - 1) as f64 + TAU * b as f64 / 3.0;
-                        let (s, c) = math::sin_cos(theta);
-                        Vector3::from(std::array::from_fn(|i| {
-                            o[i] + major * c * u[i] + minor * s * v[i]
-                        }))
-                    })
-                    .collect()
-            })
-            .collect()
+    /// A generic (non-symmetric) track: three bodies on wobbly, drifting loops on the canvas.
+    fn wobbly(n: usize) -> Track {
+        std::array::from_fn(|b| {
+            (0..n)
+                .map(|k| {
+                    let s = k as f64 / (n - 1) as f64;
+                    let (s1, c1) = math::sin_cos(TAU * (1.0 + b as f64) * s + b as f64);
+                    let (s2, c2) = math::sin_cos(TAU * 3.0 * s * s);
+                    [0.8 * c1 + 0.1 * s2 + 0.25 * (b as f64 - 1.0), 0.55 * s1 - 0.08 * c2]
+                })
+                .collect()
+        })
     }
 
     fn config() -> EmberConfig {
@@ -999,104 +735,19 @@ mod tests {
         (v[0] * v[0] + v[1] * v[1]).sqrt()
     }
 
-    const ASPECT: f64 = 1.5;
-
     /// Unequal masses, so the tidal weights are exercised.
     const MASSES: [f64; 3] = [1.0, 1.4, 0.7];
 
     #[test]
-    fn jacobi_diagonalises_symmetric_matrices() {
-        let mut rng = Lcg(7);
-        for case in 0..200 {
-            let mut m = [[0.0; 3]; 3];
-            for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2)] {
-                let x = rng.next() * 2.0 - 1.0;
-                m[i][j] = x;
-                m[j][i] = x;
-            }
-            if case % 5 == 0 {
-                // Repeated eigenvalue.
-                m = [[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, rng.next()]];
-            }
-            let (values, vectors) = principal_axes(&m);
-            assert!(values[0] >= values[1] && values[1] >= values[2]);
-            for (i, e) in vectors.iter().enumerate() {
-                for (j, f) in vectors.iter().enumerate() {
-                    let expected = if i == j { 1.0 } else { 0.0 };
-                    assert!((dot(*e, *f) - expected).abs() < 1e-14, "orthonormal {i} {j}");
-                }
-                let me = [dot(m[0], *e), dot(m[1], *e), dot(m[2], *e)];
-                for k in 0..3 {
-                    assert!((me[k] - values[i] * e[k]).abs() < 1e-14, "A e = λ e ({case})");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn jacobi_on_a_diagonal_matrix_only_sorts() {
-        let (values, vectors) =
-            principal_axes(&[[1.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 2.0]]);
-        assert_eq!(values, [3.0, 2.0, 1.0]);
-        assert_eq!(vectors, [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]);
-    }
-
-    #[test]
-    fn neumaier_recovers_cancelled_terms() {
-        let mut sum = Neumaier::default();
-        for x in [1.0, 1e100, 1.0, -1e100] {
-            sum.add(x);
-        }
-        assert_eq!(sum.total(), 2.0);
-    }
-
-    #[test]
-    fn ellipse_in_a_tilted_plane_recovers_the_plane_axes() {
-        let n = 1201;
-        let (u, v, _) = tilted_plane();
-        let track = BodyTrack::new(&ellipse(n, 30.0, 12.0), MASSES, ASPECT, &config()).unwrap();
-        let p = track.projection();
-        assert!((dot(p.axes[0], u).abs() - 1.0).abs() < 1e-12, "{:?}", p.axes);
-        assert!((dot(p.axes[1], v).abs() - 1.0).abs() < 1e-12, "{:?}", p.axes);
-        // Principal variances A²/2 and B²/2 (normalised), nothing out of the plane.
-        assert!((p.variances[0] / p.variances[1] - 6.25).abs() < 1e-9);
-        assert!(p.variances[2].abs() < 1e-12 * p.variances[0]);
-        assert_eq!(p.origin.map(|o| (o * 1e6).round() / 1e6), [120.0, -35.0, 7.5]);
-        // The major axis binds: x spans ±fill·aspect, y spans ±fill·B/A·aspect.
-        let fill = config().projection.fill;
-        let (mut x_max, mut y_max) = (0.0f64, 0.0f64);
-        for b in 0..3 {
-            for k in 0..n {
-                let [x, y] = track.knot_position(b, k);
-                x_max = x_max.max(x.abs());
-                y_max = y_max.max(y.abs());
-            }
-        }
-        assert!((x_max - fill * ASPECT).abs() < 1e-12, "{x_max}");
-        assert!((y_max - fill * ASPECT * 12.0 / 30.0).abs() < 1e-12, "{y_max}");
-        assert!((p.scale * 30.0 / p.extent - fill * ASPECT).abs() < 1e-12);
-    }
-
-    #[test]
     fn circle_duration_makes_the_median_speed_the_reference_speed() {
         let n = 1201;
-        let (_, _, normal) = tilted_plane();
         let mut cfg = config();
         cfg.fluid.reference_speed = 2.5;
-        let track = BodyTrack::new(&ellipse(n, 20.0, 20.0), MASSES, ASPECT, &cfg).unwrap();
-        // The axes span the orbit's plane (their direction within it is arbitrary for a circle).
-        for axis in track.projection().axes {
-            assert!(dot(axis, normal).abs() < 1e-12);
-        }
+        let radius = 0.6;
+        let track = BodyTrack::new(circle(n, radius), MASSES, &cfg).unwrap();
         // Every chord has the same length 2ρ sin(π/(N-1)), so the median fraction speed is exact.
-        // The three bodies sit at phases 0, 2π/3, 4π/3: their centroid is the circle's centre.
-        let at = |b| track.knot_position(b, 17);
-        let centre =
-            [(at(0)[0] + at(1)[0] + at(2)[0]) / 3.0, (at(0)[1] + at(1)[1] + at(2)[1]) / 3.0];
-        let (dx, dy) = (at(1)[0] - centre[0], at(1)[1] - centre[1]);
-        let rho = (dx * dx + dy * dy).sqrt();
         let fraction_speed =
-            2.0 * rho * math::sin(std::f64::consts::PI / (n - 1) as f64) * (n - 1) as f64;
+            2.0 * radius * math::sin(std::f64::consts::PI / (n - 1) as f64) * (n - 1) as f64;
         let expected = fraction_speed / 2.5;
         assert!((track.duration() - expected).abs() < 1e-9 * expected, "{}", track.duration());
         // Body speed is the reference speed everywhere.
@@ -1106,70 +757,25 @@ mod tests {
         }
     }
 
+    /// The knots are the canvas track's points, unchanged.
     #[test]
-    fn anchor_rule_fixes_the_axis_signs() {
-        let n = 1201;
-        for mirrored in [false, true] {
-            let mut positions = ellipse(n, 30.0, 12.0);
-            if mirrored {
-                // Point reflection through the centre flips every eigenvector sign candidate.
-                for body in &mut positions {
-                    for p in body.iter_mut() {
-                        *p = Vector3::new(240.0, -70.0, 15.0) - *p;
-                    }
-                }
-            }
-            let track = BodyTrack::new(&positions, MASSES, ASPECT, &config()).unwrap();
-            // Axis 0: the first maximal point is body 0 at knot 0 (θ = 0 or π after reflection).
-            assert!(track.knot_position(0, 0)[0] > 1.0);
-            // Axis 1: the first maximal point is body 2 at θ = 3π/2, knot (N-1)/12.
-            assert!(track.knot_position(2, (n - 1) / 12)[1] > 0.3);
-            // Both orientations give the same picture.
-            let reference =
-                BodyTrack::new(&ellipse(n, 30.0, 12.0), MASSES, ASPECT, &config()).unwrap();
-            for b in 0..3 {
-                for k in (0..n).step_by(37) {
-                    let (p, q) = (track.knot_position(b, k), reference.knot_position(b, k));
-                    assert!((p[0] - q[0]).abs() < 1e-12 && (p[1] - q[1]).abs() < 1e-12);
-                }
+    fn the_track_keeps_the_canvas_knots() {
+        let points = wobbly(301);
+        let track = BodyTrack::new(points.clone(), MASSES, &config()).unwrap();
+        for (b, body) in points.iter().enumerate() {
+            for (k, point) in body.iter().enumerate() {
+                assert_eq!(track.knot_position(b, k), *point);
             }
         }
-    }
-
-    #[test]
-    fn projection_is_bit_reproducible() {
-        let a = BodyTrack::new(&ellipse(301, 30.0, 12.0), MASSES, ASPECT, &config()).unwrap();
-        let b = BodyTrack::new(&ellipse(301, 30.0, 12.0), MASSES, ASPECT, &config()).unwrap();
-        assert_eq!(a.xs, b.xs);
-        assert_eq!(a.ys, b.ys);
-        assert_eq!(a.duration.to_bits(), b.duration.to_bits());
-        assert_eq!(a.projection, b.projection);
-    }
-
-    /// A generic (non-symmetric) orbit: three bodies on wobbly, drifting loops.
-    fn wobbly(n: usize) -> Vec<Vec<Vector3<f64>>> {
-        (0..3usize)
-            .map(|b| {
-                (0..n)
-                    .map(|k| {
-                        let s = k as f64 / (n - 1) as f64;
-                        let (s1, c1) = math::sin_cos(TAU * (1.0 + b as f64) * s + b as f64);
-                        let (s2, c2) = math::sin_cos(TAU * 3.0 * s * s);
-                        Vector3::new(
-                            3.0 * c1 + 0.4 * s2 + b as f64,
-                            2.0 * s1 - 0.3 * c2,
-                            0.5 * c1 * s2 + 0.1 * s,
-                        )
-                    })
-                    .collect()
-            })
-            .collect()
+        let again = BodyTrack::new(points, MASSES, &config()).unwrap();
+        assert_eq!(track.duration.to_bits(), again.duration.to_bits());
+        assert_eq!(track.speed, again.speed);
     }
 
     #[test]
     fn bodies_at_knot_times_sit_on_the_knots() {
         let n = 5001;
-        let track = BodyTrack::new(&wobbly(n), MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(wobbly(n), MASSES, &config()).unwrap();
         assert_eq!(track.knots(), n);
         assert_eq!(track.knot_time(0).to_bits(), 0.0f64.to_bits());
         assert_eq!(track.knot_time(n - 1), track.duration());
@@ -1189,7 +795,7 @@ mod tests {
     /// up to it, for every duration.
     #[test]
     fn the_final_knot_and_table_entry_are_exactly_the_duration() {
-        let mut track = BodyTrack::new(&wobbly(1001), MASSES, ASPECT, &config()).unwrap();
+        let mut track = BodyTrack::new(wobbly(1001), MASSES, &config()).unwrap();
         let mut rng = Lcg(23);
         let mut naive_misses = 0;
         for _ in 0..20_000 {
@@ -1214,7 +820,7 @@ mod tests {
     #[test]
     fn bodies_move_linearly_between_knots_with_the_outgoing_velocity() {
         let n = 101;
-        let track = BodyTrack::new(&wobbly(n), MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(wobbly(n), MASSES, &config()).unwrap();
         let t_scale = track.duration() / (n - 1) as f64;
         for k in [0, 1, 50, 98, 99] {
             let t = (k as f64 + 0.25) * t_scale;
@@ -1244,7 +850,7 @@ mod tests {
     #[test]
     fn speed_bound_equals_its_definition() {
         let n = 777;
-        let track = BodyTrack::new(&wobbly(n), MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(wobbly(n), MASSES, &config()).unwrap();
         let times: Vec<f64> = (0..=SPEED_INTERVALS).map(|i| track.table_time(i)).collect();
         assert!(times.windows(2).all(|w| w[0] <= w[1]));
         let naive = |t: f64| {
@@ -1277,7 +883,7 @@ mod tests {
     /// The table holds the fastest material speed: centre speed plus deformation speed.
     #[test]
     fn speed_table_entries_are_the_largest_body_speed() {
-        let track = BodyTrack::new(&wobbly(333), MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(wobbly(333), MASSES, &config()).unwrap();
         for i in [0, 1, 12345, 399_999, 400_000] {
             let fastest = track
                 .bodies_at(track.table_time(i))
@@ -1290,68 +896,71 @@ mod tests {
     }
 
     #[test]
-    fn degenerate_orbits_are_rejected() {
-        let is_degenerate = |positions: &[Vec<Vector3<f64>>]| {
+    fn degenerate_tracks_are_rejected() {
+        let is_degenerate = |track: Track| {
             matches!(
-                BodyTrack::new(positions, MASSES, ASPECT, &config()),
+                BodyTrack::new(track, MASSES, &config()),
                 Err(EmberError::DegenerateOrbit { .. })
             )
         };
         let good = wobbly(50);
-        assert!(!is_degenerate(&good));
-        // Wrong body count, unequal and too short recordings.
-        assert!(is_degenerate(&good[..2]));
-        assert!(is_degenerate(&[good.clone(), vec![good[0].clone()]].concat()));
+        assert!(!is_degenerate(good.clone()));
+        // Unequal and too short recordings.
         let mut unequal = good.clone();
         unequal[1].pop();
-        assert!(is_degenerate(&unequal));
-        let single: Vec<Vec<Vector3<f64>>> = good.iter().map(|b| b[..1].to_vec()).collect();
-        assert!(is_degenerate(&single));
+        assert!(is_degenerate(unequal));
+        assert!(is_degenerate(good.clone().map(|body| body[..1].to_vec())));
         // Non-finite coordinates.
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let mut positions = good.clone();
-            positions[2][17].y = bad;
-            assert!(is_degenerate(&positions));
+            let mut track = good.clone();
+            track[2][17][1] = bad;
+            assert!(is_degenerate(track));
         }
-        // Constant orbit: collapsed bounding box.
-        let constant = vec![vec![Vector3::new(1.0, 2.0, 3.0); 10]; 3];
-        assert!(is_degenerate(&constant));
-        // Collinear orbit: no plane.
-        let line: Vec<Vec<Vector3<f64>>> = (0..3usize)
-            .map(|b| {
-                (0..40usize)
-                    .map(|k| {
-                        let s = math::sin(k as f64 * 0.37 + b as f64);
-                        Vector3::new(1.0 + 2.0 * s, -3.0 + s, 0.5 * s)
-                    })
-                    .collect()
-            })
-            .collect();
-        assert!(is_degenerate(&line));
         // Distinct but motionless bodies: zero median speed.
-        let still: Vec<Vec<Vector3<f64>>> = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-            .iter()
-            .map(|p| vec![Vector3::from(*p); 20])
-            .collect();
-        assert!(is_degenerate(&still));
+        let still: Track = [[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]].map(|point| vec![point; 20]);
+        assert!(is_degenerate(still));
     }
 
     #[test]
-    fn invalid_canvas_parameters_are_config_errors() {
-        let positions = wobbly(20);
-        for aspect in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert!(matches!(
-                BodyTrack::new(&positions, MASSES, aspect, &config()),
-                Err(EmberError::InvalidConfig { .. })
-            ));
-        }
+    fn invalid_masses_and_speeds_are_config_errors() {
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let masses = [1.0, bad, 1.0];
             assert!(matches!(
-                BodyTrack::new(&positions, masses, ASPECT, &config()),
+                BodyTrack::new(wobbly(20), masses, &config()),
                 Err(EmberError::InvalidConfig { parameter, .. }) if parameter == "mass of body 1"
             ));
+            let mut cfg = config();
+            cfg.fluid.reference_speed = bad;
+            assert!(matches!(
+                BodyTrack::new(wobbly(20), MASSES, &cfg),
+                Err(EmberError::InvalidConfig { parameter, .. })
+                    if parameter == "fluid.reference_speed"
+            ));
         }
+    }
+
+    /// The planning figures against their definitions on a track whose answers are known.
+    #[test]
+    fn the_survey_reports_cost_clearance_and_overlap() {
+        let cfg = config();
+        let (aspect, dx) = (1.5, 0.002);
+        // Three bodies a third of a turn apart on a circle: constant speed, never close.
+        let radius = 0.6;
+        let track = BodyTrack::new(circle(2401, radius), MASSES, &cfg).unwrap();
+        let survey = track.survey(aspect, dx, &cfg);
+        assert!((survey.edge_clearance - (1.0 - radius)).abs() < 1e-6, "{survey:?}");
+        assert_eq!(survey.overlap_fraction, 0.0);
+        // Speed is the reference speed (the bodies barely deform), so the step is the CFL step.
+        assert!(survey.peak_speed > 0.999 && survey.peak_speed < 1.2, "{survey:?}");
+        let cfl_steps = track.duration() / (cfg.fluid.cfl * dx / cfg.fluid.reference_speed);
+        assert!(survey.fluid_steps >= cfl_steps * 0.999, "{survey:?} vs {cfl_steps}");
+        assert!(survey.fluid_steps < cfl_steps * 1.2, "{survey:?} vs {cfl_steps}");
+
+        // Two bodies kept closer than two radii overlap for the whole orbit.
+        let mut close = circle(601, radius);
+        close[1] = close[0].iter().map(|p| [p[0] + 0.5 * cfg.fluid.body_radius, p[1]]).collect();
+        let survey = BodyTrack::new(close, MASSES, &cfg).unwrap().survey(aspect, dx, &cfg);
+        assert_eq!(survey.overlap_fraction, 1.0);
     }
 
     /// A shape with generic axes, stretch and rates.
@@ -1500,7 +1109,7 @@ mod tests {
     /// rates are the shapes' own time derivatives, and at the end of the orbit they stop.
     #[test]
     fn track_shapes_follow_the_tidal_field() {
-        let track = BodyTrack::new(&wobbly(2001), MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(wobbly(2001), MASSES, &config()).unwrap();
         let reference = track.tidal_reference();
         assert!(reference > 0.0 && reference.is_finite());
         let mut samples = Vec::new();
@@ -1554,7 +1163,7 @@ mod tests {
     fn a_largest_aspect_of_one_keeps_rigid_discs() {
         let mut cfg = config();
         cfg.tidal.max_aspect = 1.0;
-        let track = BodyTrack::new(&wobbly(501), MASSES, ASPECT, &cfg).unwrap();
+        let track = BodyTrack::new(wobbly(501), MASSES, &cfg).unwrap();
         let r = cfg.fluid.body_radius;
         for k in 0..=50 {
             for body in track.bodies_at(track.duration() * f64::from(k) / 50.0) {
@@ -1573,7 +1182,7 @@ mod tests {
         use std::time::Instant;
         let positions = wobbly(1_000_000);
         let clock = Instant::now();
-        let track = BodyTrack::new(&positions, MASSES, ASPECT, &config()).unwrap();
+        let track = BodyTrack::new(positions, MASSES, &config()).unwrap();
         println!(
             "BodyTrack::new, 1M knots: {:.3} s (T = {:.4})",
             clock.elapsed().as_secs_f64(),

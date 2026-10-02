@@ -224,12 +224,43 @@ pub(crate) fn remap(
     rules: &ContactRules,
     decay: &InkDecay,
 ) -> RemapStats {
+    remap_nodes(prev, next, grid, window, rules, decay, 0)
+}
+
+/// [`remap`] of the visible nodes only: the margin nodes of `next` keep whatever they held, and
+/// the statistics count visible nodes. Every visible node gets the bits [`remap`] gives it.
+///
+/// For fields that are shaded and discarded (the slow film's in-between frames): the shader
+/// reads visible nodes only, and the margin, about a fifth of the nodes, matters only to the
+/// next remap.
+pub(crate) fn remap_visible(
+    prev: &InkFields,
+    next: &mut InkFields,
+    grid: &NodeGrid,
+    window: &FlowWindow<'_>,
+    rules: &ContactRules,
+    decay: &InkDecay,
+) -> RemapStats {
+    remap_nodes(prev, next, grid, window, rules, decay, grid.margin)
+}
+
+/// [`remap`] of the nodes at least `border` nodes away from every edge of the grid.
+fn remap_nodes(
+    prev: &InkFields,
+    next: &mut InkFields,
+    grid: &NodeGrid,
+    window: &FlowWindow<'_>,
+    rules: &ContactRules,
+    decay: &InkDecay,
+    border: usize,
+) -> RemapStats {
     let n = grid.len();
     assert!(prev.has_len(n) && next.has_len(n), "ink fields must match the node grid");
     let solid = *window.bodies.last().expect("a flow window has at least one snapshot");
     let remapper =
         Remapper { grid, tracer: Tracer::new(window, rules), prev, decay: *decay, solid };
     let cols = grid.cols;
+    let inner = border..cols - border;
     let [e0, e1, e2] = &mut next.freshness;
     (
         next.presence.par_chunks_mut(cols),
@@ -239,7 +270,13 @@ pub(crate) fn remap(
     )
         .into_par_iter()
         .enumerate()
-        .map(|(r, (presence, e0, e1, e2))| remapper.row(r, presence, [e0, e1, e2]))
+        .skip(border)
+        .take(grid.rows - 2 * border)
+        .map(|(r, (presence, e0, e1, e2))| {
+            let freshness =
+                [&mut e0[inner.clone()], &mut e1[inner.clone()], &mut e2[inner.clone()]];
+            remapper.row(r, border, &mut presence[inner.clone()], freshness)
+        })
         .reduce(RemapStats::default, RemapStats::merge)
 }
 
@@ -266,18 +303,26 @@ struct Remapper<'a> {
 }
 
 impl Remapper<'_> {
-    /// Remaps node row `r` into the given output row slices and returns the row's statistics.
+    /// Remaps the nodes of row `r` from column `first` on into the given output slices (one
+    /// entry per node) and returns their statistics.
     ///
     /// Nodes are traced [`LANES`] at a time (lanes are independent, so this only changes the
-    /// instruction schedule, not a single bit); the `cols mod LANES` nodes left at the end of the
-    /// row are traced one by one.
-    fn row(&self, r: usize, presence: &mut [f32], freshness: [&mut [f32]; 3]) -> RemapStats {
+    /// instruction schedule, not a single bit); the nodes left over at the end are traced one by
+    /// one.
+    fn row(
+        &self,
+        r: usize,
+        first: usize,
+        presence: &mut [f32],
+        freshness: [&mut [f32]; 3],
+    ) -> RemapStats {
         let [e0, e1, e2] = freshness;
         let cols = presence.len();
+        let world = |c: usize| self.grid.world(r, first + c);
         let mut stats = RemapStats::default();
         let mut store = |c: usize, trace: &Trace| {
             stats.non_finite_origins += u64::from(!trace.origin.iter().all(|v| v.is_finite()));
-            if inside_a_body(&self.solid, self.grid.world(r, c)) {
+            if inside_a_body(&self.solid, world(c)) {
                 (presence[c], e0[c], e1[c], e2[c]) = (0.0, 0.0, 0.0, 0.0);
                 return;
             }
@@ -287,13 +332,13 @@ impl Remapper<'_> {
         };
         let grouped = cols - cols % LANES;
         for c0 in (0..grouped).step_by(LANES) {
-            let starts = std::array::from_fn(|lane| self.grid.world(r, c0 + lane));
+            let starts = std::array::from_fn(|lane| world(c0 + lane));
             for (lane, trace) in self.tracer.trace_lanes::<LANES>(starts).iter().enumerate() {
                 store(c0 + lane, trace);
             }
         }
         for c in grouped..cols {
-            store(c, &self.tracer.trace(self.grid.world(r, c)));
+            store(c, &self.tracer.trace(world(c)));
         }
         stats
     }
@@ -908,12 +953,13 @@ mod tests {
     /// vorticity, the gate, the elliptical soak-zone test, the valve and the pre-roll, `math::exp`,
     /// the clamped Catmull-Rom sampler, the flush, the solid bodies and the row tail. One changed
     /// bit anywhere, on any CPU, changes the hash. Re-bless only for an intended change of the
-    /// remap or of the shared test fixtures, and say why. Last re-blessed for `ember-v2`: the
-    /// ember field is gone, the bodies are ellipses and their interiors are solid.
+    /// remap or of the shared test fixtures, and say why. Last re-blessed for `ember-v3`: the
+    /// soak frame is the symmetric map `R·diag(1/(semi + soak))·Rᵀ`, which does not depend on
+    /// the sign of the body's axis (`trace::SoakFrame`).
     #[test]
     fn remap_output_matches_the_golden_hash() {
         use sha2::{Digest, Sha256};
-        const GOLDEN: &str = "3ed4290997b79fb2453ebc7276d528cd6f3e9f0545b3231699c52bfd32725afe";
+        const GOLDEN: &str = "704e6a03753adab0781cbe2a3390a84ca4eeaafdfcaedfe706e784df2cd08bfe";
         let mut rng = Lcg(4242);
         let nodes = NodeGrid::new(25, 16, 2, 0.12).unwrap();
         assert_eq!(nodes.cols % LANES, 2);
@@ -972,6 +1018,58 @@ mod tests {
             let (a, b) = (&one.freshness[i], &three.freshness[i]);
             assert!(a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits()));
         }
+    }
+
+    /// The visible-only remap gives every visible node the bits of the full remap and leaves the
+    /// margin alone.
+    #[test]
+    fn the_visible_remap_matches_the_full_one_on_visible_nodes() {
+        let mut rng = Lcg(23);
+        let nodes = NodeGrid::new(41, 26, 3, 0.1).unwrap();
+        assert!(nodes.margin > 2, "the test needs a margin: {}", nodes.margin);
+        let fluid = grid(64, 40, 0.07);
+        let (snaps, bodies) = random_window(&mut rng, &fluid, 3, 2.0, 60.0);
+        let window = FlowWindow { grid: fluid, snapshots: &snaps, bodies: &bodies };
+        let rules = ContactRules {
+            soak_depth: 0.3,
+            vorticity_gate: 40.0,
+            t_on: f64::NEG_INFINITY,
+            t_valve: f64::INFINITY,
+        };
+        let d = decay(snaps[3].time, 0.8, 0.99);
+        let prev = patchy_fields(&nodes, &mut rng);
+        let mut full = InkFields::zeros(&nodes);
+        let full_stats = remap(&prev, &mut full, &nodes, &window, &rules, &d);
+        // A sentinel no remap writes (presence is in [0, 1]).
+        let untouched = 7.0_f32;
+        let mut visible = InkFields::zeros(&nodes);
+        visible.presence.fill(untouched);
+        visible.freshness.iter_mut().for_each(|field| field.fill(untouched));
+        let stats = remap_visible(&prev, &mut visible, &nodes, &window, &rules, &d);
+
+        let m = nodes.margin;
+        let mut seen = 0;
+        for r in 0..nodes.rows {
+            for c in 0..nodes.cols {
+                let n = r * nodes.cols + c;
+                let in_view = (m..nodes.rows - m).contains(&r) && (m..nodes.cols - m).contains(&c);
+                let pairs = [
+                    (visible.presence[n], full.presence[n]),
+                    (visible.freshness[0][n], full.freshness[0][n]),
+                    (visible.freshness[1][n], full.freshness[1][n]),
+                    (visible.freshness[2][n], full.freshness[2][n]),
+                ];
+                for (got, expected) in pairs {
+                    let expected = if in_view { expected } else { untouched };
+                    assert_eq!(got.to_bits(), expected.to_bits(), "node ({r}, {c})");
+                }
+                seen += usize::from(in_view);
+            }
+        }
+        assert_eq!(seen, 41 * 26 * 9);
+        assert_eq!(stats.non_finite_origins, 0);
+        // The statistics count the visible nodes only.
+        assert!(stats.contacted_nodes > 0 && stats.contacted_nodes <= full_stats.contacted_nodes);
     }
 
     /// Throughput of the remap on a production-like frame: 3×3 nodes per pixel of a 960×620 view

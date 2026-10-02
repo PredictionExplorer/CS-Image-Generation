@@ -17,6 +17,7 @@ import fcntl
 import json
 import logging
 import os
+import posixpath
 import shlex
 import shutil
 import signal
@@ -49,10 +50,73 @@ SEED_D = "d" * 64
 # overrides them for one seed).
 DEFAULT_MASSES = "[150.25, 200.5, 180.125]"
 
-# The ember look the fake generator renders (FAKE_GEN_EMBER_ALGORITHM overrides it), and an older
-# one, which live packages of the earlier look record.
-CURRENT_ALGORITHM = "ember-v2"
-STALE_ALGORITHM = "ember-v1"
+# The nft_traits.json view fields of every fake package (run.VIEW_IDENTITY_FIELDS), each as JSON
+# text: the generator's real field names, with the values of docs/fixtures/nft_traits.example.json.
+DEFAULT_VIEW: dict[str, str | None] = {
+    "stack_label": '"orbit_ribbons+harmonic_weave@0.29"',
+    "projection": '"position"',
+    "symmetry": '"none"',
+    "mode": '"elliptical"',
+    "scale": "1.1646093650188862",
+    "arc_fraction": "0.8249768504515819",
+    "orbit_eccentricity": "0.40457605398750857",
+}
+# Where the generator writes each of them in nft_traits.json.
+VIEW_FIELD_PATHS = {
+    "stack_label": "generation.structure.stack_label",
+    "projection": "generation.projection",
+    "symmetry": "generation.symmetry",
+    "mode": "generation.drift.mode",
+    "scale": "generation.drift.scale",
+    "arc_fraction": "generation.drift.arc_fraction",
+    "orbit_eccentricity": "generation.drift.orbit_eccentricity",
+}
+
+# The ember look the fake generator renders (FAKE_GEN_EMBER_ALGORITHM overrides it), an older
+# one, which live packages of the earlier look record, and one this generator does not know yet.
+CURRENT_ALGORITHM = "ember-v3"
+STALE_ALGORITHM = "ember-v2"
+NEWER_ALGORITHM = "ember-v4"
+
+# The ember files and manifest roles of the current look, in the generator's order, and those of
+# an ember-v2 package as the release before ember-v3 published it (six files, five roles, a
+# layout-3 certificate). Spelled out, never derived from run.py's tuples: the first pins those
+# tuples, and the second is what the current run.py finds on the asset host after the deploy.
+EMBER_V3_FILES = (
+    "images/source/ember.png",
+    "images/web/ember_full.webp",
+    "images/web/ember_preview.webp",
+    "videos/web/ember.mp4",
+    "videos/web/ember_slow.mp4",
+    "videos/hq/ember.mp4",
+    "metadata/ember.json",
+)
+# The order in which an ember-mode backfill stages them and then swaps them in: the media, the
+# merged manifest, the certificate last.
+EMBER_UPLOAD_ORDER = (*EMBER_V3_FILES[:-1], "metadata/assets.json", "metadata/ember.json")
+EMBER_V3_ROLES = (
+    "ember_source_master",
+    "ember_web_full",
+    "ember_web_preview",
+    "ember_web",
+    "ember_slow_web",
+    "ember_hq",
+)
+EMBER_V2_MEDIA_ROLES = {
+    "images/source/ember.png": "ember_source_master",
+    "images/web/ember_full.webp": "ember_web_full",
+    "images/web/ember_preview.webp": "ember_web_preview",
+    "videos/web/ember.mp4": "ember_web",
+    "videos/hq/ember.mp4": "ember_hq",
+}
+EMBER_V2_FILES = (*EMBER_V2_MEDIA_ROLES, "metadata/ember.json")
+EMBER_V2_CERTIFICATE = """{
+  "schema_version": 3,
+  "edition": "ember",
+  "algorithm": "ember-v2",
+  "contract": "the live render"
+}
+"""
 
 CORE_MEDIA_ROLES = {
     "images/source/master.png": "source_master",
@@ -83,12 +147,46 @@ def manifest_entry(path: str, role: str, tag: str) -> dict[str, object]:
     }
 
 
+def view_members(**changes: str | None) -> str:
+    """The view fields of a fake nft_traits.json, as the JSON text of "generation" members:
+    DEFAULT_VIEW with `changes` (JSON text per field; None leaves that field out)."""
+    fields = {**DEFAULT_VIEW, **changes}
+
+    def members(*names: str) -> list[str]:
+        return [f'"{name}": {fields[name]}' for name in names if fields[name] is not None]
+
+    structure = ['"primary": "Orbit Ribbons"', *members("stack_label")]
+    drift = [
+        '"enabled": true',
+        *members("mode", "scale", "arc_fraction", "orbit_eccentricity"),
+        '"randomized": true',
+    ]
+    return ", ".join(
+        [
+            f'"structure": {{{", ".join(structure)}}}',
+            *members("projection", "symmetry"),
+            f'"drift": {{{", ".join(drift)}}}',
+        ]
+    )
+
+
+def traits_text(seed: str, tag: str, masses: str = DEFAULT_MASSES, view: str | None = None) -> str:
+    """A fake metadata/nft_traits.json: the orbit fields (`masses` as JSON text) and the view
+    fields (`view` as view_members() text, the default view if None)."""
+    return (
+        f'{{"seed": "0x{seed}", "pipeline_version": "1.1.0", "tag": "{tag}", '
+        f'"simulation": {{"masses": {masses}, "dt": 0.001}}, '
+        f'"generation": {{"borda": {{"selected_index": 7, "retry_count": 1}}, '
+        f"{view_members() if view is None else view}}}}}"
+    )
+
+
 def certificate_text(algorithm: str, tag: str) -> str:
     """A fake metadata/ember.json, laid out like the generator's (serde_json's pretty printer):
     the top-level key is the line `  "algorithm": "<id>",`. The nested "algorithm" is a decoy that
     must never be read as the certificate's."""
     certificate = {
-        "schema_version": 2,
+        "schema_version": 4,
         "edition": "ember",
         "algorithm": algorithm,
         "contract": f"the {tag} render",
@@ -105,12 +203,13 @@ def write_package(
     ember_files: bool,
     ember_manifest: bool,
     masses: str = DEFAULT_MASSES,
+    view: str | None = None,
     extra_entries: Sequence[dict[str, object]] = (),
     algorithm: str = CURRENT_ALGORITHM,
 ) -> None:
-    """Write a fake package: every core file, 64 spectral bins, metadata, optionally the ember
-    edition's files (its certificate records `algorithm`) and manifest entries. Every file's
-    content names `tag`."""
+    """Write a fake package: every core file, 64 spectral bins, metadata (traits_text() of
+    `masses` and `view`), optionally the ember edition's files (its certificate records
+    `algorithm`) and manifest entries. Every file's content names `tag`."""
     for path in (*CORE_MEDIA_ROLES, *SPECTRAL_FILES):
         target = package / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -121,10 +220,7 @@ def write_package(
         json.dumps({"seed": f"0x{seed}", "tag": tag}), encoding="utf-8"
     )
     (metadata / "nft_traits.json").write_text(
-        f'{{"seed": "0x{seed}", "pipeline_version": "1.1.0", "tag": "{tag}", '
-        f'"simulation": {{"masses": {masses}, "dt": 0.001}}, '
-        f'"generation": {{"borda": {{"selected_index": 7, "retry_count": 1}}}}}}',
-        encoding="utf-8",
+        traits_text(seed, tag, masses, view), encoding="utf-8"
     )
     entries = [manifest_entry(path, role, tag) for path, role in CORE_MEDIA_ROLES.items()]
     entries.append(manifest_entry("spectral/", "spectral_gallery", tag))
@@ -189,7 +285,9 @@ def fake_generator(argv: list[str]) -> int:
     Modes: complete (exit 0), core_only (exit 3), stray (exit 3 leaving an ember file), stale
     (exit 0 without the ember edition), no_ember_files (exit 0, ember entries but no ember
     files), fail (exit 1), sleep (30 s), signal (killed by SIGTERM). With FAKE_GEN_STALE=1 its
-    --help does not list --no-ember. FAKE_GEN_CORRUPT names a file it overwrites with invalid
+    --help does not list --no-ember. FAKE_GEN_MASSES_<seed> and FAKE_GEN_VIEW_<seed> give the
+    masses and the view (view_members() text) of that seed's nft_traits.json, in place of
+    DEFAULT_MASSES and DEFAULT_VIEW. FAKE_GEN_CORRUPT names a file it overwrites with invalid
     JSON while rendering (a live file that changes during the render). FAKE_GEN_LOCK_PROBE names
     run.py's lock file: each render logs whether it is free and whether the generator holds it.
     FAKE_GEN_EMBER_ALGORITHM (default CURRENT_ALGORITHM) is what --ember-algorithm prints and what
@@ -235,6 +333,7 @@ def fake_generator(argv: list[str]) -> int:
         ember_files=mode == "complete",
         ember_manifest=mode in ("complete", "no_ember_files"),
         masses=os.environ.get(f"FAKE_GEN_MASSES_{seed}", DEFAULT_MASSES),
+        view=os.environ.get(f"FAKE_GEN_VIEW_{seed}"),
         algorithm=algorithm,
     )
     if mode == "stray":
@@ -246,7 +345,9 @@ def fake_ssh(argv: list[str]) -> int:
     """ssh: runs the remote command locally with /bin/sh.
 
     Exits 255 like a failed connection with FAKE_SSH_FAIL=1, or for a command that starts with
-    FAKE_SSH_FAIL_ON.
+    FAKE_SSH_FAIL_ON. A command with an `&&` step that contains FAKE_SSH_CUT_AFTER is cut off
+    like a connection lost in the middle of it: the steps up to and including that one run, the
+    rest do not, and ssh exits 255.
     """
     index = 0
     while index < len(argv) and argv[index].startswith("-"):
@@ -256,6 +357,13 @@ def fake_ssh(argv: list[str]) -> int:
     fail_on = os.environ.get("FAKE_SSH_FAIL_ON")
     if os.environ.get("FAKE_SSH_FAIL") == "1" or (fail_on and command.startswith(fail_on)):
         print("ssh: connect to host fake port 22: Connection refused", file=sys.stderr)
+        return 255
+    cut_after = os.environ.get("FAKE_SSH_CUT_AFTER")
+    if cut_after and cut_after in command:
+        steps = command.split(" && ")
+        done = next(index for index, step in enumerate(steps) if cut_after in step) + 1
+        subprocess.run(["/bin/sh", "-c", " && ".join(steps[:done])], check=False)
+        print("ssh: Connection to fake closed by remote host.", file=sys.stderr)
         return 255
     return subprocess.run(["/bin/sh", "-c", command], check=False).returncode
 
@@ -426,6 +534,58 @@ class SyncTestCase(unittest.TestCase):
         )
         return package
 
+    def remote_v2_package(
+        self, seed: str, *, extra_entries: Sequence[dict[str, object]] = ()
+    ) -> Path:
+        """A live package holding an ember-v2 edition, tagged "live": the EMBER_V2_* literals
+        (its manifest lists `extra_entries` after the five ember-v2 entries)."""
+        ember = [manifest_entry(path, role, "live") for path, role in EMBER_V2_MEDIA_ROLES.items()]
+        package = self.remote_package(seed, extra_entries=[*ember, *extra_entries])
+        for path in EMBER_V2_MEDIA_ROLES:
+            (package / path).write_text(f"{path} live\n", encoding="utf-8")
+        (package / "metadata/ember.json").write_text(EMBER_V2_CERTIFICATE, encoding="utf-8")
+        return package
+
+    def package_files(self, seed: str) -> dict[str, str]:
+        """The remote package of `seed`: {path relative to the package: content}."""
+        prefix = f"0x{seed}/"
+        return {
+            path.removeprefix(prefix): content
+            for path, content in self.remote_snapshot().items()
+            if path.startswith(prefix)
+        }
+
+    def ember_upload_commands(self, seed: str, retired: Sequence[str] = ()) -> list[str]:
+        """The two ssh commands of an ember-mode upload into the package of `seed`, whose live
+        edition has the files `retired` that the current look does not: the one before the
+        transfers (leftover .part files go, the directories are made), and the one after them,
+        which swaps the staged edition in (the old certificate and `retired` go, then every
+        staged file is renamed into place, in EMBER_UPLOAD_ORDER)."""
+        package = f"{self.remote}/0x{seed}"
+        parts = " ".join(f"{package}/{path}.part" for path in EMBER_UPLOAD_ORDER)
+        directories = sorted(
+            {posixpath.dirname(f"{package}/{path}") for path in EMBER_UPLOAD_ORDER}
+        )
+        removed = " ".join(f"{package}/{path}" for path in ("metadata/ember.json", *retired))
+        renames = [
+            f"mv -f -- {package}/{path}.part {package}/{path}" for path in EMBER_UPLOAD_ORDER
+        ]
+        return [
+            f"rm -f -- {parts} && mkdir -p -- {' '.join(directories)}",
+            " && ".join([f"rm -f -- {removed}", *renames]),
+        ]
+
+    def changes(self) -> list[str]:
+        """The remote commands that changed the fake remote (every one but the reads)."""
+        return [c for c in self.ssh_commands() if not c.startswith(("cat -- ", "cd "))]
+
+    def staged(self) -> list[str]:
+        """Per scp call, its destination relative to the fake remote."""
+        return [
+            str(Path(str(destination)).relative_to(self.remote))
+            for _sources, destination in self.calls("scp")
+        ]
+
     def listing(self) -> set[str]:
         """run.list_remote_files() of the fake remote, which must succeed."""
         remote = run.list_remote_files("fakehost", "fakeuser", str(self.remote))
@@ -547,11 +707,18 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(run.plan_seed_queue([], ["b1", "b2"], 5, ledger, 4), ["b2", "b1"])
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 4), [])
 
-    def test_an_orbit_mismatch_gives_a_seed_up_at_once(self) -> None:
-        ledger = run.BackfillLedger(ember_failures={"b1": 1}, orbit_mismatches={"b1"})
+    def test_a_package_of_the_previous_look_lacks_only_the_slow_film(self) -> None:
+        remote = remote_listing(SEED_A, [*run.CORE_PACKAGE_FILES, *EMBER_V2_FILES])
+        self.assertEqual(
+            run.missing_remote_package_parts(SEED_A, remote), ["videos/web/ember_slow.mp4"]
+        )
+        self.assertEqual(run.find_missing_seeds([SEED_A], remote), ([], [SEED_A]))
+
+    def test_an_identity_mismatch_gives_a_seed_up_at_once(self) -> None:
+        ledger = run.BackfillLedger(ember_failures={"b1": 1}, identity_mismatches={"b1"})
         self.assertEqual(run.plan_seed_queue(["u1"], ["b1", "b2"], 5, ledger), ["u1", "b2"])
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 3), ["b1"])
-        # A higher attempt cap does not bring it back: this binary regenerates the same orbit.
+        # A higher attempt cap does not bring it back: this binary regenerates the same package.
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 100), ["b1"])
 
     def test_other_failures_never_give_a_seed_up(self) -> None:
@@ -593,23 +760,34 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(data["other_failures"], {SEED_C: 4})
         self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists())
 
-    def test_orbit_mismatches_round_trip_and_older_files_have_none(self) -> None:
+    def test_identity_mismatches_round_trip_and_older_files_are_read(self) -> None:
         ledger = run.BackfillLedger({SEED_A: 1, SEED_B: 1}, {}, {SEED_B, SEED_A})
         run.save_backfill_ledger(ledger, self.identity, self.path)
         self.assertEqual(self.load(), ledger)
         data = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual(data["orbit_mismatches"], [SEED_A, SEED_B])
+        self.assertEqual(data["identity_mismatches"], [SEED_A, SEED_B])
+        self.assertNotIn("orbit_mismatches", data)
 
-        del data["orbit_mismatches"]  # a file written before the field existed
+        del data["identity_mismatches"]  # a file written before the field existed
         self.path.write_text(json.dumps(data), encoding="utf-8")
         self.assertEqual(self.load(), run.BackfillLedger({SEED_A: 1, SEED_B: 1}))
 
-        data["orbit_mismatches"] = [SEED_A, 7, None]  # malformed entries are dropped
+        # A file written while the check compared the orbit only: its list is read under its
+        # earlier name, unless the file has the current one too.
+        data["orbit_mismatches"] = [SEED_B]
         self.path.write_text(json.dumps(data), encoding="utf-8")
-        self.assertEqual(self.load().orbit_mismatches, {SEED_A})
-        data["orbit_mismatches"] = {"not": "a list"}
+        self.assertEqual(self.load().identity_mismatches, {SEED_B})
+        data["identity_mismatches"] = [SEED_A]
         self.path.write_text(json.dumps(data), encoding="utf-8")
-        self.assertEqual(self.load().orbit_mismatches, set())
+        self.assertEqual(self.load().identity_mismatches, {SEED_A})
+        del data["orbit_mismatches"]
+
+        data["identity_mismatches"] = [SEED_A, 7, None]  # malformed entries are dropped
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().identity_mismatches, {SEED_A})
+        data["identity_mismatches"] = {"not": "a list"}
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.load().identity_mismatches, set())
 
     def test_counts_reset_when_the_generator_changes(self) -> None:
         run.save_backfill_ledger(
@@ -675,13 +853,15 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
         self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1}))
 
-        # An orbit mismatch counts one attempt and gives the seed up; COMPLETE forgets it.
-        self.assertTrue(ledger.record(SEED_C, run.Outcome.ORBIT_MISMATCH, backfill=True))
+        # An identity mismatch counts one attempt and gives the seed up; COMPLETE forgets it.
+        self.assertTrue(ledger.record(SEED_C, run.Outcome.IDENTITY_MISMATCH, backfill=True))
         self.assertEqual(ledger, run.BackfillLedger({SEED_B: 1, SEED_C: 1}, {}, {SEED_C}))
         self.assertTrue(ledger.given_up(SEED_C, 3))
         with self.assertLogs(run.log, level="INFO"):
             self.assertFalse(
-                ledger.record(SEED_D, run.Outcome.ORBIT_MISMATCH, backfill=True, interrupted=True)
+                ledger.record(
+                    SEED_D, run.Outcome.IDENTITY_MISMATCH, backfill=True, interrupted=True
+                )
             )
         self.assertFalse(ledger.given_up(SEED_D, 3))
         self.assertTrue(ledger.record(SEED_C, run.Outcome.COMPLETE, backfill=True))
@@ -738,7 +918,7 @@ class GeneratorTests(SyncTestCase):
     def test_ember_algorithm_probe(self) -> None:
         self.assertEqual(self.ember_algorithm(), CURRENT_ALGORITHM)
         self.assertEqual(self.ember_algorithm("ember-v10"), "ember-v10")
-        self.assertEqual(self.ember_algorithm("  ember-v3\n"), "ember-v3")
+        self.assertEqual(self.ember_algorithm("  ember-v4\n"), "ember-v4")
 
     def test_ember_algorithm_probe_accepts_nothing_but_one_id(self) -> None:
         for printed in ("Ember v2", "ember-v2 (sumi)", "ember-v", "EMBER-V2", "ember-v2\nember-v3"):
@@ -905,35 +1085,41 @@ class ProcessSeedTests(SyncTestCase):
         self.assertEqual([entry["role"] for entry in ember], list(run.EMBER_MANIFEST_ROLES))
         self.assertTrue(all(entry["sha256"].startswith("new:") for entry in ember))
 
-        batches = self.uploaded()
-        self.assertEqual(
-            batches,
-            [
-                ["images/source/ember.png"],
-                ["images/web/ember_full.webp", "images/web/ember_preview.webp"],
-                ["videos/web/ember.mp4"],
-                ["videos/hq/ember.mp4"],
-                [run.ASSET_MANIFEST],
-                [run.EMBER_CERTIFICATE],
-            ],
-        )
+        # Every file is staged as <name>.part, one transfer each, in the generator's order, then
+        # the manifest and the certificate; nothing lands under a real name by scp.
+        self.assertEqual(self.uploaded(), [[path] for path in EMBER_UPLOAD_ORDER])
+        self.assertEqual(self.staged(), [f"0x{SEED_A}/{path}.part" for path in EMBER_UPLOAD_ORDER])
+        # Two ssh calls change the package: one before the transfers, which deletes no live
+        # file, and the swap after them (the old certificate goes, the certificate lands last).
+        self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A))
         self.assertEqual(self.remote_part_files(), [])
         # The live package was read before the render and again before the upload.
         reads = [command for command in self.ssh_commands() if command.startswith("cat -- ")]
         self.assertEqual(len(reads), 4)
         self.assertEqual(self.call_log()[2][0], "generate")
 
-    def test_an_interrupted_ember_backfill_leaves_the_package_incomplete(self) -> None:
+    def test_a_failed_ember_transfer_leaves_the_live_package_as_it_was(self) -> None:
         package = self.remote_package(SEED_A)
         certificate = package / run.EMBER_CERTIFICATE
         certificate.write_text("from an earlier, interrupted upload", encoding="utf-8")
-        live_manifest = (package / run.ASSET_MANIFEST).read_text(encoding="utf-8")
+        leftover = package / "videos/web/ember.mp4.part"
+        leftover.write_text("left by an earlier attempt", encoding="utf-8")
+        live = self.remote_snapshot()
         os.environ["FAKE_SCP_FAIL_ON"] = "videos/hq"
         with self.assertLogs(run.log, level="ERROR"):
             outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
         self.assertIs(outcome, run.Outcome.FAILED)
-        self.assertFalse(certificate.exists())
-        self.assertEqual((package / run.ASSET_MANIFEST).read_text(encoding="utf-8"), live_manifest)
+        # Five media had been staged when the sixth failed: none is under its real name, the
+        # certificate and the manifest are untouched, and no staged file is left behind.
+        self.assertEqual(len(self.calls("scp")), 5 + 2)
+        leftover_path = str(leftover.relative_to(self.remote))
+        self.assertEqual(
+            self.remote_snapshot(), {p: c for p, c in live.items() if p != leftover_path}
+        )
+        self.assertEqual(self.remote_part_files(), [])
+        prepare, discard = self.changes()
+        self.assertEqual(prepare, self.ember_upload_commands(SEED_A)[0])
+        self.assertEqual(discard, prepare.split(" && ")[0])
         remote = run.list_remote_files("fakehost", "fakeuser", str(self.remote))
         assert remote is not None
         self.assertEqual(run.find_missing_seeds([SEED_A], remote), ([], [SEED_A]))
@@ -944,15 +1130,91 @@ class ProcessSeedTests(SyncTestCase):
         os.environ[f"FAKE_GEN_MASSES_{SEED_A}"] = "[150.25, 200.5, 180.12500000000003]"
         with self.assertLogs(run.log, level="ERROR") as logs:
             outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
-        self.assertIs(outcome, run.Outcome.ORBIT_MISMATCH)
+        self.assertIs(outcome, run.Outcome.IDENTITY_MISMATCH)
         self.assertEqual(self.calls("scp"), [])
         self.assertEqual(self.remote_snapshot(), live)
         message = "\n".join(logs.output)
         self.assertIn(f"0x{SEED_A}", message)
-        self.assertIn("DIFFERENT ORBIT", message)
-        self.assertIn("ORBIT MISMATCH", message)
-        self.assertIn("simulation.masses", message)
-        self.assertNotIn("selected_index", message)
+        self.assertIn("DIFFERENT ORBIT OR VIEW", message)
+        self.assertIn(f"IDENTITY MISMATCH  seed=0x{SEED_A}", message)
+        # Only the differing field is named, with both values.
+        self.assertIn(
+            "(simulation.masses: live [150.25, 200.5, 180.125], "
+            "regenerated [150.25, 200.5, 180.12500000000003])",
+            message,
+        )
+
+    def test_ember_backfill_with_a_different_view_uploads_nothing(self) -> None:
+        # The same orbit shown another way: the ember bodies would not follow the published art.
+        self.remote_package(SEED_A)
+        live = self.remote_snapshot()
+        cases: tuple[tuple[str, str | None, str], ...] = (
+            (
+                "projection",
+                '"phase_portrait"',
+                'generation.projection: live "position", regenerated "phase_portrait"',
+            ),
+            (
+                "scale",
+                "1.1646093650188864",
+                "generation.drift.scale: live 1.1646093650188862, regenerated 1.1646093650188864",
+            ),
+            # A regenerated file without the field cannot show that it matches.
+            (
+                "symmetry",
+                None,
+                'generation.symmetry: live "none", regenerated <missing>',
+            ),
+        )
+        for field, value, difference in cases:
+            with self.subTest(field=field, value=value):
+                os.environ[f"FAKE_GEN_VIEW_{SEED_A}"] = view_members(**{field: value})
+                with self.assertLogs(run.log, level="ERROR") as logs:
+                    outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
+                self.assertIs(outcome, run.Outcome.IDENTITY_MISMATCH)
+                message = "\n".join(logs.output)
+                self.assertIn(f"DIFFERENT ORBIT OR VIEW than the live one ({difference})", message)
+                self.assertIn(f"IDENTITY MISMATCH  seed=0x{SEED_A}", message)
+        self.assertEqual(self.calls("scp"), [])
+        self.assertEqual(self.remote_snapshot(), live)
+
+    def test_replacing_an_edition_in_place_deletes_the_files_the_current_look_dropped(self) -> None:
+        # An edition of an older look with one file more than the current one, and a manifest
+        # whose other ember entries name files that are not this package's ember files.
+        teaser = "videos/hq/ember_teaser.mp4"
+        entries = [
+            manifest_entry(teaser, "ember_teaser_hq", "live"),
+            manifest_entry("images/source/master.png", "ember_decoy", "live"),
+            manifest_entry(f"../0x{SEED_B}/images/source/ember.png", "ember_decoy", "live"),
+        ]
+        package = self.remote_v2_package(SEED_A, extra_entries=entries)
+        (package / teaser).write_text("teaser live\n", encoding="utf-8")
+        self.remote_v2_package(SEED_B)
+        before_a, before_b = self.package_files(SEED_A), self.package_files(SEED_B)
+
+        with self.assertLogs(run.log, level="INFO") as logs:
+            outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
+
+        self.assertIs(outcome, run.Outcome.COMPLETE)
+        text = "\n".join(logs.output)
+        self.assertIn(
+            f"has 1 files that the current edition does not, which are deleted with it: {teaser}",
+            text,
+        )
+        self.assertIn("so those are left alone: 'images/source/master.png', ", text)
+        # The teaser went with the old certificate, in the swap: nothing went before it.
+        self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A, retired=[teaser]))
+        after = self.package_files(SEED_A)
+        self.assertEqual(
+            sorted(after), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V3_FILES])
+        )
+        # Nothing but the ember edition changed: not the main art the decoy named, not SEED_B.
+        unchanged = set(before_a) - {*EMBER_V2_FILES, teaser, run.ASSET_MANIFEST}
+        self.assertEqual({p: after[p] for p in unchanged}, {p: before_a[p] for p in unchanged})
+        self.assertEqual(self.package_files(SEED_B), before_b)
+        manifest = json.loads(after[run.ASSET_MANIFEST])
+        ember = [entry for entry in manifest["assets"] if run.is_ember_asset(entry)]
+        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V3_ROLES))
 
     def test_backfill_whose_ember_edition_fails_uploads_nothing(self) -> None:
         self.remote_package(SEED_A)
@@ -1035,11 +1297,13 @@ class ProcessSeedTests(SyncTestCase):
     def test_an_interrupted_ember_manifest_upload_never_truncates_the_live_manifest(self) -> None:
         package = self.remote_package(SEED_A)
         live_manifest = (package / run.ASSET_MANIFEST).read_text(encoding="utf-8")
+        live = self.remote_snapshot()
         os.environ["FAKE_SCP_FAIL_ON"] = run.ASSET_MANIFEST
         with self.assertLogs(run.log, level="ERROR"):
             self.assertIs(self.process(SEED_A, backfill=run.BackfillMode.EMBER), run.Outcome.FAILED)
         self.assertEqual((package / run.ASSET_MANIFEST).read_text(encoding="utf-8"), live_manifest)
-        self.assertEqual(self.remote_part_files(), [f"0x{SEED_A}/{run.ASSET_MANIFEST}.part"])
+        # Every medium had been staged; none was swapped in, and the staged files are gone.
+        self.assertEqual(self.remote_snapshot(), live)
         remote = run.list_remote_files("fakehost", "fakeuser", str(self.remote))
         assert remote is not None
         self.assertEqual(run.find_missing_seeds([SEED_A], remote), ([], [SEED_A]))
@@ -1055,11 +1319,14 @@ class ProcessSeedTests(SyncTestCase):
         borda_less = json.dumps(
             {"simulation": {"masses": [1.5, 2.5, 3.5]}, "generation": {"selector": "borda"}}
         )
+        # Every orbit field, but a view field is gone: the live view cannot be known.
+        drift_scale_less = traits_text(SEED_A, "live", view=view_members(scale=None))
         cases = (
             (run.ASSET_MANIFEST, CORRUPT_JSON, "assets.json is not valid JSON"),
             (run.ASSET_MANIFEST, '{"schema_version": 2}', "has no assets list"),
             (run.NFT_TRAITS, CORRUPT_JSON, "nft_traits.json is not valid JSON"),
             (run.NFT_TRAITS, borda_less, "lacks generation.borda.selected_index"),
+            (run.NFT_TRAITS, drift_scale_less, "nft_traits.json lacks generation.drift.scale."),
         )
         for path, content, problem in cases:
             with self.subTest(path=path, content=content):
@@ -1154,28 +1421,36 @@ SEED_F = "f" * 64
 
 
 class StaleEmberTests(SyncTestCase):
-    """Reading the live certificates, choosing the stale editions, and withdrawing them."""
+    """Reading the live certificates, choosing the stale editions, and retiring them: withdrawn,
+    or kept online for the backfill to replace."""
 
     def ember_paths(self, *seeds: str) -> set[str]:
         """The remote listing's paths of every ember file of `seeds`."""
         return {f"0x{seed}/{path}" for seed in seeds for path in run.EMBER_PACKAGE_FILES}
 
-    def withdraw_all(
-        self, seeds: list[str], *, dry_run: bool = False
-    ) -> tuple[set[str], bool, set[str]]:
-        """run.withdraw_stale_ember_editions() against the fake remote: its listing, its status,
-        and the listing it started from. The call log starts after that first listing."""
-        listing = self.listing()
-        self.forget_calls()
-        remaining, ok = run.withdraw_stale_ember_editions(
+    def retire(
+        self, seeds: list[str], listing: set[str], *, keep: bool = False, dry_run: bool = False
+    ) -> tuple[set[str], bool]:
+        """run.retire_stale_ember_editions() against the fake remote, planned from `listing`."""
+        return run.retire_stale_ember_editions(
             seeds,
             listing,
             CURRENT_ALGORITHM,
             "fakehost",
             "fakeuser",
             str(self.remote),
+            keep=keep,
             dry_run=dry_run,
         )
+
+    def retire_all(
+        self, seeds: list[str], *, keep: bool = False, dry_run: bool = False
+    ) -> tuple[set[str], bool, set[str]]:
+        """retire() from the fake remote's own listing: its listing, its status, and the listing
+        it started from. The call log starts after that first listing."""
+        listing = self.listing()
+        self.forget_calls()
+        remaining, ok = self.retire(seeds, listing, keep=keep, dry_run=dry_run)
         return remaining, ok, listing
 
     def withdraw(self, seed: str) -> bool:
@@ -1223,7 +1498,7 @@ class StaleEmberTests(SyncTestCase):
             SEED_A: CURRENT_ALGORITHM,
             SEED_B: STALE_ALGORITHM,
             SEED_C: None,
-            SEED_D: "ember-v3",
+            SEED_D: NEWER_ALGORITHM,
             unlisted: STALE_ALGORITHM,
             urgent: STALE_ALGORITHM,
             backfill: "ember-v0",
@@ -1314,6 +1589,33 @@ class StaleEmberTests(SyncTestCase):
         self.assertFalse((run.LOCAL_OUTPUT_DIR / f"0x{SEED_B}").exists())
         self.assertEqual(run.find_missing_seeds([SEED_B], self.listing()), ([], [SEED_B]))
 
+    def test_a_withdrawal_takes_the_files_the_current_look_dropped_too(self) -> None:
+        teaser = "videos/hq/ember_teaser.mp4"
+        entries = [
+            manifest_entry(teaser, "ember_teaser_hq", "live"),
+            manifest_entry("images/source/master.png", "ember_decoy", "live"),
+        ]
+        package = self.remote_v2_package(SEED_A, extra_entries=entries)
+        (package / teaser).write_text("teaser live\n", encoding="utf-8")
+        before = self.package_files(SEED_A)
+
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            self.assertTrue(self.withdraw(SEED_A))
+
+        self.assertIn("left alone: 'images/source/master.png'", "\n".join(logs.output))
+        after = self.package_files(SEED_A)
+        self.assertEqual(sorted(after), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES]))
+        kept = set(after) - {run.ASSET_MANIFEST}
+        self.assertEqual({p: after[p] for p in kept}, {p: before[p] for p in kept})
+        manifest = json.loads(after[run.ASSET_MANIFEST])
+        self.assertFalse(any(run.is_ember_asset(entry) for entry in manifest["assets"]))
+        # The media, the teaser included, go last: after the manifest that no longer lists them.
+        commands = self.ssh_commands()
+        self.assertTrue(commands[-2].startswith("mv -f -- "), commands[-2])
+        self.assertTrue(commands[-1].startswith("rm -f -- "), commands[-1])
+        self.assertTrue(commands[-1].endswith(f" {self.remote}/0x{SEED_A}/{teaser}"), commands[-1])
+        self.assertNotIn("master.png", commands[-1])
+
     def test_a_withdrawal_is_idempotent(self) -> None:
         self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
         self.assertTrue(self.withdraw(SEED_A))
@@ -1321,7 +1623,7 @@ class StaleEmberTests(SyncTestCase):
         self.assertTrue(self.withdraw(SEED_A))
         self.assertEqual(self.remote_snapshot(), withdrawn)
         # A package without a certificate is never considered again: not even ssh is needed.
-        remaining, ok, listing = self.withdraw_all([SEED_A])
+        remaining, ok, listing = self.retire_all([SEED_A])
         self.assertTrue(ok)
         self.assertEqual(remaining, listing)
         self.assertEqual(self.call_log(), [])
@@ -1333,7 +1635,7 @@ class StaleEmberTests(SyncTestCase):
         self.remote_package(SEED_C, ember=True, algorithm="ember-v0")
         a_before = {p: c for p, c in self.remote_snapshot().items() if SEED_A in p}
         with self.assertLogs(run.log, level="INFO") as logs:
-            remaining, ok, _listing = self.withdraw_all([SEED_A, SEED_B, SEED_C])
+            remaining, ok, _listing = self.retire_all([SEED_A, SEED_B, SEED_C])
         self.assertTrue(ok)
         self.assertEqual(remaining, self.listing())  # the listing a new run would see
         self.assertEqual(
@@ -1348,12 +1650,42 @@ class StaleEmberTests(SyncTestCase):
             text,
         )
 
+    def test_kept_editions_stay_online_and_are_planned_as_backfill_seeds(self) -> None:
+        self.remote_package(SEED_A, ember=True)
+        self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)  # every current file
+        self.remote_v2_package(SEED_C)  # lacks the slow film as well
+        live = self.remote_snapshot()
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run), self.assertLogs(run.log, level="INFO") as logs:
+                remaining, ok, listing = self.retire_all(
+                    [SEED_A, SEED_B, SEED_C], keep=True, dry_run=dry_run
+                )
+            self.assertTrue(ok)
+            # Nothing changed on the asset host: only the certificates were read.
+            self.assertEqual(self.remote_snapshot(), live)
+            self.assertEqual(len(self.ssh_commands()), 1)
+            self.assertEqual(self.calls("scp"), [])
+            # The plan counts both older editions as backfill seeds, whatever files they hold.
+            self.assertEqual(remaining, listing - self.ember_paths(SEED_B, SEED_C))
+            self.assertEqual(
+                run.find_missing_seeds([SEED_A, SEED_B, SEED_C], remaining),
+                ([], [SEED_B, SEED_C]),
+            )
+            text = "\n".join(logs.output)
+            self.assertIn(
+                f"Kept 2 stale ember editions online ({STALE_ALGORITHM} -> {CURRENT_ALGORITHM}): "
+                "the ember backfill replaces each in place",
+                text,
+            )
+            self.assertNotIn("WITHDRAWN", text)
+            self.assertNotIn("Withdrew", text)
+
     def test_a_failed_withdrawal_does_not_stop_the_others(self) -> None:
         self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
         self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)
         os.environ["FAKE_SSH_FAIL_ON"] = f"cat -- {self.remote}/0x{SEED_A}/"
         with self.assertLogs(run.log, level="INFO") as logs:
-            remaining, ok, _listing = self.withdraw_all([SEED_A, SEED_B])
+            remaining, ok, _listing = self.retire_all([SEED_A, SEED_B])
         self.assertFalse(ok)
         self.assertEqual(remaining, self.listing())
         self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], remaining), ([], [SEED_B]))
@@ -1400,7 +1732,7 @@ class StaleEmberTests(SyncTestCase):
         self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
         live = self.remote_snapshot()
         with self.assertLogs(run.log, level="INFO") as logs:
-            remaining, ok, listing = self.withdraw_all([SEED_A], dry_run=True)
+            remaining, ok, listing = self.retire_all([SEED_A], dry_run=True)
         self.assertTrue(ok)
         self.assertEqual(self.remote_snapshot(), live)
         self.assertEqual(len(self.ssh_commands()), 1)  # the certificates were read, nothing else
@@ -1413,25 +1745,18 @@ class StaleEmberTests(SyncTestCase):
         )
         self.assertIn("DRY-RUN  would withdraw 1 stale ember editions", text)
 
-    def test_nothing_is_withdrawn_when_the_certificates_cannot_be_read(self) -> None:
+    def test_nothing_is_retired_when_the_certificates_cannot_be_read(self) -> None:
         self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
         live = self.remote_snapshot()
         listing = self.listing()
         os.environ["FAKE_SSH_FAIL"] = "1"
-        with self.assertLogs(run.log, level="ERROR") as logs:
-            remaining, ok = run.withdraw_stale_ember_editions(
-                [SEED_A],
-                listing,
-                CURRENT_ALGORITHM,
-                "fakehost",
-                "fakeuser",
-                str(self.remote),
-                dry_run=False,
-            )
-        self.assertFalse(ok)
-        self.assertEqual(remaining, listing)
-        self.assertEqual(self.remote_snapshot(), live)
-        self.assertIn("none is withdrawn this run", "\n".join(logs.output))
+        for keep, consequence in ((False, "withdrawn"), (True, "replaced")):
+            with self.subTest(keep=keep), self.assertLogs(run.log, level="ERROR") as logs:
+                remaining, ok = self.retire([SEED_A], listing, keep=keep)
+            self.assertFalse(ok)
+            self.assertEqual(remaining, listing)
+            self.assertEqual(self.remote_snapshot(), live)
+            self.assertIn(f"none is {consequence} this run", "\n".join(logs.output))
 
 
 # ---------------------------------------------------------------------------
@@ -1440,7 +1765,84 @@ class StaleEmberTests(SyncTestCase):
 
 
 class EmberBackfillHelperTests(unittest.TestCase):
-    """merge_ember_manifest, orbit_differences and scp_timeout."""
+    """The ember file and role lists, merge_ember_manifest, retired_ember_files,
+    identity_differences and scp_timeout."""
+
+    def test_the_ember_files_and_roles_of_the_current_look(self) -> None:
+        # The generator lists its ember outputs in exactly this order (app::EMBER_OUTPUT_PATHS; a
+        # Rust unit test compares that with run.py's tuple), and writes these manifest roles.
+        self.assertEqual(run.EMBER_PACKAGE_FILES, EMBER_V3_FILES)
+        self.assertEqual(run.EMBER_MANIFEST_ROLES, EMBER_V3_ROLES)
+        self.assertEqual(run.EMBER_MEDIA_FILES, EMBER_V3_FILES[:-1])
+        self.assertEqual(run.EMBER_CERTIFICATE, EMBER_V3_FILES[-1])
+        self.assertEqual(run.REQUIRED_PACKAGE_FILES[-len(EMBER_V3_FILES) :], EMBER_V3_FILES)
+        # The look before it had every file but the slow film, and every role but its role.
+        self.assertEqual(set(EMBER_V3_FILES) - set(EMBER_V2_FILES), {"videos/web/ember_slow.mp4"})
+        self.assertEqual(
+            set(EMBER_V3_ROLES) - set(EMBER_V2_MEDIA_ROLES.values()), {"ember_slow_web"}
+        )
+        self.assertLessEqual(set(EMBER_V2_FILES), set(EMBER_V3_FILES))
+
+    def test_only_ember_files_are_named_ember(self) -> None:
+        # retired_ember_files() relies on it: a file it may delete is never a core file.
+        def named_ember(path: str) -> bool:
+            return posixpath.basename(path).startswith(run.EMBER_FILE_PREFIX)
+
+        self.assertTrue(all(named_ember(path) for path in run.EMBER_PACKAGE_FILES))
+        self.assertFalse(any(named_ember(path) for path in run.CORE_PACKAGE_FILES))
+        self.assertFalse(any(named_ember(path) for path in SPECTRAL_FILES))
+
+    def test_retired_ember_files_are_ember_files_of_the_package_only(self) -> None:
+        def entry(path: object, role: str = "ember_retired") -> dict[str, object]:
+            return {"role": role, "path": path}
+
+        current = [entry(path, role) for path, role in EMBER_MEDIA_ROLES.items()]
+        with self.assertNoLogs(run.log, level="INFO"):
+            self.assertEqual(run.retired_ember_files({"assets": current}, SEED_A), [])
+            v2 = [entry(path, role) for path, role in EMBER_V2_MEDIA_ROLES.items()]
+            self.assertEqual(run.retired_ember_files({"assets": v2}, SEED_A), [])
+
+        refused: list[object] = [
+            "images/source/master.png",  # a core file under an ember role
+            "videos/web/main.mp4",
+            "spectral/00_380nm.png",
+            "../ember.png",  # outside the package
+            f"../0x{SEED_B}/videos/hq/ember.mp4",
+            "videos/../../ember.png",
+            "/tmp/ember.png",
+            "videos//ember_old.mp4",  # not normalised
+            "./ember_old.png",
+            "videos/web/ember_frames/",
+            "",
+            7,
+            None,
+        ]
+        live = {
+            "assets": [
+                *current,
+                entry("videos/hq/ember_slow.mp4"),
+                entry("ember_notes.txt"),
+                entry("videos/hq/ember_slow.mp4", "ember_slow_hq"),  # listed twice
+                *(entry(path) for path in refused),
+                {"role": "ember_without_a_path"},
+                entry("videos/hq/ember_other.mp4", "main_hq"),  # not an ember entry
+            ]
+        }
+        with self.assertLogs(run.log, level="INFO") as logs:
+            retired = run.retired_ember_files(live, SEED_A)
+        self.assertEqual(retired, ["ember_notes.txt", "videos/hq/ember_slow.mp4"])
+        self.assertEqual([record.levelname for record in logs.records], ["WARNING", "INFO"])
+        warning, info = (record.getMessage() for record in logs.records)
+        self.assertTrue(warning.startswith(f"0x{SEED_A}: the live metadata/assets.json lists"))
+        self.assertTrue(
+            warning.endswith("left alone: " + ", ".join(repr(path) for path in refused)), warning
+        )
+        self.assertTrue(info.endswith(": ember_notes.txt, videos/hq/ember_slow.mp4"), info)
+
+        malformed: list[object] = [[], {"assets": {}}, {"assets": [{"path": "no role"}]}]
+        for manifest in malformed:
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                run.retired_ember_files(manifest, SEED_A)
 
     def test_merge_keeps_live_entries_and_replaces_ember_ones(self) -> None:
         source: dict[str, object] = {"role": "source_master", "sha256": "live"}
@@ -1505,30 +1907,105 @@ class EmberBackfillHelperTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 run.ember_algorithm_number(invalid)
 
-    def test_orbit_differences_compare_exact_numbers(self) -> None:
-        def traits(masses: str, index: int = 7, retries: int = 1) -> object:
+    def test_the_identity_fields_are_the_orbit_and_the_view(self) -> None:
+        # The real paths of the generator's nft_traits.json (src/nft_traits.rs, and
+        # docs/nft_traits.schema.json, which requires every one of them).
+        self.assertEqual(
+            [".".join(field) for field in run.IDENTITY_FIELDS],
+            [
+                "simulation.masses",
+                "generation.borda.selected_index",
+                "generation.borda.retry_count",
+                "generation.structure.stack_label",
+                "generation.projection",
+                "generation.symmetry",
+                "generation.drift.mode",
+                "generation.drift.scale",
+                "generation.drift.arc_fraction",
+                "generation.drift.orbit_eccentricity",
+            ],
+        )
+        self.assertEqual(run.IDENTITY_FIELDS, run.ORBIT_IDENTITY_FIELDS + run.VIEW_IDENTITY_FIELDS)
+        example = REPO_ROOT / "docs" / "fixtures" / "nft_traits.example.json"
+        published = run.parse_json_exact(example.read_text(encoding="utf-8"))
+        self.assertEqual(run.identity_differences(published, published), [])
+        run.parse_live_package(example.read_text(encoding="utf-8"), '{"assets": []}')
+
+    def test_identity_differences_compare_exact_values(self) -> None:
+        def traits(
+            masses: str = "[1.1, 2.5, 3.0]", index: int = 7, retries: int = 1, view: str = ""
+        ) -> object:
             return run.parse_json_exact(
                 f'{{"simulation": {{"masses": {masses}}}, '
                 f'"generation": {{"borda": {{"selected_index": {index}, '
-                f'"retry_count": {retries}}}}}}}'
+                f'"retry_count": {retries}}}, {view or view_members()}}}}}'
             )
 
-        base = traits("[1.1, 2.5, 3.0]")
-        self.assertEqual(run.orbit_differences(base, traits("[1.1, 2.5, 3.0]")), [])
+        base = traits()
+        self.assertEqual(run.identity_differences(base, traits()), [])
         self.assertEqual(
-            run.orbit_differences(base, traits("[1.1000000000000001, 2.5, 3.0]")),
+            run.identity_differences(base, traits("[1.1000000000000001, 2.5, 3.0]")),
             ["simulation.masses: live [1.1, 2.5, 3.0], regenerated [1.1000000000000001, 2.5, 3.0]"],
         )
-        differences = run.orbit_differences(base, traits("[1.1, 2.5, 3.0]", 8, 2))
+        differences = run.identity_differences(base, traits(index=8, retries=2))
         self.assertEqual(
             [difference.split(":")[0] for difference in differences],
             ["generation.borda.selected_index", "generation.borda.retry_count"],
         )
-        self.assertEqual(len(run.orbit_differences({}, {})), 3)
+
+        # Each view field alone is a difference, named with both values.
+        changes = {
+            "stack_label": (
+                '"triangle_web"',
+                'generation.structure.stack_label: live "orbit_ribbons+harmonic_weave@0.29"',
+            ),
+            "projection": ('"hodograph"', 'generation.projection: live "position"'),
+            "symmetry": ('"rot4"', 'generation.symmetry: live "none", regenerated "rot4"'),
+            "mode": ('"linear"', 'generation.drift.mode: live "elliptical", regenerated "linear"'),
+            "scale": ("1.1646093650188864", "generation.drift.scale: live 1.1646093650188862"),
+            "arc_fraction": ("0.82497685045158", "generation.drift.arc_fraction: live 0.8249"),
+            "orbit_eccentricity": ("0.0", "generation.drift.orbit_eccentricity: live 0.4045"),
+        }
+        self.assertEqual(len(changes), len(run.VIEW_IDENTITY_FIELDS))
+        for field, (value, difference) in changes.items():
+            with self.subTest(field=field):
+                changed = traits(view=view_members(**{field: value}))
+                (found,) = run.identity_differences(base, changed)
+                self.assertTrue(found.startswith(difference), found)
+                self.assertTrue(found.endswith(f"regenerated {value}"), found)
+                # A field the regenerated file lacks is a difference too.
+                without = traits(view=view_members(**{field: None}))
+                (lacking,) = run.identity_differences(base, without)
+                self.assertTrue(lacking.endswith("regenerated <missing>"), lacking)
+        # The drift fields that do not shape the view are not compared.
+        text = traits_text(SEED_A, "live")
+        other = text.replace('"enabled": true', '"enabled": false')
+        other = other.replace('"randomized": true', '"randomized": false')
+        self.assertEqual(other.count("false"), 2)
+        self.assertEqual(
+            run.identity_differences(run.parse_json_exact(text), run.parse_json_exact(other)), []
+        )
+        self.assertEqual(len(run.identity_differences({}, {})), len(run.IDENTITY_FIELDS))
+
+    def test_a_live_package_must_show_its_orbit_and_view(self) -> None:
+        manifest = '{"assets": []}'
+        run.parse_live_package(traits_text(SEED_A, "live"), manifest)
+        self.assertEqual(
+            list(VIEW_FIELD_PATHS.values()),
+            [".".join(field) for field in run.VIEW_IDENTITY_FIELDS],
+        )
+        for field, path in VIEW_FIELD_PATHS.items():
+            with self.subTest(field=field), self.assertRaises(ValueError) as raised:
+                run.parse_live_package(
+                    traits_text(SEED_A, "live", view=view_members(**{field: None})), manifest
+                )
+            self.assertEqual(str(raised.exception), f"metadata/nft_traits.json lacks {path}")
 
     def test_scp_timeout_scales_with_size(self) -> None:
+        floor_bytes = run.SCP_MIN_TIMEOUT * run.SCP_MIN_BYTES_PER_SECOND
         self.assertEqual(run.scp_timeout(0), run.SCP_MIN_TIMEOUT)
-        self.assertEqual(run.scp_timeout(284_000_000), run.SCP_MIN_TIMEOUT)
+        self.assertEqual(run.scp_timeout(floor_bytes), run.SCP_MIN_TIMEOUT)
+        self.assertEqual(run.scp_timeout(floor_bytes + 1), run.SCP_MIN_TIMEOUT + 1)
         self.assertEqual(run.scp_timeout(2_000_000_001), 2001)
 
 
@@ -1602,7 +2079,11 @@ class MainTests(SyncTestCase):
         for extra in ((), ("--max-backfill-attempts", "100")):
             with self.assertLogs(run.log, level="WARNING") as logs:
                 self.assertEqual(self.main([SEED_A], *extra), 0)
-            self.assertIn("regenerates a different orbit", "\n".join(logs.output))
+            self.assertIn(
+                "regenerates a different orbit or view than the live package (rebuild the "
+                "generator, or delete the seed from identity_mismatches in backfill_failures.json",
+                "\n".join(logs.output),
+            )
         self.assertEqual(self.generated(), [SEED_A])
 
         # A rebuilt generator tries it again (and here renders the live orbit this time).
@@ -1612,6 +2093,26 @@ class MainTests(SyncTestCase):
         self.assertEqual(self.main([SEED_A]), 0)
         self.assertEqual(self.generated(), [SEED_A, SEED_A])
         self.assertEqual(self.ledger(), run.BackfillLedger())
+
+    def test_a_different_view_gives_the_seed_up_at_once(self) -> None:
+        self.remote_package(SEED_A)
+        live = self.remote_snapshot()
+        os.environ[f"FAKE_GEN_VIEW_{SEED_A}"] = view_members(mode='"linear"')
+        with self.assertLogs(run.log, level="ERROR") as logs:
+            self.assertEqual(self.main([SEED_A]), 1)
+        self.assertIn(
+            'generation.drift.mode: live "elliptical", regenerated "linear"', "\n".join(logs.output)
+        )
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1}, {}, {SEED_A}))
+        saved = json.loads(run.BACKFILL_FAILURES.read_text(encoding="utf-8"))
+        self.assertEqual(saved["identity_mismatches"], [SEED_A])
+
+        # No second render with this binary: the seed is listed as given up on every run.
+        with self.assertLogs(run.log, level="WARNING") as logs:
+            self.assertEqual(self.main([SEED_A]), 0)
+        self.assertIn("regenerates a different orbit or view", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A])
 
     def test_a_given_up_seed_is_skipped_and_logged_every_run(self) -> None:
         self.remote_package(SEED_A)
@@ -1767,25 +2268,250 @@ class MainTests(SyncTestCase):
         self.assertEqual(self.generated(), [SEED_A, SEED_B])
         self.assertEqual(self.remote_snapshot(), live)
 
-    def test_the_keep_stale_ember_switch_keeps_every_live_edition(self) -> None:
-        self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+    def assert_current_edition(self, seed: str, published: dict[str, str]) -> None:
+        """The remote package of `seed` holds the current look's ember edition, rendered by the
+        fake generator ("new"), and is otherwise `published`, its files before the run, byte for
+        byte: the ember files, roles and certificate are compared with the EMBER_V3_* literals."""
+        package = self.package_files(seed)
+        self.assertEqual(
+            sorted(package), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V3_FILES])
+        )
+        for path in EMBER_V3_FILES[:-1]:
+            self.assertEqual(package[path], f"{path} new\n")
+        certificate = json.loads(package["metadata/ember.json"])
+        self.assertEqual(
+            (certificate["algorithm"], certificate["schema_version"], certificate["contract"]),
+            ("ember-v3", 4, "the new render"),
+        )
+        untouched = set(package) - {*EMBER_V3_FILES, "metadata/assets.json"}
+        self.assertEqual(
+            {path: package[path] for path in untouched},
+            {path: published[path] for path in untouched},
+        )
+        # The manifest: the published entries of everything else, verbatim and in order, then
+        # the six entries of the new edition. No entry of the old edition is left.
+        manifest = json.loads(package["metadata/assets.json"])
+        published_manifest = json.loads(published["metadata/assets.json"])
+        kept = [entry for entry in published_manifest["assets"] if not run.is_ember_asset(entry)]
+        self.assertEqual(manifest["assets"][: len(kept)], kept)
+        ember = manifest["assets"][len(kept) :]
+        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V3_ROLES))
+        self.assertEqual([entry["path"] for entry in ember], list(EMBER_V3_FILES[:-1]))
+        self.assertTrue(all(entry["sha256"].startswith("new:") for entry in ember))
+
+    def assert_no_ember_edition(self, seed: str, published: dict[str, str]) -> None:
+        """The remote package of `seed` is `published` without its ember edition: no ember file,
+        no ember manifest entry, and every other file byte for byte."""
+        package = self.package_files(seed)
+        self.assertEqual(sorted(package), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES]))
+        untouched = set(package) - {"metadata/assets.json"}
+        self.assertEqual(
+            {path: package[path] for path in untouched},
+            {path: published[path] for path in untouched},
+        )
+        manifest = json.loads(package["metadata/assets.json"])
+        published_manifest = json.loads(published["metadata/assets.json"])
+        kept = [entry for entry in published_manifest["assets"] if not run.is_ember_asset(entry)]
+        self.assertEqual(manifest, {**published_manifest, "assets": kept})
+
+    def test_an_ember_v2_package_is_withdrawn_at_once_and_rendered_again(self) -> None:
+        self.remote_v2_package(SEED_A)
+        self.remote_v2_package(SEED_B)
+        published_a, published_b = self.package_files(SEED_A), self.package_files(SEED_B)
+        self.assertEqual(
+            sorted(published_a), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V2_FILES])
+        )
+
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "1"), 0)
+        text = "\n".join(logs.output)
+        for seed in (SEED_A, SEED_B):
+            self.assertIn(
+                f"WITHDRAWN  seed=0x{seed}  its ember-v2 ember edition is off the asset host", text
+            )
+        self.assertIn("Withdrew 2 stale ember editions (ember-v2 -> ember-v3)", text)
+        self.assertNotIn("Kept", text)
+        # Both editions went before the plan: six files and five manifest entries each. The
+        # backfill rendered one of them again, with the seven files and six roles of ember-v3.
+        self.assertEqual(self.generated(), [SEED_A])
+        self.assert_current_edition(SEED_A, published_a)
+        self.assert_no_ember_edition(SEED_B, published_b)
+        self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], self.listing()), ([], [SEED_B]))
+
+        # The next run renders SEED_B; the fresh edition of SEED_A is not touched again.
+        after_first = self.package_files(SEED_A)
+        self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "1"), 0)
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assert_current_edition(SEED_B, published_b)
+        self.assertEqual(self.package_files(SEED_A), after_first)
+        self.assertEqual(run.find_missing_seeds([SEED_A, SEED_B], self.listing()), ([], []))
+
+    def test_a_kept_ember_v2_package_stays_online_until_it_is_replaced_in_place(self) -> None:
+        self.remote_v2_package(SEED_A)
+        self.remote_v2_package(SEED_B)
+        published_a, published_b = self.package_files(SEED_A), self.package_files(SEED_B)
+        keep = ("--keep-stale-ember", "--max-backfill", "1")
+
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], *keep), 0)
+        text = "\n".join(logs.output)
+        self.assertIn(
+            "Kept 2 stale ember editions online (ember-v2 -> ember-v3): the ember backfill "
+            "replaces each in place",
+            text,
+        )
+        self.assertNotIn("WITHDRAWN", text)
+        self.assertNotIn("Withdrew", text)
+        # Nothing was withdrawn: SEED_B is the published ember-v2 package, byte for byte.
+        self.assertEqual(self.package_files(SEED_B), published_b)
+        # SEED_A was replaced in place: its five old media replaced, the slow film added, the
+        # manifest's five ember entries replaced by six, a layout-4 ember-v3 certificate.
+        self.assertEqual(self.generated(), [SEED_A])
+        self.assert_current_edition(SEED_A, published_a)
+        # Every file was staged beside the live edition, which stayed whole until one ssh call
+        # swapped the new one in; the only live file ever deleted is the old certificate, there.
+        self.assertEqual(self.uploaded(), [[path] for path in EMBER_UPLOAD_ORDER])
+        self.assertEqual(self.staged(), [f"0x{SEED_A}/{path}.part" for path in EMBER_UPLOAD_ORDER])
+        self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A))
+
+        # The next run replaces SEED_B; the fresh edition of SEED_A is not rendered again.
+        after_first = self.package_files(SEED_A)
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], *keep), 0)
+        self.assertIn("Kept 1 stale ember editions online", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assert_current_edition(SEED_B, published_b)
+        self.assertEqual(self.package_files(SEED_A), after_first)
+
+        # Every token shows the current look: a third run has nothing to keep or to do.
         live = self.remote_snapshot()
-        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
-        self.assertEqual(self.main([SEED_A]), 0)
-        del os.environ[run.ENV_KEEP_STALE_EMBER]
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], *keep), 0)
+        text = "\n".join(logs.output)
+        self.assertIn("complete asset packages on remote. Nothing to do.", text)
+        self.assertNotIn("Kept", text)
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assertEqual(self.remote_snapshot(), live)
+
+    def test_a_kept_edition_survives_a_failed_upload_untouched(self) -> None:
+        package = self.remote_v2_package(SEED_A)
+        published = self.package_files(SEED_A)
+        swap = f"rm -f -- {package}/metadata/ember.json"
+        failures = (
+            # The slow film cannot be written (a lost connection, a full asset host).
+            ("FAKE_SCP_FAIL_ON", "videos/web/ember_slow.mp4"),
+            # Every file is staged, but the ssh call that swaps them in never starts.
+            ("FAKE_SSH_FAIL_ON", swap),
+        )
+        for attempt, (knob, value) in enumerate(failures, 1):
+            with self.subTest(knob=knob):
+                os.environ[knob] = value
+                with self.assertLogs(run.log, level="ERROR") as logs:
+                    self.assertEqual(self.main([SEED_A], "--keep-stale-ember"), 1)
+                del os.environ[knob]
+                self.assertIn("UPLOAD FAILED", "\n".join(logs.output))
+                # The published ember-v2 edition is online as it was, byte for byte: its six
+                # files, its manifest, and no staged file beside them.
+                self.assertEqual(self.package_files(SEED_A), published)
+                self.assertEqual(self.generated(), [SEED_A] * attempt)
+                # Not an ember attempt: the seed only moves back in the queue.
+                self.assertEqual(
+                    self.ledger(), run.BackfillLedger(other_failures={SEED_A: attempt})
+                )
+
+        # The next run replaces it.
         self.assertEqual(self.main([SEED_A], "--keep-stale-ember"), 0)
+        self.assert_current_edition(SEED_A, published)
+        self.assertEqual(self.ledger(), run.BackfillLedger())
+
+    def test_a_cut_off_swap_leaves_a_backfill_seed_that_a_later_run_finishes(self) -> None:
+        package = self.remote_v2_package(SEED_A)
+        published = self.package_files(SEED_A)
+        # The connection is lost in the middle of the swap, after the film was renamed into
+        # place: the certificate is gone, four media are new, the rest of the package is old.
+        os.environ["FAKE_SSH_CUT_AFTER"] = f"mv -f -- {package}/videos/web/ember.mp4.part "
+        with self.assertLogs(run.log, level="ERROR"):
+            self.assertEqual(self.main([SEED_A], "--keep-stale-ember"), 1)
+        del os.environ["FAKE_SSH_CUT_AFTER"]
+
+        swapped = EMBER_V3_FILES[:4]
+        expected = {path: text for path, text in published.items() if path != "metadata/ember.json"}
+        expected.update({path: f"{path} new\n" for path in swapped})
+        # No file is truncated or half new: each medium is the old one or the new one, the
+        # manifest is the published one, and the staged files that were not swapped in are gone.
+        self.assertEqual(self.package_files(SEED_A), expected)
+        self.assertEqual(run.find_missing_seeds([SEED_A], self.listing()), ([], [SEED_A]))
+
+        # Without a certificate the package is a backfill seed, switch or no switch: the next
+        # run renders it again and repeats the whole upload.
+        self.assertEqual(self.main([SEED_A]), 0)
+        self.assert_current_edition(SEED_A, published)
+        self.assertEqual(self.generated(), [SEED_A, SEED_A])
+
+    def test_a_kept_edition_survives_a_failed_or_mismatched_render(self) -> None:
+        self.remote_v2_package(SEED_A)
+        self.remote_v2_package(SEED_B)
+        live = self.remote_snapshot()
+        os.environ[f"FAKE_GEN_MODE_{SEED_A}"] = "core_only"
+        os.environ[f"FAKE_GEN_VIEW_{SEED_B}"] = view_members(symmetry='"mirror_x"')
+        for _ in range(2):
+            with self.assertLogs(run.log, level="WARNING"):
+                self.assertEqual(self.main([SEED_A, SEED_B], "--keep-stale-ember"), 1)
+        # Each render failed, so nothing was uploaded or deleted: both ember-v2 editions are
+        # online as published, and the mismatched one is given up without losing its edition.
+        self.assertEqual(self.generated(), [SEED_A, SEED_B])
+        self.assertEqual(self.remote_snapshot(), live)
+        self.assertEqual(self.ledger(), run.BackfillLedger({SEED_A: 1, SEED_B: 1}, {}, {SEED_B}))
+
+    def test_the_switch_and_a_paused_backfill_hold_every_edition_as_it_is(self) -> None:
+        self.remote_v2_package(SEED_A)
+        self.remote_package(SEED_B)  # no ember edition yet
+        live = self.remote_snapshot()
+        for _ in range(2):
+            self.assertEqual(
+                self.main([SEED_A, SEED_B], "--keep-stale-ember", "--max-backfill", "0"), 0
+            )
         self.assertEqual(self.remote_snapshot(), live)
         self.assertEqual(self.generated(), [])
-        self.assertEqual(len(self.ssh_commands()), 2)  # the listings: no certificate was read
+        self.assertEqual(self.calls("scp"), [])
 
-        # The command line overrides the environment.
-        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
-        self.assertEqual(self.main([SEED_A], "--keep-stale-ember", "no"), 0)
-        self.assertEqual(self.generated(), [SEED_A])
-        certificate = self.remote / f"0x{SEED_A}" / run.EMBER_CERTIFICATE
-        self.assertEqual(
-            json.loads(certificate.read_text(encoding="utf-8"))["algorithm"], CURRENT_ALGORITHM
+        # Without the switch a paused backfill renders nothing either, but the stale edition is
+        # still withdrawn at once.
+        published = self.package_files(SEED_A)
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "0"), 0)
+        self.assertIn(
+            "Withdrew 1 stale ember editions (ember-v2 -> ember-v3)", "\n".join(logs.output)
         )
+        self.assertEqual(self.generated(), [])
+        self.assert_no_ember_edition(SEED_A, published)
+
+    def test_the_keep_stale_ember_switch_replaces_every_older_edition(self) -> None:
+        # An edition of an older look that has every file of the current one (a look change
+        # that adds no file): the switch plans it for replacement by its algorithm alone.
+        package = self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)
+        published = self.package_files(SEED_A)
+        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A]), 0)
+        self.assertIn("Kept 1 stale ember editions online", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A])
+        self.assert_current_edition(SEED_A, published)
+        # Replaced by the staged swap, not withdrawn: no live medium was ever deleted.
+        self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A))
+
+        # The command line overrides the environment: `--keep-stale-ember no` withdraws.
+        (package / run.EMBER_CERTIFICATE).write_text(
+            certificate_text(STALE_ALGORITHM, "live"), encoding="utf-8"
+        )
+        published = self.package_files(SEED_A)
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(
+                self.main([SEED_A], "--keep-stale-ember", "no", "--max-backfill", "0"), 0
+            )
+        self.assertIn("Withdrew 1 stale ember editions", "\n".join(logs.output))
+        self.assert_no_ember_edition(SEED_A, published)
+        self.assertEqual(self.generated(), [SEED_A])
 
     def test_a_dry_run_withdraws_nothing_and_shows_the_plan(self) -> None:
         self.remote_package(SEED_A, ember=True, algorithm=STALE_ALGORITHM)

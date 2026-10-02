@@ -21,8 +21,6 @@ use super::{ink, math};
 pub struct EmberConfig {
     /// Navier–Stokes solver and snapshot cadence.
     pub fluid: FluidConfig,
-    /// Projection of the 3-D orbit onto the canvas.
-    pub projection: ProjectionConfig,
     /// When and where water picks up ink.
     pub contact: ContactConfig,
     /// The bodies' tidal stretching.
@@ -69,14 +67,6 @@ pub struct FluidConfig {
     /// Largest body travel between consecutive snapshots, in body radii (`body_radius`); with
     /// stretched bodies this should stay below the short semi-axis `R/√max_aspect`.
     pub max_snapshot_travel: f64,
-}
-
-/// Projection of the orbit onto the canvas.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectionConfig {
-    /// Fraction of the canvas half-height (and half-width) the orbit fills.
-    pub fill: f64,
 }
 
 /// Soak-zone contact rules: where and when passing water picks up ink.
@@ -222,7 +212,6 @@ impl Default for EmberConfig {
                 max_snapshot_interval: 2.5e-3,
                 max_snapshot_travel: 0.28,
             },
-            projection: ProjectionConfig { fill: 0.78 },
             contact: ContactConfig {
                 soak_depth: 0.030,
                 vorticity_gate: 40.0,
@@ -326,13 +315,6 @@ impl EmberConfig {
         non_negative(f.hyperviscosity, "fluid.hyperviscosity")?;
         positive(f.max_snapshot_interval, "fluid.max_snapshot_interval")?;
         positive(f.max_snapshot_travel, "fluid.max_snapshot_travel")?;
-
-        let p = &self.projection;
-        check(
-            p.fill.is_finite() && p.fill > 0.0 && p.fill <= 1.0,
-            "projection.fill",
-            "must lie in (0, 1]",
-        )?;
 
         let c = &self.contact;
         non_negative(c.soak_depth, "contact.soak_depth")?;

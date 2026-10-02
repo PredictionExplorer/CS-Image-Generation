@@ -1,10 +1,11 @@
 //! The determinism certificate `metadata/ember.json`: writing it and reading it back.
 //!
 //! The certificate records everything the ember frames are a function of — the selected orbit's
-//! initial conditions (with exact bit patterns), the integration settings, the frame schedule, the
-//! paper seed and the full [`EmberConfig`] — together with SHA-256 digests of the raw frame stream
-//! and of the still's pixels. Rendering the same inputs on any CPU architecture must reproduce
-//! both digests exactly. Encoded containers (MP4, WebP, PNG) are derived artefacts: their bytes
+//! initial conditions and the main edition's view of it (both as exact bit patterns), the
+//! integration settings, the frame schedule, the paper seed and the full [`EmberConfig`] —
+//! together with SHA-256 digests of the raw frame streams (the film and the slow film) and of
+//! the still's pixels. Rendering the same inputs on any CPU architecture must reproduce every
+//! digest exactly. Encoded containers (MP4, WebP, PNG) are derived artefacts: their bytes
 //! also depend on encoder versions, so they are not part of the contract. The `build` and
 //! `timings_seconds` sections describe the machine that produced the package and are
 //! informational only. The layout and the verification procedure are described in
@@ -17,9 +18,10 @@
 //! * `inputs.frames.sha256` — the frame schedule as little-endian `u64` knot indices
 //!   ([`schedule_sha256`]);
 //! * `inputs.paper_seed_sha256` — the paper-seed bytes ([`paper_seed_sha256`]);
-//! * `outputs.frames_rgb48le_sha256`, `outputs.still_rgb48le_sha256` — the pixels as `rgb48le`
-//!   (16-bit little-endian R, G, B per pixel, row-major from the top-left pixel; the frames
-//!   concatenated in schedule order).
+//! * `outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+//!   `outputs.still_rgb48le_sha256` — the pixels as `rgb48le` (16-bit little-endian R, G, B per
+//!   pixel, row-major from the top-left pixel; the frames of a film concatenated in the order
+//!   they are shown).
 //!
 //! # Reading a certificate back
 //!
@@ -28,16 +30,17 @@
 //! to it, every float bit for bit (the crate enables `serde_json`'s `float_roundtrip`, which
 //! parses every decimal exactly). The reader is strict: it rejects other layout versions
 //! ([`CERTIFICATE_SCHEMA_VERSION`]) and editions, missing fields — the nullable ones
-//! (`outputs.frames_rgb48le_sha256`, `config.look.floor_tau`) included, which must be present,
-//! as `null` or a value — unknown fields at every level (a
-//! field this build does not understand could be an input it would silently ignore), and
-//! outputs that disagree about the frames ([`CertificateError::InconsistentOutputs`]: frames
-//! emitted without a frames digest, which would pass as a still-only certificate, or a frames
-//! digest over another number of frames than the schedule has).
+//! (`outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+//! `config.look.floor_tau`) included, which must be present, as `null` or a value — unknown
+//! fields at every level (a field this build does not understand could be an input it would
+//! silently ignore), and outputs that disagree about the frames
+//! ([`CertificateError::InconsistentOutputs`]: frames emitted without a frames digest, which
+//! would pass as a still-only certificate, a frames digest over another number of frames than
+//! the film has, or a slow film without the normal one).
 //!
 //! The initial conditions are also written, and read back, as exact IEEE-754 bit patterns
 //! ([`F64Bits`]); [`CertificateInputs::bodies`] rebuilds them from those, never from the decimal
-//! copies next to them. The decimals are for people; the bit patterns stay authoritative for
+//! copies next to them. The view is written as bit patterns only. The decimals are for people; the bit patterns stay authoritative for
 //! readers whose JSON parser is not exact.
 
 use std::fmt;
@@ -51,7 +54,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use super::config::EmberConfig;
-use super::pipeline::{EmberProjection, EmberStats, EmberSummary, EmberTimings};
+use super::pipeline::{EmberStats, EmberSummary, EmberTimings};
+use super::view::View;
 use crate::sim::Body;
 
 /// Version of the certificate layout; the reader accepts only this version. Bump it whenever the
@@ -66,7 +70,11 @@ use crate::sim::Body;
 /// * 3 — the sumi edition with tidal bodies (`ember-v2`): no vermilion, so the cinnabar
 ///   statistics and the look's vermilion settings are gone; adds the `tidal` configuration and
 ///   `derived.hold_time`, `derived.fade_time` and `derived.tidal_reference`.
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 3;
+/// * 4 — the edition follows the main edition's view and gains the slow film (`ember-v3`): adds
+///   `inputs.view`, `inputs.frames.slow_factor`, `derived.slow_first_frame`,
+///   `outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`; the principal-plane
+///   projection (`config.projection`, `derived.projection`) is gone.
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 4;
 
 /// Version of the rendering algorithm, `ember-v<N>`. Bump `N` whenever a change alters rendered
 /// bits; the sync loop (`run.py`) withdraws and re-renders every published edition of an older
@@ -74,7 +82,9 @@ pub const CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 ///
 /// * `ember-v1` — sumi and vermilion on kozo, disc bodies.
 /// * `ember-v2` — sumi on kozo, tidally stretched bodies, the fade timed in film time.
-pub const ALGORITHM_VERSION: &str = "ember-v2";
+/// * `ember-v3` — the bodies follow the main edition's view (projection space, viewing rotation,
+///   drift and frame); a slow film; the soak frame is symmetric.
+pub const ALGORITHM_VERSION: &str = "ember-v3";
 
 /// The certificate's `edition`.
 pub const EDITION: &str = "ember";
@@ -87,10 +97,11 @@ pub const PIXEL_ENCODING: &str =
     "sRGB (IEC 61966-2-1) 16-bit, CAT16-adapted from the gallery LED-V1 illuminant to D65";
 
 /// The statement the digests certify.
-const CONTRACT: &str = "outputs.frames_rgb48le_sha256 and outputs.still_rgb48le_sha256 are a pure \
-function of `inputs` and `config`: rendering them again on any IEEE-754 CPU (x86_64, aarch64, any \
-thread count) reproduces both digests bit for bit. MP4, WebP and PNG files are encodings of these \
-pixels whose bytes also depend on encoder versions.";
+const CONTRACT: &str = "outputs.frames_rgb48le_sha256, outputs.slow_frames_rgb48le_sha256 and \
+outputs.still_rgb48le_sha256 are a pure function of `inputs` and `config`: rendering them again \
+on any IEEE-754 CPU (x86_64, aarch64, any thread count) reproduces every digest bit for bit. \
+MP4, WebP and PNG files are encodings of these pixels whose bytes also depend on encoder \
+versions.";
 
 /// The full certificate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -136,6 +147,8 @@ pub struct CertificateInputs {
     pub integrator: String,
     /// Initial conditions of the selected orbit (before the centre-of-mass shift).
     pub bodies: Vec<BodyRecord>,
+    /// The main edition's view of the orbit, which the bodies follow (exact bit patterns).
+    pub view: View,
     /// Output width in pixels.
     pub width: u32,
     /// Output height in pixels.
@@ -272,17 +285,22 @@ pub struct FrameScheduleRecord {
     pub frame_rate: u32,
     /// [`schedule_sha256`] of the schedule.
     pub sha256: String,
+    /// How many times slower the slow film is: it has this many frames per scheduled interval,
+    /// and the snapshot lattice of every render is a multiple of it.
+    pub slow_factor: u32,
 }
 
 impl FrameScheduleRecord {
-    /// The record of `frame_steps` shown at `frame_rate` frames per second.
-    pub fn new(frame_steps: &[usize], frame_rate: u32) -> Self {
+    /// The record of `frame_steps` shown at `frame_rate` frames per second, with a slow film
+    /// `slow_factor` times slower.
+    pub fn new(frame_steps: &[usize], frame_rate: u32, slow_factor: u32) -> Self {
         Self {
             count: frame_steps.len(),
             first_step: frame_steps.first().copied().unwrap_or(0),
             last_step: frame_steps.last().copied().unwrap_or(0),
             frame_rate,
             sha256: schedule_sha256(frame_steps),
+            slow_factor,
         }
     }
 }
@@ -307,8 +325,8 @@ pub struct CertificateDerived {
     pub fluid_dx: f64,
     /// Ink node grid `[cols, rows]`, margin included.
     pub ink_grid: [usize; 2],
-    /// Projection of the orbit onto the canvas.
-    pub projection: EmberProjection,
+    /// The scheduled frame at which the slow film starts (a little before the ink appears).
+    pub slow_first_frame: usize,
 }
 
 /// Digests of the rendered pixels.
@@ -322,9 +340,17 @@ pub struct CertificateOutputs {
     /// Frames in the stream: 0 for still-only renders, every scheduled frame
     /// (`inputs.frames.count`) for video renders. The reader checks both.
     pub frames_emitted: usize,
+    /// SHA-256 of the slow film's concatenated `rgb48le` frames (`null` unless it was rendered).
+    /// Required when reading, like the normal film's.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub slow_frames_rgb48le_sha256: Option<String>,
+    /// Frames in the slow film's stream: 0 unless it was rendered, else every scheduled frame
+    /// from `derived.slow_first_frame` on and `inputs.frames.slow_factor - 1` frames between
+    /// each two of them. The reader checks both.
+    pub slow_frames_emitted: usize,
     /// SHA-256 of the still as `rgb48le`.
     pub still_rgb48le_sha256: String,
-    /// Colour encoding of both ([`PIXEL_ENCODING`]).
+    /// Colour encoding of all three ([`PIXEL_ENCODING`]).
     pub encoding: String,
 }
 
@@ -333,7 +359,21 @@ impl CertificateOutputs {
     /// `schedule`: a still-only render records neither a frames digest nor frames (`null`, 0),
     /// a video render a digest over every scheduled frame. What a verifier checks follows from
     /// the digest, so a certificate with frames but no digest would pass as still-only.
-    fn check_frames(&self, schedule: &FrameScheduleRecord) -> Result<(), CertificateError> {
+    ///
+    /// The slow film follows the same rule against its own length,
+    /// `(count - 1 - slow_first_frame)·slow_factor + 1`, and is only ever rendered together
+    /// with the normal film.
+    fn check_frames(
+        &self,
+        schedule: &FrameScheduleRecord,
+        slow_first_frame: usize,
+    ) -> Result<(), CertificateError> {
+        // `None` for numbers no film has (a first frame beyond the schedule, an overflow).
+        let slow_frames = slow_first_frame
+            .checked_add(1)
+            .and_then(|skipped| schedule.count.checked_sub(skipped))
+            .and_then(|intervals| intervals.checked_mul(schedule.slow_factor as usize))
+            .and_then(|between| between.checked_add(1));
         let reason = match (&self.frames_rgb48le_sha256, self.frames_emitted) {
             (None, 0) => None,
             (None, emitted) => Some(format!(
@@ -346,7 +386,27 @@ impl CertificateOutputs {
                 schedule.count
             )),
             (Some(_), _) => None,
-        };
+        }
+        .or_else(|| match (&self.slow_frames_rgb48le_sha256, self.slow_frames_emitted) {
+            (None, 0) => None,
+            (None, emitted) => Some(format!(
+                "outputs.slow_frames_rgb48le_sha256 is null, but outputs.slow_frames_emitted is \
+                 {emitted} (a certificate without the slow film records 0 frames)"
+            )),
+            (Some(_), _) if self.frames_rgb48le_sha256.is_none() => Some(
+                "outputs.slow_frames_rgb48le_sha256 is set, but outputs.frames_rgb48le_sha256 is \
+                 null (the slow film is rendered together with the normal one)"
+                    .to_owned(),
+            ),
+            (Some(_), emitted) if Some(emitted) != slow_frames => Some(format!(
+                "outputs.slow_frames_emitted is {emitted}, but the slow film of {} scheduled \
+                 frames from frame {slow_first_frame} at factor {} has {} frames",
+                schedule.count,
+                schedule.slow_factor,
+                slow_frames.map_or("no".to_owned(), |frames| frames.to_string())
+            )),
+            (Some(_), _) => None,
+        });
         reason.map_or(Ok(()), |reason| Err(CertificateError::InconsistentOutputs { reason }))
     }
 }
@@ -388,6 +448,8 @@ pub struct CertificateContext<'a> {
     pub dt: f64,
     /// Initial conditions of the selected orbit.
     pub bodies: &'a [Body],
+    /// The main edition's view of the orbit.
+    pub view: &'a View,
     /// The frame schedule.
     pub frame_steps: &'a [usize],
     /// Frames per second of the encoded videos.
@@ -480,10 +542,15 @@ impl EmberCertificate {
                 gravitational_constant: crate::sim::G,
                 integrator: INTEGRATOR.to_owned(),
                 bodies: context.bodies.iter().map(BodyRecord::from).collect(),
+                view: *context.view,
                 width: summary.width,
                 height: summary.height,
                 paper_seed_sha256: paper_seed_sha256(context.paper_seed),
-                frames: FrameScheduleRecord::new(context.frame_steps, context.frame_rate),
+                frames: FrameScheduleRecord::new(
+                    context.frame_steps,
+                    context.frame_rate,
+                    summary.slow_factor,
+                ),
             },
             config: context.config.clone(),
             derived: CertificateDerived {
@@ -495,11 +562,13 @@ impl EmberCertificate {
                 fluid_grid: summary.fluid_grid,
                 fluid_dx: summary.fluid_dx,
                 ink_grid: summary.ink_grid,
-                projection: summary.projection,
+                slow_first_frame: summary.slow_first_frame,
             },
             outputs: CertificateOutputs {
                 frames_rgb48le_sha256: summary.frames_sha256.clone(),
                 frames_emitted: summary.frames_emitted,
+                slow_frames_rgb48le_sha256: summary.slow_frames_sha256.clone(),
+                slow_frames_emitted: summary.slow_frames_emitted,
                 still_rgb48le_sha256: summary.still_sha256.clone(),
                 encoding: PIXEL_ENCODING.to_owned(),
             },
@@ -552,7 +621,9 @@ impl EmberCertificate {
             return Err(CertificateError::WrongEdition { found: header.edition });
         }
         let certificate: Self = serde_json::from_str(text)?;
-        certificate.outputs.check_frames(&certificate.inputs.frames)?;
+        certificate
+            .outputs
+            .check_frames(&certificate.inputs.frames, certificate.derived.slow_first_frame)?;
         Ok(certificate)
     }
 }
@@ -562,6 +633,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+    use crate::ember::view::{ViewDrift, ViewFrame, ViewProjection};
 
     /// Initial conditions with awkward decimals: 17 significant digits (one of which `serde_json`
     /// without `float_roundtrip` reads one unit low), signed zero, tiny and large magnitudes.
@@ -604,6 +676,10 @@ mod tests {
             still_sha256: "ab".repeat(32),
             frames_emitted: 20,
             frames_sha256: Some("cd".repeat(32)),
+            slow_factor: 10,
+            slow_first_frame: 2,
+            slow_frames_emitted: 171,
+            slow_frames_sha256: Some("ef".repeat(32)),
             duration: 8.779_257_088_198_804,
             valve_time: 8.779_257_088_198_804 - 0.2,
             hold_time: 8.779_257_088_198_804 * 0.8 / 30.0,
@@ -612,16 +688,6 @@ mod tests {
             fluid_grid: [90, 64],
             fluid_dx: 2.0 * 1.35 / 64.0 * third * 3.0,
             ink_grid: [226, 162],
-            projection: EmberProjection {
-                origin: [0.1 + 0.2, -0.0, 2.0f64.sqrt()],
-                extent: 3.5 + 1e-15,
-                axes: [
-                    [0.6 + 1e-16, (1.0 - 0.36f64).sqrt(), third],
-                    [-third, 0.970_004_360_123_456_7, 5e-324],
-                ],
-                scale: 1.547 + third * 1e-4,
-                variances: [third * 7.0, third / 7.0, 1e-300 / 3.0],
-            },
             stats: EmberStats {
                 fluid_steps: 1_234,
                 min_dt: 0.001 + third * 7e-4,
@@ -638,6 +704,34 @@ mod tests {
                 shade_seconds: 36.0 / 7.0,
                 sink_seconds: 97.5 + third,
                 total_seconds: 1_405.6 * (1.0 + 1e-16),
+            },
+        }
+    }
+
+    /// A view with awkward numbers in every field: thirds, a signed zero and a subnormal.
+    fn view() -> View {
+        let third = 1.0 / 3.0;
+        View {
+            projection: ViewProjection::PhasePortrait,
+            rotation: [
+                [0.6 + 1e-16, -0.0, third],
+                [-third, 0.970_004_360_123_456_7, 5e-324],
+                [0.0, 1.0, 2.0f64.sqrt()],
+            ],
+            drift: ViewDrift::Elliptical {
+                rotation: [[third, 0.0, 1.0], [0.25, -third, 0.5], [1.0, 0.0, 0.0]],
+                mean_anomaly: -third * 7.0,
+                mean_motion: 0.008_168_140_899_333_463,
+                eccentricity: 0.4 + third / 10.0,
+                semi_major: 3.5 + 1e-15,
+                semi_minor: 3.0 * third,
+            },
+            frame: ViewFrame {
+                min_x: -1.547 - third * 1e-4,
+                min_y: 0.1 + 0.2,
+                width: 7.25 * third,
+                height: 1e-300 / 3.0,
+                scale: 0.542_863_189_697_265_6,
             },
         }
     }
@@ -669,6 +763,7 @@ mod tests {
             steps: 3_000,
             dt: crate::render::constants::DEFAULT_DT,
             bodies,
+            view: &view(),
             frame_steps: &steps,
             frame_rate: 60,
             paper_seed: b"abc",
@@ -751,8 +846,9 @@ mod tests {
             schedule_sha256(&schedule()),
             "122527417c8f79a93d4697ff39ac74e11cbfffdeeaca9ac8f4d6d3ea3170cb6f"
         );
-        let record = FrameScheduleRecord::new(&schedule(), 60);
+        let record = FrameScheduleRecord::new(&schedule(), 60, 10);
         assert_eq!((record.count, record.first_step, record.last_step), (20, 150, 2_999));
+        assert_eq!((record.frame_rate, record.slow_factor), (60, 10));
         assert_eq!(record.sha256, schedule_sha256(&schedule()));
     }
 
@@ -785,7 +881,9 @@ mod tests {
         // writes is unique per bit pattern.
         let rewritten = serde_json::to_string_pretty(&read).expect("serialises") + "\n";
         assert_eq!(rewritten, text);
-        assert_eq!(read.derived.projection.origin[1].to_bits(), (-0.0f64).to_bits());
+        assert_eq!(read.inputs.view, view());
+        assert_eq!(read.inputs.view.rotation[0][1].to_bits(), (-0.0f64).to_bits());
+        assert_eq!(read.inputs.view.rotation[1][2].to_bits(), 1);
         assert_eq!(read.stats.max_flow_speed.to_bits(), 3.772_653_138_656_007_6f64.to_bits());
         // The decimal copies equal their bit patterns' values.
         assert_eq!(decimals_from_bits(read.clone()), read);
@@ -839,14 +937,21 @@ mod tests {
                 "fluid_grid",
                 "hold_time",
                 "ink_grid",
-                "projection",
+                "slow_first_frame",
                 "tidal_reference",
                 "valve_time"
             ]
         );
+        assert_eq!(keys(&json["inputs"]["view"]), ["drift", "frame", "projection", "rotation"]);
         assert_eq!(
-            keys(&json["derived"]["projection"]),
-            ["axes", "extent", "origin", "scale", "variances"]
+            keys(&json["inputs"]["view"]["frame"]),
+            ["height", "min_x", "min_y", "scale", "width"]
+        );
+        assert_eq!(json["inputs"]["view"]["drift"]["mode"], "elliptical");
+        assert_eq!(json["inputs"]["view"]["frame"]["scale"], "0x3fe15f229fbe76c8");
+        assert_eq!(
+            keys(&json["inputs"]["frames"]),
+            ["count", "first_step", "frame_rate", "last_step", "sha256", "slow_factor"]
         );
         assert_eq!(
             keys(&json["stats"]),
@@ -863,7 +968,14 @@ mod tests {
         );
         assert_eq!(
             keys(&json["outputs"]),
-            ["encoding", "frames_emitted", "frames_rgb48le_sha256", "still_rgb48le_sha256"]
+            [
+                "encoding",
+                "frames_emitted",
+                "frames_rgb48le_sha256",
+                "slow_frames_emitted",
+                "slow_frames_rgb48le_sha256",
+                "still_rgb48le_sha256"
+            ]
         );
         assert_eq!(json["inputs"]["bodies"][1]["bits"]["mass"], "0x3ff0000000000000");
         assert_eq!(json["edition"], EDITION);
@@ -883,7 +995,7 @@ mod tests {
         assert!(parse(&|_| {}).is_ok());
         assert_eq!(json["schema_version"], CERTIFICATE_SCHEMA_VERSION);
         // Any other version is reported as such, not as a malformed file …
-        for version in [0, 1, 2, CERTIFICATE_SCHEMA_VERSION + 1] {
+        for version in [0, 1, 2, 3, CERTIFICATE_SCHEMA_VERSION + 1] {
             let error = parse(&|v| v["schema_version"] = version.into()).expect_err("rejected");
             assert!(
                 matches!(error, CertificateError::UnsupportedSchema { found } if found == version),
@@ -922,6 +1034,8 @@ mod tests {
         // still-only, or without its fading floor.
         for (section, key) in [
             ("outputs", "frames_rgb48le_sha256"),
+            ("outputs", "slow_frames_rgb48le_sha256"),
+            ("inputs", "view"),
             ("look", "floor_tau"),
             ("derived", "tidal_reference"),
             ("stats", "still_ink_fraction"),
@@ -939,6 +1053,8 @@ mod tests {
         let still_only = parse(&|v| {
             v["outputs"]["frames_rgb48le_sha256"] = Value::Null;
             v["outputs"]["frames_emitted"] = 0.into();
+            v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null;
+            v["outputs"]["slow_frames_emitted"] = 0.into();
         })
         .expect("an explicit null is read");
         assert_eq!(still_only.outputs.frames_rgb48le_sha256, None);
@@ -974,6 +1090,7 @@ mod tests {
         // frames, and the full 20-frame schedule (the still is its last knot).
         let mut still_summary = summary();
         (still_summary.frames_sha256, still_summary.frames_emitted) = (None, 0);
+        (still_summary.slow_frames_sha256, still_summary.slow_frames_emitted) = (None, 0);
         let still_only = certificate_of(&awkward_bodies(), &config(), &still_summary);
         assert_eq!(still_only.inputs.frames.count, 20);
         let text = serde_json::to_string(&still_only).expect("serialises");
@@ -983,6 +1100,37 @@ mod tests {
         inconsistent(
             &|v| v["outputs"]["frames_rgb48le_sha256"] = Value::Null,
             "outputs.frames_rgb48le_sha256 is null, but outputs.frames_emitted is 20",
+        );
+        // The slow film follows the same rules against its own length: 17 scheduled intervals
+        // after frame 2, ten frames each, and the first frame.
+        assert_eq!(video["outputs"]["slow_frames_emitted"], 171);
+        assert_eq!(video["derived"]["slow_first_frame"], 2);
+        let normal_only = parse(&|v| {
+            v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null;
+            v["outputs"]["slow_frames_emitted"] = 0.into();
+        })
+        .expect("a certificate of the normal film alone is read");
+        assert_eq!(normal_only.outputs.slow_frames_rgb48le_sha256, None);
+        inconsistent(
+            &|v| v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null,
+            "outputs.slow_frames_rgb48le_sha256 is null, but outputs.slow_frames_emitted is 171",
+        );
+        for emitted in [170, 172, 0, 181] {
+            inconsistent(
+                &|v| v["outputs"]["slow_frames_emitted"] = emitted.into(),
+                &format!(
+                    "outputs.slow_frames_emitted is {emitted}, but the slow film of 20 scheduled \
+                     frames from frame 2 at factor 10 has 171 frames"
+                ),
+            );
+        }
+        inconsistent(&|v| v["derived"]["slow_first_frame"] = 20.into(), "has no frames");
+        inconsistent(
+            &|v| {
+                v["outputs"]["frames_rgb48le_sha256"] = Value::Null;
+                v["outputs"]["frames_emitted"] = 0.into();
+            },
+            "outputs.slow_frames_rgb48le_sha256 is set, but outputs.frames_rgb48le_sha256 is null",
         );
         // A digest over fewer, more or no frames than the schedule has …
         for emitted in [19, 21, 0] {

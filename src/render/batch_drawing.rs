@@ -129,6 +129,15 @@ fn symmetry_transforms(
     transforms
 }
 
+/// Uniform scale, about the frame centre, of the primary symmetry copy: the copy that is neither
+/// rotated nor mirrored, which every [`SymmetryOp`] draws first. It is 1 without rotational
+/// symmetry and the rotational fit scale with it. The ember edition's bodies follow this copy
+/// (`app::ember_view`).
+#[must_use]
+pub fn primary_symmetry_scale(symmetry: SymmetryOp, width: u32, height: u32) -> f32 {
+    symmetry_transforms(symmetry, width, height).first().map_or(1.0, |primary| primary.scale)
+}
+
 /// Draw a segment once per symmetry copy, dividing energy by the fold count.
 #[inline]
 pub(crate) fn draw_segment_rows_symmetric(
@@ -389,6 +398,34 @@ mod tests {
             end: TriangleVertex { x: 44.0, y: 36.0, z: 0.0, color: (0.7, -0.1, 0.2), alpha: 1.0 },
             hdr_scale: 1.0,
             thickness_factor: 1.0,
+        }
+    }
+
+    /// The primary symmetry copy is the stroke itself, only scaled about the frame centre: by 1
+    /// without rotational symmetry and by the rotational fit scale with it.
+    #[test]
+    fn the_primary_symmetry_copy_is_only_scaled() {
+        let (width, height) = (3456, 2234);
+        let (cx, cy) = (width as f32 * 0.5, height as f32 * 0.5);
+        let fit = rotational_fit_scale(width, height);
+        assert!((f64::from(fit) - 2234.0 / 3456.0_f64.hypot(2234.0)).abs() < 1e-7, "{fit}");
+        for (symmetry, scale) in [
+            (SymmetryOp::None, 1.0),
+            (SymmetryOp::MirrorX, 1.0),
+            (SymmetryOp::Rotational { k: 2 }, fit),
+            (SymmetryOp::Rotational { k: 5 }, fit),
+            (SymmetryOp::Dihedral { k: 3 }, fit),
+        ] {
+            assert_eq!(primary_symmetry_scale(symmetry, width, height), scale, "{symmetry:?}");
+            let primary = symmetry_transforms(symmetry, width, height)[0];
+            for (x, y) in [(100.0_f32, 2000.0_f32), (3000.0, 50.0), (cx, cy)] {
+                let (px, py) = primary.apply_point(x, y, cx, cy);
+                let expected = (cx + scale * (x - cx), cy + scale * (y - cy));
+                assert!(
+                    (px - expected.0).abs() < 1e-3 && (py - expected.1).abs() < 1e-3,
+                    "{symmetry:?}: ({x}, {y}) -> ({px}, {py}), expected {expected:?}"
+                );
+            }
         }
     }
 

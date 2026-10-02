@@ -28,9 +28,12 @@
 //!
 //! Body `i`'s soak zone is its elliptical outline (semi-axes `a_i, b_i` along its axis, see
 //! `orbit::Shape`) grown by the soak depth `d`, taken as the ellipse of semi-axes
-//! `a_i + d, b_i + d` (exact for a disc). Its *soak frame* rotates a world offset into the body's
-//! axes and scales each coordinate by the reciprocal of its semi-axis (`1/(a_i + d)`, computed
-//! once per body state), which maps the zone onto the unit circle. Within a step
+//! `a_i + d, b_i + d` (exact for a disc). Its *soak frame* is the symmetric map
+//! `F = R·diag(1/(a_i + d), 1/(b_i + d))·Rᵀ` (`R` the rotation onto the body's axes; the
+//! reciprocals are computed once per body state), which takes the zone onto the unit circle.
+//! Being symmetric, `F` does not depend on the sign of the axis and stays continuous where the
+//! body is a disc and its axis is arbitrary, so the frames at the two ends of a step always
+//! describe the same orientation. Within a step
 //! the parcel moves in body `i`'s soak frame along the straight segment
 //! `a = F_1(x - c_i(t1)) → b = F_0(xn - c_i(t0))` between the frames at the step ends,
 //! parametrised by `s ∈ [0, 1]` (`s = 0` at `t1`, `s = 1` at `t0`). It is inside the zone
@@ -320,27 +323,36 @@ impl Lattice {
 }
 
 /// Maps a world offset from a body's centre into the body's soak frame, where its soak zone (the
-/// outline's semi-axes plus the soak depth) is the unit circle.
+/// outline's semi-axes plus the soak depth) is the unit circle: the symmetric matrix
+/// `R·diag(i₀, i₁)·Rᵀ` with `i₀ = 1/(a + d)`, `i₁ = 1/(b + d)` and `R` the rotation onto the
+/// axis `(c, s)`. It is the same for the axis and its negative, and `i₀·I` for a disc whatever
+/// its axis.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SoakFrame {
-    /// The body's first axis `(cos θ, sin θ)`.
-    axis: [f64; 2],
-    /// `1/(a + d)`, `1/(b + d)`.
-    inverse: [f64; 2],
+    /// `c²·i₀ + s²·i₁`.
+    xx: f64,
+    /// `c·s·(i₀ - i₁)`.
+    xy: f64,
+    /// `s²·i₀ + c²·i₁`.
+    yy: f64,
 }
 
 impl SoakFrame {
     /// The soak frame of `shape` with soak depth `soak` (`a + soak > 0` and `b + soak > 0`).
     pub(crate) fn new(shape: &Shape, soak: f64) -> Self {
-        let inverse = [1.0 / (shape.semi[0] + soak), 1.0 / (shape.semi[1] + soak)];
-        Self { axis: shape.axis, inverse }
+        let [c, s] = shape.axis;
+        let (i0, i1) = (1.0 / (shape.semi[0] + soak), 1.0 / (shape.semi[1] + soak));
+        Self {
+            xx: (c * c) * i0 + (s * s) * i1,
+            xy: (c * s) * (i0 - i1),
+            yy: (s * s) * i0 + (c * c) * i1,
+        }
     }
 
     /// The soak-frame coordinates of the world offset `d`.
     #[inline(always)]
     fn apply(&self, d: [f64; 2]) -> [f64; 2] {
-        let [c, s] = self.axis;
-        [(c * d[0] + s * d[1]) * self.inverse[0], (-s * d[0] + c * d[1]) * self.inverse[1]]
+        [self.xx * d[0] + self.xy * d[1], self.xy * d[0] + self.yy * d[1]]
     }
 }
 
@@ -661,6 +673,95 @@ pub(crate) mod tests {
             let linear = -w[0] + w[2] + 2.0 * w[3];
             assert!((linear - t).abs() < 1e-15);
         }
+    }
+
+    /// The soak frame takes the soak zone onto the unit circle, does not depend on the sign of
+    /// the axis (bit for bit), and for a disc does not depend on the axis at all.
+    #[test]
+    fn the_soak_frame_is_symmetric_and_blind_to_the_axis_sign() {
+        let soak = 0.03;
+        let (sn, c) = math::sin_cos(0.83);
+        let shape = Shape { semi: [0.07, 0.03], axis: [c, sn], spin: 0.0, strain: 0.0 };
+        let frame = SoakFrame::new(&shape, soak);
+        let norm = |v: [f64; 2]| (v[0] * v[0] + v[1] * v[1]).sqrt();
+        // The zone's ends along and across the axis land on the unit circle.
+        let along = frame.apply([0.10 * c, 0.10 * sn]);
+        let across = frame.apply([-0.06 * sn, 0.06 * c]);
+        assert!((norm(along) - 1.0).abs() < 1e-14 && (norm(across) - 1.0).abs() < 1e-14);
+        // Symmetric: the image of the outline normal stays parallel to it.
+        assert!((along[0] * sn - along[1] * c).abs() < 1e-14);
+
+        let flipped = SoakFrame::new(&Shape { axis: [-c, -sn], ..shape }, soak);
+        for (a, b) in [(frame.xx, flipped.xx), (frame.xy, flipped.xy), (frame.yy, flipped.yy)] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+
+        let disc = |angle: f64| {
+            let (sn, c) = math::sin_cos(angle);
+            SoakFrame::new(
+                &Shape { semi: [0.05, 0.05], axis: [c, sn], spin: 0.0, strain: 0.0 },
+                soak,
+            )
+        };
+        for angle in [0.0, 0.4, 1.9, -2.7] {
+            let frame = disc(angle);
+            assert_eq!(frame.xy, 0.0);
+            assert!((frame.xx - 12.5).abs() < 1e-13 && (frame.yy - 12.5).abs() < 1e-13);
+        }
+    }
+
+    /// Regression: the tidal axis is an eigenvector, whose sign can flip between two snapshots.
+    /// With a frame that was odd in the axis, the parcel's path in the soak frame then ran
+    /// through the body's centre and every gated parcel on the canvas recorded a contact.
+    #[test]
+    fn an_axis_sign_flip_between_snapshots_changes_no_trace() {
+        let g = grid(24, 16, 0.125);
+        let times = [1.0, 1.02, 1.04];
+        let snaps: Vec<Snapshot> =
+            times.iter().map(|&t| snapshot(&g, t, |_, _| [0.3, -0.2, 100.0])).collect();
+        let (sn, c) = math::sin_cos(2.3);
+        let body = |flip: f64| BodyState {
+            position: [0.2, -0.1],
+            velocity: [0.0, 0.0],
+            shape: Shape {
+                semi: [0.09, 0.04],
+                axis: [flip * c, flip * sn],
+                spin: 0.0,
+                strain: 0.0,
+            },
+        };
+        let far = BodyState { position: [1e6, 1e6], velocity: [0.0; 2], shape: Shape::disc(0.05) };
+        let bodies = |flips: [f64; 3]| -> Vec<[BodyState; 3]> {
+            flips.iter().map(|&flip| [body(flip), far, far]).collect()
+        };
+        let rules =
+            ContactRules { soak_depth: 0.03, vorticity_gate: 40.0, t_on: 0.0, t_valve: 9.0 };
+        let (steady, flipping) = (bodies([1.0, 1.0, 1.0]), bodies([1.0, -1.0, 1.0]));
+        let trace = |bodies: &[[BodyState; 3]], start| {
+            let window = FlowWindow { grid: g, snapshots: &snaps, bodies };
+            let fast = Tracer::new(&window, &rules).trace(start);
+            let reference = reference_trace(&window, &rules, start);
+            assert_eq!(
+                fast.contact.map(|t| t.map(f64::to_bits)),
+                reference.contact.map(|t| t.map(f64::to_bits))
+            );
+            fast
+        };
+        let mut contacts = 0;
+        for i in 0..40 {
+            for j in 0..30 {
+                let start = [-1.2 + 0.06 * f64::from(i), -0.9 + 0.06 * f64::from(j)];
+                let (a, b) = (trace(&steady, start), trace(&flipping, start));
+                assert_eq!(a.origin.map(f64::to_bits), b.origin.map(f64::to_bits));
+                assert_eq!(
+                    a.contact.map(|t| t.map(f64::to_bits)),
+                    b.contact.map(|t| t.map(f64::to_bits))
+                );
+                contacts += usize::from(a.contact[0].is_some());
+            }
+        }
+        // Only parcels that pass the body's soak zone are inked: a small part of the canvas.
+        assert!(contacts > 0 && contacts < 120, "{contacts} of 1200 parcels in contact");
     }
 
     #[test]
@@ -1143,13 +1244,17 @@ pub(crate) mod tests {
                 (0.0, 1.0)
             };
             let dt = t1 - t0;
-            // The soak frame of a body state: rotate into its axes, then scale by the reciprocals
-            // 1/(semi + soak) (docs/ember-design.md §5.2 step 2).
+            // The soak frame of a body state: the symmetric map R·diag(1/(semi + soak))·Rᵀ
+            // (docs/ember-design.md §5.2 step 2), the same for an axis and its negative.
             let frame = |body: &BodyState, d: [f64; 2]| {
                 let [c, sn] = body.shape.axis;
-                let local = [c * d[0] + sn * d[1], -sn * d[0] + c * d[1]];
-                let inverse = body.shape.semi.map(|semi| 1.0 / (semi + rules.soak_depth));
-                [local[0] * inverse[0], local[1] * inverse[1]]
+                let [i0, i1] = body.shape.semi.map(|semi| 1.0 / (semi + rules.soak_depth));
+                let (xx, xy, yy) = (
+                    (c * c) * i0 + (sn * sn) * i1,
+                    (c * sn) * (i0 - i1),
+                    (sn * sn) * i0 + (c * c) * i1,
+                );
+                [xx * d[0] + xy * d[1], xy * d[0] + yy * d[1]]
             };
             for (i, record) in rec.iter_mut().enumerate() {
                 let (b1, b0) = (&window.bodies[s][i], &window.bodies[s - 1][i]);

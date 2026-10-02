@@ -71,6 +71,14 @@ pub(crate) fn sin_cos(x: f64) -> (f64, f64) {
     libm::sincos(x)
 }
 
+/// Remainder of `x / y` with the sign of `x` (C `fmod`). The result is exact: no rounding is
+/// involved, so every correct implementation agrees; it goes through the pinned library like
+/// every other function here, not through the platform's.
+#[inline]
+pub(crate) fn fmod(x: f64, y: f64) -> f64 {
+    libm::fmod(x, y)
+}
+
 /// The smaller of `a` and `b`: `b` if `b < a`, otherwise `a`.
 ///
 /// Ties (including `+0` against `-0`) return `a`, and so does a NaN `b`; a NaN `a` is returned
@@ -199,6 +207,7 @@ mod tests {
         ("paper.rs", include_str!("paper.rs")),
         ("pipeline.rs", include_str!("pipeline.rs")),
         ("trace.rs", include_str!("trace.rs")),
+        ("view.rs", include_str!("view.rs")),
     ];
 
     /// This file.
@@ -287,6 +296,7 @@ mod tests {
             "fn sin(",
             "fn cos(",
             "fn sin_cos(",
+            "fn fmod(",
             "fn min(",
             "fn max(",
             "fn clamp_unit(",
@@ -359,6 +369,16 @@ mod tests {
         assert_eq!(cbrt(27.0), 3.0);
         assert_eq!(tanh(0.0), 0.0);
         assert_eq!(sin_cos(0.0), (0.0, 1.0));
+        assert_eq!(fmod(7.5, 2.0), 1.5);
+        assert_eq!(fmod(-7.5, 2.0), -1.5);
+        assert_eq!(fmod(7.5, -2.0), 1.5);
+        assert_eq!(fmod(1.0, 3.0), 1.0);
+        assert_eq!(fmod(-0.0, 3.0).to_bits(), (-0.0f64).to_bits());
+        // The remainder is exact, so it equals the IEEE operation bit for bit for any operands.
+        let tau = std::f64::consts::TAU;
+        for x in [0.1, -3.2, 9.5, 1.0e6, -123_456.789, 1.0e22, 3.141_592_653_589_794] {
+            assert_eq!(fmod(x, tau).to_bits(), (x % tau).to_bits(), "{x}");
+        }
         assert!((exp(1.0) - std::f64::consts::E).abs() <= 2.0 * f64::EPSILON);
         assert!((sin(std::f64::consts::FRAC_PI_6) - 0.5).abs() <= 2.0 * f64::EPSILON);
         assert!((cos(std::f64::consts::FRAC_PI_3) - 0.5).abs() <= 2.0 * f64::EPSILON);
@@ -387,12 +407,14 @@ mod tests {
             trig[2].1.to_bits(),
             trig[3].0.to_bits(),
             trig[3].1.to_bits(),
+            fmod(1.0e22, std::f64::consts::TAU).to_bits(),
+            fmod(-123_456.789, std::f64::consts::TAU).to_bits(),
         ];
         assert_eq!(probes, PINNED_BITS, "got {probes:#018x?}");
     }
 
     /// See [`libm_bits_are_pinned`].
-    const PINNED_BITS: [u64; 15] = [
+    const PINNED_BITS: [u64; 17] = [
         0x3fec_4894_6a8f_cf96,
         0x3ff2_50d0_48e7_a1bd,
         0x3fec_1593_c2ef_1412,
@@ -412,6 +434,9 @@ mod tests {
         // sin_cos(1e22)
         0xbfeb_453a_b76b_f397,
         0x3fe0_be2c_ef01_c8f4,
+        // fmod(1e22, 2π) and fmod(-123456.789, 2π): exact remainders
+        0x3ff1_03d1_1486_e940,
+        0xc013_0e6c_2d2d_4e00,
     ];
 
     /// musl's `sincos` shares the argument reduction and the kernels of `sin` and `cos`, so the
