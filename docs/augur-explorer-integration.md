@@ -538,15 +538,12 @@ depends on it.
    existing package as incomplete and regenerated and re-uploaded all 48;
    every existing token now has its trait file. A `404` on a trait URL now
    means a new mint the generator has not reached yet. That usually lasts
-   a little over two hours: the sync timer starts a run within 5 minutes, a
-   package with the `ember-v2` look takes about 2 hours to render on the
-   generation host (an estimate, against about 70 minutes with `ember-v1`;
-   there the `ember-v2` ember render alone measured 78 minutes), and its trait
-   file is uploaded after its
-   media. It lasts longer when several tokens are minted together, because
-   packages are generated one at a time, and up to one more package render
-   (about 2 hours) when the mint arrives while a backfill package is
-   rendering.
+   a little over three hours: the sync timer starts a run within 5 minutes,
+   a package with the `ember-v3` look takes about 3 hours to render on the
+   generation host, and its trait file is uploaded after its media. It lasts
+   longer when several tokens are minted together, because packages are
+   generated one at a time, and up to one more package render (about 3
+   hours) when the mint arrives while a backfill package is rendering.
 
    Art is pixel-identical, and this was verified empirically rather than
    assumed: re-rendering an existing seed with the new binary reproduced

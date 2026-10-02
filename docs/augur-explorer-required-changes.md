@@ -296,10 +296,9 @@ Contract: [`augur-explorer-integration.md`](augur-explorer-integration.md)
   entries (every other entry and field, `generated_at` included, unchanged)
   and deletes the edition's media files. `nft_traits.json` keeps its bytes
   and `Last-Modified`. The backfill then renders each edition again, one
-  package per sync run (about 2 hours each on the generation host with
-  `ember-v2`, an estimate, so about 4–4.5 days for all 48; see
-  [§8](#8-rollout-notes); `ember-v3` packages take longer and have not been
-  timed yet), and the `ember_*` entries return with new `bytes` and
+  package per sync run (about 3 hours each on the generation host with
+  `ember-v3`, so about 6 days for all 48; see [§8](#8-rollout-notes)), and
+  the `ember_*` entries return with new `bytes` and
   `sha256`. Until a token's turn comes, it has no ember edition. The
   `ember-v2` change was the first such change, and `ember-v3` is the second.
   That is the sync loop's default. The operator can instead keep the older
@@ -380,7 +379,9 @@ withdrawn edition, §7.1), the keys go with it.
 
 ### 7.5 Tests to add
 
-- `buildMedia`: a manifest with all five ember roles emits all five keys; a
+- `buildMedia`: a manifest with all six ember roles (`ember_slow_web`
+  included) emits the five keys and nothing for the slow film; a manifest
+  with the five roles of an `ember-v2` edition emits the same five keys; a
   manifest without `ember_source_master` emits none; a manifest without
   `ember_web` omits `ember_video`.
 - A row with `pipeline_version` `1.0.0` and an ember manifest emits the keys
@@ -389,8 +390,8 @@ withdrawn edition, §7.1), the keys go with it.
   or `304` to `If-Modified-Since`) while `assets.json` gains the ember
   entries. The stored manifest is updated and the served metadata gains the
   keys.
-- Ingester, withdrawal: a row whose stored manifest lists the five ember
-  roles is still re-checked. The stub's `assets.json` loses the `ember_*`
+- Ingester, withdrawal: a row whose stored manifest lists the ember roles
+  is still re-checked. The stub's `assets.json` loses the `ember_*`
   entries (everything else unchanged): the stored manifest is updated, the
   served metadata loses the keys, and nothing is logged as an incident.
   When the entries return with new `sha256` values, the keys return.
@@ -416,20 +417,17 @@ within one interval, and each resolves to `200`.
 
 - **Traits backfill: done.** Every existing token has its trait file and
   hashed manifest. A `404` on a trait URL now means a new mint the generator
-  has not reached yet. That usually lasts about 2 hours: the sync timer
-  starts a run within 5 minutes, the package takes about 2 hours to render
-  with the `ember-v2` look, and its trait file is uploaded after its media.
+  has not reached yet. That usually lasts about 3 hours: the sync timer
+  starts a run within 5 minutes, the package takes about 3 hours to render
+  with the `ember-v3` look, and its trait file is uploaded after its media.
   It lasts longer when several tokens are minted together, because packages
   are generated one at a time, and up to one more package render when the
   mint arrives while a backfill package is rendering. The ingester already
   treats `404` as `fetchMissing` rather than an error. An alert on a lasting
-  trait `404` should allow about 2 hours for each package generated ahead of
-  it, with a margin: the 2 hours are an estimate for the generation host,
-  not a measurement. There, `ember-v1` packages took about 70 minutes each,
-  and the `ember-v1` ember render of seed `0x46205528` took 23 minutes; an
-  `ember-v2` ember stage is estimated at about 75–80 minutes. On an Apple
-  M4 Max shared with other work, that seed's whole `ember-v2` package took
-  3 h 40 m, an upper bound for that machine
+  trait `404` should allow about 3 hours for each package generated ahead of
+  it, with a margin: on the generation host an `ember-v3` ember stage took
+  2 h 06 m for one token on the otherwise idle host, and the cost differs
+  from orbit to orbit
   ([`ember-edition.md`](ember-edition.md#runtime) has the measurements).
 - **Ember backfill: running since the edition was deployed (2026-09-29).**
   It adds the edition to one existing token per sync run. Until a token's

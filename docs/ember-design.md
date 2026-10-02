@@ -619,7 +619,9 @@ Vorticity–streamfunction form on the doubly periodic box, pseudo-spectral, 2/3
   end to end, an `ember-v2` package is estimated at about 2 hours and its ember stage at about
   75–80 minutes. All of these are `ember-v2` figures. With `ember-v3` the orbit's duration and
   speeds are those of the canvas track (§3.6), so the same seed takes another number of steps,
-  and the slow film adds ink and shading work (§8.3); `ember-v3` has not been timed yet.
+  and the slow film adds ink and shading work (§8.3): on the otherwise idle production host the
+  `ember-v3` render of token `0x70f70932` took 2 h 06 min (55,622 fluid steps), against 36 min
+  with `ember-v2`, and a package takes about 3 hours (`docs/ember-edition.md`, Runtime).
 - **Statistics** (deterministic): steps, smallest and largest `h`, largest `u_max`. A non-finite
   flow, body state or step is `EmberError::NonFinite`.
 - **Tests**: a single Fourier mode decays exactly as `e^{-D·t}`; the advection term matches an
@@ -1003,8 +1005,8 @@ non-finite flow or a failing sink. Planning checks ranges; it does not budget me
 which grow with the output size, the fluid grid and the snapshot cadence. At the defaults a
 standalone `ember-v2` render peaked at 4.9 GB resident on an Apple M4 Max, far below the peak of
 a whole package of the same seed there (85 GB resident), which belongs to the main render.
-`ember-v3` has not been measured yet; its slow film reuses the two ink-field buffers and the
-frame buffer.
+The `ember-v3` render of token `0x70f70932` peaked at 4.0 GB on the production host: its slow film
+reuses the two ink-field buffers and the frame buffer.
 
 ### 8.2 The frame loop (`render_ember`)
 
@@ -1326,7 +1328,9 @@ exactly; the standalone render took 2 h 05 m, an upper bound measured with other
 machine), and the production host (x86_64, native build with AVX2 and FMA) re-rendered the same
 edition to the M4 Max's still and frame-stream digests bit for bit, in 78 minutes. The golden
 render and the unit goldens (§0.2) were bit-identical on aarch64 macOS, x86_64 Linux and
-`x86-64-v3`. The same checks are still to be made for `ember-v3`.
+`x86-64-v3`. For `ember-v3`, the golden renders (§0.2), slow film included, are bit-identical on
+the same platforms, and the production host re-rendered token `0x70f70932` from its certificate
+to the package's still, film and slow-film digests.
 
 ---
 

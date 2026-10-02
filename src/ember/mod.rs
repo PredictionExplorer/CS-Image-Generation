@@ -34,8 +34,10 @@
 //!
 //! # Determinism
 //!
-//! The frame streams and the still are a pure function of the orbit, the view, the output size,
-//! the frame schedule, the paper seed and [`EmberConfig`]: bit-identical on every IEEE-754 CPU architecture. The module uses only
+//! The frame streams and the still are a pure function of the orbit and its recorded time step,
+//! the view, the output size, the frame schedule, the slow factor (it sets the snapshot lattice
+//! in every mode), the paper seed and [`EmberConfig`]: bit-identical on every IEEE-754 CPU
+//! architecture. The module uses only
 //! exactly rounded arithmetic, the pure-Rust [`libm`](https://docs.rs/libm) crate for
 //! transcendental functions (through `math`), its own FFT, fixed-order reductions, and parallelism
 //! only over independent outputs. See `metadata/ember.json` for the per-package certificate.

@@ -17,8 +17,8 @@ pub enum EmberError {
         reason: String,
     },
 
-    /// The orbit cannot be drawn: it is not three equally long recordings, or its track on the
-    /// canvas is non-finite, stationary or shapeless.
+    /// The orbit cannot be drawn: it is not three equally long recordings of at least two steps,
+    /// or its track on the canvas is non-finite or stationary.
     #[error("degenerate orbit: {reason}")]
     DegenerateOrbit {
         /// What made the orbit unusable.

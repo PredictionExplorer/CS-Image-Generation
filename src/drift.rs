@@ -149,6 +149,9 @@ impl DriftTransform for BrownianDrift {
         }
 
         let steps = positions[0].len().min(self.displacements.len());
+        if self.displacements[..steps].iter().all(|step| *step == Vector3::zeros()) {
+            return AppliedDrift::None;
+        }
         let mut offset = Vector3::zeros();
 
         // Apply Brownian motion: each step adds a random displacement
@@ -194,6 +197,9 @@ impl DriftTransform for LinearDrift {
             return AppliedDrift::None;
         }
 
+        if self.velocity == Vector3::zeros() {
+            return AppliedDrift::None;
+        }
         let steps = positions[0].len();
 
         for step in 0..steps {
@@ -496,6 +502,14 @@ mod tests {
         let mut positions = original.clone();
         let brownian = BrownianDrift::new(&mut make_rng(), 1.0, 3).apply(&mut positions, dt);
         assert_eq!(brownian, AppliedDrift::Brownian);
+
+        // Without a scale the linear and Brownian drifts add nothing either.
+        let mut positions = original.clone();
+        let still = LinearDrift::new(&mut make_rng(), 0.0).apply(&mut positions, dt);
+        assert_eq!(still, AppliedDrift::None);
+        let still = BrownianDrift::new(&mut make_rng(), 0.0, 3).apply(&mut positions, dt);
+        assert_eq!(still, AppliedDrift::None);
+        assert_eq!(positions, original);
     }
 
     #[test]
