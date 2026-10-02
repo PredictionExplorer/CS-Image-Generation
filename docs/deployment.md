@@ -326,20 +326,20 @@ certificate says.
 
 **How long it takes, and how much room it needs.** Every listed token is rendered again once,
 one per run by default: a full package render, then its upload and the timer's 5-minute pause.
-The slow film has up to ten times the frames of the film, so an `ember-v3` package costs more
-to render and is larger than an `ember-v2` one. No figure is given here: both are measured on
-this host after the deploy.
+An `ember-v3` package takes about 3 hours on this host (its ember stage alone 2 h 06 min
+for one token on the otherwise idle host), so a pass over 48 tokens takes about 6 days. Its
+ember files hold 0.4 to 0.6 GB per token, the slow film 176 to 294 MB of it (three tokens
+measured on 2026-10-02).
 
-- Time: read it from the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the
-  journal and multiply by the number of tokens for the whole pass.
-- Size: the slow film is expected to be a few hundred MB to about 1 GB per token. Read the real
-  sizes from the `UPLOAD … (N MB, timeout Ns)` lines of the first re-rendered package, and check
-  that the asset host has room for that many tokens *before* the pass is far along. An edition
-  is staged beside the live files before it is swapped in, so the host also needs room for one
-  whole new edition on top of what is online. A full disk fails the transfer that hits it:
-  `UPLOAD FAILED`, nothing of the live package is changed, the staged files are deleted, and
-  the seed is tried again by a later run (and fails again, after another full render, until
-  there is room).
+- Time: check it against the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the
+  journal: the orbit, and so the cost, differs from token to token.
+- Size: read each package's sizes from its `UPLOAD … (N MB, timeout Ns)` lines, and check that
+  the asset host has room for every token (48 × 0.6 GB is about 29 GB) *before* the pass is far
+  along. An edition is staged beside the live files before it is swapped in, so the host also
+  needs room for one whole new edition on top of what is online. A full disk fails the transfer
+  that hits it: `UPLOAD FAILED`, nothing of the live package is changed, the staged files are
+  deleted, and the seed is tried again by a later run (and fails again, after another full
+  render, until there is room).
 
 At the default `--max-backfill` of 1, a new mint waits for at most one backfill package (the
 rest of the run in progress). The per-seed timeout is 10 hours (`run.py --timeout`), well below
