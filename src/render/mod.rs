@@ -55,8 +55,8 @@ pub use drawing::{
 pub use effects::{DogBloomConfig, apply_diffraction_spikes, apply_dog_bloom};
 pub use types::{ChannelLevels, ToneMappingControls};
 pub use video::{
-    VideoEncodingOptions, VideoOutputSpec, create_video_from_frames_singlepass,
-    create_videos_from_frames_singlepass,
+    GroupWriter, VideoEncodingOptions, VideoOutputSpec, create_video_from_frames_singlepass,
+    create_video_groups_from_frames, create_videos_from_frames_singlepass,
 };
 pub use visual_profile::{
     LayerStack, ProjectionMode, SceneTraits, StackLayer, StructureMode, SymmetryOp,
