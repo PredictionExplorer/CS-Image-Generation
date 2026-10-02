@@ -50,6 +50,7 @@ to existing packages, and renders it again after a change of the ember look
     web/main.mp4
     web/spectral_sweep.mp4
     web/ember.mp4               (ember edition, H.264)
+    web/ember_slow.mp4          (ember edition: the slow film, H.264)
     hq/main.mp4, spectral_sweep.mp4
     hq/ember.mp4                (ember edition, archival HEVC)
   spectral/00_…nm.png … 63_…nm.png
@@ -174,7 +175,7 @@ Unchanged fields plus `sha256` (lowercase hex, SHA-256) on every single-file
 entry. Use it to build `image_details` / `animation_details` (Section 5.3) —
 do not hash files on the Go side.
 
-Packages with the ember edition append five more entries, still under
+Packages with the ember edition append six more entries, still under
 `schema_version` 2 because they are additive:
 
 | Role | Path |
@@ -183,7 +184,13 @@ Packages with the ember edition append five more entries, still under
 | `ember_web_full` | `images/web/ember_full.webp` |
 | `ember_web_preview` | `images/web/ember_preview.webp` |
 | `ember_web` | `videos/web/ember.mp4` |
+| `ember_slow_web` | `videos/web/ember_slow.mp4` |
 | `ember_hq` | `videos/hq/ember.mp4` |
+
+`ember_slow_web` is the slow film, the ember video ten times slower. It is
+new with the look `ember-v3` (Section 2.2): an edition of an older look has
+the other five entries only, and the `properties.media` keys of Section 5.3
+do not expose the slow film.
 
 Each ember entry also carries `"color_space": "srgb"`. Match entries by `path` or
 `role` rather than by array position. The ember edition's certificate,
@@ -205,24 +212,34 @@ step 1). (`--backfill-mode full` replaces the whole package, trait file
 included; Section 5.4 then applies.)
 
 **The roles can also disappear, and come back.** When a deploy changes the
-ember look (the certificate's `algorithm`, for example `ember-v1` →
-`ember-v2`; Section 2.2), the first sync run withdraws every published
+ember look (the certificate's `algorithm`, for example `ember-v2` →
+`ember-v3`; Section 2.2), the first sync run withdraws every published
 edition of the older look. For each package it deletes `metadata/ember.json`,
 rewrites `assets.json` without its `ember_*` entries (every other entry and
-field, `generated_at` included, is kept as it was), and deletes the five
-ember media files. The backfill then renders the edition again in the new
+field, `generated_at` included, is kept as it was), and deletes the
+edition's media files. The backfill then renders the edition again in the new
 look, one package per sync run, and the `ember_*` entries return with new
 `bytes` and `sha256`. In between, which lasts until the backfill reaches the
 token (days for the last tokens of a pass), the token has no ember edition.
 Consumers must handle a stored manifest with the `ember_*` roles whose fresh
-copy has none, and must not treat either change as an incident. See
+copy has none, and must not treat either change as an incident. The operator
+can instead keep the older editions online (`COSMICSIG_KEEP_STALE_EMBER=yes`):
+nothing is withdrawn then, and the backfill replaces each edition in place
+when its turn comes, so its `ember_*` entries change (new `bytes` and
+`sha256`, and with `ember-v3` one more entry, `ember_slow_web`) without
+disappearing in between. The replacement is staged beside the live files
+and swapped in by one command, so the old entries and files stay valid
+until that moment. See
 [deployment.md](deployment.md#when-a-deploy-changes-the-ember-look).
 
 Video `duration_seconds` is the encoded frame count over `frame_rate`. The
 ember videos are frame-locked to `main.mp4`, so `main_web`, `main_hq`,
 `ember_web` and `ember_hq` carry the same value (1,802 frames at 60 fps, about
 30.03 s, at the default 1,000,000 steps). Packages generated before this was
-fixed list the nominal 30.0 s for `main.mp4`.
+fixed list the nominal 30.0 s for `main.mp4`. `ember_slow_web` carries the
+slow film's own duration: ten frames per frame of `ember.mp4` from the frame
+it starts at, so at most 18,011 frames (about 300 s), less ten for every
+frame of `ember.mp4` that it skips before the ink first appears.
 
 ### 2.2 `ember.json` (the certificate)
 
@@ -230,12 +247,20 @@ The metadata server only links the certificate (`ember_certificate`,
 Section 5.3); it need not parse it. Anyone who does should know:
 
 - **Gate on `schema_version`.** The reader in this repository accepts exactly
-  one layout per build and rejects any other. The current layout is `3`,
-  written with the look `ember-v2`. The retired `ember-v1` editions have
-  layout `2` (layout `1` was only ever written by test renders).
-- **`algorithm` names the look** (`ember-v1`, `ember-v2`). It is the only field
-  that tells two looks apart: `build.crate_version` is `1.1.0` for both, and
-  `pipeline_version` in `nft_traits.json` says nothing about the edition.
+  one layout per build and rejects any other. The current layout is `4`,
+  written with the look `ember-v3`. `ember-v2` editions have layout `3` and
+  the retired `ember-v1` editions layout `2` (layout `1` was only ever
+  written by test renders).
+- **`algorithm` names the look** (`ember-v1`, `ember-v2`, `ember-v3`). It is
+  the only field that tells two looks apart: `build.crate_version` is `1.1.0`
+  for all three, and `pipeline_version` in `nft_traits.json` says nothing
+  about the edition.
+- **Layout 4 changes.** `inputs.view` is new: the main edition's view of the
+  orbit, which the ember bodies follow, with every number as an exact
+  `0x…` bit pattern. So are `inputs.frames.slow_factor`,
+  `derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
+  `outputs.slow_frames_emitted` (the slow film). `config.projection` and
+  `derived.projection` are gone.
 - **Layout 3 changes.** `stats.frames_with_cinnabar`,
   `stats.peak_frame_cinnabar_fraction` and `stats.still_cinnabar_fraction`
   are gone (`ember-v2` has no vermilion). `derived.hold_time`,
@@ -535,20 +560,28 @@ depends on it.
    `0604999`): new mints got complete packages with the ember edition, and
    the ember backfill started adding it to the 48 existing tokens at one
    package per sync run. In its default `ember` mode it uploads, for each
-   token, only the six ember files and a merged `assets.json`. The main
+   token, only the ember files (six with `ember-v1` and `ember-v2`, seven
+   with `ember-v3`) and a merged `assets.json`. The main
    art, `generation.json` and `nft_traits.json` are untouched, so
    `pipeline_version` stays `1.0.0`.
 
-   The artist has since retired that look for `ember-v2` (**pending
-   deployment**). The first sync run after that deploy withdraws every
-   `ember-v1` edition (Section 2.1): those tokens lose their `ember_*`
-   roles at once. The backfill then renders every listed token's edition
-   again, one package per sync run (an estimated 2 hours each, so about
-   4–4.5 days for the 48 existing tokens), and each token regains the roles
-   when its turn comes. Tokens the `ember-v1` backfill had not reached get
-   the `ember-v2` edition directly. Each package holds about 0.55 GB more on
-   the asset host with the edition than without it (548 MB for seed
-   `0x46205528`, 375 MB of it the archival HEVC video).
+   The artist then retired that look for `ember-v2`, deployed on
+   2026-09-30. Its first sync run withdrew every `ember-v1` edition
+   (Section 2.1): those tokens lost their `ember_*` roles at once, and the
+   backfill rendered each token's edition again, one package per sync run
+   (about 2 hours each). It had reached 15 of the 48 tokens when it was
+   paused on 2026-10-01 for the next look. An `ember-v2` package holds about
+   0.55 GB more on the asset host with the edition than without it (548 MB
+   for seed `0x46205528`, 375 MB of it the archival HEVC video).
+
+   `ember-v3` (**pending deployment**) follows the main edition's view and
+   adds the slow film, one more file and role (`ember_slow_web`). Every
+   `ember-v2` edition is rendered again, one package per sync run: by
+   default each is withdrawn first, as before, or the operator keeps them
+   online and each is replaced in place (Section 2.1). Tokens the earlier
+   backfills had not reached get the `ember-v3` edition directly. Its
+   render time and size are still to be measured on the production host;
+   both are larger than `ember-v2`'s.
 
    The Go side's ember item
    ([`augur-explorer-required-changes.md` §7](augur-explorer-required-changes.md#7-ember-edition-generator-110))

@@ -10,6 +10,12 @@ lays it, then fades to a pale grey wash, on a clock set in film time, so every o
 at the same pace. The result is shaded spectrally as sumi on a mottled, fibrous kozo sheet under a
 warm gallery light. There is no colour but the ink (see [the look](#4-the-look-lookrs)).
 
+The bodies move exactly as they do in the main artwork. The edition follows the main edition's
+view of the orbit (its projection space, its viewing angle, its drift and its framing), so at
+every step each body is where `main.mp4` draws the head of that body's trail. Next to the film
+that runs in step with `main.mp4`, the edition has a **slow film**: the same film ten times
+slower, with every frame of it simulated (see [the slow film](#6-the-slow-film)).
+
 Every package contains the ember edition next to the main render, unless the generator runs with
 `--no-ember`. It is rendered **on the CPU only**, like everything in the generator: nothing uses a
 GPU or a hardware video encoder. Its frames are **bit-identical on every CPU architecture**
@@ -29,9 +35,10 @@ whenever a change alters the rendered bits.
 | `algorithm` | Look | Status |
 |-------------|------|--------|
 | `ember-v1` | Sumi and vermilion on kozo, disc bodies. The ink faded to grey on a fixed fluid-time clock, and turned vermilion (cinnabar) where the fresh waters of two bodies met. Ink could lie inside the bodies, so dense orbits could draw a body as a black blob. | Retired by the artist. The sync loop withdraws every published `ember-v1` edition and renders it again in the current look ([In the sync loop](#in-the-sync-loop-runpy)). |
-| `ember-v2` | Sumi on kozo, tidally stretched solid bodies, the fade timed in film time, on a finer fluid grid and ink raster. Chosen by the artist from a look study (`tidal_11_exp_film`). | Current. |
+| `ember-v2` | Sumi on kozo, tidally stretched solid bodies, the fade timed in film time, on a finer fluid grid and ink raster. Chosen by the artist from a look study (`tidal_11_exp_film`). The orbit was shown in its own principal plane, scaled to fill 78% of the sheet, whatever the main artwork's view. | Superseded. The sync loop renders every published `ember-v2` edition again in the current look ([In the sync loop](#in-the-sync-loop-runpy)). |
+| `ember-v3` | The `ember-v2` ink, with the bodies moving as in the main artwork: the edition follows the main edition's projection space, viewing angle, drift and framing. Adds the slow film. Fixes a contact test that could ink water far from any body when a body's stretch axis flipped its sign. | Current. |
 
-The rest of this document describes `ember-v2`.
+The rest of this document describes `ember-v3`.
 
 ## Outputs
 
@@ -41,35 +48,40 @@ The rest of this document describes `ember-v2`.
 | `images/web/ember_full.webp` | WebP, full size | Website image. |
 | `images/web/ember_preview.webp` | WebP, at most 640 px wide | Card/preview image. |
 | `videos/web/ember.mp4` | H.264, 8-bit 4:2:0, CRF 22 | Browser-compatible video (about 136 MB for 30 s at 3456 × 2234: paper grain under a drifting wash is costly to encode; for the `ember-v1` look, CRF 22 was indistinguishable from CRF 18 at 1:1). |
+| `videos/web/ember_slow.mp4` | H.264, 8-bit 4:2:0, CRF 22 | The slow film: the same film ten times slower, with the encoder settings of `videos/web/ember.mp4`. Up to 18,011 frames (300 s) at the default 1,000,000 steps. It has no archival copy. |
 | `videos/hq/ember.mp4` | HEVC Main 4:2:2 10, CRF 17, preset slower | Archival video, about 375 MB for 30 s at 3456 × 2234. Under `--fast-encode` it is software H.264 10-bit 4:2:0 instead. |
 | `metadata/ember.json` | JSON | The determinism certificate (see below). |
 
 The sizes were measured for seed `0x46205528` with the `ember-v2` look (the package of
-[Measured cost](#measured-cost)). Together the ember files make up about 0.55 GB of that
-package's 0.81 GB (80 files), while the rest of the package, the 64 spectral bins aside, is about
-52 MB.
+[Measured cost](#measured-cost)). Together the ember files made up about 0.55 GB of that
+package's 0.81 GB (80 files), while the rest of the package, the 64 spectral bins aside, was
+about 52 MB. The slow film did not exist then; its size, and the sizes of the other files with
+the `ember-v3` look, are still to be measured.
 
-Both videos have one frame per frame of `main.mp4`, at 60 fps. With the default 1,000,000 steps
-that is 1,802 frames: every 555th step, then the final step. Frame `i` of `ember.mp4` shows the
-same orbit step as frame `i` of `main.mp4`.
+`ember.mp4` (web and archival) has one frame per frame of `main.mp4`, at 60 fps. With the
+default 1,000,000 steps that is 1,802 frames: every 555th step, then the final step. Frame `i`
+of `ember.mp4` shows the same orbit step as frame `i` of `main.mp4`, with the bodies at the
+heads of that frame's trails. The slow film shows nine more frames between every two of them,
+also at 60 fps, from a little before the ink first appears to the end of the orbit.
 
 The files are listed in `metadata/assets.json` with the roles `ember_source_master`,
-`ember_web_full`, `ember_web_preview`, `ember_web` and `ember_hq`, each with
+`ember_web_full`, `ember_web_preview`, `ember_web`, `ember_slow_web` and `ember_hq`, each with
 `"color_space": "srgb"`. These roles are additive, so the manifest stays at `schema_version` 2.
 The certificate, `metadata/ember.json`, has no manifest entry. A package is complete only with
-all six files. How `run.py` adds the edition to packages that lack it, and replaces the editions
-of a retired look, is described in [In the sync loop](#in-the-sync-loop-runpy).
+all seven files. How `run.py` adds the edition to packages that lack it, and replaces the
+editions of an older look, is described in [In the sync loop](#in-the-sync-loop-runpy).
 
 ### Flags
 
 | Flag | Effect on the ember edition |
 |------|-----------------------------|
-| *(none)* | Still, WebPs, both videos and the certificate. |
-| `--image-only` | Still, WebPs and the certificate. The fluid and the ink still run through every frame interval, so the still is identical to the full render's. Only the per-frame shading, the frame stream and the encoders are skipped. |
+| *(none)* | Still, WebPs, the three videos and the certificate. |
+| `--image-only` | Still, WebPs and the certificate. The fluid and the ink still run through every frame interval, so the still is identical to the full render's. Only the per-frame shading, the slow film's in-between frames, the frame streams and the encoders are skipped. |
 | `--fast-encode` | The HQ slot uses software `libx264`, like every `--fast-encode` video: the generator never uses a hardware encoder. The pixels and digests do not change. |
 | `--no-ember` | Skips the ember edition. The main outputs are unchanged. |
-| `--metadata-only` | Skips all rendering, the ember edition included. |
-| `--ember-algorithm` | Renders nothing: prints the id of the look this build renders (`ember-v2`) and exits with status 0. It takes no other flag. |
+| `--metadata-only` | Skips all rendering, the ember edition included. The ember preflight still runs (unless `--no-ember`) and logs what the edition would cost for this orbit; if it rejects the orbit, that is logged as a warning and the exit status stays 0. |
+| `--drift brownian` | The edition cannot follow a brownian drift, whose path is a random walk that is not recorded: the run completes the package without the ember edition and exits with status 3. `none`, `linear` and `elliptical` (the default) are followed. |
+| `--ember-algorithm` | Renders nothing: prints the id of the look this build renders (`ember-v3`) and exits with status 0. It takes no other flag. |
 
 Every run except `--metadata-only` first removes the ember files an earlier run left in the same
 output directory. A package therefore never holds ember files its `metadata/assets.json` does not
@@ -77,12 +89,20 @@ list, whatever the flags of this run.
 
 The ember stage runs after the main still, videos and spectral outputs, once their buffers have
 been freed, and before the asset manifest is written. Because it runs last, a **preflight** runs
-right after the orbit is selected, before the main render: it re-simulates the orbit and makes
-the renderer's up-front checks (configuration, output size, the paper's fibre count at that size,
-frame schedule, orbit projection, the bodies' masses, and an orbit long enough in fluid time for
-the pre-roll and the valve). An orbit the ember edition would reject is known there, in seconds,
+once the orbit is selected and the main edition's view of it is known, before the main render:
+it re-simulates the orbit and makes the renderer's up-front checks (configuration, output size,
+the paper's fibre count at that size, frame schedule, the view and the track it gives the
+bodies on the canvas, the bodies' masses, and an orbit long enough in fluid time for the
+pre-roll and the valve). An orbit the ember edition would reject is known there, in seconds,
 and the stage is skipped instead of failing after the whole main render. Only failures that
 appear while simulating (a non-finite flow) or encoding can still occur late.
+
+The preflight also logs what the edition will cost and how the orbit sits on the sheet, in two
+lines: `Ember preflight:` (the orbit's duration in fluid time, the inking window, and the frame
+counts of the film and the slow film) and `Ember plan:` (a lower estimate of the fluid steps,
+the peak body speed relative to the median, how close a body's centre comes to the sheet's edge,
+and the share of the orbit during which two bodies overlap). With `--metadata-only` these lines
+are available for any seed without rendering anything.
 
 ### When the ember edition fails
 
@@ -106,26 +126,29 @@ than 0 and 3, and every signal, as a failure. What it does with a status-3 packa
 
 Short test runs should pass `--no-ember`; otherwise they end with status 3. The orbit must last
 more than `pre_roll + valve_lead = 0.75` fluid time units, and its duration grows with the number
-of steps (the median body path, measured in canvas units). Four seeds tried with `--sims 200`
-lasted 0.11–0.23 units at 20,000 steps (rejected), 0.97–2.2 at 100,000 and 5.4–7.6 at the default
-1,000,000; the prototype's selected seeds last 7.4–14.1. `--steps 1` is always rejected, because
-the schedule needs 2 recorded steps.
+of steps (the median body path, measured in canvas units). With `ember-v2`, four seeds tried
+with `--sims 200` lasted 0.11–0.23 units at 20,000 steps (rejected), 0.97–2.2 at 100,000 and
+5.4–7.6 at the default 1,000,000; the prototype's selected seeds last 7.4–14.1. With `ember-v3`
+the path is measured in the main edition's view, drift included, so a seed's duration differs
+from its `ember-v2` one; the same seeds have not been measured again. `--steps 1` is always
+rejected, because the schedule needs 2 recorded steps.
 
 ### In the sync loop (`run.py`)
 
 `run.py` keeps the asset host in sync with the minted tokens (see
 [README, Automation](../README.md#automation); the operator's view of what follows is
 [The ember backfill](../README.md#the-ember-backfill)). It treats a package as complete only
-with all six ember files, and each run sorts the API-listed seeds by what their remote package
+with all seven ember files, and each run sorts the API-listed seeds by what their remote package
 lacks:
 
 - **New or incomplete packages** lack a core file: a new mint, or a broken upload. They are
   generated and uploaded in full, first.
 - **Backfill seeds** lack only ember files. The package predates the edition, it was uploaded
-  after its ember edition failed, or its stale edition was withdrawn (see *Stale editions*
-  below). After the new packages, each run generates at most `--max-backfill` of them (default 1,
-  env `COSMICSIG_MAX_BACKFILL`; 0 pauses the backfill), those with the fewest failed runs of any
-  kind first.
+  after its ember edition failed, its stale edition was withdrawn, or it holds an edition of an
+  older look, which lacks a file of the current one (an `ember-v2` edition has no slow film) or
+  was kept online to be replaced (see *Stale editions* below). After the new packages, each run
+  generates at most `--max-backfill` of them (default 1, env `COSMICSIG_MAX_BACKFILL`; 0 pauses
+  the backfill), those with the fewest failed runs of any kind first.
 
 A mint that arrives while a backfill package is rendering waits for it: at most
 `--max-backfill` packages, each a full render (hours on the production host; see
@@ -136,12 +159,13 @@ A mint that arrives while a backfill package is rendering waits for it: at most
 `three_body_problem --ember-algorithm` prints the look the generator renders. Before planning,
 each run reads every live certificate's `algorithm` with one ssh call (the top-level line
 `  "algorithm": "<id>",` of the pretty-printed file, read with `sed`). For each listed seed whose
-id is older (a lower `ember-v<N>`), it withdraws the edition, in this order:
+id is older (a lower `ember-v<N>`), it withdraws the edition by default, in this order:
 
 1. `metadata/ember.json` is deleted;
 2. `metadata/assets.json` is replaced by the live manifest without its `ember_*` entries (staged
    and renamed);
-3. the five media files are deleted.
+3. the six media files are deleted, and with them any other ember file that manifest listed
+   (one the current look no longer has).
 
 The package is then a backfill seed, and the same run already plans it. The token has no ember
 edition until the backfill renders it again in the current look: the retired look never stays
@@ -150,9 +174,17 @@ online. Only a readable, older id counts. An unreadable certificate, a generator
 is not listed all withdraw nothing. A package that also lacks a core file is left alone, because
 the same run regenerates it in full. A failed listing or withdrawal makes the run exit with
 status 1, and a later run retries it; `--dry-run` only logs what it would withdraw.
-`--keep-stale-ember` (env `COSMICSIG_KEEP_STALE_EMBER`) keeps every live edition, while
-`--max-backfill 0` pauses only the re-rendering: stale editions are still withdrawn. The
-operator's view is in [deployment.md](deployment.md#when-a-deploy-changes-the-ember-look).
+
+With `--keep-stale-ember` (env `COSMICSIG_KEEP_STALE_EMBER=yes`) nothing is withdrawn. Each run
+still reads the certificates, logs `Kept N stale ember editions online (ember-v2 -> ember-v3):
+the ember backfill replaces each in place`, and plans every older edition's package as a backfill
+seed. The edition stays online until its turn (`--max-backfill` per run), when the backfill
+replaces it in place (see *Backfill modes* below): no token is without an ember edition, and both
+looks are online until the pass is over. A re-render that fails, or is given up, leaves the old
+edition online. The switch does not keep the old editions for good: with `--max-backfill 0` as
+well, every live edition is held exactly as it is, while `--max-backfill 0` alone pauses only the
+re-rendering, so stale editions are still withdrawn. The operator's view is in
+[deployment.md](deployment.md#when-a-deploy-changes-the-ember-look).
 
 **Backfill modes.** `--backfill-mode` (env `COSMICSIG_BACKFILL_MODE`) sets what a backfill seed
 replaces on the asset host:
@@ -164,30 +196,51 @@ replaces on the asset host:
 
 In `ember` mode the seed is still generated in full locally. Before uploading, `run.py` fetches
 the live `metadata/nft_traits.json` and `metadata/assets.json` over ssh, and checks that the
-local render shows the **same orbit**. Three fields must be equal: `simulation.masses` (compared
-as exact JSON numbers), `generation.borda.selected_index` and `generation.borda.retry_count`.
-The check is needed because the orbit search scores candidates with platform floating point (see
+local render shows the **same orbit in the same view**. Ten fields must be equal, compared as
+exact JSON values (numbers by their exact decimal value): the orbit, `simulation.masses`,
+`generation.borda.selected_index` and `generation.borda.retry_count`, and the view,
+`generation.structure.stack_label`, `generation.projection`, `generation.symmetry`,
+`generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction` and
+`generation.drift.orbit_eccentricity`. The check is needed because the orbit search scores
+candidates with platform floating point (see
 [the determinism contract](#the-determinism-contract)), so a rebuilt binary could in principle
-select another orbit for the same seed.
+select another orbit for the same seed, and because the ember bodies follow the main edition's
+view, so the edition must be rendered in the view of the published art. The viewing rotation and
+the frame themselves are not recorded in the live package, so `run.py` assumes that they match
+once the ten fields do; it compares the layer stack as the rotation's recorded proxy. A live
+`nft_traits.json` that lacks one of the ten fields cannot be used: nothing is rendered or
+uploaded until it is repaired on the asset host.
 
-- **Same orbit.** `run.py` uploads the five ember media files, then a merged
-  `metadata/assets.json`, then `metadata/ember.json` last. In the merged manifest the live
-  non-ember entries are kept verbatim, the local `ember_*` entries are added or replaced, and
-  `generated_at` comes from the local manifest. The published main art, the spectral files,
-  `metadata/generation.json` and `metadata/nft_traits.json` are never touched. The remote
-  package looks complete only once the certificate has landed, so an interrupted upload leaves
-  the seed a backfill seed and a later run retries it.
-- **Different orbit.** `run.py` uploads nothing, logs an ERROR naming the seed and, for each
-  field that differs, the live and the regenerated value, and records a failed attempt. For a
-  withdrawn edition, the token then stays without an ember edition until someone decides: a
-  rebuilt generator, or `full` mode.
+- **Same orbit and view.** The log shows `same orbit and view as the live package, by every
+  recorded field (…); uploading only its ember edition`. `run.py` stages the edition and then
+  swaps it in. It uploads the six ember media files, a merged `metadata/assets.json` and
+  `metadata/ember.json`, each as `<name>.part` beside its destination; once all have landed,
+  one ssh call deletes the live certificate (and any ember file the live manifest listed that
+  the current look does not have), then renames the media, the manifest and the certificate,
+  last, into place. In the merged manifest the live non-ember entries are kept verbatim, the
+  local `ember_*` entries are added or replaced, and `generated_at` comes from the local
+  manifest. The published main art, the spectral files, `metadata/generation.json` and
+  `metadata/nft_traits.json` are never touched. A live ember edition (one kept by
+  `--keep-stale-ember`, or what a cut-off swap or withdrawal left) is replaced in place by the
+  swap, and stays online untouched until then: a transfer that fails leaves the package byte for
+  byte as it was, and the staged files are deleted. Staging needs room on the asset host for the
+  old and the new media at once. A swap that is cut off leaves a package without a certificate,
+  whose media are each the old file or the new one, never a truncated one: it is a backfill
+  seed, and a later run renders it again and repeats the upload.
+- **Different orbit or view.** `run.py` uploads nothing, logs an ERROR (`… shows a DIFFERENT
+  ORBIT OR VIEW than the live one (…)`) naming the seed and, for each field that differs or
+  that the regenerated file lacks, the live and the regenerated value, ends the seed with
+  `IDENTITY MISMATCH  seed=0x…`, and records a failed attempt. For a withdrawn edition, the
+  token then stays without an ember edition until someone decides: a rebuilt generator, or
+  `full` mode. A kept edition stays online as it is.
 
 `full` mode replaces minted art with a re-render. A rebuilt binary need not reproduce the live
 art bit for bit (for example, x86 production builds use an AVX2 spectral kernel that has changed
 since the live packages were made), so use `full` only deliberately. A whole package, a new
 mint's or a `full`-mode one, is uploaded in three transfers: the media, then `metadata/`
-without the certificate, then `metadata/ember.json`. An interrupted upload again leaves the
-package incomplete.
+without the certificate, then `metadata/ember.json`. Its manifest and certificate are deleted
+before the upload starts, so an interrupted one leaves the package incomplete, and a later run
+regenerates and uploads it in full.
 
 **Exit status 3.** For a new mint, `run.py` deletes any stale ember files from the remote
 package directory, then uploads the status-3 package with its core files. The token gets its
@@ -205,11 +258,14 @@ deterministic (a full disk, an encoder crash), so read a given-up seed's log bef
 is broken, and delete its ledger entry (see below) to retry it. These count as failed attempts:
 
 - generator exit status 3;
-- in `ember` mode, regenerated metadata that cannot show its orbit or give its ember entries;
-- in `ember` mode, an orbit mismatch. It also gives the seed up at once, whatever the cap: the
-  same binary would regenerate the same orbit on every retry. The seed is listed under
-  `orbit_mismatches` in `backfill_failures.json`, and every run logs `ember backfill given up:
-  this generator binary regenerates a different orbit than the live package`;
+- in `ember` mode, regenerated metadata that cannot show its orbit and view or give its ember
+  entries;
+- in `ember` mode, an orbit or view mismatch. It also gives the seed up at once, whatever the
+  cap: the same binary would regenerate the same package on every retry. The seed is listed
+  under `identity_mismatches` in `backfill_failures.json` (`orbit_mismatches`, the list's name
+  before the view was checked, is still read from an older file), and every run logs `ember
+  backfill given up: this generator binary regenerates a different orbit or view than the live
+  package`;
 - a regenerated package whose ember files are incomplete.
 
 Upload and ssh failures, timeouts, a generator killed by a signal (such as SIGTERM), a live
@@ -230,39 +286,55 @@ rebuilt. A binary without `--ember-algorithm` works, but withdraws no stale edit
 every run).
 
 After a deploy that bumps the algorithm, every listed token's edition is withdrawn by the first
-run and rendered again at one package per timer run: a full package, then the upload and the
-timer's delay. A package with the `ember-v2` look is estimated to take about 2 hours on the
+run (or, with `--keep-stale-ember`, kept online until it is replaced) and rendered again at one
+package per timer run: a full package, then the upload and the timer's delay. A package with the `ember-v2` look is estimated to take about 2 hours on the
 production host, against about 70 minutes with `ember-v1` (see [Runtime](#runtime)). Multiply it
-by the number of tokens for the whole pass: for 48 tokens, an estimated 4–4.5 days.
+by the number of tokens for the whole pass: for 48 tokens, an estimated 4–4.5 days. An
+`ember-v3` package costs more, because of its slow film, and has not been timed yet.
 
 **Versions.** Packages generated by a build record its crate version as `pipeline_version` in
 `metadata/nft_traits.json` and as `build.crate_version` in `metadata/ember.json`. The default
 `ember` backfill keeps each existing token's live `nft_traits.json`, so an existing token keeps
 its original `pipeline_version` once its ember edition is live again, while its certificate
-records the build that rendered the edition. The crate version is 1.1.0 for both looks, so only
-the certificate's `algorithm` tells an `ember-v1` edition from an `ember-v2` one. Consumers must
+records the build that rendered the edition. The crate version is 1.1.0 for all three looks, so
+only the certificate's `algorithm` tells the editions of different looks apart. Consumers must
 find the edition through the manifest's `ember_*` roles, not through `pipeline_version`
 ([augur-explorer-integration.md §2.1](augur-explorer-integration.md#21-assetsjson-schema_version-2)).
 
 ## How a frame is made
 
-### 1. Orbit to moving bodies (`orbit.rs`)
+### 1. Orbit to moving bodies (`view.rs`, `orbit.rs`)
 
 The ember edition re-simulates the selected orbit **raw**, with the same integrator, time step and
-number of steps. The main render's trajectory cannot be reused: it has been through the seed's
-projection, view rotation and drift. The three recorded paths (3 bodies × N steps) become bodies
-on the canvas in six steps:
+number of steps, and then applies the main edition's view to it. It cannot take the main render's
+trajectory: that one was transformed with the platform's math library, so its bits differ from
+machine to machine (see [the determinism contract](#the-determinism-contract)). Instead, the main
+pipeline records the view it resolved, and the edition applies that view again with portable
+arithmetic. The three recorded paths (3 bodies × N steps) become bodies on the canvas in seven
+steps:
 
-1. Normalise by the bounding box: `q = (p - origin) / extent`.
-2. Run a principal component analysis over all 3N points: the cyclic Jacobi eigen-decomposition
-   of the 3×3 covariance, in a fixed order. The two leading axes span the canvas. Each axis's sign
-   is fixed by a deterministic anchor rule.
-3. Scale the projection so the orbit fills 78% of the canvas (`y ∈ [-1, 1]`,
-   `x ∈ [-a, a]` with `a = width / height`).
-4. Map orbit steps to fluid time so that the **median body speed is exactly 1**. Knot `k` of `N`
-   sits at `t_k = T·k/(N-1)`, where `T` is the orbit's duration in fluid units.
-5. Interpolate positions linearly between knots.
-6. Give each body its **tidal shape**, from the projected positions and the initial masses.
+1. **Projection space.** The seed's projection: plain positions, or one of three phase-space
+   projections that mix positions with velocities (phase portrait, cross braid, hodograph).
+2. **Viewing rotation.** The rotation the main edition chose as the best-composed of its
+   candidate viewing angles.
+3. **Drift.** The offset the main edition's drift adds to all three bodies at every step: none,
+   a constant velocity, or an arc of an ellipse (the default).
+4. **Frame.** The main edition's frame: the bounding box of the transformed orbit with its 5%
+   margin, widened to the output's aspect ratio, and the scale that seeds with a rotational
+   symmetry apply to the primary copy of their strokes. The canvas is `y ∈ [-1, 1]`,
+   `x ∈ [-a, a]` with `a = width / height`.
+5. Map orbit steps to fluid time so that the **median body speed is exactly 1** on the canvas.
+   Knot `k` of `N` sits at `t_k = T·k/(N-1)`, where `T` is the orbit's duration in fluid units.
+6. Interpolate positions linearly between knots.
+7. Give each body its **tidal shape**, from the canvas positions and the initial masses.
+
+After step 4 each body is where the main edition draws the head of that body's trail, at every
+recorded step: the two agree to far below a millionth of a pixel (a test holds them to `10⁻⁹`
+pixels for every projection space, drift and symmetry). For a seed with a symmetry, the main
+artwork draws several copies of every stroke, and the ember bodies follow the primary copy, the
+one that is neither rotated nor mirrored. In the phase-space projections the paths on the sheet
+are not paths in physical space; the bodies stir the water along them all the same. The recipe
+is in [ember-design.md §3](ember-design.md#3-orbit--moving-bodies-viewrs-orbitrs).
 
 The tidal shape is the one a small fluid body takes in the field of the other two. On the canvas,
 body `j` exerts on body `i` the Plummer-softened tidal tensor
@@ -328,7 +400,8 @@ dilution at the grid scale.
 Between two frames the fluid is advanced through a few velocity snapshots. The snapshots are at
 most `2.5·10⁻³` fluid units apart, and close enough that no body's material moves more than 0.28
 body radii between them, its outline's turning and stretching included: under half the shortest
-semi-axis of a 3 : 1 body. Each node then does two things:
+semi-axis of a 3 : 1 body. Their number per frame interval is a multiple of ten, so that every
+frame of [the slow film](#6-the-slow-film) falls on a snapshot. Each node then does two things:
 
 1. **Traces back.** It follows its water backwards to the previous frame along exact
    characteristics: RK4 in time, bilinear velocity in space, linear in time between snapshots.
@@ -409,19 +482,56 @@ reduced by bisection, keeping lightness and hue; neutral soot on warm paper stay
 is a safeguard), and is encoded as 16-bit sRGB. A pixel whose nine nodes are all bare paper uses a
 cached paper value.
 
+### 6. The slow film
+
+`videos/web/ember_slow.mp4` is the same film ten times slower (`EMBER_SLOW_FACTOR` in
+`src/app.rs`): between every two frames of `ember.mp4` it shows nine more, at 60 fps.
+
+**Real frames.** No frame is interpolated from its neighbours. Inside every frame interval the
+fluid already stops at a number of evenly spaced snapshots that is a multiple of ten, so each
+in-between moment is a snapshot of the simulation. An in-between frame is the previous film
+frame's ink carried through the flow up to its snapshot, with the bodies at their positions of
+that moment and the ink they lay on the way, shaded like any other frame. Every tenth frame of
+the slow film is a frame of `ember.mp4`, byte for byte, and its last frame is the still.
+
+**A side product.** The ink of a film frame is never computed from an in-between frame: each
+frame of either film is one remap away from a film frame's ink. The in-between frames therefore
+blur nothing and the film frames do not stand out among them. The still and `ember.mp4` are the
+same whether or not the slow film is rendered; `--image-only` renders the same still without
+either film.
+
+**Start and length.** The first frames of the film are bare paper, because nothing inks during
+the pre-roll. The slow film skips most of them: it starts six film frames (one second of slow
+film) before the frame interval in which the bodies start inking, and runs to the end of the
+orbit. From there it has ten frames per film frame, plus the last one: at most 18,011 frames
+(300 s) at the default 1,000,000 steps, less ten for every film frame it skips. The certificate
+records the film frame it starts at as `derived.slow_first_frame`.
+
+**The look, ten times slower.** The film times of [the look](#4-the-look-lookrs) stretch with
+the film: in the slow film the ink stays black for 8 s and fades with an e-folding time of
+7.5 s.
+
+The slow film has a web encode only, with the settings of `videos/web/ember.mp4`. Its raw frames
+have their own digest in the certificate, so an archival encode can be made from a re-render.
+The details are in [ember-design.md §8.3](ember-design.md#83-the-slow-film).
+
 ## The determinism contract
 
-The raw frames (`rgb48le`, 16-bit little-endian sRGB samples) and the still are a pure function of
-five inputs:
+The raw frames of both films (`rgb48le`, 16-bit little-endian sRGB samples) and the still are a
+pure function of six inputs:
 
 - the selected orbit's initial conditions (masses, positions and velocities), the number of steps,
   the integrator time step and the gravitational constant;
+- the main edition's view of that orbit (`inputs.view`): its projection space, viewing rotation,
+  drift and frame, recorded as exact bit patterns;
 - the output size;
 - the paper seed;
 - the full `EmberConfig`;
-- the frame schedule: `main.mp4`'s checkpoints for `steps`, recorded as `inputs.frames`. The ink
-  is remapped once per frame interval, so the schedule shapes the still too. Changing it, for
-  example through `DEFAULT_TARGET_FRAMES`, changes every digest, the still's included.
+- the frame schedule: `main.mp4`'s checkpoints for `steps`, and the slow factor, recorded as
+  `inputs.frames`. The ink is remapped once per frame interval, through a number of snapshots
+  that is a multiple of the slow factor, so both shape the still too. Changing the schedule, for
+  example through `DEFAULT_TARGET_FRAMES`, or the slow factor changes every digest, the still's
+  included.
 
 Rendering them again on any IEEE-754 CPU, with any number of threads, reproduces every bit. The
 contract holds because of these rules:
@@ -429,10 +539,10 @@ contract holds because of these rules:
 - **Arithmetic.** Only exactly rounded arithmetic is used: `+ − × ÷`, `sqrt`, comparisons,
   conversions. Rust never fuses `a·b + c` into an FMA, and it never reorders floating-point
   operations.
-- **Transcendentals.** `exp`, `tanh`, `sin`, `cos`, `pow`, `cbrt` and `ln` come from the
-  pure-Rust [`libm`](https://docs.rs/libm) crate (a port of musl), pinned at `=0.2.16`, never from
-  the platform's C library. A unit test in `src/ember/math.rs` rejects any other call.
-  Dependabot ignores `libm`; bump it only by hand, together with the golden hashes.
+- **Transcendentals.** `exp`, `tanh`, `sin`, `cos`, `pow`, `cbrt`, `ln` and the remainder `fmod`
+  come from the pure-Rust [`libm`](https://docs.rs/libm) crate (a port of musl), pinned at
+  `=0.2.16`, never from the platform's C library. A unit test in `src/ember/math.rs` rejects any
+  other call. Dependabot ignores `libm`; bump it only by hand, together with the golden hashes.
 - **No architecture-dependent code paths.** The FFT is the crate's own (no `rustfft`), and there
   are no intrinsics, no `target_feature` dispatch and no `mul_add`.
 - **Parallelism over independent outputs only.** Rows, columns, nodes and pixels are split across
@@ -442,54 +552,68 @@ contract holds because of these rules:
 - **The orbit itself.** It comes from the same deterministic integrator. The gravity kernel cubes
   distances by multiplication, not `powi`. The tidal shapes use only `+ − × ÷ √` and comparisons,
   in a fixed order, and their reference is an order statistic.
+- **The view.** The main edition computes its view with the platform's math library and chooses
+  its viewing angle with a platform-dependent score. The ember edition therefore takes no
+  position from it. It takes the view's parameters, recorded in the certificate as bit patterns,
+  and applies them to the raw orbit with the arithmetic and the functions above.
 
 The encoded files (MP4, WebP, even the PNG's compressed bytes) are *derived* artefacts. Their
 bytes also depend on encoder and library versions, so they are outside the contract. The PNG is
 lossless: decoding it to `rgb48le` reproduces the certified still digest.
 
-The contract is keyed on the recorded initial conditions, not on the seed. Turning a seed into an
-orbit runs the main generator's orbit search, whose scores use platform floating point (`rustfft`
-with runtime SIMD dispatch, the platform's libm). On an exact near-tie between two candidate
-orbits, a different machine could in principle select the other one. A cross-machine check
-therefore compares `inputs.bodies` first, or re-renders from them with the `verify` tool below.
+The contract is keyed on the recorded initial conditions and the recorded view, not on the seed.
+Turning a seed into an orbit runs the main generator's orbit search, whose scores use platform
+floating point (`rustfft` with runtime SIMD dispatch, the platform's libm). On an exact near-tie
+between two candidate orbits, a different machine could in principle select the other one. The
+view is resolved by the main pipeline with the platform's libm too, so two machines can record
+views that differ in their last bits, or in principle choose another viewing angle. A
+cross-machine check therefore compares `inputs.bodies` and `inputs.view` first, or re-renders
+from them with the `verify` tool below.
 
 ### The certificate: `metadata/ember.json`
 
 | Field | Contents |
 |-------|----------|
-| `schema_version`, `edition`, `algorithm` | Layout version (3), `"ember"`, and the rendering algorithm version (`ember-v2`, bumped whenever rendered bits change; see [Looks](#looks)). |
+| `schema_version`, `edition`, `algorithm` | Layout version (4), `"ember"`, and the rendering algorithm version (`ember-v3`, bumped whenever rendered bits change; see [Looks](#looks)). |
 | `contract` | The statement being certified. |
 | `inputs.seed`, `inputs.steps`, `inputs.dt`, `inputs.gravitational_constant`, `inputs.integrator` | The simulation inputs. |
 | `inputs.bodies` | The selected orbit's initial masses, positions and velocities, as decimals (for people) **and** as exact IEEE-754 bit patterns (`bits`, `0x` followed by 16 hex digits; authoritative). |
+| `inputs.view` | The main edition's view of the orbit, which the bodies follow: `projection` (`position`, `phase_portrait`, `cross_braid` or `hodograph`), `rotation` (the viewing rotation, a 3 × 3 matrix), `drift` (`mode` `none`, `linear` with its `velocity`, or `elliptical` with its `rotation`, `mean_anomaly`, `mean_motion`, `eccentricity`, `semi_major` and `semi_minor`) and `frame` (`min_x`, `min_y`, `width`, `height`, `scale`). Every number is an exact bit pattern, like `inputs.bodies[*].bits`, with no decimal copy. |
 | `inputs.width`, `inputs.height`, `inputs.paper_seed_sha256` | Output size and the SHA-256 of the paper seed. |
-| `inputs.frames` | Frame count, first and last step, frame rate, and a SHA-256 of the schedule (little-endian `u64` step indices). |
-| `config` | The full `EmberConfig`: `fluid`, `projection`, `contact`, `tidal` (`max_aspect`, `stretch_quantile`, `softening`), `look` (`floor`, `fade_fraction`, `hold_fraction`, `floor_tau`), `paper` and `raster`. |
-| `derived` | The orbit duration and valve time in fluid units, the look's `hold_time` and `fade_time` in fluid units, the orbit's `tidal_reference` anisotropy, the fluid and ink grids (`fluid_grid`, `fluid_dx`, `ink_grid`), and `projection` (origin, extent, principal axes, scale, variances). |
-| `outputs.frames_rgb48le_sha256` | SHA-256 of all frames concatenated as `rgb48le`; `null` for `--image-only`. |
+| `inputs.frames` | Frame count, first and last step, frame rate, a SHA-256 of the schedule (little-endian `u64` step indices), and `slow_factor` (10): how many times slower the slow film is. |
+| `config` | The full `EmberConfig`: `fluid`, `contact`, `tidal` (`max_aspect`, `stretch_quantile`, `softening`), `look` (`floor`, `fade_fraction`, `hold_fraction`, `floor_tau`), `paper` and `raster`. |
+| `derived` | The orbit duration and valve time in fluid units, the look's `hold_time` and `fade_time` in fluid units, the orbit's `tidal_reference` anisotropy, the fluid and ink grids (`fluid_grid`, `fluid_dx`, `ink_grid`), and `slow_first_frame`, the frame of `ember.mp4` at which the slow film starts. |
+| `outputs.frames_rgb48le_sha256` | SHA-256 of all frames of `ember.mp4` concatenated as `rgb48le`; `null` for `--image-only`. |
+| `outputs.slow_frames_rgb48le_sha256` | SHA-256 of all frames of the slow film concatenated as `rgb48le`; `null` when the slow film was not rendered (`--image-only`). |
 | `outputs.still_rgb48le_sha256` | SHA-256 of the still as `rgb48le`. |
-| `outputs.frames_emitted`, `outputs.encoding` | Frame count and the colour encoding of the digested pixels. |
+| `outputs.frames_emitted`, `outputs.slow_frames_emitted`, `outputs.encoding` | The frame counts of the two films and the colour encoding of the digested pixels. |
 | `stats` | Deterministic render statistics: fluid steps (`fluid_steps`), time-step range (`min_dt`, `max_dt`), peak flow speed (`max_flow_speed`), `snapshots`, `contact_events`, the still's ink coverage (`still_ink_fraction`, the fraction of its visible ink nodes carrying any ink) and gamut-mapped pixels (`still_gamut_mapped_pixels`). |
 | `build` | Informational only: crate version (1.1.0 for this release), CPU architecture, OS and thread count of the producing machine. |
 | `timings_seconds` | Informational only: wall-clock seconds of the `fluid`, `ink`, `shade` and `sink` stages and the `total`. |
 
-Layout 3 came with `ember-v2`. It dropped `ember-v1`'s cinnabar statistics
-(`stats.frames_with_cinnabar`, `stats.peak_frame_cinnabar_fraction`,
-`stats.still_cinnabar_fraction`) and vermilion settings, and added `config.tidal`,
-`derived.hold_time`, `derived.fade_time` and `derived.tidal_reference`. The published
-`ember-v1` certificates have layout 2 (layout 1 was only ever written by test renders).
+Layout 4 came with `ember-v3`. It added `inputs.view`, `inputs.frames.slow_factor`,
+`derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
+`outputs.slow_frames_emitted`, and dropped `config.projection` and `derived.projection`, the
+principal-plane projection of `ember-v2`. Layout 3 came with `ember-v2`. It dropped
+`ember-v1`'s cinnabar statistics (`stats.frames_with_cinnabar`,
+`stats.peak_frame_cinnabar_fraction`, `stats.still_cinnabar_fraction`) and vermilion settings,
+and added `config.tidal`, `derived.hold_time`, `derived.fade_time` and
+`derived.tidal_reference`. The published `ember-v1` certificates have layout 2 (layout 1 was
+only ever written by test renders).
 
 Everything except `build` and `timings_seconds` must match between two renders of the same
 inputs. `ember::EmberCertificate::read_json` reads a certificate back into typed Rust values. It
-rejects other layout versions (this build reads only layout 3), unknown or missing fields (a
-nullable field such as the frames digest must be present, as `null` or a value) and malformed bit
-patterns, and rebuilds the initial conditions bit for bit from `inputs.bodies[*].bits`. The
-layout, the digest definitions and the versioning rules are in
+rejects other layout versions (this build reads only layout 4), unknown or missing fields (a
+nullable field such as a frames digest must be present, as `null` or a value), malformed bit
+patterns and outputs that disagree about the frames of either film, and rebuilds the initial
+conditions and the view bit for bit from their bit patterns. The layout, the digest definitions
+and the versioning rules are in
 [ember-design.md §8.4](ember-design.md#84-the-certificate-certificaters-metadataemberjson).
 
 ### Verifying a package on another machine
 
-`examples/ember_render.rs` re-renders a package from its certificate alone and compares both
-digests:
+`examples/ember_render.rs` re-renders a package from its certificate alone and compares the
+digests it records, of the still and of the two films:
 
 ```bash
 cargo run --release --example ember_render -- verify output/<name>/metadata/ember.json
@@ -498,19 +622,28 @@ cargo run --release --example ember_render -- verify output/<name>/metadata/embe
 The re-render takes as long as the original, so the tool first checks that this build can
 reproduce the certificate at all. It stops with a message naming each field that rules it out:
 outputs that disagree about the frames (frames emitted without a frames digest, or a count other
-than `inputs.frames.count`), the rendering algorithm version, the integrator, the time step and
+than the film's length), the rendering algorithm version, the integrator, the time step and
 the gravitational constant (bit for bit), the paper-seed digest, the frame-schedule digest, and
-whether the recorded configuration round-trips through this build's `EmberConfig`. It then prints
-`MATCH` or `MISMATCH` for the still and the frames. The exit status is 0 on a match, 1 on a
-mismatch and 2 on an error. A build verifies only certificates of its own look: an `ember-v1`
-certificate is an error for an `ember-v2` build (its layout cannot be read).
+whether the recorded configuration round-trips through this build's `EmberConfig`. The view and
+the slow factor are inputs like the bodies: the re-render follows what the certificate records.
+The tool then prints `MATCH` or `MISMATCH` for `still`, `frames` and `slow` (`(not recorded)`
+for a film the certificate has no digest of), and for the frame counts (`outputs`), `derived`
+and `stats`, which the re-render must reproduce as well. The exit status is 0 when everything
+matches, 1 on a mismatch and 2 on an error. A build verifies only certificates of its own look:
+an `ember-v1` or `ember-v2` certificate is an error for an `ember-v3` build (its layout cannot
+be read).
+
+The tool's `render` subcommand renders an orbit outside the generator, for look development:
+`--video` and `--slow-video` encode the two films, `--slow-factor` sets another slow factor, and
+`--frontal` draws the orbit as it is (plain positions, no rotation, no drift) instead of
+through a certificate's view.
 
 ### Verifying on two machines
 
 1. Build the same commit on both machines with `cargo build --release --locked`. The native-CPU
    flags in `.cargo/config.toml` do not affect the ember edition.
 2. Render the same seed on each. Use `--image-only` for a faster check of the still alone, but use
-   the same mode on both machines, because the frames digest exists only for full renders:
+   the same mode on both machines, because the frames digests exist only for full renders:
 
    ```bash
    ./target/release/three_body_problem --seed 0x46205528 --output verify
@@ -523,8 +656,11 @@ certificate is an error for an `ember-v2` build (its layout cannot be read).
    diff ember-x86_64.json ember-arm64.json    # must print nothing
    ```
 
-   A difference in `inputs.bodies` means that the two machines selected different orbits (see
-   the contract above). Verify each certificate with the `verify` tool instead.
+   A difference in `inputs.bodies` means that the two machines selected different orbits, and a
+   difference in `inputs.view` that their main pipelines resolved different views (see the
+   contract above; the view is computed with the platform's math library, so two operating
+   systems can record views that differ in their last bits). The two certificates then certify
+   different inputs: verify each of them on the other machine with the `verify` tool instead.
 
 4. Check that the shipped PNG really is the certified still:
 
@@ -569,8 +705,17 @@ definition.
 ## Runtime
 
 Everything runs on the CPU. The fluid, the ink and the shading use the machine's cores through
-rayon (the fluid solver at most 32 of them), and both encoders are software (`libx264`,
-`libx265`); nothing uses a GPU or a hardware encoder.
+rayon (the fluid solver at most 32 of them), and the three encoders are software (`libx264`
+for the two web videos, `libx265` for the archival one); nothing uses a GPU or a hardware
+encoder.
+
+Every figure in this section was measured or estimated with the `ember-v2` look, which had no
+slow film and showed the orbit in its own principal plane. `ember-v3` has not been timed yet.
+Two things change its cost: the orbit's duration in fluid time, and with it the number of fluid
+steps, now follows from the bodies' speeds in the main edition's view; and the slow film adds
+ink and shading work for nine more frames per film frame and a third encoder (see
+[How the cost scales](#how-the-cost-scales)). The preflight's `Ember plan:` line gives a lower
+estimate of the fluid steps of a seed before anything is rendered.
 
 ### Measured cost
 
@@ -619,9 +764,9 @@ window, the paper, one frame, and two ink-field buffers of 87.7 million nodes, f
 each (2.8 GB together). The encoders add their own (x265's look-ahead holds several GB at this
 size).
 
-**Cross-architecture check at production scale.** On the M4 Max, the package's ember still and
-frame stream have exactly the standalone render's digests, so the generator's path reproduces the
-edition bit for bit:
+**Cross-architecture check at production scale (`ember-v2`).** On the M4 Max, the package's
+ember still and frame stream had exactly the standalone render's digests, so the generator's
+path reproduced the edition bit for bit:
 
 ```text
 outputs.still_rgb48le_sha256   b34495d49de0db906dacd7f9b1c47c9aee29bd58439c31f7d23455a8c22608fd
@@ -633,10 +778,11 @@ this edition at full scale with `examples/ember_render` while a sync run shared 
 and all 1,802 frames matched the digests above bit for bit, and the render took 4,673 s (78 min:
 fluid 3,839 s at 49.0 ms per step, ink 730 s, shading 63 s, sink 41 s). (For the `ember-v1`
 look, an Apple M4 Max re-rendered an x86_64 production package from its certificate: the still
-and all 1,802 frames matched bit for bit.) At small scale, the golden renders of
-`tests/ember_determinism.rs` and every ember unit golden are bit-identical on aarch64 macOS,
+and all 1,802 frames matched bit for bit.) At small scale, the `ember-v2` golden renders of
+`tests/ember_determinism.rs` and every ember unit golden were bit-identical on aarch64 macOS,
 x86_64 Linux and x86-64-v3 (AVX2); CI runs the golden tests on x86_64 Linux (baseline and
-x86-64-v3), aarch64 Linux and aarch64 macOS.
+x86-64-v3), aarch64 Linux and aarch64 macOS. The full-scale check is still to be repeated for
+`ember-v3`, whose certificate also carries the slow film's digest.
 
 `--image-only` was not timed separately: it skips the per-frame shading and all encoding, so it
 costs about the fluid plus the ink.
@@ -645,11 +791,12 @@ costs about the fluid plus the ink.
 
 | Stage | Scales with | Notes |
 |-------|-------------|-------|
-| Orbit re-simulation | steps | Done twice: by the preflight and by the ember stage, each time with the projection, the time map and the tidal reference. Not timed on its own: in the M4 Max package, the ember stage spent about 7 minutes outside its render, on the orbit, the PNG and WebP writes and the encoders' tail together. |
+| Orbit re-simulation | steps | Done twice: by the preflight and by the ember stage, each time with the view, the time map and the tidal reference. Not timed on its own: in the M4 Max package (`ember-v2`), the ember stage spent about 7 minutes outside its render, on the orbit, the PNG and WebP writes and the encoders' tail together. |
 | Fluid | orbit duration / time step | 26 real 2160 × 1536 FFTs per step: 58.9 ms on the M4 Max, 48.9 ms on the production host. The grid does not depend on the output size; the step count depends on the orbit's duration, the grid spacing and the peak speeds of the flow and the bodies (78,356 steps for 19.12 fluid units). The solver runs in its own pool of at most 32 threads: beyond that its transforms stop scaling. On the loaded production host a step took 55.8 ms with 16 threads, 48.9 ms with 32, 47.9 ms with 48, 50.2 ms with 64 and 63.6 ms with 96. |
-| Ink | frames × ink nodes × snapshots per frame | About 87.7 million nodes (11374 × 7708, margin included) at 3456 × 2234, 2.25 times as many as with the 2 × 2 nodes of `ember-v1`. The 0.28-radius travel bound (0.5 for `ember-v1`) sets the snapshots per frame wherever the bodies move fast. Uses every core. |
-| Shading | frames × pixels × 9 nodes | 36-band Kubelka–Munk for inked nodes; cached paper elsewhere. Uses every core. |
-| Encoding | frames × pixels | Runs concurrently with rendering. The frames go to both encoders through pipes, so an encoder slower than the render would show up as sink back-pressure (`timings_seconds.sink`). In the M4 Max package, with both encoders running, it was 65 s of an 8,846 s render: the encoders kept pace. |
+| Ink | frames × ink nodes × snapshots per frame | About 87.7 million nodes (11374 × 7708, margin included) at 3456 × 2234, 2.25 times as many as with the 2 × 2 nodes of `ember-v1`. The 0.28-radius travel bound (0.5 for `ember-v1`) sets the snapshots per frame wherever the bodies move fast; since `ember-v3` their number is rounded up to a multiple of ten. Uses every core. |
+| Ink of the slow film | film frames × visible ink nodes × snapshots per frame × 4.5 | The nine in-between frames of a frame interval trace through 1/10, 2/10, … 9/10 of its snapshots: 4.5 times the snapshot steps of the film frame's own remap, on the visible nodes only (the margin, about a fifth of the nodes, is skipped). Not rendered under `--image-only`. |
+| Shading | frames × pixels × 9 nodes | 36-band Kubelka–Munk for inked nodes; cached paper elsewhere. Uses every core. With the slow film, about ten times as many frames are shaded. |
+| Encoding | frames × pixels | Runs concurrently with rendering. The frames go to the encoders through pipes (the film's two and the slow film's one), so an encoder slower than the render would show up as sink back-pressure (`timings_seconds.sink`). In the M4 Max package (`ember-v2`, two encoders), it was 65 s of an 8,846 s render: the encoders kept pace. |
 
-`--image-only` skips the per-frame shading and all encoding, but the fluid and ink still run over
-the whole orbit.
+`--image-only` skips the per-frame shading, the slow film and all encoding, but the fluid and the
+ink of the film frames still run over the whole orbit.

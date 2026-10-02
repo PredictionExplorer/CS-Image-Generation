@@ -274,11 +274,14 @@ Contract: [`augur-explorer-integration.md`](augur-explorer-integration.md)
 
 ### 7.1 What changes on the asset host
 
-- **New packages** carry six more files. Five media files are listed in
+- **New packages** carry seven more files. Six media files are listed in
   `assets.json` under the roles `ember_source_master`, `ember_web_full`,
-  `ember_web_preview`, `ember_web` and `ember_hq`, each with
-  `"color_space": "srgb"`. The certificate, `metadata/ember.json`, has no
-  manifest entry. The manifest stays at `schema_version` 2.
+  `ember_web_preview`, `ember_web`, `ember_slow_web` and `ember_hq`, each
+  with `"color_space": "srgb"`. The certificate, `metadata/ember.json`, has
+  no manifest entry. The manifest stays at `schema_version` 2.
+  `ember_slow_web` (`videos/web/ember_slow.mp4`, the ember video ten times
+  slower) is new with the look `ember-v3`; editions of the older looks have
+  the other five roles only, and §7.3 defines no key for it.
 - **The 48 existing packages** get the edition from the ember backfill, one
   per sync run; it started when the edition was deployed (2026-09-29). In
   its default mode the backfill uploads only the ember files and a merged
@@ -287,19 +290,29 @@ Contract: [`augur-explorer-integration.md`](augur-explorer-integration.md)
   `generation.json` and the main art are untouched.
 - **A new ember look withdraws the published editions, then renders them
   again.** The certificate's `algorithm` names the look (`ember-v1`, then
-  `ember-v2`). The first sync run after a deploy that changes it withdraws
-  every edition of the older look: it deletes `metadata/ember.json`,
-  rewrites `assets.json` without the `ember_*` entries (every other entry
-  and field, `generated_at` included, unchanged) and deletes the five ember
-  media files. `nft_traits.json` keeps its bytes and `Last-Modified`. The
-  backfill then renders each edition again, one package per sync run
-  (about 2 hours each on the generation host, an estimate, so about 4–4.5
-  days for all 48; see [§8](#8-rollout-notes)), and the `ember_*` entries
-  return with new `bytes` and `sha256`. Until a token's turn comes, it has
-  no ember edition. The `ember-v2` change is the first such change.
-- **The certificate's layout** is `schema_version` 3 with `ember-v2`: the
-  cinnabar statistics are gone and `derived.hold_time`, `derived.fade_time`,
-  `derived.tidal_reference` and `config.tidal` are new
+  `ember-v2`, then `ember-v3`). The first sync run after a deploy that
+  changes it withdraws every edition of the older look: it deletes
+  `metadata/ember.json`, rewrites `assets.json` without the `ember_*`
+  entries (every other entry and field, `generated_at` included, unchanged)
+  and deletes the edition's media files. `nft_traits.json` keeps its bytes
+  and `Last-Modified`. The backfill then renders each edition again, one
+  package per sync run (about 2 hours each on the generation host with
+  `ember-v2`, an estimate, so about 4–4.5 days for all 48; see
+  [§8](#8-rollout-notes); `ember-v3` packages take longer and have not been
+  timed yet), and the `ember_*` entries return with new `bytes` and
+  `sha256`. Until a token's turn comes, it has no ember edition. The
+  `ember-v2` change was the first such change, and `ember-v3` is the second.
+  That is the sync loop's default. The operator can instead keep the older
+  editions online (`COSMICSIG_KEEP_STALE_EMBER=yes`): nothing is withdrawn
+  then, and the backfill replaces each edition in place when its turn
+  comes, so the `ember_*` entries change without disappearing in between.
+- **The certificate's layout** is `schema_version` 4 with `ember-v3`:
+  `inputs.view`, `inputs.frames.slow_factor`, `derived.slow_first_frame`,
+  `outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted` are
+  new, and `config.projection` and `derived.projection` are gone. It was 3
+  with `ember-v2`, where the cinnabar statistics went and
+  `derived.hold_time`, `derived.fade_time`, `derived.tidal_reference` and
+  `config.tidal` were new
   ([integration §2.2](augur-explorer-integration.md#22-emberjson-the-certificate)).
   The Go side only links the certificate, so this matters only to code
   that parses it.
@@ -427,11 +440,14 @@ within one interval, and each resolves to `200`.
   re-check pass picks up every token backfilled so far. The exception is
   §7.2: if the manifest decoder rejects unknown fields, fix it now, because
   the new mints' and the backfilled tokens' manifests carry `color_space`.
-- **`ember-v2`: pending deployment.** Its first sync run withdraws every
-  `ember-v1` edition, and the backfill renders each token's edition again,
-  one per sync run (about 2 hours each, about 4–4.5 days for all 48; both
-  estimates). In between, a token is served without the `ember_*` keys,
-  which is expected. A §7.4 re-check that skips rows with the ember roles
-  would instead keep serving the withdrawn edition's keys, pointing at
-  deleted files. Once the pass is done, refresh the marketplaces again
-  (integration §9, step 6).
+- **`ember-v2`: deployed 2026-09-30.** Its first sync run withdrew every
+  `ember-v1` edition, and the backfill rendered each token's edition again,
+  one per sync run (about 2 hours each); it had reached 15 of the 48 tokens
+  when it was paused on 2026-10-01.
+- **`ember-v3`: pending deployment.** It adds the slow film (role
+  `ember_slow_web`) and renders every edition again, one per sync run. By
+  default each older edition is withdrawn first; in between, a token is
+  served without the `ember_*` keys, which is expected. A §7.4 re-check that
+  skips rows with the ember roles would instead keep serving the withdrawn
+  edition's keys, pointing at deleted files. Once the pass is done, refresh
+  the marketplaces again (integration §9, step 6).

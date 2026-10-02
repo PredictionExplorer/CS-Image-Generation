@@ -19,23 +19,26 @@ the port never did. The edition follows the artist's rule of no GPU for anything
 runs on the CPU, down to the video encoders (§8.5). It renders:
 
 - one frame per checkpoint of the main video (`render::main_video_checkpoints`), so frame `i`
-  of `ember.mp4` shows the same orbit step as frame `i` of `main.mp4`;
-- a 16-bit sRGB still of the final recorded step (knot `steps - 1`), which is the last frame,
-  byte for byte.
+  of `ember.mp4` shows the same orbit step as frame `i` of `main.mp4`, with the three bodies
+  where `main.mp4` draws the heads of its trails (§3);
+- the slow film, `ember_slow.mp4`: the same film ten times slower, with nine simulated frames
+  between every two of those frames (§8.3);
+- a 16-bit sRGB still of the final recorded step (knot `steps - 1`), which is the last frame of
+  both films, byte for byte.
 
 The look is `tidal_11_exp_film`, the artist's choice from a look-development study: black
 pine-soot sumi on a kozo sheet, laid into the water by three tidally stretched bodies. Fresh ink
 stays black for a moment, then fades to a pale grey wash on a clock set in film time, the same on
 every orbit. There is no red anywhere. The ink is carried by a two-dimensional Navier–Stokes flow
-that the three bodies (the selected orbit, projected onto its principal plane) stir as
+that the three bodies (the selected orbit, seen exactly as the main edition shows it, §3) stir as
 Brinkman-penalised ellipses of constant area, each stretched by the tidal field of the other two
-(§3.10). Beyond the prototype, the edition has the tidal shapes, solid bodies that hold no ink
-(§5.3), a **presence-clamped tone law**, under which ink diluted with clear water weakens
-linearly (§6.1), and the film-time clock (§6.1). For unmixed water the tone law is the
-prototype's reservoir feed. The values agree with it up to the `f32` storage and per-frame
-ageing of `E` (§5.3): the prototype evaluates each ink sample's exact age, while the port stores
-`E` as `f32` and multiplies it by the frame's fade every frame (a relative rounding of about
-2⁻²⁴ per frame).
+(§3.10). Beyond the prototype, the edition has the main edition's view (§3.1–§3.5), the tidal
+shapes, solid bodies that hold no ink (§5.3), a **presence-clamped tone law**, under which ink
+diluted with clear water weakens linearly (§6.1), the film-time clock (§6.1) and the slow film
+(§8.3). For unmixed water the tone law is the prototype's reservoir feed. The values agree with
+it up to the `f32` storage and per-frame ageing of `E` (§5.3): the prototype evaluates each ink
+sample's exact age, while the port stores `E` as `f32` and multiplies it by the frame's fade
+every frame (a relative rounding of about 2⁻²⁴ per frame).
 
 **Changes from `ember-v1`** (sumi and vermilion on kozo, disc bodies). `ember-v2`:
 
@@ -51,6 +54,27 @@ ageing of `E` (§5.3): the prototype evaluates each ink sample's exact age, whil
 - writes certificate schema 3 (§8.4), and the generator reports its algorithm with
   `--ember-algorithm` (§8.5).
 
+**Changes from `ember-v2`.** `ember-v3`, the current algorithm:
+
+- follows the main edition's view. `ember-v2` projected the raw orbit onto its own principal
+  plane (a PCA) and scaled it to a `projection.fill` fraction of the sheet. `ember-v3` applies
+  the seed's projection space, the main edition's viewing rotation, its drift and its frame, so
+  the bodies move as they do in `main.mp4`. The main pipeline records the view it resolved and
+  the edition re-applies it with portable arithmetic (`view.rs`). The old §3.1–§3.5 (bounding
+  box, moments, principal axes, anchor rule, projection) are replaced by the view's §3.1–§3.5;
+  `config.projection` and `derived.projection` are gone;
+- renders the slow film (§8.3). Every scheduled frame interval gets a snapshot lattice that is a
+  multiple of the slow factor, in every mode, so the still and the normal film are computed
+  through finer steps than `ember-v2`'s as well. The old §8.3 ("Pixel stream") is now the
+  *Pixel streams* paragraph of §8.4;
+- makes the soak frame symmetric (§5.2 step 2). The `ember-v2` frame rotated an offset onto the
+  body's axis, an eigenvector whose sign is arbitrary and could flip between two snapshots; the
+  parcel's path in the soak frame then ran through the body's centre, and gated parcels
+  recorded contacts that never happened;
+- writes certificate schema 4 (§8.4): `inputs.view`, `inputs.frames.slow_factor`,
+  `derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
+  `outputs.slow_frames_emitted`.
+
 ---
 
 ## 0. Determinism and engineering rules
@@ -64,10 +88,11 @@ and aarch64 (NEON), with any number of threads.
 - **Float primitives.** Only `+ - * /`, `sqrt`, `abs`, `floor`, `ceil`, `round`, `trunc`,
   comparisons, integer operations, `as` casts and `f64 → f32` rounding. All are exactly rounded.
 - **Transcendentals through `crate::ember::math` only**, a facade over the pure-Rust `libm`
-  crate pinned at `=0.2.16`: `exp`, `ln`, `pow`, `cbrt`, `tanh`, `sin`, `cos`, `sin_cos`. Never
-  the std methods (`exp`, `ln`, `log*`, `powf`, `powi`, `sin`, `cos`, `tan`, `sin_cos`, `tanh`,
-  `sinh`, `cosh`, `atan*`, `asin`, `acos`, `cbrt`, `hypot`, `exp_m1`, `ln_1p`, `exp2`,
-  `mul_add`, for `f64` and `f32`), which call the platform's C library. The unit test
+  crate pinned at `=0.2.16`: `exp`, `ln`, `pow`, `cbrt`, `tanh`, `sin`, `cos`, `sin_cos`, and
+  the exact remainder `fmod`. Never the std methods (`exp`, `ln`, `log*`, `powf`, `powi`, `sin`,
+  `cos`, `tan`, `sin_cos`, `tanh`, `sinh`, `cosh`, `atan*`, `asin`, `acos`, `cbrt`, `hypot`,
+  `exp_m1`, `ln_1p`, `exp2`, `mul_add`, for `f64` and `f32`), which call the platform's C
+  library. The unit test
   `ember_sources_use_only_portable_math` in `math.rs` scans every ember source for these
   patterns, and `every_ember_source_file_is_guarded` fails until a new `src/ember/*.rs` file is
   added to its list. `libm_bits_are_pinned` pins the bits of every wrapper.
@@ -98,6 +123,10 @@ and aarch64 (NEON), with any number of threads.
 - **The orbit.** The integrator (`sim.rs`) is portable too: its gravity kernel cubes distances by
   multiplication, not `powi`. The tidal shapes (§3.10) use only `+ - * /`, `sqrt` and
   comparisons, and their reference is an order statistic.
+- **The view.** The main edition computes its view with the platform's libm and a
+  platform-dependent score, so the edition never takes transformed positions from it. It takes
+  the view's parameters, recorded as bit patterns, and re-applies them to the raw orbit with
+  exactly rounded arithmetic, `math::sin_cos` and `math::fmod` (§3.5).
 
 ### 0.2 Golden canaries
 
@@ -113,9 +142,12 @@ Unit tests pin SHA-256 digests of small but complete computations:
   (`GOLDEN_SHA256`);
 - `paper.rs`: the paper sheet (`GOLDEN_SHEET_SHA256`);
 - `math.rs`: the libm bits (`libm_bits_are_pinned`);
-- `tests/ember_determinism.rs`: the end-to-end frame stream and still of a small render of a
-  tilted figure-eight with tidal bodies, and two of its statistics, `stats.contact_events` and
-  the still's inked node count.
+- `view.rs`: the bits of the canvas track for every projection space under every drift, through
+  a tilted rotation and a scaled frame (`the_canvas_track_matches_the_golden_hash`);
+- `tests/ember_determinism.rs`: the end-to-end frame streams of both films and the still of a
+  small render of a tilted figure-eight with tidal bodies, seen through a fixed view given as
+  exact literals (a tilted rotation, an elliptical drift, a frame scale of 0.9), and two of its
+  statistics, `stats.contact_events` and the still's inked node count.
 
 CI runs them on x86_64 Linux, aarch64 Linux and aarch64 macOS, and once more on x86_64 built
 for `x86-64-v3` (AVX2/FMA code generation; `ci/README.md`). A digest that changes on one architecture only is a
@@ -124,22 +156,24 @@ determinism bug; a digest that changes everywhere is an algorithm change.
 Any change that alters rendered bits must bump `certificate::ALGORITHM_VERSION`, re-bless every
 affected digest and verify the new values on both architectures:
 
-- **Unit goldens** (`fft.rs`, `fluid.rs`, `ink.rs`, `paper.rs`, `optics.rs`, `math.rs`) have no
-  bless switch. Each asserts with `assert_eq!`, so a failing test prints its new value next to
-  the recorded one. Run `cargo test --release --lib ember` and copy the printed values into the
-  constants.
+- **Unit goldens** (`fft.rs`, `fluid.rs`, `ink.rs`, `paper.rs`, `optics.rs`, `math.rs`,
+  `view.rs`) have no bless switch. Each asserts with `assert_eq!`, so a failing test prints its
+  new value next to the recorded one. Run `cargo test --release --lib ember` and copy the
+  printed values into the constants.
 - **End-to-end goldens**: `EMBER_BLESS=1 cargo test --release --test ember_determinism --
-  --include-ignored --nocapture` prints them: the frame-stream and still digests
-  (`GOLDEN_FRAMES_SHA256`, `GOLDEN_STILL_SHA256`), the render's `stats.contact_events`
-  (`GOLDEN_CONTACT_EVENTS`) and the still's inked node count (`GOLDEN_STILL_INK_NODES` =
-  `still_ink_fraction · WIDTH·HEIGHT·q²`, recovered exactly: the render divides one integer count
-  by that denominator once). Update all four constants. Every render must print the same values,
-  and the ignored `the_golden_render_stretches_its_bodies` must pass: with `tidal.max_aspect = 1`
-  the golden orbit draws a different still, so the goldens cover the shape arithmetic (see the
-  file's header for the full procedure).
+  --include-ignored --nocapture` prints them: the digests of the frame stream, the slow film and
+  the still (`GOLDEN_FRAMES_SHA256`, `GOLDEN_SLOW_FRAMES_SHA256`, `GOLDEN_STILL_SHA256`), the
+  render's `stats.contact_events` (`GOLDEN_CONTACT_EVENTS`) and the still's inked node count
+  (`GOLDEN_STILL_INK_NODES` = `still_ink_fraction · WIDTH·HEIGHT·q²`, recovered exactly: the
+  render divides one integer count by that denominator once). Update all five constants. Every
+  render must print the same values (with the slow film, without it and still-only: the mode
+  changes no bit of what it renders), and the ignored `the_golden_render_stretches_its_bodies`
+  must pass: with `tidal.max_aspect = 1` the golden orbit draws a different still, so the
+  goldens cover the shape arithmetic (see the file's header for the full procedure).
 
 A `libm` bump is such a change, and it re-blesses **every** ember golden, unit and end-to-end:
-the `math` wrappers feed the FFT twiddles, the fluid, the ink, the paper and the optics.
+the `math` wrappers feed the view, the FFT twiddles, the fluid, the ink, the paper and the
+optics.
 Dependabot ignores `libm`; bump it by hand.
 
 ### 0.3 Code rules
@@ -160,11 +194,11 @@ Dependabot ignores `libm`; bump it by hand.
    Tests use tiny grids: the whole ember unit suite stays within seconds.
 4. **Errors.** Fallible constructors return `EmberResult<T>` (`error.rs`). No `unwrap` or
    `expect` outside tests except on provably infallible invariants, with the reason stated.
-5. **Performance.** The production render (1,000,000 steps, 3456 × 2234 pixels, 1802 frames)
-   must be reasonable on a 16-core CPU: buffers are allocated once and reused, hot loops do not
-   allocate, data is structure-of-arrays. Correctness and determinism come first. Everything
-   runs on the CPU: no GPU and no hardware video encoder, anywhere. The cost of the default
-   resolution is in §4.2.
+5. **Performance.** The production render (1,000,000 steps, 3456 × 2234 pixels, 1802 frames,
+   and up to 18,011 in the slow film) must be reasonable on a 16-core CPU: buffers are
+   allocated once and reused, hot loops do not allocate, data is structure-of-arrays.
+   Correctness and determinism come first. Everything runs on the CPU: no GPU and no hardware
+   video encoder, anywhere. The cost of the default resolution is in §4.2.
 
 ---
 
@@ -196,7 +230,9 @@ Dependabot ignores `libm`; bump it by hand.
   evaluated as `(T·k)/(N - 1)` except that `t_{N-1} = T` exactly.
 - **Film time.** The frame schedule (§8.5) shows the whole orbit, 1,802 frames at 60 fps (about
   30 s) at the default 1,000,000 steps, so film time is proportional to fluid time and a fraction
-  of `T` is the same fraction of the film. The look is timed that way (§6.1).
+  of `T` is the same fraction of the film. The look is timed that way (§6.1). The slow film
+  (§8.3) shows the same fluid times ten times slower, so every film time of the look lasts ten
+  times as long in it.
 - **Paper.** The sheet is measured in millimetres with `x` right and `y` **down** from the
   top-left corner (§7.5).
 
@@ -209,70 +245,190 @@ Dependabot ignores `libm`; bump it by hand.
 | `mod.rs` | Overview, module tree, public re-exports. | |
 | `error.rs` | Errors. | `EmberError`, `EmberResult` |
 | `config.rs` | Every tunable, its defaults (Appendix A) and range validation. | `EmberConfig` and its sections (`TidalConfig` among them), `validate` |
-| `math.rs` | The libm facade, portable comparison primitives, the source guard. | `exp`, `ln`, `pow`, `cbrt`, `tanh`, `sin`, `cos`, `sin_cos` |
-| `orbit.rs` | Orbit → three moving, tidally stretched bodies: PCA projection, time map and shapes (§3). | `BodyTrack`, `BodyMotion`, `BodyState`, `Shape`, `Projection` |
+| `math.rs` | The libm facade, portable comparison primitives, the source guard. | `exp`, `ln`, `pow`, `cbrt`, `tanh`, `sin`, `cos`, `sin_cos`, `fmod` |
+| `view.rs` | The main edition's view, re-applied to the raw orbit: projection space, viewing rotation, drift and frame → the canvas track (§3.1–3.5). | `View`, `ViewProjection`, `ViewDrift`, `ViewFrame`, `View::canvas_track` |
+| `orbit.rs` | Canvas track → three moving, tidally stretched bodies: time map and shapes (§3.6–3.10). | `BodyTrack`, `BodyMotion`, `BodyState`, `Shape`, `TrackSurvey` |
 | `fft.rs` | Deterministic mixed-radix FFT and real 2-D transforms (§4.1). | `Rfft2d`, `Spectrum` |
 | `fluid.rs` | The Navier–Stokes wake solver with penalised elliptical bodies (§4.2). | `FluidGrid`, `WakeSolver`, `Snapshot`, `FluidStats` |
 | `trace.rs` | Backward characteristics with gated elliptical soak-zone contacts (§5.2). | `Tracer`, `FlowWindow`, `ContactRules`, `SoakFrame`, `Trace` |
-| `ink.rs` | Ink node grid, ink fields, solid bodies and the per-frame remap (§5.3). | `NodeGrid`, `InkFields`, `InkDecay`, `remap` |
+| `ink.rs` | Ink node grid, ink fields, solid bodies and the per-frame remap (§5.3). | `NodeGrid`, `InkFields`, `InkDecay`, `remap`, `remap_visible` |
 | `look.rs` | Tone law, timed in film time → the pine-soot load (§6). | `Look` |
 | `optics.rs` | 36-band Kubelka–Munk/Saunderson shading of the pine-soot load and the display encoding (§7.1–7.4). | `Optics` |
 | `paper.rs` | The kozo sheet: formation and fibres → mottle and ink gain (§7.5). | `KozoSheet`, `PaperSample` |
-| `pipeline.rs` | Planning, the frame loop, shading, digests (§8.1–8.3). | `plan_ember`, `render_ember`, `EmberRequest`, `EmberSummary` |
+| `pipeline.rs` | Planning, the frame loop, the slow film, shading, digests (§8.1–8.3). | `plan_ember`, `render_ember`, `EmberRequest`, `EmberMode`, `EmberFrame`, `EmberSummary` |
 | `certificate.rs` | The determinism certificate, written and read back (§8.4). | `EmberCertificate`, `schedule_sha256`, `ALGORITHM_VERSION` |
 
 **Public API** (`three_body_problem::ember`): `EmberConfig`, `EmberError`, `EmberResult`,
 `EmberRequest`, `EmberMode`, `EmberFrame`, `EmberPlan`, `EmberSummary`, `EmberStats`,
-`EmberTimings`, `EmberProjection`, `plan_ember`, `render_ember`, `EmberCertificate`,
-`CertificateError`, and the `certificate`, `config`, `error` and `pipeline` modules. Everything
-else is `pub(crate)`. `fft_bench` is a hidden export for `benches/ember_fft.rs`.
+`EmberTimings`, `View`, `ViewProjection`, `ViewDrift`, `ViewFrame`, `plan_ember`,
+`render_ember`, `EmberCertificate`, `CertificateError`, and the `certificate`, `config`,
+`error`, `pipeline` and `view` modules. Everything else is `pub(crate)`. `fft_bench` is a hidden
+export for `benches/ember_fft.rs`.
 
-**Around the module**: `app.rs` (`preflight_ember_edition`, `render_ember_edition`,
-`ember_masses`, the paper seed and the frame schedule), `main.rs` (stage order, exit status and
-`--ember-algorithm`, §8.5), `render/video.rs` (the `*_srgb` encoders, all software),
-`examples/ember_render.rs` (verification and look development, §8.6),
-`tests/ember_determinism.rs` (the end-to-end golden test) and `benches/ember_fft.rs`.
+**Around the module**: `app.rs` (`ember_view`, `ember_frontal_view`,
+`preflight_ember_edition`, `render_ember_edition`, `ember_masses`, the paper seed, the frame
+schedule and `EMBER_SLOW_FACTOR`), `main.rs` (stage order, exit status and `--ember-algorithm`,
+§8.5), `drift.rs` (`AppliedDrift`, what a drift added) and `render/batch_drawing.rs`
+(`primary_symmetry_scale`), which the view is captured from (§3.5), `render/video.rs` (the
+`*_srgb` encoders, all software, and `create_video_groups_from_frames`, which feeds the
+encoders of both films from one render), `examples/ember_render.rs` (verification and look
+development, §8.6), `tests/ember_determinism.rs` (the end-to-end golden test) and
+`benches/ember_fft.rs`.
 
 ---
 
-## 3. Orbit → moving bodies (`orbit.rs`)
+## 3. Orbit → moving bodies (`view.rs`, `orbit.rs`)
 
 The input is the raw recorded orbit, `positions[body][knot] ∈ ℝ³`: exactly three bodies with
-`N ≥ 2` knots each, all finite, straight from the integrator (not drift- or view-transformed),
-and the three initial masses (`EmberRequest::masses`). `BodyTrack::new(positions, masses,
-aspect, config)` builds the bodies in the following steps. All sums run in **scan order**
-(knot-major, then body) with Neumaier-compensated summation. A non-positive or non-finite
-aspect, fill, reference speed or mass is `InvalidConfig`; a degenerate recording is
-`DegenerateOrbit`.
+`N ≥ 2` knots each, straight from the integrator (not projected, rotated or drifted), its
+recorded time step `dt` (`EmberRequest::dt`), the three initial masses (`EmberRequest::masses`)
+and the main edition's view of the orbit (`EmberRequest::view`, an `ember::View`).
 
-**3.1 Bounding box.** `low`/`high` per axis over all `3N` points; `origin = (low + high)/2`,
-`extent = max_axis(high - low)`. A non-finite or non-positive extent is `DegenerateOrbit`.
+The main edition does not draw the raw orbit. It draws it in the seed's projection space,
+rotated to the best-composed of several viewing angles, carried along a drift path and framed by
+an aspect-corrected bounding box. The ember edition shows the same motion: at every recorded
+knot each body sits where the main edition draws the head of that body's trail (for a seed with
+a symmetry, the head of the trail's primary copy). `View::canvas_track(raw, dt, aspect)` applies
+§3.1–§3.4 to every knot of every body and returns the **canvas track** `pos[body][knot]` on the
+canvas of §1. Only `x` and `y` of the transformed point reach the frame, so its third component
+is never formed. `BodyTrack::new(track, masses, config)` stores the track (3 × N × 2 `f64`,
+structure of arrays) and derives the duration, the time map and the tidal shapes from it
+(§3.6–§3.10).
 
-**3.2 Moments.** Normalised points `q = (p - origin)/extent`; their mean `μ` over all `3N`
-points and the covariance `C = Σ (q - μ)(q - μ)ᵀ / 3N`.
+`canvas_track` returns `InvalidView` for a view that fails `View::validate` (a non-finite
+number, a frame without a positive size, a `scale` outside `(0, 1]`, a drift eccentricity
+outside `[0, 1)` or a negative drift semi-axis), for a `dt` or an aspect that is not finite and
+positive, and for the two frame checks of §3.4. It returns `DegenerateOrbit` unless the orbit
+has exactly three bodies with the same number (at least 2) of recorded positions, each of which
+gives a finite canvas position. `BodyTrack::new` returns `DegenerateOrbit` for a median body
+speed that gives no finite positive duration (§3.6) and `InvalidConfig` for a reference speed or
+a mass that is not finite and positive.
 
-**3.3 Principal axes.** Symmetric 3 × 3 eigen-decomposition by **cyclic Jacobi**: fixed pivot
-order `(0,1), (0,2), (1,2)`; rotation from `θ = (a_qq - a_pp)/(2·a_pq)`,
-`t = sign(θ)/(|θ| + sqrt(θ² + 1))`, `c = 1/sqrt(t² + 1)`, `s = t·c`; sweeps until every
-`|off-diagonal| ≤ 10⁻³⁰⁰` or 64 sweeps. Eigenpairs sorted by eigenvalue, descending
-(`total_cmp`, index tie-break). The orbit must span a plane: `λ₁ > 10⁻¹²·λ₀`, else
-`DegenerateOrbit`. `e₀` is normalised and `e₁` Gram–Schmidt-orthogonalised against it.
+**3.1 Projection space** (`ViewProjection`; the main edition's `ProjectionMode`, applied there
+by `app::apply_projection`). Velocities are forward differences over the recorded step, the last
+knot repeating the one before it: `v[k] = (p[n] - p[n-1])/dt` with `n = min(k + 1, N - 1)`. With
+`ext(q) = max(max q - min q, 10⁻¹²)` taken over every body and knot (finite values only),
+`velocity_scale = max(ext(p.x), ext(p.y)) / max(ext(v.x), ext(v.y))`, or 1 if the denominator is
+at most `10⁻¹²`, and `w = v·velocity_scale`: the velocities rescaled to the extent of the
+positions. The point `s` of body `b` at knot `k` is
 
-**3.4 Anchor rule.** Eigenvector signs are arbitrary, so each axis `a ∈ {0, 1}` is oriented by
-its anchor: with `v = (q - μ)·e_a`, the anchor is the first point in scan order whose
-`|v| ≥ max|v|·(1 - 10⁻¹²)`; flip `e_a` if the anchor's `v < 0`.
+| `projection` | `s` |
+|--------------|-----|
+| `position` | `(p.x, p.y, p.z)` |
+| `phase_portrait` | `(p.x, w.x, p.y)` |
+| `cross_braid` | `(p.x, p'.y, p.z)`, with `p'` the position of body `(b + 1) mod 3` at knot `k` |
+| `hodograph` | `(w.x, w.y, p.z)` |
 
-**3.5 Projection.** `P = ((q - μ)·e₀, (q - μ)·e₁)`; per axis `centre = (min P + max P)/2`,
-`half = (max P - min P)/2`, and `scale = fill / max(half_x/a, half_y)` (`fill =
-projection.fill`, default 0.78). A knot's world position is `pos_k = (P_k - centre)·scale`, so
-the bodies span `±fill·a` in `x` or `±fill` in `y`, whichever binds. The projected knots are
-stored once (3 × N × 2 `f64`, structure of arrays).
+Plain positions never form the velocities. In the other three spaces the canvas track is not a
+path in physical space; the time map, the tidal shapes and the fluid work on the canvas track
+whatever it shows.
 
-**3.6 Duration.** On segment `left`, the velocity per source fraction is
+**3.2 Viewing rotation** (`View::rotation`). `q = R·s`, with `R` the 3 × 3 rotation, row-major,
+that the main edition chose: `app::apply_view_orientation` draws `VIEW_CANDIDATE_COUNT` (4)
+uniformly distributed rotations from a forked seed stream, scores the composition each one
+gives and keeps the best. The winning matrix is recorded, not the random numbers or the
+quaternion behind it. Each component is evaluated as `(R_i0·s.x + R_i1·s.y) + R_i2·s.z`, the
+order of the main edition's matrix product, so the rotated `x` and `y` have the main edition's
+bits (the test `the_rotation_has_the_bits_of_the_matrix_product` compares them with nalgebra's
+`Matrix3 * Vector3`).
+
+**3.3 Drift** (`ViewDrift`). `q += o[k]`, the same offset for the three bodies at knot `k`. The
+view records what the main edition's drift added (`drift::AppliedDrift`, returned by
+`DriftTransform::apply`), not the drift's configuration:
+
+- `none`: no offset. A drift whose parameters made it a no-op records this too.
+- `linear`: `o[k] = (V·k)·dt` with the drift velocity `V` (`velocity`), per component and in
+  that order.
+- `elliptical`, a Keplerian arc: the mean anomaly is `M = wrap(M₀ + n·(k·dt))` (`mean_anomaly`,
+  `mean_motion`), where `wrap` takes the exact remainder `math::fmod(·, 2π)` and moves it by one
+  turn if it lies outside `[-π, π]`. The eccentric anomaly `E` solves `E - e·sin E = M`
+  (`eccentricity`) by Newton's iteration from `E = M`: `step = (E - e·sin E - M)/(1 - e·cos E)`,
+  `E ← E - step`, at most 8 times, stopping after a step with `|step| < 10⁻¹²` or when
+  `|1 - e·cos E| ≤ ε` (`ε = f64::EPSILON`); `E = M` when `|e| ≤ ε`. Then
+  `(x', y') = (a·(cos E - e), b·sin E)` (`semi_major`, `semi_minor`) and
+  `o[k] = (D₀₀·x' + D₀₁·y', D₁₀·x' + D₁₁·y')`, with `D` the orientation of the drift ellipse
+  (`rotation`, row-major). Every sine and cosine comes from `math::sin_cos`.
+
+This is the main edition's own solver on the portable functions. The main edition evaluates the
+same formulas with the platform's `sin` and `cos`, which is where the two tracks can differ in
+the last bits (§3.5); without a drift and with a linear one, both sides run the same exactly
+rounded operations in the same order.
+
+A brownian drift is a seeded random walk whose per-step offsets are not recorded, so the edition
+cannot follow it: `app::ember_view` returns `EmberError::InvalidView`, and the run completes the
+package without the ember edition (exit status 3, §8.5).
+
+**3.4 Frame** (`ViewFrame`). `min_x`, `min_y`, `width` and `height` are the main edition's
+bounding box (`RenderContext::bounds`): the extent of the transformed `x` and `y` over every body
+and knot, padded by 5 % of its span on each side, then widened about its centre on one axis to
+the output's aspect ratio. `scale` is the scale about the frame centre that the seed's symmetry
+applies to the primary copy of every stroke (`render::batch_drawing::primary_symmetry_scale`):
+1 without a symmetry and with the mirror symmetry, and the rotational fit scale
+`min(W, H)/hypot(W, H)` (0.543 at 3456 × 2234) with a rotational or dihedral one, which keeps
+the rotated copies on the sheet. With
+
+```text
+nx = (q.x - min_x)/width          ny = (q.y - min_y)/height
+x  = a·(2·nx - 1)·scale           y  = (1 - 2·ny)·scale
+```
+
+`(nx, ny)` are the main edition's normalised coordinates (its pixel is `(nx·W, ny·H)`, rows
+downwards) and `(x, y)` is the canvas position, with `a` the aspect of §1 and `+y` up. Two
+checks tie the frame to the orbit, each an `InvalidView`:
+
+- the frame has the canvas's aspect, `|(width/height)/a - 1| ≤ 10⁻⁹`: otherwise the canvas
+  would shear the orbit;
+- every knot lies on the canvas, `|x| ≤ a·(1 + 10⁻⁹)` and `|y| ≤ 1 + 10⁻⁹`: the frame encloses
+  the whole transformed orbit, so a body off the canvas means that the view belongs to another
+  orbit, another number of steps or an output of another shape.
+
+With the 5 % padding, the orbit and its drift path together span `1/1.1 ≈ 0.909` of the canvas
+on the axis that binds the frame (times `scale`), where `ember-v2` filled 0.78 of it with the
+orbit alone. At `scale = 1` a body's centre therefore comes within 0.091 of the top and of the
+bottom edge when `y` binds, or within `0.091·a` of the left and of the right edge when `x`
+does. The preflight logs the smallest clearance (§8.1).
+
+**3.5 Why the view is recorded and re-applied.** The main pipeline computes its view with the
+platform's `sin`, `cos` and `ln` and chooses the viewing angle with a platform-dependent score,
+so its transformed positions are not reproducible bit for bit on another CPU or operating
+system, while everything the ember edition renders must be (§0.1). Taking the main edition's
+positions would break the contract; recomputing the view inside the edition would either
+inherit the platform dependence or choose another view than the one the main artwork shows.
+
+The main pipeline therefore *captures* the view it resolved. `app::ember_view(projection,
+rotation, drift, bounds, symmetry, (width, height))` assembles the `View` in `main.rs`, once
+the main edition's bounding box is known, from the values the main render itself uses: the
+projection mode, the winning rotation as a matrix, the drift as the quantities it added, the
+bounding box and the primary copy's scale. The certificate records it as `inputs.view`, every
+`f64` as its exact bit pattern (§8.4), so the view is an input like the bodies. The ember
+edition *re-applies* it to the raw orbit it re-simulates (§8.5), with exactly rounded
+arithmetic, `math::sin_cos` and `math::fmod` only.
+
+The canvas track is thus a pure function of the certificate's inputs on every CPU, and it
+agrees with the main edition's on-screen positions to a few units in the last place, far below
+a millionth of a pixel. `app`'s test `test_ember_bodies_follow_the_main_edition_view` runs the
+main pipeline's own functions for every projection space, every drift the edition follows
+(none, linear, elliptical) and every kind of symmetry (none, mirror, rotational, dihedral), on a
+wide and on a tall sheet, and finds every knot within `10⁻⁹` pixels of where the main edition
+draws it.
+
+A render outside the generator has no main edition to follow.
+`app::ember_frontal_view(positions, width, height)` builds the view of an orbit drawn as it is:
+plain positions, the identity rotation, no drift, the main edition's framing rule and
+`scale = 1` (§8.6).
+
+Tests (`view.rs`): the frame mapping with its `y` flip; the rotation's bits; each projection
+space against its definition; the Kepler solve and the angle wrap; the drift offsets; a golden
+digest of the track (§0.2); a JSON round trip that is exact bit for bit and rejects decimal
+numbers and unknown keys; and the rejections above.
+
+**3.6 Duration.** On segment `left` of the canvas track, the velocity per source fraction is
 `dpos/df = (pos_{left+1} - pos_left)·(N - 1)`. The median of `|dpos/df|` over the 3 × 200,001
 samples `f_j = j/200000` (`left = min(⌊f·(N-1)⌋, N-2)`), taken as the exact middle order
 statistic, gives the duration `T = median / reference_speed`: the median body speed is exactly
-`reference_speed` (1), which fixes the Reynolds number.
+`reference_speed` (1), which fixes the Reynolds number. The speeds are on-canvas speeds, so `T`
+depends on the view (its projection space, its drift and the frame's size and `scale`) as well
+as on the orbit.
 
 **3.7 State at time `t`.** `f = clamp(t/T, 0, 1)`, `fi = f·(N - 1)`,
 `left = min(⌊fi⌋, N - 2)`, `w = fi - left`; `pos = pos_left + w·(pos_{left+1} - pos_left)` and
@@ -461,7 +617,9 @@ Vorticity–streamfunction form on the doubly periodic box, pseudo-spectral, 2/3
   sink 61 s) and its whole package 3 h 40 m. On the production host, where the `ember-v1` render
   of the same seed took 23.4 minutes and a sync run of an `ember-v1` package about 70 minutes
   end to end, an `ember-v2` package is estimated at about 2 hours and its ember stage at about
-  75–80 minutes.
+  75–80 minutes. All of these are `ember-v2` figures. With `ember-v3` the orbit's duration and
+  speeds are those of the canvas track (§3.6), so the same seed takes another number of steps,
+  and the slow film adds ink and shading work (§8.3); `ember-v3` has not been timed yet.
 - **Statistics** (deterministic): steps, smallest and largest `h`, largest `u_max`. A non-finite
   flow, body state or step is `EmberError::NonFinite`.
 - **Tests**: a single Fourier mode decays exactly as `e^{-D·t}`; the advection term matches an
@@ -483,21 +641,30 @@ A frame interval `(t_prev, t_frame]` is covered by `S ≥ 1` snapshot intervals,
 at knots `from` and `to`:
 
 ```text
-S      = max(⌈Δt / max_snapshot_interval⌉, ⌈max_b path_b / (max_snapshot_travel·body_radius)⌉, 1)
+S₀     = max(⌈Δt / max_snapshot_interval⌉, ⌈max_b path_b / (max_snapshot_travel·body_radius)⌉, 1)
 path_b = Σ_{k ∈ (from, to]} ( |pos_b(t_k) - pos_b(t_{k-1})|
                               + deformation_speed_b(t_{k-1})·(t_k - t_{k-1}) )
+S      = ⌈S₀ / F⌉·F
 ```
 
-with `Δt = t_to - t_from`. `path_b` is the farthest any material of body `b` can travel: the
-length of its centre's recorded polyline through the knots `from..=to` (not its displacement,
-which misses a body that turns back) plus, per knot interval, its outline's deformation speed
-(§3.10) at the interval's start times the interval (a tidally turning ellipse sweeps water even
-where its centre rests). `S = 0` when `from = to`. No snapshot interval is longer than
+with `Δt = t_to - t_from` and `F` the slow factor (`EmberRequest::slow_factor`, 10 in the
+product). `S₀` is the count the cadence needs (`snapshot_intervals`), and `S` the next multiple
+of `F` (`lattice_intervals`): the snapshots lie on a uniform lattice on which every in-between
+frame of the slow film ends on a snapshot (§8.3). The lattice is the same in every mode, so the
+fluid's steps, the scheduled frames and the still do not depend on whether the slow film is
+rendered.
+
+`path_b` is the farthest any material of body `b` can travel: the length of its centre's
+recorded polyline through the knots `from..=to` (not its displacement, which misses a body that
+turns back) plus, per knot interval, its outline's deformation speed (§3.10) at the interval's
+start times the interval (a tidally turning ellipse sweeps water even where its centre rests).
+`S = 0` when `from = to`. No snapshot interval is longer than
 `max_snapshot_interval` (default 0.0025) or lets a body's material move more than
 `max_snapshot_travel` radii (default 0.28, i.e. 0.014 world units, under half the shortest
 semi-axis `R/√max_aspect ≈ 0.0289`, so the soak test's straight segments (§5.2) keep the
 thinnest stretched body resolved in time). `FlowWindow` borrows the `S + 1` snapshots and the
-bodies (centres and outlines) at each snapshot time; a single snapshot is an empty window.
+bodies (centres and outlines) at each snapshot time; a single snapshot is an empty window. A
+side remap of the slow film borrows a prefix of them, `τ_0 … τ_{j·S/F}` (§8.3).
 
 ### 5.2 Backward trace (`trace_back(window, rules, start) → Trace`)
 
@@ -520,14 +687,27 @@ per body, the **latest** contact time in the window (or none). For `s = S … 1`
      `g0 = a1 > wc ? 0 : (a0 > wc ? sc : 1)`,
      `g1 = a1 > wc ? (a0 > wc ? 1 : sc) : (a0 > wc ? 1 : 0)`.
    - *Soak frames.* Body `i`'s soak zone is its outline (semi-axes `a_i ≥ b_i` along
-     `(cos θ_i, sin θ_i)`, §3.10) grown by `soak_depth`, taken as the ellipse of semi-axes
-     `a_i + soak_depth`, `b_i + soak_depth` (exact for a disc). Its soak frame (`SoakFrame`)
-     rotates a world offset `v` from the body's centre into the body's axes and scales each
-     coordinate by the reciprocal of its semi-axis:
-     `F(v) = ((cos θ_i·v_x + sin θ_i·v_y)·ia, (-sin θ_i·v_x + cos θ_i·v_y)·ib)` with
-     `ia = 1/(a_i + soak_depth)`, `ib = 1/(b_i + soak_depth)` rounded once per body state
-     (multiplied, never divided). It maps the zone onto the unit circle. `F_1` is the frame of
-     the body at `t1`, `F_0` the one at `t0`.
+     `(c, s) = (cos θ_i, sin θ_i)`, §3.10) grown by `soak_depth`, taken as the ellipse of
+     semi-axes `a_i + soak_depth`, `b_i + soak_depth` (exact for a disc). Its soak frame
+     (`SoakFrame`) is the symmetric matrix `F = R·diag(ia, ib)·Rᵀ`, with `R` the rotation onto
+     the body's axes and `ia = 1/(a_i + soak_depth)`, `ib = 1/(b_i + soak_depth)` rounded once
+     per body state (multiplied, never divided):
+
+     ```text
+     xx = (c·c)·ia + (s·s)·ib      xy = (c·s)·(ia - ib)      yy = (s·s)·ia + (c·c)·ib
+     F(v) = (xx·v_x + xy·v_y, xy·v_x + yy·v_y)
+     ```
+
+     It scales a world offset `v` from the body's centre by `ia` along the long axis and by
+     `ib` across it, without turning it, and so maps the zone onto the unit circle. `F_1` is
+     the frame of the body at `t1`, `F_0` the one at `t0`. `F` is even in the axis: `(c, s)`
+     and `(-c, -s)` give the same bits, and a disc's frame is `ia·I` (to rounding) whatever its
+     axis. That matters because the tidal axis is an eigenvector, whose sign is arbitrary
+     (§3.10) and can differ between the two snapshots of a step. The `ember-v2` frame rotated
+     `v` into the body's axes, `((c·v_x + s·v_y)·ia, (-s·v_x + c·v_y)·ib)`, which is odd in the
+     axis: after a sign flip `F_1` and `F_0` described opposite orientations, the segment of
+     step 3 ran through the body's centre, and any parcel that passed the gate recorded a
+     contact, wherever it was.
 3. **Zone test** per body `i`, the prototype's `_seg_iv` in soak-frame coordinates with radius 1:
    the parcel moves along the straight segment from `a = F_1(x - c_i(t1))` (`s = 0`) to
    `b = F_0(xn - c_i(t0))` (`s = 1`), with `c_i` the body's centre. With `d = b - a`,
@@ -547,7 +727,9 @@ with a literal eager implementation): the soak frames of both ends of every step
 once per window; the gate is evaluated only when a zone interval is non-empty; no contact work
 once every body has a record, when `t1 - dt > t_valve`, or when `t1 < t_on`; a zone test with
 `disc ≤ 0` stops before the square root. `trace_lanes` advances four independent parcels in lock
-step (each lane runs exactly the single-parcel operations).
+step (each lane runs exactly the single-parcel operations). Two tests pin the soak frame:
+`the_soak_frame_is_symmetric_and_blind_to_the_axis_sign` and
+`an_axis_sign_flip_between_snapshots_changes_no_trace`.
 
 ### 5.3 Fields and remap
 
@@ -583,6 +765,13 @@ linearly, which models dilution at the node scale.
 
 A node whose traced origin is not finite (a NaN or infinite velocity on its pathline) inherits
 clear water and is counted; the pipeline turns any such count into `EmberError::NonFinite`.
+
+`remap_visible` is the same remap of the visible nodes only: the `M` margin nodes on every side
+of `next` keep whatever they held, the statistics count visible nodes, and every visible node
+gets the bits `remap` gives it (a test compares the two). It serves fields that are shaded and
+discarded, the slow film's in-between frames (§8.3): the shader reads visible nodes only, and
+the margin matters only to the next remap.
+
 Tests cover pure translation and rotation flows, a disc inking exactly its swept band, analytic
 moving-disc contact times, the valve and the pre-roll, zero outside the grid, the clamp, the
 flush, a node-by-node reference (the eager tracer, the literal sampler and the literal
@@ -777,23 +966,45 @@ the floor wash (§6.1).
 `plan_ember(request)` checks, in this order, and derives everything the render needs before the
 fluid starts: `EmberConfig::validate`; the output size (non-empty, at most 16,384 per side); the
 kozo sheet's fibre count at that size (at most 2²⁴ = 16,777,216, §7.5: it depends on the fibre
-density and the output's aspect together, which `validate` cannot see); the
-frame schedule (non-empty, strictly increasing, ending on the final knot `N - 1`, `N ≥ 2`); the
-orbit's projection, duration and tidal model (`BodyTrack::new`, §3, which also checks the
-masses); the valve time `t_valve = T - valve_lead`, which must exceed `pre_roll`
-(`OrbitTooShort`); the fluid grid and the ink node grid. It costs one projection and the orbit's
-tables (the median speed over 3 × 200,001 samples, the tidal reference over 3 × 4,001 and the
-shape-aware speed table of 400,001 entries, each evaluating every body's shape at `t` and
-`t + δ`: fixed counts, whatever the number of knots) and allocates nothing proportional to the
-output. `render_ember` plans again itself; `app::preflight_ember_edition` runs the plan right
-after the orbit is selected, so a rejected orbit fails in seconds rather than after the main
-render.
+density and the output's aspect together, which `validate` cannot see); the frame schedule
+(non-empty, strictly increasing, ending on the final knot `N - 1`, `N ≥ 2`); the slow factor
+(1 to `MAX_SLOW_FACTOR` = 240, else `InvalidSchedule`); the view and the canvas track it gives
+the orbit (`View::canvas_track`, §3.1–§3.4); the orbit's duration and tidal model
+(`BodyTrack::new`, §3.6–§3.10, which also checks the masses); the valve time
+`t_valve = T - valve_lead`, which must exceed `pre_roll` (`OrbitTooShort`); the fluid grid and
+the ink node grid; the slow film's first frame and length (§8.3); and the survey below. It costs
+one pass of the view over the orbit and the orbit's tables (the median speed over 3 × 200,001
+samples, the tidal reference over 3 × 4,001 and the shape-aware speed table of 400,001 entries,
+each evaluating every body's shape at `t` and `t + δ`: fixed counts, whatever the number of
+knots) and allocates nothing proportional to the output. `render_ember` plans again itself;
+`app::preflight_ember_edition` runs the plan right after the orbit is selected and its view
+captured, so a rejected orbit fails in seconds rather than after the main render.
+
+**The survey** (`TrackSurvey` in `orbit.rs`, read through `EmberPlan`) says what an orbit will
+cost and how it sits on the sheet before any fluid is simulated:
+
+- `estimated_fluid_steps`: the solver's step rule (§4.2) on the bodies' own speeds,
+  `Σ_i (T/400000)/min(cfl·dx/max(speed_i, 10⁻⁶), max_dt)` over the speed table of §3.8
+  (`i < 400000`). The stirred water is faster in places, so a render takes somewhat more steps
+  (`stats.fluid_steps`).
+- `peak_speed`: the largest entry of that table over `reference_speed`, the fastest material
+  speed of a body in units of the median speed.
+- `edge_clearance`: `min(a - |x|, 1 - |y|)` over every knot of every body, the smallest
+  distance of a body's centre from the canvas edge (§3.4).
+- `overlap_fraction`: the fraction of the 4,001 uniform times `T·i/4000` at which two bodies'
+  centres are closer than `2·body_radius`.
+
+The preflight logs them next to the orbit's duration, the inking window and the frame counts of
+both films (the lines `Ember preflight: …` and `Ember plan: …`), and returns them as
+`app::EmberPreflight`.
 
 Barring resource exhaustion, a request that plans successfully can fail later only on a
 non-finite flow or a failing sink. Planning checks ranges; it does not budget memory or time,
 which grow with the output size, the fluid grid and the snapshot cadence. At the defaults a
-standalone render peaked at 4.9 GB resident on an Apple M4 Max, far below the peak of a whole
-package of the same seed there (85 GB resident), which belongs to the main render.
+standalone `ember-v2` render peaked at 4.9 GB resident on an Apple M4 Max, far below the peak of
+a whole package of the same seed there (85 GB resident), which belongs to the main render.
+`ember-v3` has not been measured yet; its slow film reuses the two ink-field buffers and the
+frame buffer.
 
 ### 8.2 The frame loop (`render_ember`)
 
@@ -805,22 +1016,35 @@ fields = 0; window[0] = snapshot at t = 0, bodies at t = 0; t_prev = 0; previous
 for each scheduled knot k_f (frame f):
     t_f = t_{k_f};  S = snapshot intervals from the previous knot to k_f (§5.1)
     for s in 1..=S: solver.advance_to(τ_s); snapshot → window[s]; bodies(τ_s)
+    if mode == VideoAndSlow and f > slow_first_frame and S > 0:
+        the F - 1 in-between frames of the slow film (§8.3)
     if S > 0 and t_f ≥ pre_roll:
         floor_fade = floor_tau ? exp(-(t_f - t_prev)/floor_tau) : 1
         decay = InkDecay(t_f, τ, exp(-(t_f - t_prev)/τ), floor_fade)
         remap(fields → next, window, rules, decay); swap   (§5.3)
         any non-finite origin → NonFinite
-    if mode == Video or f is the last frame:
+    if mode != StillOnly or f is the last frame:
         shade every pixel (§7.1) → 16-bit sRGB; non-finite → NonFinite
         rgb48le = little-endian bytes of the samples
-        if Video: SHA-256 stream ← rgb48le; sink(frame)
+        if mode != StillOnly:
+            frames SHA-256 ← rgb48le
+            if mode == VideoAndSlow and f ≥ slow_first_frame: slow SHA-256 ← rgb48le
+            sink(frame)
     window[0] ← window[S]; t_prev = t_f
 still = the last frame; still digest = SHA-256(rgb48le of the still)
 ```
 
-- **Modes.** `EmberMode::Video` shades every frame and hands it to the sink in order;
-  `EmberMode::StillOnly` shades only the last one and never calls the sink. The fluid and the ink
-  run through every interval in both modes, so the still is identical.
+- **Modes.** `EmberMode::Video` shades every scheduled frame and hands it to the sink in order
+  (the normal film). `EmberMode::VideoAndSlow` also renders the slow film: its in-between frames
+  reach the sink between the scheduled ones (§8.3). `EmberMode::StillOnly` shades only the last
+  frame and never calls the sink. The fluid, its snapshot lattice and the scheduled ink remaps
+  are the same in all three, so the still and the scheduled frames do not depend on the mode.
+- **The sink** receives every `EmberFrame` once, in time order. `index` is the frame's position
+  in the normal film (`None` for an in-between frame) and `orbit_step` the recorded knot it
+  shows; `slow_index` is its position in the slow film (`None` for a frame that is not part of
+  it: every frame in `Video` mode, and the scheduled frames before the slow film starts);
+  `count` and `slow_count` are the lengths of the two films; `time` is the fluid time; `rgb` and
+  `rgb48le` hold the pixels.
 - **Before the pre-roll** the fields stay 0 (bare paper); the first remap after it drops every
   contact earlier than `pre_roll` (§5.2 step 5).
 - **The snapshot window** keeps its buffers between frames (it grows to the largest `S` seen) and
@@ -829,54 +1053,136 @@ still = the last frame; still digest = SHA-256(rgb48le of the still)
   solver runs in its own pool of 32 threads (its transforms stop scaling); the remap and the
   shading use the caller's pool. Results never depend on either.
 - **Statistics** (`EmberStats`, deterministic, in the certificate): `fluid_steps`, `min_dt`,
-  `max_dt`, `max_flow_speed` (the peak penalised flow speed), `snapshots`, `contact_events` (the
-  nodes that recorded a contact, summed over the remapped frames; nodes inside a body are not
-  counted), `still_ink_fraction` (the fraction of the still's visible ink nodes,
-  `width·height·q²`, margin excluded, with a non-zero carbon load) and
-  `still_gamut_mapped_pixels`. The counts are integers summed exactly and the fraction is one
-  count divided once, so all are thread-count invariant (§0.1). Every interval is remapped in
-  both modes, so `contact_events` is the same in `Video` and `StillOnly`. Wall-clock
-  `EmberTimings` (fluid, ink, shade, sink, total) are informational.
-- **Summary.** `EmberSummary` also carries `duration`, `valve_time`, `hold_time` (`hold`),
-  `fade_time` (`τ`), `tidal_reference` (`Δ_ref`), the grids and the projection: the
-  certificate's `derived` section (§8.4).
+  `max_dt`, `max_flow_speed` (the peak penalised flow speed), `snapshots` (the snapshot
+  intervals `S`, summed over the frames), `contact_events` (the nodes that recorded a contact,
+  summed over the scheduled remaps; nodes inside a body are not counted), `still_ink_fraction`
+  (the fraction of the still's visible ink nodes, `width·height·q²`, margin excluded, with a
+  non-zero carbon load) and `still_gamut_mapped_pixels`. The counts are integers summed exactly
+  and the fraction is one count divided once, so all are thread-count invariant (§0.1). Every
+  interval gets its scheduled remap in every mode and the slow film's side remaps add nothing,
+  so the statistics are the same in `Video`, `VideoAndSlow` and `StillOnly`. Wall-clock
+  `EmberTimings` (fluid, ink, shade, sink, total) are informational; the slow film's remaps,
+  shading and sink time are counted in them.
+- **Summary.** `EmberSummary` also carries the slow film's `slow_factor`, `slow_first_frame`,
+  `slow_frames_emitted` and `slow_frames_sha256`, and `duration`, `valve_time`, `hold_time`
+  (`hold`), `fade_time` (`τ`), `tidal_reference` (`Δ_ref`) and the grids: the certificate's
+  `derived` section (§8.4).
 
-### 8.3 Pixel stream
+### 8.3 The slow film
 
-The digested pixels are `rgb48le`: 16-bit sRGB samples, R, G, B per pixel, row-major from the
-top-left pixel, little-endian (written explicitly, independent of the host's byte order). The
-frame stream digest covers all frames concatenated in schedule order. The PNG, WebP and MP4 files
-are encodings of these pixels; their bytes depend on encoder versions and are outside the
-contract (the PNG decodes back to the still's `rgb48le`).
+`EmberMode::VideoAndSlow` renders a second film from the same simulation: the normal film `F`
+times slower (`F` = `EmberRequest::slow_factor`; the generator passes `app::EMBER_SLOW_FACTOR`
+= 10), with `F - 1` in-between frames inside every interval between two scheduled frames. Every
+in-between frame is simulated: none is interpolated from its neighbours.
+
+- **Lattice.** The snapshot count `S` of every scheduled frame interval is a multiple of `F`
+  (§5.1), in every mode. In-between frame `j ∈ 1..F` of an interval therefore falls on its
+  snapshot `j·S/F`, at `τ = τ_{j·S/F}`: a time the solver lands on anyway, with the bodies'
+  state at exactly that time. Because the lattice follows from it, the slow factor is an input
+  of the still and the normal film too (`inputs.frames.slow_factor`). It must lie in
+  `1..=MAX_SLOW_FACTOR` (240); 1 gives no in-between frames.
+- **Side remaps.** In-between frame `j` is the previous scheduled frame's fields remapped
+  through the prefix of the interval's flow window that ends at snapshot `j·S/F` (the snapshots
+  and bodies `0..=j·S/F`), with the decay of the elapsed time, `InkDecay(τ, fade τ,
+  exp(-(τ - t_prev)/fade τ), floor_fade)` and `floor_fade` over `τ - t_prev`. It runs the
+  tracer and the remap of §5.2–§5.3 unchanged, over real snapshots; `remap_visible` computes
+  it, since only visible nodes are shaded. The result is shaded, hashed, handed to the sink and
+  discarded: it lives in the scratch buffer that the interval's scheduled remap overwrites
+  afterwards. An in-between frame before the pre-roll (`τ < t_on`) shows the previous
+  scheduled frame's fields as they are, which is bare paper.
+- **Independence.** A side remap never feeds the scheduled chain: the scheduled remap of the
+  interval starts from the same fields and runs through the whole window, whether or not side
+  remaps ran before it. The still and the normal film are therefore the same with and without
+  the slow film, and side remaps add nothing to `EmberStats`. A non-finite origin in a side
+  remap, or a non-finite shaded pixel, fails the render like any other (`NonFinite`).
+- **Why it is smooth.** Every frame of either film, scheduled or in-between, is exactly one
+  remap away from a scheduled frame's fields, through the same fine steps of the same window.
+  The in-between frames therefore carry no more resampling of the ink than the scheduled ones
+  (chaining the remaps at the slow cadence would resample the ink `F` times as often and
+  soften the still and the normal film), and the scheduled frames are neither sharper nor
+  softer than their neighbours, so nothing pulses at every `F`-th frame. Contacts are decided
+  on the same snapshot steps in every frame.
+- **Start and length.** The slow film skips the bare paper of the pre-roll. With `k_on` the
+  first scheduled frame at or after `t_on = pre_roll` (the last frame if there is none), it
+  starts at scheduled frame `first = max(k_on - 1 - SLOW_FILM_LEAD_FRAMES, 0)`:
+  `SLOW_FILM_LEAD_FRAMES` = 6 scheduled frames before the frame interval in which the bodies
+  start inking, which is one second of bare paper at factor 10 and 60 fps. From there it shows
+  every scheduled frame and the `F - 1` frames between each two of them:
+  `(count - 1 - first)·F + 1` frames, with `count` the schedule's length (`SlowFilm::plan`).
+  At the default 1,000,000 steps and factor 10 that is at most 18,011 frames, 300 s at 60 fps,
+  less ten frames per skipped scheduled frame. `first` is recorded as
+  `derived.slow_first_frame`. Slow frame `i·F` is scheduled frame `first + i` byte for byte,
+  and the last slow frame is the still.
+- **Digest.** `outputs.slow_frames_rgb48le_sha256` hashes the slow film's frames in order,
+  scheduled and in-between alike, and `outputs.slow_frames_emitted` is their count (§8.4).
+- **Cost.** A side remap traces through `j·S/F` snapshot intervals, so the side remaps of a
+  frame interval trace through `S·(F - 1)/2` intervals together (4.5·`S` at factor 10), on the
+  visible nodes, next to the `S` of the scheduled remap on every node. Shading, hashing and the
+  sink run for `F` frames per interval instead of one. The fluid's work does not depend on the
+  mode. In every mode, rounding `S₀` up to a multiple of `F` gives the solver more times to
+  land on and the scheduled remap more, shorter steps than `ember-v2` took.
+- **Tests.** `pipeline.rs`: `the_snapshot_lattice_is_a_multiple_of_the_slow_factor` and
+  `the_slow_film_starts_a_little_before_the_ink`. `ink.rs`:
+  `the_visible_remap_matches_the_full_one_on_visible_nodes`. `tests/ember_determinism.rs`: the
+  slow film has its planned length, starts on bare paper, holds every scheduled frame from
+  `first` on at every `F`-th index and ends on the still; the still and the normal film have
+  the golden digests with the slow film, without it and in still-only mode; and
+  `the_slow_film_moves_evenly_between_scheduled_frames` checks that the film opens with its
+  lead of bare paper and that, once the ink is on the sheet, the picture changes from every
+  slow frame to the next by about the same amount, across the scheduled frames too: no
+  repeated frame, no jump, and no flicker back (two frames apart, it has changed more than in
+  either step between them).
 
 ### 8.4 The certificate (`certificate.rs`, `metadata/ember.json`)
 
-Layout (`schema_version` 3, `CERTIFICATE_SCHEMA_VERSION`), in file order. Version 1 was only
+Layout (`schema_version` 4, `CERTIFICATE_SCHEMA_VERSION`), in file order. Version 1 was only
 written by test renders; version 2, published with `ember-v1`, added
 `stats.frames_with_cinnabar` and `stats.peak_frame_cinnabar_fraction` and required the nullable
-keys to be present. Version 3
-is the layout of `ember-v2`: the cinnabar statistics and the look's vermilion settings
-(`fresh_tau`, `hold`, `ember_tau`, `cinnabar_strength`, `carbon_keep`, `meeting_threshold`) are
-gone; it adds the `tidal` configuration, the film-time look settings (`fade_fraction`,
-`hold_fraction`) and `derived.hold_time`, `derived.fade_time` and `derived.tidal_reference`. A
-reader rejects any other version, so an `ember-v1` certificate reads as `UnsupportedSchema`.
+keys to be present. Version 3 was the layout of `ember-v2`: the cinnabar statistics and the
+look's vermilion settings (`fresh_tau`, `hold`, `ember_tau`, `cinnabar_strength`,
+`carbon_keep`, `meeting_threshold`) went; it added the `tidal` configuration, the film-time
+look settings (`fade_fraction`, `hold_fraction`) and `derived.hold_time`, `derived.fade_time`
+and `derived.tidal_reference`. Version 4 is the layout of `ember-v3`: it adds `inputs.view`,
+`inputs.frames.slow_factor`, `derived.slow_first_frame`,
+`outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`, and the
+principal-plane projection (`config.projection`, `derived.projection`) is gone. A reader
+rejects any other version, so an `ember-v1` or `ember-v2` certificate reads as
+`UnsupportedSchema`.
 
 | Field | Contents |
 |-------|----------|
-| `schema_version`, `edition`, `algorithm`, `contract` | Layout version (3), `"ember"`, `ALGORITHM_VERSION` (`ember-v2`), and the certified statement. |
-| `inputs` | `seed` (hex), `steps`, `dt`, `gravitational_constant`, `integrator`, `bodies` (initial masses, positions and velocities as decimals and as `0x`-prefixed 16-digit `f64` bit patterns), `width`, `height`, `paper_seed_sha256`, `frames` (`count`, `first_step`, `last_step`, `frame_rate`, `sha256`). |
-| `config` | The full `EmberConfig` (Appendix A), `tidal` included. |
-| `derived` | `duration`, `valve_time`, `hold_time`, `fade_time`, `tidal_reference`, `fluid_grid` `[nx, ny]`, `fluid_dx`, `ink_grid` `[cols, rows]`, and `projection` (`origin`, `extent`, `axes`, `scale`, `variances`). |
-| `outputs` | `frames_rgb48le_sha256` (`null` for still-only renders), `frames_emitted`, `still_rgb48le_sha256`, `encoding`. |
+| `schema_version`, `edition`, `algorithm`, `contract` | Layout version (4), `"ember"`, `ALGORITHM_VERSION` (`ember-v3`), and the certified statement. |
+| `inputs` | `seed` (hex), `steps`, `dt`, `gravitational_constant`, `integrator`, `bodies` (initial masses, positions and velocities as decimals and as `0x`-prefixed 16-digit `f64` bit patterns), `view` (the main edition's view, below), `width`, `height`, `paper_seed_sha256`, `frames` (`count`, `first_step`, `last_step`, `frame_rate`, `sha256`, `slow_factor`). |
+| `config` | The full `EmberConfig` (Appendix A): `fluid`, `contact`, `tidal`, `look`, `paper`, `raster`. |
+| `derived` | `duration`, `valve_time`, `hold_time`, `fade_time`, `tidal_reference`, `fluid_grid` `[nx, ny]`, `fluid_dx`, `ink_grid` `[cols, rows]`, `slow_first_frame` (the scheduled frame at which the slow film starts, §8.3). |
+| `outputs` | `frames_rgb48le_sha256` (`null` for still-only renders), `frames_emitted`, `slow_frames_rgb48le_sha256` (`null` unless the slow film was rendered), `slow_frames_emitted`, `still_rgb48le_sha256`, `encoding`. |
 | `stats` | `EmberStats` (§8.2): `fluid_steps`, `min_dt`, `max_dt`, `max_flow_speed`, `snapshots`, `contact_events`, `still_ink_fraction`, `still_gamut_mapped_pixels`. |
 | `build` | Informational: `crate_version` (`CARGO_PKG_VERSION`, 1.1.0 for the release that ships the ember edition), `target_arch`, `target_os`, `threads`. |
 | `timings_seconds` | Informational: `fluid`, `ink`, `shade`, `sink`, `total`. |
 
+**The view** (`inputs.view`, §3.1–§3.4) has four keys: `projection` (`"position"`,
+`"phase_portrait"`, `"cross_braid"` or `"hodograph"`); `rotation` (3 × 3, row-major); `drift`,
+an object tagged by `mode`: `"none"`, `"linear"` with `velocity` (3 numbers), or `"elliptical"`
+with `rotation` (3 × 3, row-major), `mean_anomaly`, `mean_motion`, `eccentricity`, `semi_major`
+and `semi_minor`; and `frame` (`min_x`, `min_y`, `width`, `height`, `scale`). Every number is
+written as its `f64` bit pattern, a `0x`-prefixed 16-digit string like those of `bodies`, with
+no decimal copy: the view is read back bit for bit, and a decimal number in the place of a bit
+pattern is rejected like an unknown key.
+
 Digests are lowercase hex SHA-256: `inputs.frames.sha256 = schedule_sha256(steps)` hashes the
 knot indices as little-endian `u64`s in schedule order; `inputs.paper_seed_sha256 =
-paper_seed_sha256(seed bytes ++ "\0cosmic-ember/kozo-sheet/v1")`; the outputs hash `rgb48le`
-(§8.3). Everything except `build` and `timings_seconds` is deterministic and must match between
-two renders of the same inputs.
+paper_seed_sha256(seed bytes ++ "\0cosmic-ember/kozo-sheet/v1")`; the outputs hash the pixel
+streams below. Everything except `build` and `timings_seconds` is deterministic and must match
+between two renders of the same inputs.
+
+**Pixel streams.** The digested pixels are `rgb48le`: 16-bit sRGB samples, R, G, B per pixel,
+row-major from the top-left pixel, little-endian (written explicitly, independent of the host's
+byte order). `outputs.frames_rgb48le_sha256` covers the scheduled frames concatenated in
+schedule order; `outputs.slow_frames_rgb48le_sha256` covers the slow film's frames concatenated
+in film order, the scheduled frames from `derived.slow_first_frame` on and the in-between
+frames (§8.3); `outputs.still_rgb48le_sha256` covers the still alone. The PNG, WebP and MP4
+files are encodings of these pixels; their bytes depend on encoder versions and are outside the
+contract (the PNG decodes back to the still's `rgb48le`).
 
 **Writing.** `EmberCertificate::new(context, summary)` assembles it; `write_json` writes
 pretty-printed JSON with a final newline, flushes and syncs the file, and returns every I/O
@@ -885,10 +1191,13 @@ error.
 **Reading.** `EmberCertificate::read_json`/`from_json` parse it into the same types. The reader
 rejects another `schema_version` (`UnsupportedSchema`) or `edition` (`WrongEdition`), missing and
 unknown fields at every level, malformed bit patterns (`Json`, naming the field and its
-position), and outputs that disagree about the frames (`InconsistentOutputs`: frames emitted
-without a frames digest, or a frames digest over another number of frames than
-`inputs.frames.count`). The nullable fields (`outputs.frames_rgb48le_sha256`,
-`config.look.floor_tau`) must be present too, as `null` or a value: a certificate without the
+position), and outputs that disagree about the frames (`InconsistentOutputs`). For the normal
+film that is frames emitted without a frames digest, or a frames digest over another number of
+frames than `inputs.frames.count`. The slow film follows the same rule against its own length,
+`(count - 1 - slow_first_frame)·slow_factor + 1`, and a slow digest without a frames digest is
+rejected too: the slow film is only rendered together with the normal one. The nullable fields
+(`outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+`config.look.floor_tau`) must be present, as `null` or a value: a certificate without the
 frames digest is rejected, not read as still-only. The crate enables `serde_json`'s
 `float_roundtrip`, so every decimal reads back exactly and a written certificate reads back
 equal to itself, every float bit for bit. `CertificateInputs::bodies()` nevertheless rebuilds
@@ -900,77 +1209,124 @@ is not exact.
 `CERTIFICATE_SCHEMA_VERSION` whenever the layout changes; each keeps its version history in its
 doc comment. The sync loop re-renders the published editions of an older algorithm (§8.5).
 
-**What is certified.** The frames are a pure function of `inputs` and `config`: the recorded
-bodies, not the seed. Mapping a seed to an orbit runs the main generator's orbit search, whose
-scores use platform floating point (`rustfft` with runtime SIMD dispatch, the platform libm);
-on an exact near-tie a different machine could in principle select a different orbit. A
-cross-machine check therefore compares `inputs.bodies` first, or re-renders from them (§8.6).
+**What is certified.** The three digests are a pure function of `inputs` and `config`: the
+recorded bodies and the recorded view, not the seed. Mapping a seed to an orbit runs the main
+generator's orbit search, whose scores use platform floating point (`rustfft` with runtime SIMD
+dispatch, the platform libm); on an exact near-tie a different machine could in principle select
+a different orbit. The view comes from the main pipeline too, platform libm included (§3.5). A
+cross-machine check therefore compares `inputs.bodies` and `inputs.view` first, or re-renders
+from them (§8.6).
 
 ### 8.5 Integration in the generator
 
 - **Frame schedule**: `app::ember_frame_schedule(steps)` = `render::main_video_checkpoints(steps)`
   (every 555th step and the final one at the default 1,000,000 steps: 1,802 frames), at
-  `DEFAULT_VIDEO_FPS` = 60.
+  `DEFAULT_VIDEO_FPS` = 60. The slow factor is `app::EMBER_SLOW_FACTOR` = 10.
 - **Orbit**: `sim::get_positions(bodies, steps)` re-simulates the selected initial conditions raw
-  (warm-up of `steps`, then `steps` recorded knots) with `DEFAULT_DT` and `sim::G`.
-  `app::ember_masses(bodies)` passes the three initial masses (`EmberRequest::masses`, the tidal
-  weights of §3.10); anything but three bodies is `DegenerateOrbit`.
-- **Stage order** (`main.rs`): the preflight (§8.1) right after the orbit selection; the ember
-  stage after the main still, videos and spectral outputs (whose buffers are freed first) and
-  before the asset manifest. `--no-ember` skips both; `--image-only` renders `StillOnly`.
-- **Encoding**: frames stream straight into two encoders, with an explicit BT.709 conversion
-  and sRGB tags (`render/video.rs`):
-  - web: `web_compatible_srgb` H.264 with `crf = app::EMBER_WEB_CRF` (22), overriding that
-    constructor's default CRF 18 (`app::ember_video_options`);
-  - archival: `high_quality_srgb` HEVC 4:2:2 10-bit, or `software_fast_srgb` under
-    `--fast-encode`.
+  (warm-up of `steps`, then `steps` recorded knots) with `DEFAULT_DT` and `sim::G`;
+  `EmberRequest::dt` is `DEFAULT_DT`. `app::ember_masses(bodies)` passes the three initial masses
+  (`EmberRequest::masses`, the tidal weights of §3.10); anything but three bodies is
+  `DegenerateOrbit`.
+- **View**: `main.rs` calls `app::ember_view` (§3.5) once the main edition's bounding box is
+  fixed, with the seed's projection mode, the rotation `app::apply_view_orientation` returned,
+  the `AppliedDrift` of `app::apply_drift_transformation` (`AppliedDrift::None` under
+  `--drift none`), the bounding box, the seed's symmetry and the output size. A view that cannot
+  be built (a brownian drift) fails the edition like a failed preflight.
+- **Stage order** (`main.rs`): the preflight (§8.1) once the view is captured, before the main
+  render; the ember stage after the main still, videos and spectral outputs (whose buffers are
+  freed first) and before the asset manifest. `--no-ember` skips both; `--image-only` renders
+  `StillOnly`, and every other run `VideoAndSlow`. `--metadata-only` renders nothing but still
+  runs the preflight (unless `--no-ember`), which logs the plan and its survey; a rejection is
+  logged as a warning there and does not change the exit status.
+- **Package files** (`app::EMBER_OUTPUT_PATHS`, in this order), with their roles in
+  `metadata/assets.json`:
 
-  Every encoder is software (`libx264`, `libx265`) on every platform: nothing in the generator
-  uses a GPU or a hardware encoder. The main edition's `--fast-encode` (`fast_encode`) is
-  `libx264` too; the macOS VideoToolbox encoder it used before `ember-v2` is removed.
-- **`--ember-algorithm`** prints `ALGORITHM_VERSION` (`ember-v2`) on its own line and exits 0
+  | File | Role |
+  |------|------|
+  | `images/source/ember.png` | `ember_source_master` |
+  | `images/web/ember_full.webp` | `ember_web_full` |
+  | `images/web/ember_preview.webp` | `ember_web_preview` |
+  | `videos/web/ember.mp4` | `ember_web` |
+  | `videos/web/ember_slow.mp4` | `ember_slow_web` |
+  | `videos/hq/ember.mp4` | `ember_hq` |
+  | `metadata/ember.json` | none (the certificate has no manifest entry) |
+
+  An `--image-only` package has no ember video and no video role. There is no archival copy of
+  the slow film: its frames are certified, so one can be encoded from a re-render.
+- **Encoding**: both films stream straight into their encoders from one render
+  (`app::encode_ember_videos`, on `render::create_video_groups_from_frames`), with an explicit
+  BT.709 conversion and sRGB tags (`render/video.rs`). The call takes one group of encoders per
+  film and hands the frame sink one `GroupWriter` per group; a frame with an `index` is written
+  to the normal film's group and a frame with a `slow_index` to the slow film's:
+  - normal film, web: `web_compatible_srgb` H.264 with `crf = app::EMBER_WEB_CRF` (22),
+    overriding that constructor's default CRF 18 (`app::ember_video_options`);
+  - normal film, archival: `high_quality_srgb` HEVC 4:2:2 10-bit, or `software_fast_srgb` under
+    `--fast-encode`;
+  - slow film, web: the same options as the normal film's web encode.
+
+  The encoders of both groups succeed or fail together: if the render fails, or a write to any
+  encoder fails, every encoder is killed and no video is finalised; the edition then fails as a
+  whole (below). Every encoder is software (`libx264`, `libx265`) on every platform: nothing in
+  the generator uses a GPU or a hardware encoder. The main edition's `--fast-encode`
+  (`fast_encode`) is `libx264` too; the macOS VideoToolbox encoder it used before `ember-v2` is
+  removed.
+- **`--ember-algorithm`** prints `ALGORITHM_VERSION` (`ember-v3`) on its own line and exits 0
   without rendering or writing anything; given with any other argument it is a parse error
-  (status 2). `run.py` probes it before planning, reads the `algorithm` of every live
-  certificate in one ssh call, and withdraws each edition of an older algorithm (its
-  certificate, then its `metadata/assets.json` entries, then its media), which the ember
-  backfill then renders again in the current look. Nothing is withdrawn unless both ids can be
-  read; `--keep-stale-ember` keeps the live editions
+  (status 2). `run.py` probes it before planning and compares it with the `algorithm` of every
+  live certificate, to find the published editions of an older algorithm, which the ember
+  backfill renders again in the current look
   ([ember-edition.md](ember-edition.md#in-the-sync-loop-runpy)).
-- **Failure**: when the ember preflight or stage fails, the generator logs the error, removes
-  every ember file, writes the rest of the package (metadata included) as a `--no-ember` run
-  does, and exits with status **3** ("package complete except the ember edition"). The exit
-  statuses are 0 (complete, or `--ember-algorithm`), 3 (complete except the ember edition), 2
-  (rejected by the argument parser: an unknown flag, a malformed value or `--ember-algorithm`
-  with another argument) and 1 (any other failure, including an invalid `--seed` or a resolution
-  above 16,384 per side). `run.py` uploads a new mint's status-3 package with its core files. It
-  retries the ember edition later as a backfill, and gives up on a seed after
-  `MAX_BACKFILL_ATTEMPTS` (3) failed ember attempts with the same generator binary
-  ([ember-edition.md](ember-edition.md#in-the-sync-loop-runpy)).
+- **Failure**: when the view, the ember preflight or the ember stage fails, the generator logs
+  the error, removes every ember file, writes the rest of the package (metadata included) as a
+  `--no-ember` run does, and exits with status **3** ("package complete except the ember
+  edition"). The exit statuses are 0 (complete, or `--ember-algorithm`), 3 (complete except the
+  ember edition), 2 (rejected by the argument parser: an unknown flag, a malformed value or
+  `--ember-algorithm` with another argument) and 1 (any other failure, including an invalid
+  `--seed` or a resolution above 16,384 per side). `run.py` uploads a new mint's status-3
+  package with its core files. It retries the ember edition later as a backfill, and gives up
+  on a seed after `MAX_BACKFILL_ATTEMPTS` (3) failed ember attempts with the same generator
+  binary ([ember-edition.md](ember-edition.md#in-the-sync-loop-runpy)).
 
 ### 8.6 Verification (`examples/ember_render.rs`)
 
 `cargo run --release --example ember_render -- verify <package>/metadata/ember.json` reads the
-certificate with the typed reader (which rejects an `ember-v1` certificate by its schema
-version) and, before the re-render (about as long as the original render: 2 h 05 m at the
-default size on an Apple M4 Max, an upper bound measured with other work on the machine), fails
-with a message naming each field that this build cannot reproduce: `outputs` that disagree about
-the frames (`frames_emitted > 0` with a `null` frames digest, which would otherwise verify the
-still alone, or a frames digest with `frames_emitted ≠ inputs.frames.count`), `algorithm`
-(≠ `ALGORITHM_VERSION`), `inputs.integrator`, `inputs.dt` and `inputs.gravitational_constant`
-(compared bit for bit with `DEFAULT_DT` and `sim::G`), `inputs.paper_seed_sha256` (against the
-build's paper-seed derivation), `inputs.frames.sha256` (against the build's schedule), and
-`config` (it must round-trip: `serde_json::to_value(&config)` equals the recorded JSON). It then
-re-renders from the recorded bodies, their masses included (`app::ember_masses`), and compares
-both digests (exit 0 on a match, 1 on a mismatch, 2 on an error). The `render` subcommand
-renders any orbit for look development, with a partial configuration override (for example
-`--config '{"tidal": {"max_aspect": 2.0}}'`).
+certificate with the typed reader (which rejects an `ember-v1` or `ember-v2` certificate by its
+schema version) and, before the re-render (about as long as the original render), fails with a
+message naming each field that this build cannot reproduce: `outputs` that disagree about the
+frames of either film (§8.4, *Reading*), `algorithm` (≠ `ALGORITHM_VERSION`),
+`inputs.integrator`, `inputs.dt` and `inputs.gravitational_constant` (compared bit for bit with
+`DEFAULT_DT` and `sim::G`), `inputs.paper_seed_sha256` (against the build's paper-seed
+derivation), `inputs.frames.sha256` (against the build's schedule), and `config` (it must
+round-trip: `serde_json::to_value(&config)` equals the recorded JSON). It then
+re-renders from the recorded bodies, their masses included (`app::ember_masses`), through the
+recorded view (`inputs.view`) and with the recorded slow factor (`inputs.frames.slow_factor`):
+both are inputs like the bodies, so the tool follows the certificate, not the build's defaults.
+The mode follows the digests: `VideoAndSlow` when both film digests are recorded, `Video` with
+the frames digest alone, `StillOnly` with neither. It compares the three digests, printing
+`MATCH`, `MISMATCH` or `(not recorded)` for `still`, `frames` and `slow`, and then what else
+the certificate says of the render, which is as deterministic as the pixels: the frame counts
+(`outputs`), `derived` and `stats`, each `MATCH` or `MISMATCH` with the first field that
+differs (exit 0 when everything matches, 1 on a mismatch, 2 on an error).
 
-At full scale, the package of seed `0x46205528` rendered on the M4 Max carries the still and
-frame-stream digests of a standalone render of the same orbit on that machine, bit for bit: the
-production path reproduces the edition exactly. Across architectures, the golden render and the
-unit goldens (§0.2) are bit-identical on aarch64 macOS, x86_64 Linux and `x86-64-v3`, and at
-full scale the production host (x86_64, native build with AVX2 and FMA) re-rendered the same
-edition to the M4 Max's still and frame-stream digests bit for bit, in 78 minutes.
+The `render` subcommand renders any orbit for look development into `--out`: the still
+(`ember.png`), a `summary.json` with the view, the digests and the statistics, and on request
+every Nth scheduled frame as a PNG (`--frame-every`), the normal film (`--video`, `ember.mp4`)
+and the slow film (`--slow-video`, `ember_slow.mp4`). `--config` takes a partial configuration
+override (for example `--config '{"tidal": {"max_aspect": 2.0}}'`), and `--slow-factor` another
+slow factor (default `app::EMBER_SLOW_FACTOR`; it sets the snapshot lattice, so it changes the
+still as well). `--bodies` is either an ember certificate, whose bodies, seed and view are used,
+or a file with `bodies_f64_bits`. A certificate's view fits only the orbit it was recorded for:
+the same `--steps` and an output of the same aspect ratio. With `--frontal`, and for a
+`bodies_f64_bits` file, the orbit is drawn as it is, through `app::ember_frontal_view` (§3.5).
+
+The full-scale checks so far were made with `ember-v2`. The package of seed `0x46205528`
+rendered on an Apple M4 Max carried the still and frame-stream digests of a standalone render
+of the same orbit on that machine, bit for bit (the production path reproduces the edition
+exactly; the standalone render took 2 h 05 m, an upper bound measured with other work on the
+machine), and the production host (x86_64, native build with AVX2 and FMA) re-rendered the same
+edition to the M4 Max's still and frame-stream digests bit for bit, in 78 minutes. The golden
+render and the unit goldens (§0.2) were bit-identical on aarch64 macOS, x86_64 Linux and
+`x86-64-v3`. The same checks are still to be made for `ember-v3`.
 
 ---
 
@@ -998,7 +1354,6 @@ sizes in millimetres of the depicted sheet.
 | `fluid.hyperviscosity` | 144 | Hyperviscosity coefficient (per `dx`). |
 | `fluid.max_snapshot_interval` | 0.0025 | Largest time between snapshots (§5.1). |
 | `fluid.max_snapshot_travel` | 0.28 | Largest body travel between snapshots, in radii: under half the shortest semi-axis `R/√3` (§5.1). |
-| `projection.fill` | 0.78 | Fraction of the canvas the orbit fills (§3.5). |
 | `contact.soak_depth` | 0.03 | Soak zone depth beyond the outline (semi-axes `a + 0.03`, `b + 0.03`; 0.08 for a disc; §5.2 step 2). |
 | `contact.vorticity_gate` | 40 | `|ω|` gate `wc` (§5.2 step 2). |
 | `contact.pre_roll` | 0.5 | No ink before this time (`t_on`). |
