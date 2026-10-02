@@ -142,9 +142,9 @@ SSH_BASE_OPTS = [
 
 # An scp transfer may take SCP_MIN_TIMEOUT seconds, or longer when it carries more than
 # SCP_MIN_TIMEOUT * SCP_MIN_BYTES_PER_SECOND bytes. The ember edition's videos are the large
-# transfers: its slow film alone is expected to be a few hundred MB to about 1 GB. The sizes of
-# the current look are measured after the deploy that introduces it (the `UPLOAD ... (N MB,
-# timeout Ns)` log lines); no figure is quoted here.
+# transfers: with the ember-v3 look the slow film is 176 to 294 MB and the archival film 134 to
+# 225 MB (three tokens measured on the production host); the `UPLOAD ... (N MB, timeout Ns)`
+# log lines give each transfer's size.
 SCP_MIN_TIMEOUT = 900
 SCP_MIN_BYTES_PER_SECOND = 1_000_000
 

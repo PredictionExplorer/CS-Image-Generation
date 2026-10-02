@@ -67,8 +67,10 @@ the M4 Max, shared with other work, it took 2 h 05 min on its own and the seed's
 [docs/ember-edition.md](docs/ember-edition.md#runtime)). The edition added about 0.55 GB to the
 package (0.81 GB in all), and its render peaked at 4.9 GB of memory: a package's memory peak
 (85 GB resident on the M4 Max) belongs to the main render. `ember-v3` costs more, because the
-slow film adds ink, shading and encoding work and one more video file; its times and sizes are
-still to be measured. That document also covers the physics, the ink model, the look, the slow
+slow film adds ink, shading and encoding work and one more video file: on the production host
+(128 threads, otherwise idle) its ember stage took 2 h 06 min for a token whose `ember-v2`
+stage took 36 min, so a package takes about 3 hours, and its seven ember files hold 0.4 to
+0.6 GB (the slow film 176 to 294 MB). That document also covers the physics, the ink model, the look, the slow
 film, the certificate fields, and how to verify a package on two machines. Pass `--no-ember` to
 skip the edition. If the edition fails, the rest of the package is still written and the run
 exits with status `3` (see [Exit status](#exit-status)).
@@ -297,7 +299,7 @@ Any other failure of a backfill seed (the generator exits `1` or is killed by a 
 
 The counts live in `backfill_failures.json` in `run.py`'s working directory: `ember_failures` (toward the cap) and `other_failures` (for the order), together with the generator binary's identity (resolved path, size and modification time). Rebuilding the generator resets every count, so a fixed binary retries all the seeds it had given up. To retry one given-up seed with the same binary, delete its entry from `ember_failures` (and from `identity_mismatches`, if it is listed there). In a run where a backfill seed fails, `run.py` exits with `1`, so the failure is visible to systemd (the service shows `failed`): until the seed is given up, or for as long as it fails for another reason.
 
-**Duration and disk space.** A backfill pass regenerates every waiting token once, one package per run by default: a full render, then the upload and the timer's 5-minute pause. The ember look introduced with `ember-v2` costs substantially more than the first one: a package takes an estimated 2 hours on the production host, against about 70 minutes measured with `ember-v1` (read the measured figure from the `OK  seed=0x…  (total …)` log lines), so a pass over N tokens takes about N × 2 hours: about 4–4.5 days for 48 tokens. A render that hangs is stopped by the per-seed `--timeout` (10 hours by default). Each package holds about 0.55 GB more with the ember edition than without it (measured for seed `0x46205528` with `ember-v2`: `ember.png` about 37 MB, the web `ember.mp4` about 136 MB at CRF 22, the HQ `ember.mp4` about 375 MB). These are `ember-v2` figures: an `ember-v3` package takes longer and holds one more file, the slow film `ember_slow.mp4`, and its time and size are still to be measured.
+**Duration and disk space.** A backfill pass regenerates every waiting token once, one package per run by default: a full render, then the upload and the timer's 5-minute pause. The ember look introduced with `ember-v2` costs substantially more than the first one: a package takes an estimated 2 hours on the production host, against about 70 minutes measured with `ember-v1` (read the measured figure from the `OK  seed=0x…  (total …)` log lines), so a pass over N tokens takes about N × 2 hours: about 4–4.5 days for 48 tokens. A render that hangs is stopped by the per-seed `--timeout` (10 hours by default). An `ember-v3` package takes about 3 hours on the production host: its ember stage alone took 2 h 06 min for one token on the otherwise idle host. A pass over 48 tokens therefore takes about 6 days. Its ember edition holds 0.4 to 0.6 GB (three tokens measured: `ember.png` about 36 MB, the web `ember.mp4` 39 to 70 MB, the slow film `ember_slow.mp4` 176 to 294 MB, the HQ `ember.mp4` 134 to 225 MB).
 
 ### Stale ember editions
 

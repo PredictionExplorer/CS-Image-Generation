@@ -579,9 +579,9 @@ depends on it.
    `ember-v2` edition is rendered again, one package per sync run: by
    default each is withdrawn first, as before, or the operator keeps them
    online and each is replaced in place (Section 2.1). Tokens the earlier
-   backfills had not reached get the `ember-v3` edition directly. Its
-   render time and size are still to be measured on the production host;
-   both are larger than `ember-v2`'s.
+   backfills had not reached get the `ember-v3` edition directly. A
+   package takes about 3 hours, so the pass over 48 tokens takes about 6
+   days; the ember files hold 0.4 to 0.6 GB per token.
 
    The Go side's ember item
    ([`augur-explorer-required-changes.md` §7](augur-explorer-required-changes.md#7-ember-edition-generator-110))
