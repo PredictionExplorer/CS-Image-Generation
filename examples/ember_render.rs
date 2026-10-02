@@ -76,7 +76,8 @@ enum Command {
     /// Re-render a package from `metadata/ember.json` and compare its digests.
     Verify {
         /// Path of the certificate.
-        certificate: PathBuf,
+        #[arg(value_name = "CERTIFICATE")]
+        path: PathBuf,
     },
     /// Render an orbit from its initial conditions.
     Render {
@@ -120,7 +121,7 @@ enum Command {
 fn main() -> ExitCode {
     tracing_subscriber::fmt().with_target(false).init();
     let result = match Cli::parse().command {
-        Command::Verify { certificate } => verify(&certificate),
+        Command::Verify { path } => verify(&path),
         Command::Render {
             bodies,
             out,
@@ -161,14 +162,14 @@ fn main() -> ExitCode {
 /// the re-render's frame counts, derived quantities and statistics are the recorded ones.
 fn verify(path: &Path) -> Result<bool> {
     let text = fs::read_to_string(path)?;
-    let certificate = EmberCertificate::from_json(&text)?;
+    let record = EmberCertificate::from_json(&text)?;
     let recorded: Value = serde_json::from_str(&text)?;
-    let inputs = &certificate.inputs;
+    let inputs = &record.inputs;
     let paper_seed = app::ember_paper_seed(&app::parse_seed(&inputs.seed)?);
     let frame_steps = app::ember_frame_schedule(inputs.steps);
 
     let problems =
-        reproducibility_problems(&certificate, &recorded["config"], &paper_seed, &frame_steps)?;
+        reproducibility_problems(&record, &recorded["config"], &paper_seed, &frame_steps)?;
     if !problems.is_empty() {
         return Err(format!(
             "this build cannot reproduce and verify {}:\n  - {}",
@@ -180,7 +181,7 @@ fn verify(path: &Path) -> Result<bool> {
     println!(
         "checked  {} with {}; dt, G, paper seed, {} scheduled frames and the configuration \
          match this build",
-        certificate.algorithm,
+        record.algorithm,
         inputs.integrator,
         frame_steps.len()
     );
@@ -188,7 +189,7 @@ fn verify(path: &Path) -> Result<bool> {
     // The reader has checked that the outputs agree about the frames, so what is verified
     // follows from the digests: without a frames digest (a still-only certificate) only the
     // still is, and the slow film is only if its digest is recorded.
-    let outputs = &certificate.outputs;
+    let outputs = &record.outputs;
     let expected_frames = outputs.frames_rgb48le_sha256.as_deref();
     let expected_slow = outputs.slow_frames_rgb48le_sha256.as_deref();
     let bodies = inputs.bodies();
@@ -204,7 +205,7 @@ fn verify(path: &Path) -> Result<bool> {
         width: inputs.width,
         height: inputs.height,
         paper_seed: &paper_seed,
-        config: &certificate.config,
+        config: &record.config,
         mode: match (expected_frames, expected_slow) {
             (Some(_), Some(_)) => EmberMode::VideoAndSlow,
             (Some(_), None) => EmberMode::Video,
@@ -272,24 +273,24 @@ fn digest_matches(name: &str, recorded: Option<&str>, rendered: Option<&str>) ->
     matches
 }
 
-/// Everything that stops this build from reproducing and verifying `certificate`, found before
+/// Everything that stops this build from reproducing and verifying `record`, found before
 /// the render: one entry per offending field, with the recorded value and this build's (or the
 /// field it contradicts).
 ///
 /// `recorded_config` is the certificate's `config` exactly as parsed from the file, so that a
 /// field this build's [`EmberConfig`] would default or re-encode is caught.
 fn reproducibility_problems(
-    certificate: &EmberCertificate,
+    record: &EmberCertificate,
     recorded_config: &Value,
     paper_seed: &[u8],
     frame_steps: &[usize],
 ) -> Result<Vec<String>> {
-    let inputs = &certificate.inputs;
+    let inputs = &record.inputs;
     let mut problems = Vec::new();
-    if certificate.algorithm != certificate::ALGORITHM_VERSION {
+    if record.algorithm != certificate::ALGORITHM_VERSION {
         problems.push(format!(
             "algorithm: the certificate was rendered by {:?}, this build implements {:?}",
-            certificate.algorithm,
+            record.algorithm,
             certificate::ALGORITHM_VERSION
         ));
     }
@@ -332,7 +333,7 @@ fn reproducibility_problems(
             inputs.steps
         ));
     }
-    let reread = serde_json::to_value(&certificate.config)?;
+    let reread = serde_json::to_value(&record.config)?;
     if let Some(difference) = first_difference("config", recorded_config, &reread, "read back as") {
         problems.push(format!(
             "{difference} (the recorded configuration does not round-trip through this build's \
