@@ -4,11 +4,12 @@
 //! each with a single responsibility. This improves testability, readability, and
 //! maintainability.
 
-use crate::drift::parse_drift_mode;
+use crate::drift::{AppliedDrift, parse_drift_mode};
 use crate::drift_config::{ResolvedDriftConfig, resolve_drift_config};
 use crate::ember::certificate::{CertificateContext, EmberCertificate};
 use crate::ember::{
     self, EmberConfig, EmberError, EmberFrame, EmberMode, EmberRequest, EmberResult, EmberSummary,
+    View, ViewDrift, ViewFrame, ViewProjection,
 };
 use crate::error::{AppError, ConfigError, Result};
 use crate::generation_log::{
@@ -17,9 +18,10 @@ use crate::generation_log::{
 };
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
-    VideoEncodingOptions, VideoOutputSpec, constants, create_videos_from_frames_singlepass,
-    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
-    save_image_as_png_16bit, save_image_as_srgb_png_16bit,
+    VideoEncodingOptions, VideoOutputSpec, constants, create_video_groups_from_frames,
+    create_videos_from_frames_singlepass, generate_body_color_sequences,
+    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
+    save_image_as_srgb_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use chrono::Local;
@@ -27,6 +29,7 @@ use image::{ImageBuffer, Rgb};
 use nalgebra::{Matrix3, Vector3};
 use serde::Serialize;
 use std::fs::{self, File};
+use std::io::Write as _;
 use std::process::Command;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -44,21 +47,29 @@ pub const EMBER_FULL_WEBP_PATH: &str = "images/web/ember_full.webp";
 pub const EMBER_PREVIEW_WEBP_PATH: &str = "images/web/ember_preview.webp";
 /// Package-relative path of the ember edition's browser-compatible H.264 video.
 pub const EMBER_WEB_VIDEO_PATH: &str = "videos/web/ember.mp4";
+/// Package-relative path of the ember edition's slow film (browser-compatible H.264): the same
+/// film [`EMBER_SLOW_FACTOR`] times slower.
+pub const EMBER_SLOW_WEB_VIDEO_PATH: &str = "videos/web/ember_slow.mp4";
 /// Package-relative path of the ember edition's archival HEVC video.
 pub const EMBER_HQ_VIDEO_PATH: &str = "videos/hq/ember.mp4";
 /// Package-relative path of the ember edition's determinism certificate.
 pub const EMBER_CERTIFICATE_PATH: &str = "metadata/ember.json";
 /// Package-relative paths of every file the ember edition writes, in [`EmberOutputPaths`] field
-/// order: still, full WebP, preview WebP, web video, HQ video, certificate. `run.py` requires
-/// each of them in a complete package (`EMBER_PACKAGE_FILES`).
-pub const EMBER_OUTPUT_PATHS: [&str; 6] = [
+/// order: still, full WebP, preview WebP, web video, slow web video, HQ video, certificate.
+/// `run.py` requires each of them in a complete package (`EMBER_PACKAGE_FILES`).
+pub const EMBER_OUTPUT_PATHS: [&str; 7] = [
     EMBER_STILL_PATH,
     EMBER_FULL_WEBP_PATH,
     EMBER_PREVIEW_WEBP_PATH,
     EMBER_WEB_VIDEO_PATH,
+    EMBER_SLOW_WEB_VIDEO_PATH,
     EMBER_HQ_VIDEO_PATH,
     EMBER_CERTIFICATE_PATH,
 ];
+
+/// How many times slower the ember edition's slow film is: it shows this many frames for each
+/// frame of the normal film, every one of them simulated (`ember::EmberRequest::slow_factor`).
+pub const EMBER_SLOW_FACTOR: u32 = 10;
 
 /// Appended to the package seed bytes to seed the ember edition's kozo sheet: a separate,
 /// versioned domain, so the paper texture never correlates with any other seeded choice and
@@ -324,11 +335,13 @@ impl AssetEntry {
 /// What the ember stage produced, as recorded in `metadata/assets.json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EmberManifest {
-    /// Frames in each ember video (`0` when no video was encoded).
+    /// Frames in each ember video of normal speed (`0` when no video was encoded).
     pub frames_emitted: usize,
+    /// Frames in the slow film (`0` when no video was encoded).
+    pub slow_frames_emitted: usize,
     /// Frames per second of the ember videos.
     pub frame_rate: u32,
-    /// Whether `videos/{web,hq}/ember.mp4` were encoded (not under `--image-only`).
+    /// Whether the ember videos were encoded (not under `--image-only`).
     pub has_video: bool,
     /// Whether the HQ slot holds the software fast encode (`--fast-encode`) instead of HEVC.
     pub fast_encode: bool,
@@ -339,6 +352,7 @@ impl EmberManifest {
     pub fn from_summary(summary: &EmberSummary, fast_encode: bool) -> Self {
         Self {
             frames_emitted: summary.frames_emitted,
+            slow_frames_emitted: summary.slow_frames_emitted,
             frame_rate: constants::DEFAULT_VIDEO_FPS,
             has_video: summary.frames_emitted > 0,
             fast_encode,
@@ -425,8 +439,8 @@ pub fn generate_webp_images(paths: ImageOutputPaths<'_>) -> Result<()> {
 ///
 /// `ember` describes the ember edition's outputs (`None` when it was skipped with `--no-ember`
 /// or failed); its entries are appended after the main renderer's with their own roles
-/// (`ember_source_master`, `ember_web_full`, `ember_web_preview`, `ember_web`, `ember_hq`), so
-/// the manifest stays at `schema_version` 2 for existing readers.
+/// (`ember_source_master`, `ember_web_full`, `ember_web_preview`, `ember_web`, `ember_slow_web`,
+/// `ember_hq`), so the manifest stays at `schema_version` 2 for existing readers.
 pub fn write_asset_manifest(
     seed_dir: &str,
     width: u32,
@@ -530,13 +544,14 @@ fn ember_entries(seed_dir: &str, size: (u32, u32), ember: &EmberManifest) -> Vec
         AssetEntry::image(seed_dir, EMBER_PREVIEW_WEBP_PATH, "ember_web_preview", "webp", preview),
     ];
     if ember.has_video {
-        let duration_seconds = ember.frames_emitted as f64 / f64::from(ember.frame_rate);
         let [web, hq] = ember_video_options(ember.fast_encode);
-        for (path, role, options) in
-            [(EMBER_WEB_VIDEO_PATH, "ember_web", web), (EMBER_HQ_VIDEO_PATH, "ember_hq", hq)]
-        {
+        for (path, role, options, frames) in [
+            (EMBER_WEB_VIDEO_PATH, "ember_web", &web, ember.frames_emitted),
+            (EMBER_SLOW_WEB_VIDEO_PATH, "ember_slow_web", &web, ember.slow_frames_emitted),
+            (EMBER_HQ_VIDEO_PATH, "ember_hq", &hq, ember.frames_emitted),
+        ] {
             let facts = VideoFacts {
-                duration_seconds,
+                duration_seconds: frames as f64 / f64::from(ember.frame_rate),
                 frame_rate: ember.frame_rate,
                 codec: manifest_codec(&options.codec),
                 pixel_format: &options.pixel_format,
@@ -975,11 +990,14 @@ fn rotated_sample(
 /// Positions are already expressed in the centre-of-mass frame, so rotating
 /// about the origin is rotation about the COM. Uses a forked RNG domain so it
 /// does not perturb the main seed stream consumed by drift and colors.
+///
+/// Returns the winning rotation, which the ember edition re-applies to follow the same view
+/// ([`ember_view`]).
 pub fn apply_view_orientation(
     positions: &mut [Vec<Vector3<f64>>],
     rng: &Sha3RandomByteStream,
     stack: render::LayerStack,
-) -> (f64, f64, f64) {
+) -> Matrix3<f64> {
     info!(
         "STAGE 2.25/7: Selecting best of {} seeded viewing orientations...",
         VIEW_CANDIDATE_COUNT
@@ -1015,7 +1033,7 @@ pub fn apply_view_orientation(
         "   => View quaternion components: ({:.3}, {:.3}, {:.3}) score {best_score:.4}",
         best_triple.0, best_triple.1, best_triple.2
     );
-    best_triple
+    rotation
 }
 
 fn quaternion_to_matrix(w: f64, x: f64, y: f64, z: f64) -> Matrix3<f64> {
@@ -1036,6 +1054,15 @@ fn quaternion_to_matrix(w: f64, x: f64, y: f64, z: f64) -> Matrix3<f64> {
     )
 }
 
+/// The drift a run resolved and what it added to the positions.
+#[derive(Clone, Debug)]
+pub struct DriftOutcome {
+    /// The resolved drift configuration (recorded in the generation log and the traits).
+    pub config: ResolvedDriftConfig,
+    /// What was added to every body at every step (re-applied by the ember edition).
+    pub applied: AppliedDrift,
+}
+
 /// Apply drift transformation to positions
 pub fn apply_drift_transformation(
     positions: &mut [Vec<Vector3<f64>>],
@@ -1044,7 +1071,7 @@ pub fn apply_drift_transformation(
     drift_arc_fraction: Option<f64>,
     drift_orbit_eccentricity: Option<f64>,
     rng: &mut Sha3RandomByteStream,
-) -> Result<Option<ResolvedDriftConfig>> {
+) -> Result<DriftOutcome> {
     info!("STAGE 2.5/7: Resolving drift configuration...");
 
     let resolved =
@@ -1061,10 +1088,10 @@ pub fn apply_drift_transformation(
     }
 
     let mut drift_transform = parse_drift_mode(drift_mode, rng, drift_params, num_steps)?;
-    drift_transform.apply(positions, constants::DEFAULT_DT);
+    let applied = drift_transform.apply(positions, constants::DEFAULT_DT);
 
     info!("   => Drift applied successfully");
-    Ok(Some(resolved))
+    Ok(DriftOutcome { config: resolved, applied })
 }
 
 /// Generate color sequences and alpha values for bodies
@@ -1280,6 +1307,8 @@ pub struct EmberOutputPaths<'a> {
     pub preview_webp: &'a str,
     /// Browser-compatible H.264 video (not written for image-only renders).
     pub web_video: &'a str,
+    /// The slow film as browser-compatible H.264 (not written for image-only renders).
+    pub slow_web_video: &'a str,
     /// Archival HEVC video, or the software fast encode (not written for image-only renders).
     pub hq_video: &'a str,
     /// Determinism certificate (`metadata/ember.json`).
@@ -1295,6 +1324,8 @@ pub struct EmberEditionRequest<'a> {
     pub seed_bytes: &'a [u8],
     /// Initial conditions of the selected orbit, before the centre-of-mass shift.
     pub bodies: &'a [Body],
+    /// The main edition's view of that orbit ([`ember_view`]), which the bodies follow.
+    pub view: &'a View,
     /// Recorded orbit steps (the main renderer's `--steps`).
     pub steps: usize,
     /// Output width in pixels.
@@ -1335,6 +1366,16 @@ pub struct EmberPreflight {
     pub valve_time: f64,
     /// Frames of the ember video; the last one is the still.
     pub frames: usize,
+    /// Frames of the slow film.
+    pub slow_frames: usize,
+    /// Fluid steps the orbit needs at least (the render's cost grows with them).
+    pub estimated_fluid_steps: f64,
+    /// Fastest body speed on the canvas, in units of the median speed.
+    pub peak_speed: f64,
+    /// Smallest distance of a body's centre from the canvas edge (the canvas is 2 high).
+    pub edge_clearance: f64,
+    /// Fraction of the orbit during which two bodies overlap on the canvas.
+    pub overlap_fraction: f64,
 }
 
 /// The three bodies' initial masses, which set the tidal field that stretches them in the ember
@@ -1353,6 +1394,90 @@ pub fn ember_masses(bodies: &[Body]) -> Result<[f64; 3]> {
     }
 }
 
+/// The main edition's view of the selected orbit, for the ember edition to follow: the seed's
+/// projection space, the viewing rotation [`apply_view_orientation`] chose, the drift
+/// [`apply_drift_transformation`] added, and the frame the renderer fits to the transformed
+/// orbit (`bounds`, with the scale its symmetry applies to the primary copy of every stroke).
+///
+/// # Errors
+///
+/// [`EmberError::InvalidView`] for a Brownian drift: its path is a seeded random walk that is
+/// not recorded, so the ember edition cannot follow it.
+pub fn ember_view(
+    projection: render::ProjectionMode,
+    rotation: &Matrix3<f64>,
+    drift: AppliedDrift,
+    bounds: &render::context::BoundingBox,
+    symmetry: render::SymmetryOp,
+    (width, height): (u32, u32),
+) -> Result<View> {
+    let rows = |m: &Matrix3<f64>| std::array::from_fn(|i| std::array::from_fn(|j| m[(i, j)]));
+    let drift = match drift {
+        AppliedDrift::None => ViewDrift::None {},
+        AppliedDrift::Linear { velocity } => {
+            ViewDrift::Linear { velocity: [velocity.x, velocity.y, velocity.z] }
+        }
+        AppliedDrift::Elliptical {
+            rotation,
+            initial_mean_anomaly,
+            mean_motion,
+            eccentricity,
+            semi_major,
+            semi_minor,
+        } => ViewDrift::Elliptical {
+            rotation: rows(&rotation),
+            mean_anomaly: initial_mean_anomaly,
+            mean_motion,
+            eccentricity,
+            semi_major,
+            semi_minor,
+        },
+        AppliedDrift::Brownian => {
+            return Err(EmberError::InvalidView {
+                reason: "a brownian drift is a random walk whose path is not recorded; the ember \
+                         edition follows no, linear or elliptical drift"
+                    .into(),
+            }
+            .into());
+        }
+    };
+    Ok(View {
+        projection: match projection {
+            render::ProjectionMode::Position => ViewProjection::Position,
+            render::ProjectionMode::PhasePortrait => ViewProjection::PhasePortrait,
+            render::ProjectionMode::CrossBraid => ViewProjection::CrossBraid,
+            render::ProjectionMode::Hodograph => ViewProjection::Hodograph,
+        },
+        rotation: rows(rotation),
+        drift,
+        frame: ViewFrame {
+            min_x: bounds.min_x,
+            min_y: bounds.min_y,
+            width: bounds.width,
+            height: bounds.height,
+            scale: f64::from(render::batch_drawing::primary_symmetry_scale(
+                symmetry, width, height,
+            )),
+        },
+    })
+}
+
+/// The view of an orbit that is drawn as it is: plain positions seen along the z axis, no
+/// drift, framed as the main edition frames a trajectory. For renders outside the generator
+/// (`examples/ember_render.rs`), which have no main edition to follow.
+pub fn ember_frontal_view(positions: &[Vec<Vector3<f64>>], width: u32, height: u32) -> View {
+    let context = render::context::RenderContext::new(width, height, positions, true);
+    ember_view(
+        render::ProjectionMode::Position,
+        &Matrix3::identity(),
+        AppliedDrift::None,
+        context.bounds(),
+        render::SymmetryOp::None,
+        (width, height),
+    )
+    .expect("a view without drift is always representable")
+}
+
 /// Checks, in a fraction of a second, that the ember edition can render the selected orbit at
 /// this output size with `config`, so that an orbit it would reject is known before the main
 /// render rather than in the ember stage, which runs last.
@@ -1360,11 +1485,13 @@ pub fn ember_masses(bodies: &[Body]) -> Result<[f64; 3]> {
 /// Re-simulates the raw orbit exactly as [`render_ember_edition`] does and plans the render with
 /// [`ember::plan_ember`] — the checks [`ember::render_ember`] itself makes before its fluid
 /// starts: the configuration, the output size, the frame schedule (at least 2 recorded steps),
-/// the orbit's projection (it must span a plane) and its duration against the pre-roll and the
-/// valve, and the fluid and ink grids. Failures that only show while simulating (e.g. a
-/// non-finite flow) cannot be predicted.
+/// the view and the canvas track it gives the orbit, the orbit's duration against the pre-roll
+/// and the valve, and the fluid and ink grids. Failures that only show while simulating (e.g. a
+/// non-finite flow) cannot be predicted. The plan's figures are logged: they say what the render
+/// will cost and how the orbit sits on the sheet.
 pub fn preflight_ember_edition(
     bodies: &[Body],
+    view: &View,
     steps: usize,
     width: u32,
     height: u32,
@@ -1374,8 +1501,11 @@ pub fn preflight_ember_edition(
     let frame_steps = ember_frame_schedule(steps);
     let preflight = check_ember_request(&EmberRequest {
         positions: &positions,
+        dt: constants::DEFAULT_DT,
         masses: ember_masses(bodies)?,
+        view,
         frame_steps: &frame_steps,
+        slow_factor: EMBER_SLOW_FACTOR,
         width,
         height,
         paper_seed: &[],
@@ -1383,21 +1513,39 @@ pub fn preflight_ember_edition(
         mode: EmberMode::StillOnly,
     })?;
     info!(
-        "   => Ember preflight: orbit lasts {:.3} fluid time units (inking {:.3}..{:.3}), {} frames",
-        preflight.duration, config.contact.pre_roll, preflight.valve_time, preflight.frames
+        "   => Ember preflight: orbit lasts {:.3} fluid time units (inking {:.3}..{:.3}), {} \
+         frames, {} in the slow film",
+        preflight.duration,
+        config.contact.pre_roll,
+        preflight.valve_time,
+        preflight.frames,
+        preflight.slow_frames
+    );
+    info!(
+        "   => Ember plan: at least {:.0} fluid steps; peak body speed {:.1}x the median; \
+         bodies come within {:.3} of the sheet's edge and overlap for {:.1}% of the orbit",
+        preflight.estimated_fluid_steps,
+        preflight.peak_speed,
+        preflight.edge_clearance,
+        100.0 * preflight.overlap_fraction
     );
     Ok(preflight)
 }
 
 /// Plans an ember request ([`ember::plan_ember`]): the checks [`ember::render_ember`] makes
-/// before its fluid starts. Cost: one projection of the orbit (about 50 ms for a million steps),
-/// no allocation proportional to the output size.
+/// before its fluid starts. Cost: one pass of the view over the orbit and the track's tables (a
+/// fraction of a second for a million steps), no allocation proportional to the output size.
 fn check_ember_request(request: &EmberRequest<'_>) -> Result<EmberPreflight> {
     let plan = ember::plan_ember(request)?;
     Ok(EmberPreflight {
         duration: plan.duration(),
         valve_time: plan.valve_time(),
         frames: plan.frames(),
+        slow_frames: plan.slow_frames(),
+        estimated_fluid_steps: plan.estimated_fluid_steps(),
+        peak_speed: plan.peak_speed(),
+        edge_clearance: plan.edge_clearance(),
+        overlap_fraction: plan.overlap_fraction(),
     })
 }
 
@@ -1426,19 +1574,20 @@ fn ember_video_options(fast_encode: bool) -> [VideoEncodingOptions; 2] {
 
 /// Renders the ember edition of the selected orbit and writes its package files.
 ///
-/// The orbit is re-simulated raw with [`sim::get_positions`]: the selection's trajectory has
-/// already been through the seed's projection, view rotation and drift, whereas the ember
-/// edition needs the physical orbit. Frames follow `main.mp4`'s schedule at
-/// [`constants::DEFAULT_VIDEO_FPS`]; they are streamed to the two encoders as they are shaded
-/// (unless `image_only`), the final frame is saved as a 16-bit sRGB PNG with two WebP
-/// derivatives, and `metadata/ember.json` certifies the SHA-256 digests of the raw frames and of
-/// the still, which every CPU architecture reproduces bit for bit.
+/// The orbit is re-simulated raw with [`sim::get_positions`] and the main edition's view is
+/// re-applied to it with portable arithmetic (`ember::View`), so that the bodies move as they
+/// do in `main.mp4` and every CPU reproduces the result bit for bit. Frames follow
+/// `main.mp4`'s schedule at [`constants::DEFAULT_VIDEO_FPS`], with the slow film's in-between
+/// frames ([`EMBER_SLOW_FACTOR`]); they are streamed to the encoders as they are shaded (unless
+/// `image_only`), the final frame is saved as a 16-bit sRGB PNG with two WebP derivatives, and
+/// `metadata/ember.json` certifies the SHA-256 digests of the raw frames of both films and of
+/// the still.
 ///
 /// An error can leave some outputs behind (partial videos, the PNG of a still whose WebP
 /// derivatives failed, a truncated certificate); [`remove_ember_outputs`] deletes them.
 pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSummary> {
     let started = Instant::now();
-    let mode = if request.image_only { EmberMode::StillOnly } else { EmberMode::Video };
+    let mode = if request.image_only { EmberMode::StillOnly } else { EmberMode::VideoAndSlow };
     info!(
         "STAGE EMBER: ember edition ({}) — re-simulating the raw orbit ({} steps)...",
         if request.image_only { "still only" } else { "still + videos" },
@@ -1449,8 +1598,11 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
     let paper_seed = ember_paper_seed(request.seed_bytes);
     let ember_request = EmberRequest {
         positions: &positions,
+        dt: constants::DEFAULT_DT,
         masses: ember_masses(request.bodies)?,
+        view: request.view,
         frame_steps: &frame_steps,
+        slow_factor: EMBER_SLOW_FACTOR,
         width: request.width,
         height: request.height,
         paper_seed: &paper_seed,
@@ -1460,13 +1612,14 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
     // Cheap, and it must pass before the encoders are spawned (`main` has already run it).
     check_ember_request(&ember_request)?;
 
-    let summary = match mode {
-        EmberMode::StillOnly => ember::render_ember(&ember_request, &mut |_| Ok(()))?,
-        EmberMode::Video => encode_ember_videos(
+    let summary = if request.image_only {
+        ember::render_ember(&ember_request, &mut |_| Ok(()))?
+    } else {
+        encode_ember_videos(
             &ember_request,
             request.paths,
             ember_video_options(request.fast_encode),
-        )?,
+        )?
     };
     drop(positions);
 
@@ -1483,6 +1636,7 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
         steps: request.steps,
         dt: constants::DEFAULT_DT,
         bodies: request.bodies,
+        view: request.view,
         frame_steps: &frame_steps,
         frame_rate: constants::DEFAULT_VIDEO_FPS,
         paper_seed: &paper_seed,
@@ -1496,14 +1650,16 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
     Ok(summary)
 }
 
-/// Renders every frame straight into the two encoders (one `rgb48le` stream, no temporary
-/// files) and returns the render's summary.
+/// Renders every frame straight into the encoders of the two films (`rgb48le` streams, no
+/// temporary files) and returns the render's summary: the normal film goes to its web and HQ
+/// encoders, the slow film to its web encoder.
 ///
 /// Errors:
 /// - a render failure (e.g. [`EmberError::NonFinite`]) is returned as such; the encoders are
 ///   killed and no video is finalised;
-/// - an encoder that dies mid-stream breaks the frame pipe: the video module's error is
-///   returned, naming the encoder and its exit status followed by the pipe error;
+/// - an encoder of either film that dies mid-stream breaks its frame pipe: the video module's
+///   error is returned, naming the encoder and its exit status followed by the pipe error, and
+///   every other encoder is killed without finalising its file;
 /// - an encoder that fails after the last frame is reported by the video module with its exit
 ///   status.
 fn encode_ember_videos(
@@ -1511,19 +1667,28 @@ fn encode_ember_videos(
     paths: EmberOutputPaths<'_>,
     [web, hq]: [VideoEncodingOptions; 2],
 ) -> Result<EmberSummary> {
-    let outputs = [
+    let slow =
+        [VideoOutputSpec { output_file: paths.slow_web_video.to_string(), options: web.clone() }];
+    let normal = [
         VideoOutputSpec { output_file: paths.web_video.to_string(), options: web },
         VideoOutputSpec { output_file: paths.hq_video.to_string(), options: hq },
     ];
     let mut outcome: Option<EmberResult<EmberSummary>> = None;
-    let encoded = create_videos_from_frames_singlepass(
+    let encoded = create_video_groups_from_frames(
         request.width,
         request.height,
         constants::DEFAULT_VIDEO_FPS,
-        |out| {
+        &[&normal, &slow],
+        |films| {
+            let pipe = |e: std::io::Error| EmberError::Sink(format!("video encoder pipe: {e}"));
             let mut sink = |frame: &EmberFrame<'_>| -> EmberResult<()> {
-                out.write_all(frame.rgb48le)
-                    .map_err(|e| EmberError::Sink(format!("video encoder pipe: {e}")))
+                if frame.index.is_some() {
+                    films[0].write_all(frame.rgb48le).map_err(pipe)?;
+                }
+                if frame.slow_index.is_some() {
+                    films[1].write_all(frame.rgb48le).map_err(pipe)?;
+                }
+                Ok(())
             };
             let result = ember::render_ember(request, &mut sink);
             let stream = match &result {
@@ -1533,7 +1698,6 @@ fn encode_ember_videos(
             outcome = Some(result);
             stream
         },
-        &outputs,
     );
     ember_encode_outcome(outcome, encoded)
 }
@@ -1587,10 +1751,10 @@ fn ember_encode_outcome(
 fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
     let stats = &summary.stats;
     let timings = &summary.timings;
-    let video_seconds = summary.frames_emitted as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+    let seconds = |frames: usize| frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
     info!(
         "   => Ember edition: orbit {:.3} fluid time units (valve at {:.3}), fluid {}x{}, ink \
-         nodes {}x{}, {} frames ({video_seconds:.2}s of video)",
+         nodes {}x{}, {} frames ({:.2}s of video), {} in the slow film ({:.2}s)",
         summary.duration,
         summary.valve_time,
         summary.fluid_grid[0],
@@ -1598,6 +1762,9 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
         summary.ink_grid[0],
         summary.ink_grid[1],
         summary.frames_emitted,
+        seconds(summary.frames_emitted),
+        summary.slow_frames_emitted,
+        seconds(summary.slow_frames_emitted),
     );
     info!(
         "   => Ember look: ink black for {:.3} and fading with tau {:.3} fluid time units; tidal \
@@ -1612,6 +1779,9 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
     );
     if let Some(frames_sha256) = &summary.frames_sha256 {
         info!("   => Ember frames: sha256 {frames_sha256} (rgb48le stream)");
+    }
+    if let Some(slow_sha256) = &summary.slow_frames_sha256 {
+        info!("   => Ember slow film: sha256 {slow_sha256} (rgb48le stream)");
     }
     info!(
         "   => Ember work: {} fluid steps (dt {:.2e}..{:.2e}, max flow speed {:.2}), {} \
@@ -2172,6 +2342,146 @@ mod tests {
         assert!(differs, "different seeds should view from different angles");
     }
 
+    /// A raw orbit without any symmetry: three bodies on different lopsided loops away from the
+    /// origin, moving in all three dimensions.
+    fn lopsided_orbit(steps: usize) -> Vec<Vec<Vector3<f64>>> {
+        (0..3u32)
+            .map(|body| {
+                let b = f64::from(body);
+                (0..steps)
+                    .map(|step| {
+                        let t = step as f64 / steps as f64;
+                        let a = std::f64::consts::TAU * (1.0 + 0.5 * b) * t + 0.9 * b;
+                        Vector3::new(
+                            (2.0 + 0.4 * b) * a.cos() + 0.7 * (3.0 * a).sin() + 1.5 - b,
+                            (1.2 - 0.2 * b) * a.sin() + 0.3 * (2.0 * a).cos() + 2.0 * t,
+                            0.8 * (1.7 * a).sin() - 0.5 * t + 0.3 * b,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The ember edition's bodies move as the main edition draws them: for every projection
+    /// space, drift and symmetry, on a wide and on a tall sheet, the canvas track of the captured
+    /// view lands on the pixel where the main edition draws the head of each trail (the primary
+    /// symmetry copy), to within a billionth of a pixel at every step.
+    #[test]
+    fn test_ember_bodies_follow_the_main_edition_view() {
+        use render::{ProjectionMode, SymmetryOp};
+
+        let raw = lopsided_orbit(600);
+        let stack = render::LayerStack::solo(render::StructureMode::TriangleWeb);
+        let projections = [
+            ProjectionMode::Position,
+            ProjectionMode::PhasePortrait,
+            ProjectionMode::CrossBraid,
+            ProjectionMode::Hodograph,
+        ];
+        let symmetries = [
+            SymmetryOp::None,
+            SymmetryOp::MirrorX,
+            SymmetryOp::Rotational { k: 3 },
+            SymmetryOp::Dihedral { k: 4 },
+        ];
+        let mut worst = 0.0_f64;
+        for (case, projection) in projections.into_iter().enumerate() {
+            for drift_mode in ["none", "linear", "elliptical"] {
+                // The main pipeline, as `main` runs it.
+                let seed = [case as u8, drift_mode.len() as u8];
+                let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
+                let mut positions = apply_projection(&raw, projection);
+                let rotation = apply_view_orientation(&mut positions, &rng, stack);
+                let drift = apply_drift_transformation(
+                    &mut positions,
+                    drift_mode,
+                    None,
+                    None,
+                    None,
+                    &mut rng,
+                )
+                .expect("the drift resolves")
+                .applied;
+                assert_eq!(drift == AppliedDrift::None, drift_mode == "none", "{drift_mode}");
+
+                for symmetry in symmetries {
+                    for (width, height) in [(96_u32, 64_u32), (64, 96)] {
+                        let label =
+                            format!("{projection:?}, {drift_mode}, {symmetry:?}, {width}x{height}");
+                        let context =
+                            render::context::RenderContext::new(width, height, &positions, true);
+                        let bounds = context.bounds();
+                        let view = ember_view(
+                            projection,
+                            &rotation,
+                            drift,
+                            bounds,
+                            symmetry,
+                            (width, height),
+                        )
+                        .expect("the view is representable");
+                        let (w, h) = (f64::from(width), f64::from(height));
+                        let track = view
+                            .canvas_track(&raw, constants::DEFAULT_DT, w / h)
+                            .unwrap_or_else(|e| panic!("{label}: {e}"));
+                        let scale = f64::from(render::batch_drawing::primary_symmetry_scale(
+                            symmetry, width, height,
+                        ));
+                        for (body, points) in track.iter().enumerate() {
+                            for (step, &[x, y]) in points.iter().enumerate() {
+                                // Main: the frame's pixel, then the primary symmetry copy's
+                                // scale about the frame centre.
+                                let p = positions[body][step];
+                                let (nx, ny) = bounds.normalize(p.x, p.y);
+                                let main = [
+                                    0.5 * w + scale * (nx * w - 0.5 * w),
+                                    0.5 * h + scale * (ny * h - 0.5 * h),
+                                ];
+                                // Ember: the canvas [-aspect, aspect] × [-1, 1], y up, on the
+                                // same sheet.
+                                let ember = [(x / (w / h) + 1.0) * 0.5 * w, (1.0 - y) * 0.5 * h];
+                                let error =
+                                    (main[0] - ember[0]).abs().max((main[1] - ember[1]).abs());
+                                assert!(
+                                    error < 1e-9,
+                                    "{label}: body {body} step {step}: main {main:?}, ember {ember:?}"
+                                );
+                                worst = worst.max(error);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("largest difference between main and ember: {worst:e} px");
+    }
+
+    /// Left stays left and up stays up: in a frontal view, the body that the main edition draws
+    /// nearest the top left corner of the image is nearest the canvas's top left for ember.
+    #[test]
+    fn test_ember_frontal_view_keeps_the_image_orientation() {
+        // Body 0 goes right and (in image rows) down, body 1 the other way, body 2 stays put.
+        let raw = vec![
+            vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(3.0, 1.0, 0.0)],
+            vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(-3.0, -1.0, 0.0)],
+            vec![Vector3::new(0.0, 0.0, 5.0), Vector3::new(0.0, 0.0, -5.0)],
+        ];
+        let (width, height) = (300, 200);
+        let view = ember_frontal_view(&raw, width, height);
+        let track = view.canvas_track(&raw, constants::DEFAULT_DT, 1.5).expect("a track");
+        let context = render::context::RenderContext::new(width, height, &raw, true);
+        // The main edition: body 0 ends right of and below the centre (image y points down).
+        let (px, py) = context.to_pixel(3.0, 1.0);
+        assert!(px > 150.0 && py > 100.0, "({px}, {py})");
+        // Ember: right of and below the centre too (canvas y points up).
+        assert!(track[0][1][0] > 0.0 && track[0][1][1] < 0.0, "{:?}", track[0][1]);
+        assert!(track[1][1][0] < 0.0 && track[1][1][1] > 0.0, "{:?}", track[1][1]);
+        assert_eq!(track[2], vec![[0.0, 0.0], [0.0, 0.0]]);
+        // The 5% margin of the main frame on the long axis: the bodies stop short of the edge.
+        assert!((track[0][1][0] - 1.5 / 1.1).abs() < 1e-12, "{:?}", track[0][1]);
+    }
+
     #[test]
     fn test_end_to_end_pipeline_parallel_matches_serial_reference() {
         for seed in [[0xCA, 0xFE], [0xBE, 0xEF], [0x12, 0x34]] {
@@ -2214,6 +2524,12 @@ mod tests {
         }
     }
 
+    /// The frontal view of the orbit `bodies` recorded for `steps` steps: what a render outside
+    /// the generator follows ([`ember_frontal_view`]).
+    fn frontal_view(bodies: &[Body], steps: usize, width: u32, height: u32) -> View {
+        ember_frontal_view(&sim::get_positions(bodies.to_vec(), steps).positions, width, height)
+    }
+
     /// Three bodies of an ordinary (non-degenerate) configuration.
     fn preflight_bodies() -> Vec<Body> {
         vec![
@@ -2229,18 +2545,32 @@ mod tests {
         let bodies = preflight_bodies();
         let config = EmberConfig::default();
         for (steps, width, height) in [(1, 64, 40), (0, 64, 40), (100, 0, 40), (100, 16_385, 40)] {
-            let result = preflight_ember_edition(&bodies, steps, width, height, &config);
+            let result = preflight_ember_edition(
+                &bodies,
+                &frontal_view(&bodies, steps, width, height),
+                steps,
+                width,
+                height,
+                &config,
+            );
             assert!(result.is_err(), "{steps} steps at {width}x{height} must be rejected");
         }
         assert!(matches!(
-            preflight_ember_edition(&bodies, 1, 64, 40, &config),
+            preflight_ember_edition(&bodies, &frontal_view(&bodies, 1, 64, 40), 1, 64, 40, &config),
             Err(AppError::Ember(EmberError::InvalidSchedule { .. }))
         ));
         // The configuration under test is the one checked.
         let mut invalid = EmberConfig::default();
         invalid.fluid.cfl = 0.0;
         assert!(matches!(
-            preflight_ember_edition(&figure_eight_bodies(), 20_000, 64, 40, &invalid),
+            preflight_ember_edition(
+                &figure_eight_bodies(),
+                &frontal_view(&figure_eight_bodies(), 20_000, 64, 40),
+                20_000,
+                64,
+                40,
+                &invalid
+            ),
             Err(AppError::Ember(EmberError::InvalidConfig { .. }))
         ));
     }
@@ -2264,14 +2594,28 @@ mod tests {
         let contact = &config.contact;
         // About 10 periods: the bodies travel far across the canvas.
         let steps = 20_000;
-        let preflight =
-            preflight_ember_edition(&figure_eight_bodies(), steps, 64, 40, &config).expect("ok");
+        let preflight = preflight_ember_edition(
+            &figure_eight_bodies(),
+            &frontal_view(&figure_eight_bodies(), steps, 64, 40),
+            steps,
+            64,
+            40,
+            &config,
+        )
+        .expect("ok");
         assert!(preflight.duration > contact.pre_roll + contact.valve_lead, "{preflight:?}");
         assert_eq!(preflight.valve_time, preflight.duration - contact.valve_lead);
         assert_eq!(preflight.frames, render::main_video_checkpoints(steps).len());
         // A sliver of a slow orbit lasts far too little fluid time.
         assert!(matches!(
-            preflight_ember_edition(&preflight_bodies(), 100, 64, 40, &config),
+            preflight_ember_edition(
+                &preflight_bodies(),
+                &frontal_view(&preflight_bodies(), 100, 64, 40),
+                100,
+                64,
+                40,
+                &config
+            ),
             Err(AppError::Ember(EmberError::OrbitTooShort { .. }))
         ));
     }
@@ -2354,6 +2698,11 @@ mod tests {
             still_sha256: String::new(),
             frames_emitted,
             frames_sha256: None,
+            slow_factor: EMBER_SLOW_FACTOR,
+            slow_first_frame: 0,
+            slow_frames_emitted: frames_emitted.saturating_sub(1) * EMBER_SLOW_FACTOR as usize
+                + usize::from(frames_emitted > 0),
+            slow_frames_sha256: None,
             duration: 10.0,
             valve_time: 9.75,
             hold_time: 0.25,
@@ -2362,13 +2711,6 @@ mod tests {
             fluid_grid: [16, 16],
             fluid_dx: 0.1,
             ink_grid: [8, 4],
-            projection: ember::pipeline::EmberProjection {
-                origin: [0.0; 3],
-                extent: 1.0,
-                axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                scale: 1.0,
-                variances: [2.0, 1.0, 0.5],
-            },
             stats: ember::pipeline::EmberStats::default(),
             timings: ember::pipeline::EmberTimings::default(),
         }
@@ -2381,6 +2723,7 @@ mod tests {
             video,
             EmberManifest {
                 frames_emitted: 1_802,
+                slow_frames_emitted: 18_011,
                 frame_rate: constants::DEFAULT_VIDEO_FPS,
                 has_video: true,
                 fast_encode: true,
@@ -2456,7 +2799,7 @@ mod tests {
         ["main_web", "main_hq", "spectral_sweep_web", "spectral_sweep_hq", "spectral_bins"];
     const EMBER_STILL_ROLES: [&str; 3] =
         ["ember_source_master", "ember_web_full", "ember_web_preview"];
-    const EMBER_VIDEO_ROLES: [&str; 2] = ["ember_web", "ember_hq"];
+    const EMBER_VIDEO_ROLES: [&str; 3] = ["ember_web", "ember_slow_web", "ember_hq"];
 
     #[test]
     fn test_manifest_without_ember_keeps_the_legacy_entries() {
@@ -2512,9 +2855,15 @@ mod tests {
 
     #[test]
     fn test_manifest_appends_the_ember_edition() {
-        let dir = package_fixture(&[EMBER_STILL_PATH, EMBER_WEB_VIDEO_PATH, EMBER_HQ_VIDEO_PATH]);
+        let dir = package_fixture(&[
+            EMBER_STILL_PATH,
+            EMBER_WEB_VIDEO_PATH,
+            EMBER_SLOW_WEB_VIDEO_PATH,
+            EMBER_HQ_VIDEO_PATH,
+        ]);
         let ember = EmberManifest {
             frames_emitted: 1_802,
+            slow_frames_emitted: 17_941,
             frame_rate: 60,
             has_video: true,
             fast_encode: false,
@@ -2556,6 +2905,18 @@ mod tests {
                 "sha256": fixture_sha256(EMBER_WEB_VIDEO_PATH),
             })
         );
+        // The slow film: the web encode's settings, and its own, longer duration.
+        assert_eq!(
+            *entry(&manifest, "ember_slow_web"),
+            serde_json::json!({
+                "path": "videos/web/ember_slow.mp4", "kind": "video", "role": "ember_slow_web",
+                "format": "mp4", "width": 3456, "height": 2234,
+                "duration_seconds": 17_941.0 / 60.0, "frame_rate": 60,
+                "codec": "h264", "pixel_format": "yuv420p", "color_space": "srgb",
+                "bytes": EMBER_SLOW_WEB_VIDEO_PATH.len(),
+                "sha256": fixture_sha256(EMBER_SLOW_WEB_VIDEO_PATH),
+            })
+        );
         let hq = entry(&manifest, "ember_hq");
         assert_eq!(hq["path"], "videos/hq/ember.mp4");
         assert_eq!((&hq["codec"], &hq["pixel_format"]), (&"hevc".into(), &"yuv422p10le".into()));
@@ -2571,8 +2932,10 @@ mod tests {
         for steps in [100_000, 1_000_000, 1_234_567] {
             // The ember videos are frame-locked to `main.mp4`: same frames, same duration.
             let frames = ember_frame_schedule(steps).len();
+            let slow_frames = (frames - 1) * EMBER_SLOW_FACTOR as usize + 1;
             let ember = EmberManifest {
                 frames_emitted: frames,
+                slow_frames_emitted: slow_frames,
                 frame_rate: constants::DEFAULT_VIDEO_FPS,
                 has_video: true,
                 fast_encode: false,
@@ -2589,6 +2952,9 @@ mod tests {
             let main = duration("main_web").as_f64().expect("duration");
             assert_eq!(main.to_bits(), seconds.to_bits(), "{main} s for {frames} frames");
             assert_eq!(duration("spectral_sweep_web"), 10.0, "the sweep is unchanged");
+            // The slow film has its own length.
+            let slow = slow_frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+            assert_eq!(duration("ember_slow_web").as_f64().map(f64::to_bits), Some(slow.to_bits()));
         }
     }
 
@@ -2597,6 +2963,7 @@ mod tests {
         let dir = package_fixture(&[]);
         let ember = EmberManifest {
             frames_emitted: 120,
+            slow_frames_emitted: 1_191,
             frame_rate: 60,
             has_video: true,
             fast_encode: true,
@@ -2605,6 +2972,9 @@ mod tests {
         let hq = entry(&manifest, "ember_hq");
         assert_eq!((&hq["codec"], &hq["pixel_format"]), (&"h264".into(), &"yuv420p10le".into()));
         assert_eq!(hq["duration_seconds"], 2.0);
+        // The fast encode replaces the HQ slot only; the slow film keeps the web settings.
+        let slow = entry(&manifest, "ember_slow_web");
+        assert_eq!((&slow["codec"], &slow["pixel_format"]), (&"h264".into(), &"yuv420p".into()));
     }
 
     #[test]
@@ -2614,6 +2984,7 @@ mod tests {
 
         let still_only = EmberManifest {
             frames_emitted: 0,
+            slow_frames_emitted: 0,
             frame_rate: 60,
             has_video: false,
             fast_encode: false,
@@ -2723,10 +3094,9 @@ mod tests {
         false
     }
 
-    /// Recorded steps of the tiny video render: the fewest for which the preflight accepts the
-    /// orbit of [`tilted_figure_eight_bodies`] under [`tiny_ember_config`] at 96×64 (it lasts
-    /// 1.2024 fluid time units, just over `pre_roll + valve_lead = 1.2`; 403 steps last 1.1959),
-    /// so the render and both encodes of its 403 frames take a few seconds.
+    /// Recorded steps of the tiny video render: a short arc of [`tilted_figure_eight_bodies`],
+    /// which its frontal view spreads over the 96×64 sheet, so that under [`tiny_ember_config`]
+    /// the render and the encodes of its frames take a few seconds.
     const TINY_VIDEO_STEPS: usize = 404;
 
     /// A package directory with the ember edition's output paths, each built from its named
@@ -2737,6 +3107,7 @@ mod tests {
         full_webp: String,
         preview_webp: String,
         web_video: String,
+        slow_web_video: String,
         hq_video: String,
         certificate: String,
     }
@@ -2755,6 +3126,7 @@ mod tests {
                 full_webp: path(EMBER_FULL_WEBP_PATH),
                 preview_webp: path(EMBER_PREVIEW_WEBP_PATH),
                 web_video: path(EMBER_WEB_VIDEO_PATH),
+                slow_web_video: path(EMBER_SLOW_WEB_VIDEO_PATH),
                 hq_video: path(EMBER_HQ_VIDEO_PATH),
                 certificate: path(EMBER_CERTIFICATE_PATH),
                 dir,
@@ -2775,6 +3147,7 @@ mod tests {
                 seed_hex: "46205528",
                 seed_bytes: &[0x46, 0x20, 0x55, 0x28],
                 bodies: &bodies,
+                view: &frontal_view(&bodies, steps, 96, 64),
                 steps,
                 width: 96,
                 height: 64,
@@ -2786,6 +3159,7 @@ mod tests {
                     full_webp: &self.full_webp,
                     preview_webp: &self.preview_webp,
                     web_video: &self.web_video,
+                    slow_web_video: &self.slow_web_video,
                     hq_video: &self.hq_video,
                     certificate: &self.certificate,
                 },
@@ -2876,8 +3250,14 @@ mod tests {
         let outputs = &certificate["outputs"];
         assert!(outputs["frames_rgb48le_sha256"].is_null(), "{outputs}");
         assert_eq!((outputs["frames_emitted"].as_u64(), summary.frames_emitted), (Some(0), 0));
-        assert!(!std::path::Path::new(&package.web_video).exists());
-        assert!(!std::path::Path::new(&package.hq_video).exists());
+        assert!(outputs["slow_frames_rgb48le_sha256"].is_null(), "{outputs}");
+        assert_eq!(
+            (outputs["slow_frames_emitted"].as_u64(), summary.slow_frames_emitted),
+            (Some(0), 0)
+        );
+        for video in [&package.web_video, &package.slow_web_video, &package.hq_video] {
+            assert!(!std::path::Path::new(video).exists(), "{video}");
+        }
         let stats = summary.stats;
         assert!(stats.still_ink_fraction > 0.0 && stats.still_ink_fraction < 1.0, "{stats:?}");
         assert_eq!(
@@ -2901,24 +3281,22 @@ mod tests {
     }
 
     /// The production path end to end, at a tiny size: every frame is shaded and streamed into
-    /// both encoders (`--fast-encode`: software H.264 in both slots), the videos hold exactly the
-    /// scheduled frames, the certificate records the frame stream the render hashed, and the
-    /// asset manifest lists both videos with that frame count's duration.
+    /// the encoders of its film (`--fast-encode`: software H.264 in every slot), each video holds
+    /// exactly the frames of its film (the scheduled frames, or the slow film's), the certificate
+    /// records both frame streams the render hashed, and the asset manifest lists the three
+    /// videos, each with the duration of its frame count.
     #[test]
-    fn test_render_ember_edition_writes_both_videos() {
-        let test = "test_render_ember_edition_writes_both_videos";
+    fn test_render_ember_edition_writes_its_videos() {
+        let test = "test_render_ember_edition_writes_its_videos";
         if !media_tools_available(test, &["ffmpeg", "ffprobe"]) {
             return;
         }
-        // The smallest orbit the preflight accepts (the ember stage's cost bound for this test).
+        // The preflight plans what the render then does.
         let config = tiny_ember_config();
-        let preflight =
-            |steps| preflight_ember_edition(&tilted_figure_eight_bodies(), steps, 96, 64, &config);
-        assert!(preflight(TINY_VIDEO_STEPS).is_ok());
-        assert!(matches!(
-            preflight(TINY_VIDEO_STEPS - 1),
-            Err(AppError::Ember(EmberError::OrbitTooShort { .. }))
-        ));
+        let bodies = tilted_figure_eight_bodies();
+        let view = frontal_view(&bodies, TINY_VIDEO_STEPS, 96, 64);
+        let plan = preflight_ember_edition(&bodies, &view, TINY_VIDEO_STEPS, 96, 64, &config)
+            .expect("the tiny orbit plans");
 
         let package = TinyEmberPackage::new();
         let summary = package.render(TINY_VIDEO_STEPS, false, true);
@@ -2931,27 +3309,44 @@ mod tests {
         let outputs = &certificate["outputs"];
         assert_eq!(outputs["frames_rgb48le_sha256"], frames_sha256, "{outputs}");
         assert_eq!(outputs["frames_emitted"], frames);
+        // The slow film: every scheduled frame from its first one on, and the frames between.
+        let slow_frames = summary.slow_frames_emitted;
+        assert_eq!(plan.slow_frames, slow_frames);
+        assert_eq!(
+            slow_frames,
+            (frames - 1 - summary.slow_first_frame) * EMBER_SLOW_FACTOR as usize + 1
+        );
+        let slow_sha256 = summary.slow_frames_sha256.as_deref().expect("the slow film is hashed");
+        assert_eq!(outputs["slow_frames_rgb48le_sha256"], slow_sha256, "{outputs}");
+        assert_eq!(outputs["slow_frames_emitted"], slow_frames);
+        assert_eq!(certificate["inputs"]["frames"]["slow_factor"], EMBER_SLOW_FACTOR);
+        assert_eq!(certificate["derived"]["slow_first_frame"], summary.slow_first_frame);
         let stats = summary.stats;
         assert!(stats.contact_events > 0, "the bodies inked the water: {stats:?}");
         assert_eq!(certificate["stats"]["contact_events"], stats.contact_events);
 
-        // Both videos exist and decode to exactly the scheduled frames.
+        // Every video exists and decodes to exactly the frames of its film.
         let [web, hq] = ember_video_options(true);
-        for (video, options) in [(&package.web_video, &web), (&package.hq_video, &hq)] {
-            assert!(fs::metadata(video).expect("ember.mp4").len() > 0, "{video}");
+        let videos = [
+            ("ember_web", &package.web_video, &web, frames),
+            ("ember_slow_web", &package.slow_web_video, &web, slow_frames),
+            ("ember_hq", &package.hq_video, &hq, frames),
+        ];
+        for (_, video, options, film_frames) in videos {
+            assert!(fs::metadata(video).expect("an ember video").len() > 0, "{video}");
             let (codec, decoded) = probe_video(video);
             assert_eq!(codec, manifest_codec(&options.codec), "{video}");
-            assert_eq!(decoded, frames, "{video}: every scheduled frame is encoded");
+            assert_eq!(decoded, film_frames, "{video}: every frame of the film is encoded");
         }
 
-        // The manifest lists both with the duration of that frame count at the product rate.
+        // The manifest lists each with the duration of its frame count at the product rate.
         let manifest = EmberManifest::from_summary(&summary, true);
         write_asset_manifest(package.seed_dir(), 96, 64, TINY_VIDEO_STEPS, false, Some(&manifest))
             .expect("manifest");
         let bytes = fs::read(package.dir.path().join("metadata/assets.json")).expect("assets.json");
         let assets: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
-        let seconds = frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
-        for (role, video) in [("ember_web", &package.web_video), ("ember_hq", &package.hq_video)] {
+        for (role, video, _, film_frames) in videos {
+            let seconds = film_frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
             let listed = entry(&assets, role);
             assert_eq!(
                 listed["duration_seconds"].as_f64().map(f64::to_bits),

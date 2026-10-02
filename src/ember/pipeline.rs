@@ -4,6 +4,18 @@
 //! video). Between two frames the fluid is advanced through a few velocity snapshots, the ink
 //! fields are remapped along exact backward characteristics through those snapshots, and every
 //! pixel is shaded from its `q×q` ink nodes. The last frame is the still.
+//!
+//! # The slow film
+//!
+//! [`EmberMode::VideoAndSlow`] also renders the slow film: the same film `slow_factor` times
+//! slower, with `slow_factor - 1` real in-between frames inside every interval between two
+//! scheduled frames. The snapshots of an interval lie on a uniform lattice whose size is a
+//! multiple of `slow_factor` in every mode, so each in-between time is a snapshot time. An
+//! in-between frame is a *side* remap: the previous scheduled frame's fields remapped through
+//! the window's prefix that ends at its snapshot, shaded, and discarded. The scheduled chain
+//! never sees it, so the normal film and the still do not depend on whether the slow film is
+//! rendered, and every frame of either film is one remap away from a scheduled frame's fields
+//! through the same fine steps (docs/ember-design.md §8.3).
 
 use std::time::Instant;
 
@@ -16,17 +28,25 @@ use tracing::info;
 use super::config::{EmberConfig, FluidConfig};
 use super::error::{EmberError, EmberResult};
 use super::fluid::{FluidGrid, FluidStats, Snapshot, WakeSolver};
-use super::ink::{InkDecay, InkFields, NodeGrid, remap};
+use super::ink::{InkDecay, InkFields, NodeGrid, remap, remap_visible};
 use super::look::Look;
 use super::math;
 use super::optics::Optics;
-use super::orbit::{BodyMotion, BodyState, BodyTrack};
+use super::orbit::{BodyMotion, BodyState, BodyTrack, TrackSurvey};
 use super::paper::{KozoSheet, check_fibre_count};
 use super::trace::{ContactRules, FlowWindow};
+use super::view::View;
 use crate::sim::Sha3RandomByteStream;
 
 /// Largest supported output side, matching the main renderer's limit.
 const MAX_SIDE: u32 = 16_384;
+
+/// Largest supported [`EmberRequest::slow_factor`].
+const MAX_SLOW_FACTOR: u32 = 240;
+
+/// Scheduled frames of bare paper that the slow film shows before the frame interval in which
+/// the ink first appears: with the default factor 10 at 60 frames per second, one second.
+const SLOW_FILM_LEAD_FRAMES: usize = 6;
 
 /// Most threads the fluid solver uses.
 ///
@@ -57,14 +77,19 @@ fn in_pool<T: Send>(pool: Option<&rayon::ThreadPool>, work: impl FnOnce() -> T +
     }
 }
 
-/// What [`render_ember`] renders.
+/// What [`render_ember`] renders. The fluid and the scheduled ink remaps are the same in every
+/// mode, so the still and the scheduled frames do not depend on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EmberMode {
-    /// Every scheduled frame is shaded and handed to the sink; the last one is the still.
-    Video,
     /// Only the final frame is shaded (the fluid and ink still run through the whole schedule,
-    /// so the still is identical to the video's last frame). The sink is not called.
+    /// so the still is identical to the films' last frame). The sink is not called.
     StillOnly,
+    /// The normal film: every scheduled frame is shaded and handed to the sink; the last one is
+    /// the still.
+    Video,
+    /// The normal film and the slow film: the sink also receives the in-between frames (see the
+    /// module documentation).
+    VideoAndSlow,
 }
 
 /// Inputs of one ember render.
@@ -72,12 +97,19 @@ pub enum EmberMode {
 pub struct EmberRequest<'a> {
     /// Raw recorded orbit, `positions[body][knot]`: exactly three bodies, at least two knots.
     pub positions: &'a [Vec<Vector3<f64>>],
+    /// Time step of the recording (the phase-space projections difference positions over it).
+    pub dt: f64,
     /// The bodies' masses (finite and positive), in the order of `positions`: they set the tidal
     /// field that stretches the bodies.
     pub masses: [f64; 3],
+    /// The main edition's view of the orbit, which the bodies follow.
+    pub view: &'a View,
     /// Recorded knots to render as frames: strictly increasing, the last one must be the final
     /// knot (the still). Use the main video's checkpoints so both videos stay in step.
     pub frame_steps: &'a [usize],
+    /// How many times slower the slow film is (at least 1). It also fixes the snapshot lattice,
+    /// in every mode, so it is an input of the still and the normal film too.
+    pub slow_factor: u32,
     /// Output width in pixels.
     pub width: u32,
     /// Output height in pixels.
@@ -90,15 +122,21 @@ pub struct EmberRequest<'a> {
     pub mode: EmberMode,
 }
 
-/// One rendered frame, handed to the sink in schedule order.
+/// One rendered frame, handed to the sink in time order. A scheduled frame belongs to the normal
+/// film and, once the slow film has started, to the slow film too; an in-between frame belongs
+/// to the slow film only.
 #[derive(Clone, Copy, Debug)]
 pub struct EmberFrame<'a> {
-    /// Frame number (0-based).
-    pub index: usize,
-    /// Number of frames in the schedule.
+    /// Position in the normal film (0-based); `None` for an in-between frame.
+    pub index: Option<usize>,
+    /// Frames of the normal film (the schedule's length).
     pub count: usize,
-    /// Recorded orbit knot shown by this frame.
-    pub orbit_step: usize,
+    /// Position in the slow film (0-based); `None` if this frame is not part of it.
+    pub slow_index: Option<usize>,
+    /// Frames of the slow film (0 unless the mode is [`EmberMode::VideoAndSlow`]).
+    pub slow_count: usize,
+    /// Recorded orbit knot shown by a scheduled frame.
+    pub orbit_step: Option<usize>,
     /// Fluid time of this frame.
     pub time: f64,
     /// Width in pixels.
@@ -109,22 +147,6 @@ pub struct EmberFrame<'a> {
     pub rgb: &'a [u16],
     /// The same samples as little-endian bytes (`rgb48le`), ready for an encoder pipe.
     pub rgb48le: &'a [u8],
-}
-
-/// Projection of the orbit onto the canvas (recorded as the certificate's `derived.projection`).
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EmberProjection {
-    /// Centre of the orbit's bounding box (original units).
-    pub origin: [f64; 3],
-    /// Largest side of the orbit's bounding box (original units).
-    pub extent: f64,
-    /// The two principal axes spanning the canvas (normalised 3-D space).
-    pub axes: [[f64; 3]; 2],
-    /// World units per normalised projected unit.
-    pub scale: f64,
-    /// Principal variances, descending.
-    pub variances: [f64; 3],
 }
 
 /// Deterministic statistics of a render (part of the determinism contract; recorded as the
@@ -191,10 +213,20 @@ pub struct EmberSummary {
     pub still: Vec<u16>,
     /// SHA-256 (hex) of the still as `rgb48le` bytes.
     pub still_sha256: String,
-    /// Frames handed to the sink (`0` in [`EmberMode::StillOnly`]).
+    /// Frames of the normal film handed to the sink (`0` in [`EmberMode::StillOnly`]).
     pub frames_emitted: usize,
-    /// SHA-256 (hex) of the concatenated `rgb48le` frame stream, in [`EmberMode::Video`].
+    /// SHA-256 (hex) of the normal film's concatenated `rgb48le` frames, unless
+    /// [`EmberMode::StillOnly`].
     pub frames_sha256: Option<String>,
+    /// How many times slower the slow film is ([`EmberRequest::slow_factor`]).
+    pub slow_factor: u32,
+    /// The scheduled frame at which the slow film starts.
+    pub slow_first_frame: usize,
+    /// Frames of the slow film handed to the sink (`0` unless [`EmberMode::VideoAndSlow`]).
+    pub slow_frames_emitted: usize,
+    /// SHA-256 (hex) of the slow film's concatenated `rgb48le` frames, in
+    /// [`EmberMode::VideoAndSlow`].
+    pub slow_frames_sha256: Option<String>,
     /// Orbit duration in fluid time units.
     pub duration: f64,
     /// Fluid time at which the bodies stopped inking.
@@ -211,8 +243,6 @@ pub struct EmberSummary {
     pub fluid_dx: f64,
     /// Ink node grid `[cols, rows]` including the margin.
     pub ink_grid: [usize; 2],
-    /// Orbit projection.
-    pub projection: EmberProjection,
     /// Deterministic statistics.
     pub stats: EmberStats,
     /// Wall-clock timings.
@@ -229,8 +259,8 @@ impl EmberSummary {
 
 /// Everything [`render_ember`] checks and derives before the fluid starts.
 ///
-/// Planning costs one projection of the orbit and its tables (about 0.1 s for a million recorded
-/// steps) and allocates nothing proportional to the output, so callers can run it long before
+/// Planning costs one pass of the view over the orbit and the track's tables (a fraction of a
+/// second for a million recorded steps) and allocates nothing proportional to the output, so callers can run it long before
 /// rendering to reject an orbit the edition cannot draw. [`render_ember`] plans the request itself; see
 /// [`plan_ember`] for what a successful plan does and does not guarantee.
 #[derive(Debug)]
@@ -241,6 +271,31 @@ pub struct EmberPlan {
     rules: ContactRules,
     aspect: f64,
     frames: usize,
+    slow: SlowFilm,
+    survey: TrackSurvey,
+}
+
+/// The slow film of a request: the normal film `factor` times slower, starting a little before
+/// the ink first appears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SlowFilm {
+    /// In-between frames per scheduled interval, plus one.
+    factor: usize,
+    /// The scheduled frame that is the slow film's first frame.
+    first_frame: usize,
+    /// Frames of the slow film: `(scheduled frames after the first)·factor + 1`.
+    frames: usize,
+}
+
+impl SlowFilm {
+    /// The slow film of a schedule whose frames are at the fluid times `frame_time(i)`
+    /// (`count ≥ 1` of them, the last one after `t_on`): it starts [`SLOW_FILM_LEAD_FRAMES`]
+    /// scheduled frames before the interval in which the inking starts at `t_on`.
+    fn plan(count: usize, frame_time: impl Fn(usize) -> f64, t_on: f64, factor: usize) -> Self {
+        let inked = (0..count).find(|&index| frame_time(index) >= t_on).unwrap_or(count - 1);
+        let first_frame = inked.saturating_sub(SLOW_FILM_LEAD_FRAMES + 1);
+        Self { factor, first_frame, frames: (count - 1 - first_frame) * factor + 1 }
+    }
 }
 
 impl EmberPlan {
@@ -264,6 +319,38 @@ impl EmberPlan {
         self.frames
     }
 
+    /// Frames of the slow film ([`EmberMode::VideoAndSlow`]).
+    pub fn slow_frames(&self) -> usize {
+        self.slow.frames
+    }
+
+    /// The scheduled frame at which the slow film starts.
+    pub fn slow_first_frame(&self) -> usize {
+        self.slow.first_frame
+    }
+
+    /// Fluid steps the orbit needs at least: the bodies' own speeds through the solver's step
+    /// rule. The stirred water is faster in places, so a render takes somewhat more.
+    pub fn estimated_fluid_steps(&self) -> f64 {
+        self.survey.fluid_steps
+    }
+
+    /// Fastest body speed on the canvas, in units of the reference (median) speed.
+    pub fn peak_speed(&self) -> f64 {
+        self.survey.peak_speed
+    }
+
+    /// Smallest distance of a body's centre from the canvas edge over the orbit, in canvas units
+    /// (the canvas is 2 high).
+    pub fn edge_clearance(&self) -> f64 {
+        self.survey.edge_clearance
+    }
+
+    /// Fraction of the orbit during which two bodies' discs overlap on the canvas.
+    pub fn overlap_fraction(&self) -> f64 {
+        self.survey.overlap_fraction
+    }
+
     /// Fluid grid `[nx, ny]`.
     pub fn fluid_grid(&self) -> [usize; 2] {
         [self.grid.nx, self.grid.ny]
@@ -277,9 +364,9 @@ impl EmberPlan {
 
 /// Validates a request and derives its plan: the configuration, the output size (at most
 /// 16,384 pixels per side), the kozo sheet's fibre count at that size (at most 16,777,216), the
-/// frame schedule (non-empty, strictly increasing, ending on the final knot), the orbit's
-/// projection (it must span a plane), its duration against the pre-roll and the valve
-/// (`T - valve_lead > pre_roll`), and the fluid and ink grids.
+/// frame schedule (non-empty, strictly increasing, ending on the final knot) and the slow
+/// factor, the view and the canvas track it gives the orbit, the orbit's duration against the
+/// pre-roll and the valve (`T - valve_lead > pre_roll`), and the fluid and ink grids.
 ///
 /// Barring resource exhaustion, a request that plans successfully can fail later only if the
 /// simulated flow becomes non-finite or the sink fails. Planning checks ranges; it does not
@@ -294,9 +381,18 @@ pub fn plan_ember(request: &EmberRequest<'_>) -> EmberResult<EmberPlan> {
     check_fibre_count(request.width, request.height, &config.paper)?;
     let knots = request.positions.first().map_or(0, Vec::len);
     validate_schedule(request.frame_steps, knots)?;
+    if !(1..=MAX_SLOW_FACTOR).contains(&request.slow_factor) {
+        return Err(EmberError::InvalidSchedule {
+            reason: format!(
+                "the slow factor {} must be between 1 and {MAX_SLOW_FACTOR}",
+                request.slow_factor
+            ),
+        });
+    }
 
     let aspect = f64::from(request.width) / f64::from(request.height);
-    let track = BodyTrack::new(request.positions, request.masses, aspect, config)?;
+    let canvas = request.view.canvas_track(request.positions, request.dt, aspect)?;
+    let track = BodyTrack::new(canvas, request.masses, config)?;
     let t_valve = valve_time(track.duration(), config)?;
     let grid = FluidGrid::for_canvas(aspect, config.fluid.rows, config.fluid.box_margin)?;
     let nodes = NodeGrid::new(
@@ -311,7 +407,15 @@ pub fn plan_ember(request: &EmberRequest<'_>) -> EmberResult<EmberPlan> {
         t_on: config.contact.pre_roll,
         t_valve,
     };
-    Ok(EmberPlan { track, grid, nodes, rules, aspect, frames: request.frame_steps.len() })
+    let frames = request.frame_steps.len();
+    let slow = SlowFilm::plan(
+        frames,
+        |index| track.knot_time(request.frame_steps[index]),
+        rules.t_on,
+        request.slow_factor as usize,
+    );
+    let survey = track.survey(aspect, grid.dx, config);
+    Ok(EmberPlan { track, grid, nodes, rules, aspect, frames, slow, survey })
 }
 
 /// `t_valve = T - valve_lead` for an orbit of duration `T`; the orbit is too short unless
@@ -329,29 +433,34 @@ fn valve_time(duration: f64, config: &EmberConfig) -> EmberResult<f64> {
 
 /// Renders the ember edition of an orbit.
 ///
-/// In [`EmberMode::Video`] every scheduled frame is passed to `sink` in order; the returned
-/// summary's `still` equals the last frame. The result is bit-identical on every CPU architecture
-/// and for every rayon thread count.
+/// Unless the mode is [`EmberMode::StillOnly`], every scheduled frame is passed to `sink` in
+/// order, and in [`EmberMode::VideoAndSlow`] the slow film's in-between frames are passed
+/// between them; the returned summary's `still` equals the last frame. The result is
+/// bit-identical on every CPU architecture and for every rayon thread count.
 pub fn render_ember(
     request: &EmberRequest<'_>,
     sink: &mut dyn FnMut(&EmberFrame<'_>) -> EmberResult<()>,
 ) -> EmberResult<EmberSummary> {
     let started = Instant::now();
     let config = request.config;
-    let EmberPlan { track, grid, nodes, rules, aspect, .. } = plan_ember(request)?;
+    let EmberPlan { track, grid, nodes, rules, aspect, slow, .. } = plan_ember(request)?;
     let duration = track.duration();
     let (t_on, t_valve) = (rules.t_on, rules.t_valve);
+    let films = request.mode != EmberMode::StillOnly;
+    let slow_film = request.mode == EmberMode::VideoAndSlow;
+    let slow_count = if slow_film { slow.frames } else { 0 };
     let fluid_pool = fluid_pool();
     let mut solver = in_pool(fluid_pool.as_ref(), || WakeSolver::new(grid, &config.fluid, aspect))?;
     info!(
         "Ember edition: orbit lasts {duration:.3} fluid units; fluid {}x{} (dx {:.5}); ink nodes \
-         {}x{}; {} frames",
+         {}x{}; {} frames{}",
         grid.nx,
         grid.ny,
         grid.dx,
         nodes.cols,
         nodes.rows,
-        request.frame_steps.len()
+        request.frame_steps.len(),
+        if slow_film { format!(", {slow_count} in the slow film") } else { String::new() }
     );
 
     let look = Look::new(&config.look, duration);
@@ -361,6 +470,13 @@ pub fn render_ember(
     let paper = PaperCache::new(&sheet, &optics);
     let shader =
         Shader { nodes: &nodes, look: &look, optics: &optics, sheet: &sheet, paper: &paper };
+    // The fields' decay over the fluid time `dt` that ends at `frame_time`.
+    let decay_over = |dt: f64, frame_time: f64| InkDecay {
+        frame_time,
+        fade_tau: look.fade_tau(),
+        fresh_fade: math::exp(-dt / look.fade_tau()),
+        floor_fade: config.look.floor_tau.map_or(1.0, |tau| math::exp(-dt / tau)),
+    };
 
     let mut fields = InkFields::zeros(&nodes);
     let mut next_fields = InkFields::zeros(&nodes);
@@ -372,9 +488,11 @@ pub fn render_ember(
     let mut rgb = vec![0u16; pixels * 3];
     let mut rgb48le = vec![0u8; pixels * 6];
     let mut stream_hasher = Sha256::new();
+    let mut slow_hasher = Sha256::new();
     let mut stats = EmberStats::default();
     let mut timings = EmberTimings::default();
     let mut frames_emitted = 0;
+    let mut slow_frames_emitted = 0;
     // Visible ink nodes (the margin excluded): the denominator of the node fractions.
     let view_nodes = (nodes.width * nodes.height * nodes.supersample * nodes.supersample) as f64;
 
@@ -384,8 +502,10 @@ pub fn render_ember(
     let progress_every = (count / 20).max(1);
     for (index, &step) in request.frame_steps.iter().enumerate() {
         let t_frame = track.knot_time(step);
-        let intervals =
-            snapshot_intervals(&track, |k| track.knot_time(k), previous_step, step, &config.fluid);
+        let intervals = lattice_intervals(
+            snapshot_intervals(&track, |k| track.knot_time(k), previous_step, step, &config.fluid),
+            slow.factor,
+        );
 
         let clock = Instant::now();
         window.begin_frame();
@@ -406,16 +526,61 @@ pub fn render_ember(
         stats.snapshots += intervals as u64;
         timings.fluid_seconds += clock.elapsed().as_secs_f64();
 
+        // The slow film's in-between frames of this interval: side remaps of the previous
+        // scheduled frame's fields into `next_fields`, which the scheduled remap overwrites.
+        // They are shaded and dropped, so only the visible nodes are remapped.
+        if slow_film && index > slow.first_frame && intervals > 0 {
+            for between in 1..slow.factor {
+                let last = between * (intervals / slow.factor);
+                let time = window.snapshots()[last].time;
+                let clock = Instant::now();
+                let inked = time >= t_on;
+                if inked {
+                    let flow = FlowWindow {
+                        grid,
+                        snapshots: &window.snapshots()[..=last],
+                        bodies: &window.bodies()[..=last],
+                    };
+                    let decay = decay_over(time - t_prev, time);
+                    let side =
+                        remap_visible(&fields, &mut next_fields, &nodes, &flow, &rules, &decay);
+                    if side.non_finite_origins > 0 {
+                        return Err(EmberError::NonFinite { stage: "ink trace", time });
+                    }
+                }
+                timings.ink_seconds += clock.elapsed().as_secs_f64();
+
+                let clock = Instant::now();
+                let shown = if inked { &next_fields } else { &fields };
+                if !shader.shade(shown, &mut rgb).finite {
+                    return Err(EmberError::NonFinite { stage: "shading", time });
+                }
+                encode_le(&rgb, &mut rgb48le);
+                timings.shade_seconds += clock.elapsed().as_secs_f64();
+
+                let clock = Instant::now();
+                slow_hasher.update(&rgb48le);
+                sink(&EmberFrame {
+                    index: None,
+                    count,
+                    slow_index: Some(slow_frames_emitted),
+                    slow_count,
+                    orbit_step: None,
+                    time,
+                    width: request.width,
+                    height: request.height,
+                    rgb: &rgb,
+                    rgb48le: &rgb48le,
+                })?;
+                slow_frames_emitted += 1;
+                timings.sink_seconds += clock.elapsed().as_secs_f64();
+            }
+        }
+
         let clock = Instant::now();
         if intervals > 0 && t_frame >= t_on {
             let flow = FlowWindow { grid, snapshots: window.snapshots(), bodies: window.bodies() };
-            let dt = t_frame - t_prev;
-            let decay = InkDecay {
-                frame_time: t_frame,
-                fade_tau: look.fade_tau(),
-                fresh_fade: math::exp(-dt / look.fade_tau()),
-                floor_fade: config.look.floor_tau.map_or(1.0, |tau| math::exp(-dt / tau)),
-            };
+            let decay = decay_over(t_frame - t_prev, t_frame);
             let remap_stats = remap(&fields, &mut next_fields, &nodes, &flow, &rules, &decay);
             if remap_stats.non_finite_origins > 0 {
                 return Err(EmberError::NonFinite { stage: "ink trace", time: t_frame });
@@ -426,7 +591,7 @@ pub fn render_ember(
         timings.ink_seconds += clock.elapsed().as_secs_f64();
 
         let is_last = index + 1 == count;
-        if request.mode == EmberMode::Video || is_last {
+        if films || is_last {
             let clock = Instant::now();
             let shade_stats = shader.shade(&fields, &mut rgb);
             if !shade_stats.finite {
@@ -438,13 +603,19 @@ pub fn render_ember(
                 stats.still_ink_fraction = shade_stats.inked_nodes as f64 / view_nodes;
                 stats.still_gamut_mapped_pixels = shade_stats.gamut_mapped;
             }
-            if request.mode == EmberMode::Video {
+            if films {
                 let clock = Instant::now();
+                let in_slow_film = slow_film && index >= slow.first_frame;
                 stream_hasher.update(&rgb48le);
+                if in_slow_film {
+                    slow_hasher.update(&rgb48le);
+                }
                 sink(&EmberFrame {
-                    index,
+                    index: Some(index),
                     count,
-                    orbit_step: step,
+                    slow_index: in_slow_film.then_some(slow_frames_emitted),
+                    slow_count,
+                    orbit_step: Some(step),
                     time: t_frame,
                     width: request.width,
                     height: request.height,
@@ -452,6 +623,7 @@ pub fn render_ember(
                     rgb48le: &rgb48le,
                 })?;
                 frames_emitted += 1;
+                slow_frames_emitted += usize::from(in_slow_film);
                 timings.sink_seconds += clock.elapsed().as_secs_f64();
             }
         }
@@ -469,6 +641,7 @@ pub fn render_ember(
             );
         }
     }
+    debug_assert_eq!(slow_frames_emitted, slow_count, "the slow film has its planned length");
 
     let fluid: FluidStats = solver.stats();
     stats.fluid_steps = fluid.steps;
@@ -477,15 +650,17 @@ pub fn render_ember(
     stats.max_flow_speed = fluid.max_speed;
     timings.total_seconds = started.elapsed().as_secs_f64();
 
-    let projection = track.projection();
     Ok(EmberSummary {
         width: request.width,
         height: request.height,
         still_sha256: hex::encode(Sha256::digest(&rgb48le)),
         still: rgb,
         frames_emitted,
-        frames_sha256: (request.mode == EmberMode::Video)
-            .then(|| hex::encode(stream_hasher.finalize())),
+        frames_sha256: films.then(|| hex::encode(stream_hasher.finalize())),
+        slow_factor: request.slow_factor,
+        slow_first_frame: slow.first_frame,
+        slow_frames_emitted,
+        slow_frames_sha256: slow_film.then(|| hex::encode(slow_hasher.finalize())),
         duration,
         valve_time: t_valve,
         hold_time: look.hold(),
@@ -494,16 +669,17 @@ pub fn render_ember(
         fluid_grid: [grid.nx, grid.ny],
         fluid_dx: grid.dx,
         ink_grid: [nodes.cols, nodes.rows],
-        projection: EmberProjection {
-            origin: projection.origin,
-            extent: projection.extent,
-            axes: projection.axes,
-            scale: projection.scale,
-            variances: projection.variances,
-        },
         stats,
         timings,
     })
+}
+
+/// The snapshot intervals of a scheduled frame interval that needs `intervals` of them
+/// ([`snapshot_intervals`]): the next multiple of the slow film's `factor`, so that each of its
+/// in-between frames ends on a snapshot. It is the same in every mode, so the fluid's steps, the
+/// scheduled frames and the still do not depend on whether the slow film is rendered.
+fn lattice_intervals(intervals: usize, factor: usize) -> usize {
+    intervals.div_ceil(factor) * factor
 }
 
 /// Rejects empty or oversized outputs.
@@ -860,6 +1036,41 @@ mod tests {
         assert_eq!(snapshot_intervals(&fast_shuttle(), knot_time, 90, 90, &fluid), 0);
     }
 
+    /// Every scheduled interval gets a multiple of the slow factor of snapshot intervals, so
+    /// the slow film's in-between times are snapshot times.
+    #[test]
+    fn the_snapshot_lattice_is_a_multiple_of_the_slow_factor() {
+        for (intervals, factor, lattice) in
+            [(0, 10, 0), (1, 10, 10), (10, 10, 10), (11, 10, 20), (55, 10, 60), (7, 1, 7)]
+        {
+            assert_eq!(lattice_intervals(intervals, factor), lattice, "{intervals} by {factor}");
+        }
+    }
+
+    /// The slow film starts [`SLOW_FILM_LEAD_FRAMES`] scheduled frames before the interval in
+    /// which the bodies start inking, and has `factor` frames per scheduled interval from there.
+    #[test]
+    fn the_slow_film_starts_a_little_before_the_ink() {
+        let time = |index: usize| index as f64;
+        let plan = |count, t_on, factor| {
+            let film = SlowFilm::plan(count, time, t_on, factor);
+            (film.first_frame, film.frames)
+        };
+        // Inking starts inside the interval (20, 21]: that interval starts at frame 20, and the
+        // film 6 frames earlier.
+        assert_eq!(SLOW_FILM_LEAD_FRAMES, 6);
+        assert_eq!(plan(100, 20.5, 10), (14, 85 * 10 + 1));
+        // Exactly on a frame, the interval is the one that ends there.
+        assert_eq!(plan(100, 20.0, 10), (13, 86 * 10 + 1));
+        // Ink from the start: the whole film, slowed.
+        assert_eq!(plan(100, 0.0, 10), (0, 99 * 10 + 1));
+        assert_eq!(plan(100, 3.5, 10), (0, 99 * 10 + 1));
+        // Factor 1 is the normal film from the first frame on.
+        assert_eq!(plan(100, 20.5, 1), (14, 86));
+        // A single frame is the still.
+        assert_eq!(plan(1, 0.5, 10), (0, 1));
+    }
+
     #[test]
     fn schedule_must_end_on_the_final_knot() {
         assert!(validate_schedule(&[1, 2, 9], 10).is_ok());
@@ -910,9 +1121,13 @@ mod tests {
         let steps = 20_000;
         let positions = figure_eight_positions(steps);
         let frame_steps = crate::render::main_video_checkpoints(steps);
+        let view = crate::ember::view::tests::frontal_view(&positions, 1.5);
         let request = |config| EmberRequest {
             positions: &positions,
+            dt: crate::render::constants::DEFAULT_DT,
             masses: [1.0; 3],
+            view: &view,
+            slow_factor: 10,
             frame_steps: &frame_steps,
             width: 96,
             height: 64,

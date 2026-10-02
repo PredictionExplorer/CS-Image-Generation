@@ -6,8 +6,40 @@ use tracing::warn;
 
 /// Trait for applying drift transformations to position data
 pub trait DriftTransform {
-    /// Apply the drift transformation to all body positions for one time step.
-    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64);
+    /// Apply the drift transformation to all body positions and report what was added.
+    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) -> AppliedDrift;
+}
+
+/// What a [`DriftTransform`] added to the positions: the same offset for every body at each
+/// step. The ember edition re-applies it from these values to follow the same motion
+/// (`ember::View`), so each variant holds the resolved quantities, not the configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AppliedDrift {
+    /// Nothing was added: no drift, or a drift whose parameters made it a no-op.
+    None,
+    /// `offset[step] = (velocity * step) * dt`.
+    Linear {
+        /// Drift velocity.
+        velocity: Vector3<f64>,
+    },
+    /// A random walk; its per-step offsets are not recorded.
+    Brownian,
+    /// `offset[step] = rotation * (a * (cos E - e), b * sin E, 0)` with `E` the eccentric
+    /// anomaly of the mean anomaly `initial_mean_anomaly + mean_motion * (step * dt)`.
+    Elliptical {
+        /// Orientation of the drift ellipse.
+        rotation: Matrix3<f64>,
+        /// Mean anomaly at step 0, in radians.
+        initial_mean_anomaly: f64,
+        /// Mean motion in radians per unit of simulation time.
+        mean_motion: f64,
+        /// Orbital eccentricity `e`.
+        eccentricity: f64,
+        /// Semi-major axis `a`.
+        semi_major: f64,
+        /// Semi-minor axis `b`.
+        semi_minor: f64,
+    },
 }
 
 /// Maximum supported drift sweep, in fractions of a full rotation.
@@ -66,8 +98,8 @@ impl DriftParameters {
 pub struct NoDrift;
 
 impl DriftTransform for NoDrift {
-    fn apply(&mut self, _positions: &mut [Vec<Vector3<f64>>], _dt: f64) {
-        // Do nothing
+    fn apply(&mut self, _positions: &mut [Vec<Vector3<f64>>], _dt: f64) -> AppliedDrift {
+        AppliedDrift::None
     }
 }
 
@@ -111,9 +143,9 @@ impl BrownianDrift {
 }
 
 impl DriftTransform for BrownianDrift {
-    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], _dt: f64) {
+    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], _dt: f64) -> AppliedDrift {
         if positions.is_empty() || positions[0].is_empty() {
-            return;
+            return AppliedDrift::None;
         }
 
         let steps = positions[0].len().min(self.displacements.len());
@@ -129,6 +161,7 @@ impl DriftTransform for BrownianDrift {
                 body_positions[step] += offset;
             }
         }
+        AppliedDrift::Brownian
     }
 }
 
@@ -156,9 +189,9 @@ impl LinearDrift {
 }
 
 impl DriftTransform for LinearDrift {
-    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) {
+    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) -> AppliedDrift {
         if positions.is_empty() || positions[0].is_empty() {
-            return;
+            return AppliedDrift::None;
         }
 
         let steps = positions[0].len();
@@ -171,6 +204,7 @@ impl DriftTransform for LinearDrift {
                 body_positions[step] += offset;
             }
         }
+        AppliedDrift::Linear { velocity: self.velocity }
     }
 }
 
@@ -198,18 +232,18 @@ impl EllipticalDrift {
 }
 
 impl DriftTransform for EllipticalDrift {
-    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) {
+    fn apply(&mut self, positions: &mut [Vec<Vector3<f64>>], dt: f64) -> AppliedDrift {
         if positions.is_empty() || positions[0].len() < 2 {
-            return;
+            return AppliedDrift::None;
         }
 
         if self.sweep_radians.abs() <= f64::EPSILON || self.params.scale <= 0.0 {
-            return;
+            return AppliedDrift::None;
         }
 
         let (semi_major, semi_minor) = orbital_axes(positions, self.params);
         if semi_major <= f64::EPSILON || semi_minor <= f64::EPSILON {
-            return;
+            return AppliedDrift::None;
         }
 
         let eccentricity = self.params.eccentricity;
@@ -231,6 +265,14 @@ impl DriftTransform for EllipticalDrift {
             for body_positions in positions.iter_mut() {
                 body_positions[step] += offset;
             }
+        }
+        AppliedDrift::Elliptical {
+            rotation: self.rotation,
+            initial_mean_anomaly: self.initial_mean_anomaly,
+            mean_motion,
+            eccentricity,
+            semi_major,
+            semi_minor,
         }
     }
 }

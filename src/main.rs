@@ -24,7 +24,8 @@ use clap::{Parser, ValueEnum};
 use rayon::ThreadPoolBuilder;
 use three_body_problem::{
     app,
-    ember::EmberConfig,
+    drift::AppliedDrift,
+    ember::{EmberConfig, View},
     error::{self, AppError, Result},
     nft_traits,
     render::{self, RenderConfig},
@@ -176,10 +177,10 @@ struct Args {
     #[arg(long)]
     equil_weight: Option<f64>,
 
-    /// Print the id of the ember look this generator renders (e.g. `ember-v2`,
+    /// Print the id of the ember look this generator renders (e.g. `ember-v3`,
     /// the `algorithm` of every `metadata/ember.json` it writes) and exit.
-    /// The sync loop (run.py) withdraws and re-renders the published editions
-    /// of every older look.
+    /// The sync loop (run.py) renders the published editions of every older
+    /// look again.
     #[arg(long, default_value_t = false, exclusive = true)]
     ember_algorithm: bool,
 }
@@ -314,10 +315,16 @@ fn build_generation_log_config(
 /// ember stage runs last, so an orbit it rejects (typically a short test run whose orbit lasts
 /// too little fluid time) is known in seconds and the stage is skipped instead of failing after
 /// the whole main render and its encodes.
-fn preflight_ember_stage(args: &Args, bodies: &[Body], config: &EmberConfig) -> Result<()> {
+fn preflight_ember_stage(
+    args: &Args,
+    bodies: &[Body],
+    view: &View,
+    config: &EmberConfig,
+) -> Result<()> {
     info!("STAGE EMBER (preflight): checking the ember edition can render this orbit...");
     app::preflight_ember_edition(
         bodies,
+        view,
         args.steps,
         args.resolution.width,
         args.resolution.height,
@@ -361,14 +368,16 @@ fn render_ember_stage(
     hex_seed: &str,
     seed_bytes: &[u8],
     bodies: &[Body],
+    view: &View,
     config: &EmberConfig,
 ) -> Result<app::EmberManifest> {
-    let [still_png, full_webp, preview_webp, web_video, hq_video, certificate] =
+    let [still_png, full_webp, preview_webp, web_video, slow_web_video, hq_video, certificate] =
         app::EMBER_OUTPUT_PATHS.map(|relative| format!("{seed_dir}/{relative}"));
     let summary = app::render_ember_edition(&app::EmberEditionRequest {
         seed_hex: hex_seed,
         seed_bytes,
         bodies,
+        view,
         steps: args.steps,
         width: args.resolution.width,
         height: args.resolution.height,
@@ -380,6 +389,7 @@ fn render_ember_stage(
             full_webp: &full_webp,
             preview_webp: &preview_webp,
             web_video: &web_video,
+            slow_web_video: &slow_web_video,
             hq_video: &hq_video,
             certificate: &certificate,
         },
@@ -448,8 +458,9 @@ fn main() -> Result<ExitCode> {
         visual_profile.parameters.projection,
     )?;
     // Moved out, not copied: nothing reads `selection.positions` afterwards (the ember edition
-    // and the traits re-simulate the raw orbit from `selection.bodies`), so dropping `positions`
-    // below really frees the trajectory.
+    // and the traits re-simulate the raw orbit from `selection.bodies`; the ember edition then
+    // re-applies the view captured below), so dropping `positions` further down really frees
+    // the trajectory.
     let mut positions = std::mem::take(&mut selection.positions);
     let visual_profile = visual_profile.with_stack(selection.stack);
     let resolved_effect_config = visual_profile.effect_config.clone();
@@ -475,20 +486,21 @@ fn main() -> Result<ExitCode> {
 
     // Seeded viewing orientation: photograph the 3D orbit from the
     // best-composed of several candidate angles.
-    app::apply_view_orientation(&mut positions, &rng, selection.stack);
+    let view_rotation = app::apply_view_orientation(&mut positions, &rng, selection.stack);
 
-    let drift_config = if args.drift == DriftModeArg::None {
+    let (drift_config, applied_drift) = if args.drift == DriftModeArg::None {
         info!("STAGE 2.5/7: Drift disabled");
-        None
+        (None, AppliedDrift::None)
     } else {
-        app::apply_drift_transformation(
+        let drift = app::apply_drift_transformation(
             &mut positions,
             args.drift.as_str(),
             None,
             None,
             None,
             &mut rng,
-        )?
+        )?;
+        (Some(drift.config), drift.applied)
     };
 
     let (colors, body_alphas) = app::generate_colors(
@@ -537,24 +549,53 @@ fn main() -> Result<ExitCode> {
 
     // The ember edition's look and simulation parameters (recorded in its certificate).
     let ember_config = EmberConfig::default();
-    // Set once the ember edition has failed (its preflight or its stage): the package is then
-    // completed without it, and the run exits with `EXIT_EMBER_FAILED`.
+    // The main edition's view of the orbit, which the ember edition's bodies follow: the
+    // projection space, the viewing rotation, the drift and the frame resolved above.
+    let ember_view = app::ember_view(
+        visual_profile.parameters.projection,
+        &view_rotation,
+        applied_drift,
+        bbox,
+        scene_traits.symmetry,
+        (args.resolution.width, args.resolution.height),
+    );
+    // Set once the ember edition has failed (its view, its preflight or its stage): the package
+    // is then completed without it, and the run exits with `EXIT_EMBER_FAILED`.
     let mut ember_failed = false;
 
     if args.metadata_only {
         info!("METADATA-ONLY MODE: skipping histogram, rendering, and asset manifest");
+        // The preflight costs a fraction of a second and logs what the ember edition would cost
+        // for this orbit; nothing is rendered and the exit status does not depend on it.
+        if !args.no_ember
+            && let Err(error) = ember_view.and_then(|view| {
+                preflight_ember_stage(&args, &selection.bodies, &view, &ember_config)
+            })
+        {
+            warn!("The ember edition cannot render this orbit: {}", error_chain(&error));
+        }
     } else {
         // Ember files an earlier run left in this directory would survive a run that writes
         // fewer of them (`--no-ember`, `--image-only`, a failed stage), unlisted in the manifest
         // this run writes. Removed up front, before anything is rendered; unremovable files fail
         // the run, since a package must never ship ember files its manifest does not describe.
         app::remove_ember_outputs(&seed_dir)?;
-        if !args.no_ember
-            && let Err(error) = preflight_ember_stage(&args, &selection.bodies, &ember_config)
-        {
-            warn_ember_failed("cannot render this orbit (preflight)", &error);
-            ember_failed = true;
-        }
+        // `Some` while the ember edition is to be rendered: its view passed the preflight.
+        let ember_view = if args.no_ember {
+            None
+        } else {
+            let checked = ember_view.and_then(|view| {
+                preflight_ember_stage(&args, &selection.bodies, &view, &ember_config).map(|()| view)
+            });
+            match checked {
+                Ok(view) => Some(view),
+                Err(error) => {
+                    warn_ember_failed("cannot render this orbit (preflight)", &error);
+                    ember_failed = true;
+                    None
+                }
+            }
+        };
         {
             // Main still, videos, spectral gallery and sweep. `levels`, the frame buffers and the
             // full-frame SPD accumulation (GiBs at full size) are freed at the end of this block,
@@ -637,16 +678,14 @@ fn main() -> Result<ExitCode> {
         let ember = if args.no_ember {
             info!("STAGE EMBER: skipped (--no-ember)");
             None
-        } else if ember_failed {
-            info!("STAGE EMBER: skipped (the preflight rejected this orbit)");
-            None
-        } else {
+        } else if let Some(view) = &ember_view {
             match render_ember_stage(
                 &args,
                 &seed_dir,
                 hex_seed,
                 &seed_bytes,
                 &selection.bodies,
+                view,
                 &ember_config,
             ) {
                 Ok(manifest) => Some(manifest),
@@ -656,6 +695,9 @@ fn main() -> Result<ExitCode> {
                     None
                 }
             }
+        } else {
+            info!("STAGE EMBER: skipped (the preflight rejected this orbit)");
+            None
         };
         if ember_failed {
             // A failed stage can leave partial files (a PNG whose WebPs failed, truncated

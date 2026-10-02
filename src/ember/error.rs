@@ -17,10 +17,19 @@ pub enum EmberError {
         reason: String,
     },
 
-    /// The orbit cannot be projected (non-finite, collapsed or one-dimensional).
+    /// The orbit cannot be drawn: it is not three equally long recordings, or its track on the
+    /// canvas is non-finite, stationary or shapeless.
     #[error("degenerate orbit: {reason}")]
     DegenerateOrbit {
         /// What made the orbit unusable.
+        reason: String,
+    },
+
+    /// The main edition's view cannot be followed (a non-finite or inconsistent recorded view, or
+    /// a drift whose path is not recorded).
+    #[error("invalid ember view: {reason}")]
+    InvalidView {
+        /// What is wrong with the view.
         reason: String,
     },
 

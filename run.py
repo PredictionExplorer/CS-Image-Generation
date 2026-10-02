@@ -32,30 +32,40 @@ Generator exit statuses (see README "Exit status"):
 
 Ember backfill (remote packages that lack only the ember edition's files):
     --backfill-mode ember (default) regenerates the package locally, checks that the render shows
-    the same orbit as the live package, and uploads only the ember files and a merged
-    metadata/assets.json; the published main art, spectral files, generation.json and
-    nft_traits.json are never touched.
+    the same orbit in the same view as the live package (the ember edition follows the main
+    edition's view), and uploads only the ember files and a merged metadata/assets.json; the
+    published main art, spectral files, generation.json and nft_traits.json are never touched.
     --backfill-mode full replaces the whole remote package. A seed whose ember edition fails
     --max-backfill-attempts times with the same generator binary is given up
-    (backfill_failures.json). A seed whose regenerated orbit differs from the live package's is
-    given up at once: the same binary always regenerates the same orbit. A backfill run that
-    fails for any other reason is not counted toward that cap, but moves the seed behind the
-    seeds that have failed less often, so a seed that always fails cannot stall the backfill.
+    (backfill_failures.json). A seed whose regenerated orbit or view differs from the live
+    package's is given up at once: the same binary always regenerates the same orbit and view. A
+    backfill run that fails for any other reason is not counted toward that cap, but moves the
+    seed behind the seeds that have failed less often, so a seed that always fails cannot stall
+    the backfill.
 
 Stale ember editions (after a deploy that changes the ember edition's look):
     `<generator> --ember-algorithm` prints the id of the look the generator renders (ember-v<N>,
     the "algorithm" every package records in metadata/ember.json). Before planning, a run reads
-    the id of every live certificate in one ssh call and withdraws each listed seed's edition
-    whose id is older: its certificate first, then its metadata/assets.json entries, then its
-    media. The package then lacks only the ember edition, so the backfill renders it again in the
-    current look; until then the token has no ember edition, so the old look is never online next
-    to the new one. Nothing is withdrawn unless both ids can be read.
-    --keep-stale-ember (env COSMICSIG_KEEP_STALE_EMBER=yes) keeps the live editions as they are.
+    the id of every live certificate in one ssh call. A listed seed's edition whose id is older
+    is stale, and its package is planned as an ember backfill seed, which the backfill renders
+    again in the current look (--max-backfill per run). What happens to the stale edition until
+    then is the operator's choice:
+      * by default it is withdrawn at once: its certificate first, then its metadata/assets.json
+        entries, then its media. The token has no ember edition until its turn in the backfill,
+        so the old look is never online next to the new one;
+      * with --keep-stale-ember (env COSMICSIG_KEEP_STALE_EMBER=yes) nothing is withdrawn: the
+        edition stays online until the backfill replaces it in place, so no token is without an
+        ember edition, and both looks are online while the backfill works through the
+        collection. With --max-backfill 0 as well, every live edition is held exactly as it is.
+    No edition is stale unless both ids can be read.
 
 Uploads: the metadata files and the certificate are uploaded under temporary names and renamed
     into place, so an interrupted upload never leaves a truncated metadata file; a whole package
     first loses its remote metadata/assets.json, so an interrupted one reads as incomplete (and
-    is regenerated in full) until its manifest has landed.
+    is regenerated in full) until its manifest has landed. An ember-mode backfill stages every
+    file of the edition that way, media included, and swaps them in with one ssh call once all
+    have landed: a failed transfer leaves the live package, any older ember edition included,
+    exactly as it was.
 
 Usage:
     python3 run.py [--dry-run]
@@ -97,13 +107,14 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # Defaults (non-sensitive only; deployment values come from .env / env vars)
 # ---------------------------------------------------------------------------
 
-# Per-seed generator timeout. A package is a full render, and the ember edition's current look (a
-# finer fluid grid and supersampling) made it substantially more expensive than the earlier one;
-# its time on the production host is re-measured after the deploy (the `OK  seed=... (total ...)`
-# log lines). The timeout only has to catch a render that hangs, so it leaves ample headroom, but
-# it must stay well below the service's 24-hour TimeoutStartSec: a render that hangs then fails
-# and moves back in the queue, instead of using up every run until systemd stops it (a stopped run
-# counts no failure, so the same seed would come first again).
+# Per-seed generator timeout. A package is a full render, and the ember edition is the most
+# expensive part of it: a fine fluid grid, supersampling and two films, of which the slow one
+# runs ten times slower and so has up to ten times the frames. Its time on the production host is
+# re-measured after every deploy that changes the look (the `OK  seed=... (total ...)` log
+# lines); no figure is quoted here. The timeout only has to catch a render that hangs, so it
+# leaves ample headroom, but it must stay well below the service's 24-hour TimeoutStartSec: a
+# render that hangs then fails and moves back in the queue, instead of using up every run until
+# systemd stops it (a stopped run counts no failure, so the same seed would come first again).
 DEFAULT_TIMEOUT = 10 * 3600  # 10 hours
 API_TOKEN_FETCH_LIMIT = 999999
 DEFAULT_ARBITRUM_RPC_URL = "https://arb1.arbitrum.io/rpc"
@@ -130,8 +141,10 @@ SSH_BASE_OPTS = [
 ]
 
 # An scp transfer may take SCP_MIN_TIMEOUT seconds, or longer when it carries more than
-# SCP_MIN_TIMEOUT * SCP_MIN_BYTES_PER_SECOND bytes: a package with the ember edition is about
-# 0.4 GB larger than one without it (the HQ ember video alone is about 284 MB).
+# SCP_MIN_TIMEOUT * SCP_MIN_BYTES_PER_SECOND bytes. The ember edition's videos are the large
+# transfers: its slow film alone is expected to be a few hundred MB to about 1 GB. The sizes of
+# the current look are measured after the deploy that introduces it (the `UPLOAD ... (N MB,
+# timeout Ns)` log lines); no figure is quoted here.
 SCP_MIN_TIMEOUT = 900
 SCP_MIN_BYTES_PER_SECOND = 1_000_000
 
@@ -147,7 +160,7 @@ GENERATOR_PROBE_TIMEOUT = 30
 # renders, the "algorithm" of every metadata/ember.json it writes, and exits 0 without rendering.
 # A binary that predates the flag rejects it (exit status 2). The id's number grows whenever the
 # edition's rendered bits change, so a live certificate with a lower number holds a look the
-# generator no longer renders: a stale edition (withdraw_stale_ember_editions()).
+# generator no longer renders: a stale edition (retire_stale_ember_editions()).
 GENERATOR_EMBER_ALGORITHM_FLAG = "--ember-algorithm"
 EMBER_ALGORITHM_RE = re.compile(r"ember-v(?P<number>[0-9]+)")
 
@@ -171,43 +184,72 @@ CORE_PACKAGE_FILES = (
     ASSET_MANIFEST,
     NFT_TRAITS,
 )
-# The ember edition (the orbit drawn in sumi ink by the fluid it stirs) and its determinism
-# certificate. Packages generated before it existed, whose ember edition failed, or whose stale
-# edition was withdrawn, lack only these files: they are regenerated as a backfill that yields to
-# new mints (see find_missing_seeds, plan_seed_queue, --backfill-mode and
-# withdraw_stale_ember_editions). Keep in sync with app::EMBER_OUTPUT_PATHS (a Rust unit test
-# checks it).
+# The ember edition (the orbit drawn in sumi ink by the fluid it stirs, in the main edition's
+# view) and its determinism certificate: the still and its two WebP derivatives, the film, the
+# slow film (the same film ten times slower), the archival film, the certificate. Packages
+# generated before the edition existed, whose ember edition failed, or whose stale edition was
+# withdrawn or lacks a file of the current look, lack only these files: they are regenerated as a
+# backfill that yields to new mints (see find_missing_seeds, plan_seed_queue, --backfill-mode and
+# retire_stale_ember_editions). Keep in sync with app::EMBER_OUTPUT_PATHS, order included: a Rust
+# unit test reads this tuple from the source text, so it stays one plain string literal per line.
 EMBER_PACKAGE_FILES = (
     "images/source/ember.png",
     "images/web/ember_full.webp",
     "images/web/ember_preview.webp",
     "videos/web/ember.mp4",
+    "videos/web/ember_slow.mp4",
     "videos/hq/ember.mp4",
     "metadata/ember.json",
 )
 REQUIRED_PACKAGE_FILES = CORE_PACKAGE_FILES + EMBER_PACKAGE_FILES
 # The ember edition's media: every ember file except its certificate, which is uploaded last.
 EMBER_MEDIA_FILES = tuple(path for path in EMBER_PACKAGE_FILES if path != EMBER_CERTIFICATE)
+# Every ember file's name starts with this, and no other package file's does (a test pins both):
+# retired_ember_files() deletes nothing whose name does not.
+EMBER_FILE_PREFIX = "ember"
 
-# The roles of the ember entries in metadata/assets.json (every role of the edition starts with
-# EMBER_ROLE_PREFIX; the certificate has no manifest entry). A full package lists all five.
+# The roles of the ember entries in metadata/assets.json, in the order of EMBER_MEDIA_FILES
+# (every role of the edition starts with EMBER_ROLE_PREFIX; the certificate has no manifest
+# entry). A full package lists every one of them.
 EMBER_ROLE_PREFIX = "ember_"
 EMBER_MANIFEST_ROLES = (
     "ember_source_master",
     "ember_web_full",
     "ember_web_preview",
     "ember_web",
+    "ember_slow_web",
     "ember_hq",
 )
 
-# The metadata/nft_traits.json fields that identify the selected orbit. An ember-mode backfill
-# uploads the regenerated ember edition only if all three equal the live package's (compared as
-# exact JSON numbers), so the edition always draws the orbit of the published main art.
+# The metadata/nft_traits.json fields that identify the picture the ember edition must match: the
+# selected orbit, and the view the main edition shows it in. An ember-mode backfill uploads the
+# regenerated ember edition only if every one of IDENTITY_FIELDS equals the live package's
+# (compared as exact JSON values: numbers by their exact decimal value, never as floats), so the
+# edition always draws the orbit of the published main art, as that art shows it.
 ORBIT_IDENTITY_FIELDS = (
     ("simulation", "masses"),
     ("generation", "borda", "selected_index"),
     ("generation", "borda", "retry_count"),
 )
+# The ember bodies follow the main edition's view: its projection (position space or one of the
+# phase-space projections), its symmetry (which scales the primary copy the bodies follow) and
+# its camera drift. ("mode" is "none" exactly when the drift is off, so "enabled" adds nothing;
+# "randomized" says how the values were chosen, not what they are.) The viewing rotation and the
+# frame are derived while rendering and are not recorded in nft_traits.json, so they cannot be
+# compared: they are ASSUMED to match once these fields do. The layer stack is compared as their
+# recorded proxy: the rotation is the best of four by a score that depends on the adaptively
+# chosen stack (computed with platform floating point), so another stack means the rotation was
+# chosen for another picture.
+VIEW_IDENTITY_FIELDS = (
+    ("generation", "structure", "stack_label"),
+    ("generation", "projection"),
+    ("generation", "symmetry"),
+    ("generation", "drift", "mode"),
+    ("generation", "drift", "scale"),
+    ("generation", "drift", "arc_fraction"),
+    ("generation", "drift", "orbit_eccentricity"),
+)
+IDENTITY_FIELDS = ORBIT_IDENTITY_FIELDS + VIEW_IDENTITY_FIELDS
 
 # Generator exit status for a package that is complete except for the ember edition: its
 # preflight or its stage failed, the generator removed every ember file, and it wrote the rest
@@ -226,8 +268,8 @@ DEFAULT_MAX_BACKFILL = 1
 # binary (see GeneratorIdentity) and resets when the binary changes, so a rebuilt generator
 # retries every seed; until then a given-up seed is logged as a WARNING on every run. Backfill
 # runs that fail for another reason are counted separately (BackfillLedger.other_failures): they
-# only order the queue and never give a seed up. An orbit mismatch does not wait for the cap: it
-# gives the seed up at once (Outcome.ORBIT_MISMATCH).
+# only order the queue and never give a seed up. An orbit or view mismatch does not wait for the
+# cap: it gives the seed up at once (Outcome.IDENTITY_MISMATCH).
 MAX_BACKFILL_ATTEMPTS = 3
 
 # Environment variable names for required config
@@ -249,13 +291,15 @@ SELECTOR_GET_NFT_SEED = "0xb0c0fe4e"  # getNftSeed(uint256)
 
 
 class BackfillMode(enum.Enum):
-    """How a backfill seed (a live package that lacks only the ember edition) is uploaded."""
+    """How a backfill seed (a live package that lacks only the current ember edition) is
+    uploaded."""
 
     EMBER = "ember"
     """Non-destructive (the default): the package is regenerated in full locally, but only its
-    ember edition (the six ember files and a merged metadata/assets.json) is uploaded, and only
-    if the render shows the same orbit as the live package. The published main art, spectral
-    files, generation.json and nft_traits.json are never touched."""
+    ember edition (EMBER_PACKAGE_FILES and a merged metadata/assets.json) is uploaded, and only
+    if the render shows the same orbit in the same view as the live package (IDENTITY_FIELDS).
+    The published main art, spectral files, generation.json and nft_traits.json are never
+    touched."""
     FULL = "full"
     """The whole regenerated package replaces the remote one, main art included."""
 
@@ -844,8 +888,10 @@ def missing_remote_package_parts(seed: str, remote_files: set[str]) -> list[str]
 def is_ember_backfill(missing_parts: list[str]) -> bool:
     """True if a package lacks only ember edition files.
 
-    Such a package predates the edition, or was uploaded after its ember edition failed (exit
-    3). Also used for a local package, whose missing parts then show a failed ember edition.
+    Such a package predates the edition, was uploaded after its ember edition failed (exit 3),
+    lost its stale edition to a withdrawal, or holds an edition of an older look that lacks a
+    file of the current one. Also used for a local package, whose missing parts then show a
+    failed ember edition.
     """
     return bool(missing_parts) and all(part in EMBER_PACKAGE_FILES for part in missing_parts)
 
@@ -853,9 +899,10 @@ def is_ember_backfill(missing_parts: list[str]) -> bool:
 def find_missing_seeds(seeds: list[str], remote_files: set[str]) -> tuple[list[str], list[str]]:
     """Split the API seeds whose remote package is incomplete into (urgent, backfill).
 
-    Urgent seeds lack a core file: new mints and broken uploads. Backfill seeds lack only the
-    ember edition's files: their packages predate the edition, or were uploaded after their ember
-    edition failed. Both lists keep API order.
+    Urgent seeds lack a core file: new mints and broken uploads. Backfill seeds lack only ember
+    edition files (is_ember_backfill()); retire_stale_ember_editions() takes the files of every
+    stale edition out of `remote_files` first, so those packages are backfill seeds too. Both
+    lists keep API order.
     """
     urgent: list[str] = []
     backfill: list[str] = []
@@ -870,7 +917,7 @@ def find_missing_seeds(seeds: list[str], remote_files: set[str]) -> tuple[list[s
 
 def given_up_seeds(backfill: list[str], ledger: BackfillLedger, max_attempts: int) -> list[str]:
     """Backfill seeds given up with this generator binary (in API order): those whose ember
-    edition failed `max_attempts` or more times, and those whose orbit did not match."""
+    edition failed `max_attempts` or more times, and those whose orbit or view did not match."""
     return [seed for seed in backfill if ledger.given_up(seed, max_attempts)]
 
 
@@ -895,8 +942,8 @@ def plan_seed_queue(
     for any reason, costs one render per pass over the backlog and cannot stall the backfill.
     Seeds with `max_attempts` or more failed ember attempts are left out: they are given up until
     the generator binary changes, so a seed whose ember edition always fails costs at most
-    `max_attempts` renders. A seed whose regenerated orbit did not match the live package is left
-    out after that one render. Other failures never give a seed up.
+    `max_attempts` renders. A seed whose regenerated orbit or view did not match the live package
+    is left out after that one render. Other failures never give a seed up.
     """
     eligible = [seed for seed in backfill if not ledger.given_up(seed, max_attempts)]
     ordered = sorted(eligible, key=ledger.failed_runs)
@@ -924,13 +971,14 @@ class Outcome(enum.Enum):
     (after processing) uploaded without it. Counts one failed ember attempt."""
     EMBER_FAILED = "ember failed"
     """The ember edition failed and nothing was uploaded: a backfill seed's exit 3, regenerated
-    metadata that cannot show its orbit or give its ember entries, or an incomplete local ember
-    edition. Counts one failed ember attempt."""
-    ORBIT_MISMATCH = "orbit mismatch"
-    """An ember-mode backfill whose regenerated package shows another orbit than the live one:
-    nothing was uploaded. The generator is deterministic, so this binary would regenerate the
-    same orbit on every retry: the seed counts one failed ember attempt and is given up at once
-    (BackfillLedger.orbit_mismatches) instead of after --max-backfill-attempts renders."""
+    metadata that cannot show its orbit and view or give its ember entries, or an incomplete
+    local ember edition. Counts one failed ember attempt."""
+    IDENTITY_MISMATCH = "identity mismatch"
+    """An ember-mode backfill whose regenerated package shows another orbit, or the same orbit in
+    another view, than the live one (IDENTITY_FIELDS): nothing was uploaded. The generator is
+    deterministic, so this binary would regenerate the same package on every retry: the seed
+    counts one failed ember attempt and is given up at once (BackfillLedger.identity_mismatches)
+    instead of after --max-backfill-attempts renders."""
 
 
 # ---------------------------------------------------------------------------
@@ -991,19 +1039,21 @@ class BackfillLedger:
     """
 
     ember_failures: dict[str, int] = dataclasses.field(default_factory=dict)
-    """Failed ember attempts: generator exit 3, an orbit that differs from the live package's,
-    or an incomplete ember edition (CORE_ONLY and EMBER_FAILED outcomes)."""
+    """Failed ember attempts: generator exit 3, an incomplete ember edition (CORE_ONLY and
+    EMBER_FAILED outcomes), or an orbit or view that differs from the live package's
+    (IDENTITY_MISMATCH)."""
     other_failures: dict[str, int] = dataclasses.field(default_factory=dict)
     """Backfill runs that failed for any other reason (FAILED outcomes: the generator exited 1,
     crashed, timed out or was killed, the live package cannot be used, an upload failed)."""
-    orbit_mismatches: set[str] = dataclasses.field(default_factory=set)
-    """Seeds whose regenerated orbit differed from the live package's (ORBIT_MISMATCH): given up
-    at once, whatever --max-backfill-attempts says, until the generator binary changes."""
+    identity_mismatches: set[str] = dataclasses.field(default_factory=set)
+    """Seeds whose regenerated orbit or view differed from the live package's
+    (IDENTITY_MISMATCH): given up at once, whatever --max-backfill-attempts says, until the
+    generator binary changes."""
 
     def given_up(self, seed: str, max_attempts: int) -> bool:
-        """True if `seed` is given up with this generator binary: an orbit mismatch, or at least
-        `max_attempts` failed ember attempts."""
-        return seed in self.orbit_mismatches or self.ember_failures.get(seed, 0) >= max_attempts
+        """True if `seed` is given up with this generator binary: an identity mismatch, or at
+        least `max_attempts` failed ember attempts."""
+        return seed in self.identity_mismatches or self.ember_failures.get(seed, 0) >= max_attempts
 
     def failed_runs(self, seed: str) -> int:
         """Every failed backfill run of `seed`, whatever the reason: its place in the queue."""
@@ -1014,7 +1064,7 @@ class BackfillLedger:
         for counts in self._all_counts():
             for seed in [seed for seed in counts if seed not in seeds]:
                 del counts[seed]
-        self.orbit_mismatches = {seed for seed in self.orbit_mismatches if seed in seeds}
+        self.identity_mismatches = {seed for seed in self.identity_mismatches if seed in seeds}
 
     def record(
         self, seed: str, outcome: Outcome, *, backfill: bool, interrupted: bool = False
@@ -1023,15 +1073,15 @@ class BackfillLedger:
 
         COMPLETE clears the seed's counts. CORE_ONLY and EMBER_FAILED count one failed ember
         attempt, for an urgent seed too: a new mint uploaded without its ember edition becomes a
-        backfill seed with one attempt. ORBIT_MISMATCH counts one too, and gives the seed up.
+        backfill seed with one attempt. IDENTITY_MISMATCH counts one too, and gives the seed up.
         FAILED counts one other failure for a `backfill` seed only (every run retries urgent
         seeds anyway). Nothing is counted while the run is `interrupted` (shutting down), since
         the failure may be the signal's doing.
         """
         if outcome is Outcome.COMPLETE:
             cleared = [counts.pop(seed) for counts in self._all_counts() if seed in counts]
-            mismatched = seed in self.orbit_mismatches
-            self.orbit_mismatches.discard(seed)
+            mismatched = seed in self.identity_mismatches
+            self.identity_mismatches.discard(seed)
             return bool(cleared) or mismatched
         if outcome is Outcome.FAILED and not backfill:
             return False
@@ -1040,13 +1090,19 @@ class BackfillLedger:
             return False
         counts = self.other_failures if outcome is Outcome.FAILED else self.ember_failures
         counts[seed] = counts.get(seed, 0) + 1
-        if outcome is Outcome.ORBIT_MISMATCH:
-            self.orbit_mismatches.add(seed)
+        if outcome is Outcome.IDENTITY_MISMATCH:
+            self.identity_mismatches.add(seed)
         return True
 
     def _all_counts(self) -> tuple[dict[str, int], dict[str, int]]:
         """Both count maps."""
         return self.ember_failures, self.other_failures
+
+
+# The ledger's list of given-up mismatches, and its name in files written while the check
+# compared the orbit only (still read, so an upgrade of run.py alone forgets no seed).
+_MISMATCHES_KEY = "identity_mismatches"
+_LEGACY_MISMATCHES_KEY = "orbit_mismatches"
 
 
 def _ledger_counts(data: dict[object, object]) -> dict[str, int]:
@@ -1060,10 +1116,11 @@ def load_backfill_ledger(
     """The failure counts of earlier runs with the same generator binary.
 
     The file is `{"generator": {"path", "size", "mtime_ns"}, "ember_failures": {seed: count},
-    "other_failures": {seed: count}, "orbit_mismatches": [seed, ...]}` ("orbit_mismatches" may be
-    absent: files written before it existed). The ledger is empty if the file is absent,
-    unreadable or malformed (logged), or was written for another generator binary (the counts
-    reset when the binary changes).
+    "other_failures": {seed: count}, "identity_mismatches": [seed, ...]}`. "identity_mismatches"
+    may be absent (files written before it existed); "orbit_mismatches", its earlier name, is
+    then read in its place. The ledger is empty if the file is absent, unreadable or malformed
+    (logged), or was written for another generator binary (the counts reset when the binary
+    changes).
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -1088,7 +1145,7 @@ def load_backfill_ledger(
             path,
         )
         return BackfillLedger()
-    mismatches = data.get("orbit_mismatches", [])
+    mismatches = data.get(_MISMATCHES_KEY, data.get(_LEGACY_MISMATCHES_KEY, []))
     return BackfillLedger(
         _ledger_counts(data["ember_failures"]),
         _ledger_counts(data["other_failures"]),
@@ -1108,7 +1165,7 @@ def save_backfill_ledger(
         "generator": generator.to_json() if generator is not None else None,
         "ember_failures": dict(sorted(ledger.ember_failures.items())),
         "other_failures": dict(sorted(ledger.other_failures.items())),
-        "orbit_mismatches": sorted(ledger.orbit_mismatches),
+        _MISMATCHES_KEY: sorted(ledger.identity_mismatches),
     }
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -1328,15 +1385,21 @@ def remove_ember_files(seed_dir: Path) -> bool:
     return ok
 
 
-def remove_remote_ember_files(ssh_host: str, ssh_user: str, remote_dir: str, seed: str) -> bool:
+def remove_remote_ember_files(
+    ssh_host: str, ssh_user: str, remote_dir: str, seed: str, retired: Iterable[str] = ()
+) -> bool:
     """Delete the ember edition's files from the remote package of `seed` (absent ones are fine).
+
+    `retired` names further files of the package to delete in the same ssh call: those of a live
+    edition of an older look that the current look does not have (retired_ember_files()).
 
     Run before uploading a package without the ember edition: scp adds and overwrites files but
     never deletes any, so a stale ember file of an earlier upload would stay next to a manifest
     that does not list it, and could make the package look complete. False if the removal failed.
     """
     package = remote_seed_dir(remote_dir, seed)
-    paths = " ".join(shlex.quote(f"{package}/{filename}") for filename in EMBER_PACKAGE_FILES)
+    filenames = (*EMBER_PACKAGE_FILES, *retired)
+    paths = " ".join(shlex.quote(f"{package}/{filename}") for filename in filenames)
     result = run_remote(
         ssh_host, ssh_user, f"rm -f -- {paths}", timeout=30, label=f"ssh-rm-ember-0x{seed}"
     )
@@ -1416,28 +1479,6 @@ def full_upload_steps(local_seed_dir: Path) -> list[UploadStep]:
     return [step for step in steps if step.sources]
 
 
-def ember_upload_steps(local_seed_dir: Path) -> list[UploadStep]:
-    """The ember edition of a package whose core is live: its media, the manifest, the certificate.
-
-    The media go first, then metadata/assets.json (merged with the live manifest), and
-    metadata/ember.json last of all, so the remote package looks complete only once everything
-    else has landed. The manifest and the certificate are staged: an interrupted upload never
-    leaves the live manifest truncated.
-    """
-    groups: list[tuple[str, list[Path]]] = []
-    for filename in EMBER_MEDIA_FILES:
-        subdir = posixpath.dirname(filename)
-        if not groups or groups[-1][0] != subdir:
-            groups.append((subdir, []))
-        groups[-1][1].append(local_seed_dir / filename)
-    steps = [UploadStep(tuple(paths), subdir) for subdir, paths in groups]
-    for filename in (ASSET_MANIFEST, EMBER_CERTIFICATE):
-        steps.append(
-            UploadStep((local_seed_dir / filename,), posixpath.dirname(filename), staged=True)
-        )
-    return steps
-
-
 def tree_bytes(path: Path) -> int:
     """The size of a file, or of every file beneath a directory."""
     if path.is_dir():
@@ -1502,17 +1543,25 @@ def scp_transfer(sources: Sequence[Path], remote_target: str, label: str, retrie
 
 
 def rename_remote_files(
-    ssh_host: str, ssh_user: str, renames: Sequence[tuple[str, str]], label: str
+    ssh_host: str,
+    ssh_user: str,
+    renames: Sequence[tuple[str, str]],
+    label: str,
+    *,
+    remove: Sequence[str] = (),
 ) -> bool:
     """Rename remote files in order, with one ssh call; False (logged) if it failed.
 
     `mv -f` within one directory is an atomic rename(2): each target is either its old file (or
     absent) or the complete new one. A failure stops at that rename, so later targets keep their
-    old state.
+    old state. The files in `remove` are deleted first, in the same call (absent ones are fine).
     """
-    command = " && ".join(
+    commands = [
         f"mv -f -- {shlex.quote(source)} {shlex.quote(target)}" for source, target in renames
-    )
+    ]
+    if remove:
+        commands.insert(0, "rm -f -- " + " ".join(shlex.quote(path) for path in remove))
+    command = " && ".join(commands)
     result = run_remote(ssh_host, ssh_user, command, timeout=30, label=f"ssh-mv-{label}")
     if result is not None and result.returncode == 0:
         return True
@@ -1603,6 +1652,85 @@ def upload_package(
     )
 
 
+def _discard_remote_parts(ssh_host: str, ssh_user: str, parts: Iterable[str], label: str) -> None:
+    """Delete the staged `.part` files of a failed upload, so that they do not hold room on the
+    asset host until the package's next attempt (which deletes them in any case). Best effort."""
+    command = "rm -f -- " + " ".join(shlex.quote(part) for part in parts)
+    result = run_remote(ssh_host, ssh_user, command, timeout=30, label=f"ssh-rm-parts-{label}")
+    if result is None or result.returncode != 0:
+        log.warning(
+            "%s: could not delete the staged %s files of the failed upload; the next upload of "
+            "this package deletes them",
+            label,
+            PART_SUFFIX,
+        )
+
+
+def upload_ember_edition(
+    ssh_host: str,
+    ssh_user: str,
+    remote_dir: str,
+    local_seed_dir: Path,
+    *,
+    retired: Sequence[str] = (),
+    retries: int = 2,
+) -> bool:
+    """Put the local package's ember edition into its live remote package, in place of any ember
+    edition there; False (logged) on failure.
+
+    The edition is staged, then swapped in:
+      1. one ssh call creates the destination directories and deletes the `.part` files an
+         earlier attempt may have left;
+      2. every file is uploaded as `<name>.part` beside its destination, one scp transfer each:
+         EMBER_MEDIA_FILES in order, then metadata/assets.json (the caller merged it with the
+         live manifest), then metadata/ember.json. No live file changes meanwhile, so a transfer
+         that fails (a lost connection, a full asset host) leaves the package, an ember edition
+         of an older look included, byte for byte as it was; the staged files are then deleted;
+      3. only when all have landed, ONE ssh call swaps the edition in: it deletes the live
+         metadata/ember.json and `retired` (the live edition's files that the current look does
+         not have, retired_ember_files(); relative to the package), then renames each medium
+         into place, then the manifest, then the certificate, last of all.
+    Every change of step 3 is an unlink or an atomic rename(2) within one directory, so no file
+    is ever truncated under its real name. Staging needs room on the asset host for the new
+    media next to the old ones.
+
+    What a reader of the asset host can observe:
+      * until the swap: the package as it was, with no ember edition or with the complete old
+        one, plus `.part` files that no manifest lists;
+      * during the swap, which transfers nothing and takes a moment, and from then on if that
+        call is cut off: no certificate, and either the old manifest (without ember entries, or
+        with the old edition's and their checksums) over media that are each the old edition's
+        or already the new one's, or the new manifest over the new media;
+      * after it: the complete new edition.
+    So a package with a certificate always holds one edition throughout: that certificate's
+    manifest entries and media. Without one it reads as a backfill seed, and a later run renders
+    it again and repeats the upload from step 1.
+    """
+    remote_package = f"{remote_dir.rstrip('/')}/{local_seed_dir.name}"
+    files = (*EMBER_MEDIA_FILES, ASSET_MANIFEST, EMBER_CERTIFICATE)
+    targets = [posixpath.join(remote_package, path) for path in files]
+    parts = [f"{target}{PART_SUFFIX}" for target in targets]
+    directories = [posixpath.dirname(target) for target in targets]
+    if not prepare_remote_dirs(ssh_host, ssh_user, directories, parts):
+        return False
+
+    name = local_seed_dir.name
+    for index, (path, part) in enumerate(zip(files, parts, strict=True), 1):
+        label = f"{name} [{index}/{len(files)}]"
+        staged = f"{ssh_user}@{ssh_host}:{part}"
+        if not scp_transfer((local_seed_dir / path,), staged, label, retries):
+            _discard_remote_parts(ssh_host, ssh_user, parts, name)
+            return False
+
+    stale = [posixpath.join(remote_package, path) for path in (EMBER_CERTIFICATE, *retired)]
+    renames = list(zip(parts, targets, strict=True))
+    if not rename_remote_files(ssh_host, ssh_user, renames, name, remove=stale):
+        _discard_remote_parts(ssh_host, ssh_user, parts, name)
+        return False
+    log.info("UPLOADED the ember edition of %s -> %s", name, remote_package)
+    return True
+
+
 def cleanup_seed_dir(seed: str) -> None:
     """Remove the entire per-seed output directory tree."""
     seed_dir = LOCAL_OUTPUT_DIR / f"0x{seed}"
@@ -1616,7 +1744,7 @@ def cleanup_seed_dir(seed: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Ember-mode backfill: orbit check and merged manifest
+# Ember-mode backfill: orbit and view check, merged manifest, retired files
 # ---------------------------------------------------------------------------
 
 
@@ -1645,20 +1773,24 @@ def _json_field(data: object, field: tuple[str, ...]) -> object:
 
 
 def _format_json_value(value: object) -> str:
-    """A compact rendering of a parsed JSON value for log messages."""
+    """A compact rendering of a parsed JSON value for log messages (strings in quotes)."""
     if isinstance(value, list):
         return "[" + ", ".join(_format_json_value(item) for item in value) + "]"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
     return str(value)
 
 
-def orbit_differences(live_traits: object, local_traits: object) -> list[str]:
-    """The ORBIT_IDENTITY_FIELDS in which two parsed nft_traits.json files differ.
+def identity_differences(live_traits: object, local_traits: object) -> list[str]:
+    """The IDENTITY_FIELDS (orbit, then view) in which two parsed nft_traits.json files differ.
 
     Parse both with parse_json_exact(), so numbers compare exactly. A field missing on either
-    side counts as a difference. Each entry names the field and both values.
+    side counts as a difference (a live file must have them all to be used at all, see
+    parse_live_package(); a regenerated file that lacks one cannot show that it matches). Each
+    entry names the field and both values.
     """
     differences: list[str] = []
-    for field in ORBIT_IDENTITY_FIELDS:
+    for field in IDENTITY_FIELDS:
         live = _json_field(live_traits, field)
         local = _json_field(local_traits, field)
         if live is _MISSING or local is _MISSING or live != local:
@@ -1729,6 +1861,66 @@ def without_ember_entries(live: object) -> dict[str, object]:
     return stripped
 
 
+def _is_ember_file_path(path: object) -> TypeGuard[str]:
+    """True for a package-relative path that can only name an ember file.
+
+    It is normalised (no "//", no "." component, no trailing "/"), stays inside the package (not
+    absolute, no ".." component), and its file name starts with EMBER_FILE_PREFIX, which the name
+    of no core or spectral file does.
+    """
+    return (
+        isinstance(path, str)
+        and path == posixpath.normpath(path)
+        and not posixpath.isabs(path)
+        and ".." not in path.split("/")
+        and posixpath.basename(path).startswith(EMBER_FILE_PREFIX)
+    )
+
+
+def retired_ember_files(live: object, seed: str) -> list[str]:
+    """The files of the live ember edition of `seed` that the current edition does not have.
+
+    They are the paths of the live metadata/assets.json's ember entries that are not in
+    EMBER_PACKAGE_FILES: an edition of an older look may hold a file that the current look no
+    longer produces. No transfer ever deletes a file, so these are deleted by name (one INFO
+    line lists them) by the two operations that read the live manifest anyway: the ember-mode
+    backfill that replaces the edition (upload_ember_edition()) and its withdrawal
+    (withdraw_ember_edition()). That is not every way an edition goes: a whole-package upload
+    (an urgent seed, or --backfill-mode full), the removal before a package without the edition
+    is uploaded (generator exit 3), and a withdrawal cut off after its stripped manifest landed
+    delete only EMBER_PACKAGE_FILES, and would leave such a file on the asset host, listed by no
+    manifest. No look so far has dropped a file (ember-v2's files are a subset of ember-v3's); a
+    look that does must extend those paths.
+
+    The manifest is data read from the asset host, so only a path that _is_ember_file_path()
+    accepts is returned: nothing outside the package, and no core or spectral file, can be
+    named for deletion. Any other path of an ember entry is left alone, with a WARNING. Raises
+    ValueError if the manifest is malformed.
+    """
+    _live_manifest, live_assets = _manifest(live, "live")
+    listed = [entry["path"] for entry in live_assets if is_ember_asset(entry) and "path" in entry]
+    paths = [path for path in listed if path not in EMBER_PACKAGE_FILES]
+    retired = sorted({path for path in paths if _is_ember_file_path(path)})
+    refused = [path for path in paths if not _is_ember_file_path(path)]
+    if refused:
+        log.warning(
+            "0x%s: the live %s lists ember entries whose paths are not ember files of the "
+            "package, so those are left alone: %s",
+            seed,
+            ASSET_MANIFEST,
+            ", ".join(repr(path) for path in refused),
+        )
+    if retired:
+        log.info(
+            "0x%s: its live ember edition has %d files that the current edition does not, "
+            "which are deleted with it: %s",
+            seed,
+            len(retired),
+            ", ".join(retired),
+        )
+    return retired
+
+
 def manifest_json(manifest: dict[str, object]) -> str:
     """The text of a metadata/assets.json that run.py rewrote (merged or stripped)."""
     return json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
@@ -1759,8 +1951,8 @@ class LivePackage:
     """The metadata of a published package that an ember-mode backfill reads back."""
 
     traits: object
-    """metadata/nft_traits.json, parsed with parse_json_exact(): it has every
-    ORBIT_IDENTITY_FIELDS entry."""
+    """metadata/nft_traits.json, parsed with parse_json_exact(): it has every IDENTITY_FIELDS
+    entry."""
     manifest: dict[str, object]
     """metadata/assets.json: a JSON object whose assets list gives every entry a role."""
 
@@ -1771,8 +1963,10 @@ def parse_live_package(traits_text: str, manifest_text: str) -> LivePackage:
         traits = parse_json_exact(traits_text)
     except ValueError as exc:
         raise ValueError(f"{NFT_TRAITS} is not valid JSON ({exc})") from None
+    # Every generator that wrote nft_traits.json wrote all of these (its schema requires them),
+    # so a live file without one is damaged: its orbit or view cannot be known, and is not guessed.
     missing = [
-        ".".join(field) for field in ORBIT_IDENTITY_FIELDS if _json_field(traits, field) is _MISSING
+        ".".join(field) for field in IDENTITY_FIELDS if _json_field(traits, field) is _MISSING
     ]
     if missing:
         raise ValueError(f"{NFT_TRAITS} lacks {', '.join(missing)}")
@@ -1790,10 +1984,10 @@ def read_live_package(
     """The live metadata/nft_traits.json and metadata/assets.json of `seed`, checked.
 
     None (logged) if ssh or a read failed, or if a live file cannot be used (parse_live_package()).
-    An unusable live file needs repair on the asset host: without the orbit fields and a valid
-    manifest no ember edition can be checked against the package or merged into it. Neither case
-    is an ember attempt, so neither gives the seed up; the ember-mode backfill checks the live
-    package before rendering too, so an unusable one costs no render.
+    An unusable live file needs repair on the asset host: without the orbit and view fields and a
+    valid manifest no ember edition can be checked against the package or merged into it. Neither
+    case is an ember attempt, so neither gives the seed up; the ember-mode backfill checks the
+    live package before rendering too, so an unusable one costs no render.
     """
     package = remote_seed_dir(remote_dir, seed)
     traits_text = read_remote_file(ssh_host, ssh_user, f"{package}/{NFT_TRAITS}")
@@ -1822,17 +2016,24 @@ def upload_ember_backfill(
     """Upload only the ember edition of a regenerated package whose core package is live.
 
     Reads the live package back (read_live_package(), again just before the upload, so the merge
-    starts from the current manifest). If the regenerated package shows the same orbit
-    (ORBIT_IDENTITY_FIELDS), uploads the ember media, then the live manifest merged with the new
-    ember entries, then metadata/ember.json last (ember_upload_steps(); the remote certificate is
-    deleted first). The published main art, spectral files, generation.json and nft_traits.json
-    are never touched.
+    starts from the current manifest). If the regenerated package shows the same orbit in the
+    same view (IDENTITY_FIELDS; the viewing rotation and the frame are not recorded in the live
+    package, so they are assumed to match, not verified), stages the ember media, the live
+    manifest merged with the new ember entries and metadata/ember.json, and swaps them in with
+    one ssh call (upload_ember_edition()). The published main art, spectral files,
+    generation.json and nft_traits.json are never touched.
 
-    Returns COMPLETE once uploaded; ORBIT_MISMATCH (nothing uploaded) if the regenerated package
-    shows another orbit; EMBER_FAILED (nothing uploaded) if its own metadata cannot show its orbit
-    or give its ember entries;
-    FAILED (nothing uploaded, not an ember attempt) if the live package cannot be read or used,
-    or ssh, scp or the local disk failed.
+    A live ember edition is replaced in place by that swap (one of an older look that
+    --keep-stale-ember kept online, or what a cut-off swap or withdrawal left): its media and
+    manifest entries are replaced, its certificate too, and the files it has that the current
+    edition does not (retired_ember_files()) are deleted. Until the swap it stays online
+    untouched, so a failed upload costs the token nothing.
+
+    Returns COMPLETE once uploaded; IDENTITY_MISMATCH (nothing uploaded) if the regenerated
+    package shows another orbit or another view; EMBER_FAILED (nothing uploaded) if its own
+    metadata cannot show its orbit and view or give its ember entries; FAILED (nothing uploaded,
+    not an ember attempt) if the live package cannot be read or used, or ssh, scp or the local
+    disk failed.
     """
     live = read_live_package(seed, ssh_host, ssh_user, remote_dir)
     if live is None:
@@ -1848,25 +2049,25 @@ def upload_ember_backfill(
         local_traits = parse_json_exact(local_traits_text)
     except ValueError as exc:
         log.error(
-            "0x%s: the regenerated %s is not valid JSON (%s), so its orbit cannot be checked. "
-            "Nothing is uploaded.",
+            "0x%s: the regenerated %s is not valid JSON (%s), so its orbit and view cannot be "
+            "checked. Nothing is uploaded.",
             seed,
             NFT_TRAITS,
             exc,
         )
         return Outcome.EMBER_FAILED
-    differences = orbit_differences(live.traits, local_traits)
+    differences = identity_differences(live.traits, local_traits)
     if differences:
         log.error(
-            "0x%s: the regenerated package shows a DIFFERENT ORBIT than the live one (%s). Its "
-            "ember edition would not match the published art, so nothing is uploaded, and the "
-            "seed is given up with this generator binary (it would regenerate the same orbit). "
-            "Only --backfill-mode full would upload it, replacing the published package, main "
-            "art included.",
+            "0x%s: the regenerated package shows a DIFFERENT ORBIT OR VIEW than the live one "
+            "(%s). Its ember edition would not match the published art, so nothing is uploaded, "
+            "and the seed is given up with this generator binary (it would regenerate the same "
+            "package). Only --backfill-mode full would upload it, replacing the published "
+            "package, main art included.",
             seed,
             "; ".join(differences),
         )
-        return Outcome.ORBIT_MISMATCH
+        return Outcome.IDENTITY_MISMATCH
 
     try:
         merged = merge_ember_manifest(live.manifest, json.loads(local_manifest_text))
@@ -1885,17 +2086,20 @@ def upload_ember_backfill(
         log.error("0x%s: could not write the merged %s: %s", seed, ASSET_MANIFEST, exc)
         return Outcome.FAILED
 
-    log.info("0x%s: same orbit as the live package; uploading only its ember edition", seed)
-    steps = ember_upload_steps(seed_dir)
-    if not upload_steps(
-        ssh_host, ssh_user, remote_dir, seed_dir, steps, remove=(EMBER_CERTIFICATE,)
-    ):
+    log.info(
+        "0x%s: same orbit and view as the live package, by every recorded field (its viewing "
+        "rotation and frame are not recorded, and are assumed to match); uploading only its "
+        "ember edition",
+        seed,
+    )
+    retired = retired_ember_files(live.manifest, seed)
+    if not upload_ember_edition(ssh_host, ssh_user, remote_dir, seed_dir, retired=retired):
         return Outcome.FAILED
     return Outcome.COMPLETE
 
 
 # ---------------------------------------------------------------------------
-# Stale ember editions: withdrawn when the generator renders a newer look
+# Stale ember editions: retired when the generator renders a newer look
 # ---------------------------------------------------------------------------
 
 # A sed script that prints the id of a certificate's top-level "algorithm". The generator writes
@@ -2026,7 +2230,8 @@ def withdraw_ember_edition(seed: str, ssh_host: str, ssh_user: str, remote_dir: 
       2. metadata/assets.json is replaced by the live one without its ember entries
          (without_ember_entries(); uploaded as .part and renamed into place, so it is never left
          truncated), so it no longer lists the files step 3 deletes;
-      3. every ember file is deleted (remove_remote_ember_files()).
+      3. every ember file is deleted (remove_remote_ember_files()), and with them any file of the
+         edition that the current look does not have (retired_ember_files()).
     Idempotent: withdrawing a withdrawn edition rewrites the same manifest and deletes nothing.
     """
     package = remote_seed_dir(remote_dir, seed)
@@ -2034,7 +2239,9 @@ def withdraw_ember_edition(seed: str, ssh_host: str, ssh_user: str, remote_dir: 
     if live_text is None:
         return False
     try:
-        stripped = without_ember_entries(json.loads(live_text))
+        live = json.loads(live_text)
+        stripped = without_ember_entries(live)
+        retired = retired_ember_files(live, seed)
     except ValueError as exc:
         log.error(
             "0x%s: its stale ember edition cannot be withdrawn: the live %s cannot be used (%s). "
@@ -2064,49 +2271,18 @@ def withdraw_ember_edition(seed: str, ssh_host: str, ssh_user: str, remote_dir: 
             return False
     finally:
         cleanup_seed_dir(seed)
-    return remove_remote_ember_files(ssh_host, ssh_user, remote_dir, seed)
+    return remove_remote_ember_files(ssh_host, ssh_user, remote_dir, seed, retired)
 
 
-def withdraw_stale_ember_editions(
-    seeds: Sequence[str],
-    remote_files: set[str],
-    generator_algorithm: str,
-    ssh_host: str,
-    ssh_user: str,
-    remote_dir: str,
-    *,
-    dry_run: bool,
-) -> tuple[set[str], bool]:
-    """Withdraw every stale live ember edition (stale_ember_editions()) before the run plans.
+def _withdraw_ember_editions(
+    stale: dict[str, str], ssh_host: str, ssh_user: str, remote_dir: str, *, dry_run: bool
+) -> tuple[list[str], list[str]]:
+    """Withdraw each stale edition ({seed: its algorithm}, in that order): (withdrawn, failed).
 
-    A stale edition shows a look the generator no longer renders; the artist retired it, so it
-    must not stay online next to the current one. Each is withdrawn (withdraw_ember_edition()),
-    which leaves its package lacking only the ember edition: a backfill seed, which the ember
-    backfill renders again in the current look (--max-backfill per run, after new mints). Until
-    then the token has no ember edition. Only seeds in `seeds` are touched (the seed list of this
-    run), since run.py never regenerates any other package.
-
-    Nothing is withdrawn unless the certificates were read in full (one ssh call), and only
-    certificates whose algorithm could be read and is older than `generator_algorithm` count, so
-    no failure or unexpected file can start a mass withdrawal. The ssh call is skipped when
-    `remote_files` holds no certificate. In a dry run nothing changes on the asset host.
-
-    Returns `remote_files` without the files of every withdrawn edition (every one a dry run would
-    withdraw), so this run's planning already sees those packages as backfill seeds, and False if
-    the certificates could not be read or a withdrawal failed (both logged; the other withdrawals
-    go ahead). A later run retries a failed withdrawal, or backfills the package if its
-    certificate is already gone.
+    `withdrawn` lists the seeds whose edition is off the asset host (in a dry run: would be),
+    `failed` those whose withdrawal failed (withdraw_ember_edition() logged why); the others go
+    ahead. A shutdown request stops the loop: the remaining editions wait for a later run.
     """
-    if not any(path.endswith(f"/{EMBER_CERTIFICATE}") for path in remote_files):
-        return remote_files, True
-    live = list_remote_ember_algorithms(ssh_host, ssh_user, remote_dir)
-    if live is None:
-        log.error("Stale ember editions cannot be recognised, so none is withdrawn this run")
-        return remote_files, False
-    stale = stale_ember_editions(seeds, live, generator_algorithm, remote_files)
-    if not stale:
-        return remote_files, True
-
     withdrawn: list[str] = []
     failed: list[str] = []
     for seed, algorithm in stale.items():
@@ -2123,18 +2299,87 @@ def withdraw_stale_ember_editions(
                 "WITHDRAWN  seed=0x%s  its %s ember edition is off the asset host", seed, algorithm
             )
         else:
-            failed.append(seed)  # withdraw_ember_edition() logged why
+            failed.append(seed)
             continue
         withdrawn.append(seed)
+    return withdrawn, failed
 
-    retired = sorted(set(stale.values()), key=ember_algorithm_number)
-    log.info(
-        "%s %d stale ember editions (%s -> %s): the ember backfill renders them again",
-        "DRY-RUN  would withdraw" if dry_run else "Withdrew",
-        len(withdrawn),
-        ", ".join(retired),
-        generator_algorithm,
-    )
+
+def retire_stale_ember_editions(
+    seeds: Sequence[str],
+    remote_files: set[str],
+    generator_algorithm: str,
+    ssh_host: str,
+    ssh_user: str,
+    remote_dir: str,
+    *,
+    keep: bool,
+    dry_run: bool,
+) -> tuple[set[str], bool]:
+    """Retire every stale live ember edition (stale_ember_editions()) before the run plans.
+
+    A stale edition shows a look the generator no longer renders, so its package is planned as a
+    backfill seed, which the ember backfill renders again in the current look (--max-backfill per
+    run, after new mints). Only seeds in `seeds` are touched (the seed list of this run), since
+    run.py never regenerates any other package. Until its turn in the backfill, the edition is
+      * withdrawn at once (withdraw_ember_edition()), by default: the artist retired the look, so
+        it must not stay online next to the current one, and the token has no ember edition
+        until it is rendered again;
+      * left online, with `keep` (--keep-stale-ember): nothing changes on the asset host here, and
+        the backfill replaces the edition in place (upload_ember_backfill(); the whole package
+        with --backfill-mode full), so the token is never without an ember edition. An edition
+        whose seed the backfill gives up, or whose backfill is paused (--max-backfill 0), stays.
+
+    No edition is retired unless the certificates were read in full (one ssh call), and only
+    certificates whose algorithm could be read and is older than `generator_algorithm` count, so
+    no failure or unexpected file can start a mass withdrawal. The ssh call is skipped when
+    `remote_files` holds no certificate. In a dry run nothing changes on the asset host.
+
+    Returns `remote_files` without the EMBER_PACKAGE_FILES of every retired edition (withdrawn,
+    kept for the backfill to replace, or that a dry run would withdraw), so this run's planning
+    sees those packages as backfill seeds, and False if the certificates could not be read or a
+    withdrawal failed (both logged; the other withdrawals go ahead). A later run retries a failed
+    withdrawal, or backfills the package if its certificate is already gone.
+    """
+    if not any(path.endswith(f"/{EMBER_CERTIFICATE}") for path in remote_files):
+        return remote_files, True
+    live = list_remote_ember_algorithms(ssh_host, ssh_user, remote_dir)
+    if live is None:
+        log.error(
+            "Stale ember editions cannot be recognised, so none is %s this run",
+            "replaced" if keep else "withdrawn",
+        )
+        return remote_files, False
+    stale = stale_ember_editions(seeds, live, generator_algorithm, remote_files)
+    if not stale:
+        return remote_files, True
+
+    looks = ", ".join(sorted(set(stale.values()), key=ember_algorithm_number))
+    failed: list[str] = []
+    if keep:
+        retired = list(stale)
+        for seed, algorithm in stale.items():
+            log.debug(
+                "0x%s: its %s ember edition stays online until it is replaced", seed, algorithm
+            )
+        log.info(
+            "Kept %d stale ember editions online (%s -> %s): the ember backfill replaces each in "
+            "place",
+            len(retired),
+            looks,
+            generator_algorithm,
+        )
+    else:
+        retired, failed = _withdraw_ember_editions(
+            stale, ssh_host, ssh_user, remote_dir, dry_run=dry_run
+        )
+        log.info(
+            "%s %d stale ember editions (%s -> %s): the ember backfill renders them again",
+            "DRY-RUN  would withdraw" if dry_run else "Withdrew",
+            len(retired),
+            looks,
+            generator_algorithm,
+        )
     if failed:
         log.error(
             "%d stale ember editions could not be withdrawn (see above; a later run retries each, "
@@ -2142,7 +2387,7 @@ def withdraw_stale_ember_editions(
             len(failed),
             ", ".join(f"0x{seed}" for seed in failed),
         )
-    gone = {f"0x{seed}/{path}" for seed in withdrawn for path in EMBER_PACKAGE_FILES}
+    gone = {f"0x{seed}/{path}" for seed in retired for path in EMBER_PACKAGE_FILES}
     return remote_files - gone, not failed
 
 
@@ -2162,8 +2407,8 @@ def _generate_and_upload(
     ember_capable: bool,
 ) -> Outcome:
     """process_seed() without the dry run, the cleanup and the final log line."""
-    # An ember-mode backfill needs the live package's orbit and manifest: check them before the
-    # render, which takes hours, so a live package that cannot be used costs no render.
+    # An ember-mode backfill needs the live package's orbit, view and manifest: check them before
+    # the render, which takes hours, so a live package that cannot be used costs no render.
     if (
         backfill is BackfillMode.EMBER
         and read_live_package(seed, ssh_host, ssh_user, remote_dir) is None
@@ -2233,14 +2478,15 @@ def process_seed(
 
     Returns:
         COMPLETE: the package was uploaded with its ember edition (an ember-mode backfill: the
-            ember edition alone, after the orbit check).
+            ember edition alone, after the orbit and view check).
         CORE_ONLY: an urgent seed's package was uploaded without the ember edition (generator
             exit 3, or a generator that predates the edition), after any stale ember file was
             deleted from its remote directory.
         EMBER_FAILED: the ember edition failed and nothing was uploaded (a backfill seed's exit
             3, an incomplete local ember edition).
-        ORBIT_MISMATCH: an ember-mode backfill regenerated another orbit than the live
-            package's; nothing was uploaded, and the seed is given up with this binary.
+        IDENTITY_MISMATCH: an ember-mode backfill regenerated another orbit or another view
+            than the live package's; nothing was uploaded, and the seed is given up with this
+            binary.
         FAILED: nothing was uploaded for any other reason (for an ember-mode backfill, this
             includes a live package that cannot be read or used, checked before generating).
     The local package is deleted before generating and afterwards, whatever the outcome.
@@ -2248,8 +2494,8 @@ def process_seed(
     if dry_run:
         if backfill is BackfillMode.EMBER:
             log.info(
-                "DRY-RUN  would regenerate 0x%s and, if its orbit matches the live package, "
-                "upload only its ember edition",
+                "DRY-RUN  would regenerate 0x%s and, if its orbit and view match the live "
+                "package, upload only its ember edition",
                 seed,
             )
         elif backfill is BackfillMode.FULL:
@@ -2279,9 +2525,9 @@ def process_seed(
         log.warning("OK WITHOUT EMBER  seed=0x%s  (total %s)  core package uploaded", seed, elapsed)
     elif outcome is Outcome.EMBER_FAILED:
         log.error("EMBER FAILED  seed=0x%s  (total %s)  nothing uploaded", seed, elapsed)
-    elif outcome is Outcome.ORBIT_MISMATCH:
+    elif outcome is Outcome.IDENTITY_MISMATCH:
         log.error(
-            "ORBIT MISMATCH  seed=0x%s  (total %s)  nothing uploaded; given up with this binary",
+            "IDENTITY MISMATCH  seed=0x%s  (total %s)  nothing uploaded; given up with this binary",
             seed,
             elapsed,
         )
@@ -2545,8 +2791,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=non_negative_int,
         default=os.environ.get(ENV_MAX_BACKFILL, str(DEFAULT_MAX_BACKFILL)),
         help=(
-            "Packages missing only the ember edition to regenerate per run, after every "
-            "new or incomplete package; 0 pauses the backfill "
+            "Packages missing only the ember edition (or holding a stale one) to regenerate "
+            "per run, after every new or incomplete package; 0 pauses the backfill "
             f"(env: {ENV_MAX_BACKFILL}; default: {DEFAULT_MAX_BACKFILL})"
         ),
     )
@@ -2558,8 +2804,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "How a backfilled package is uploaded: 'ember' uploads only its ember edition "
             "(and a merged metadata/assets.json), after checking that the render shows the "
-            "same orbit as the live package; 'full' replaces the whole remote package, main "
-            f"art included (env: {ENV_BACKFILL_MODE}; default: {DEFAULT_BACKFILL_MODE.value})"
+            "same orbit in the same view as the live package; 'full' replaces the whole remote "
+            "package, main art included "
+            f"(env: {ENV_BACKFILL_MODE}; default: {DEFAULT_BACKFILL_MODE.value})"
         ),
     )
     p.add_argument(
@@ -2579,10 +2826,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="{yes,no}",
         default=os.environ.get(ENV_KEEP_STALE_EMBER, "no"),
         help=(
-            "Keep live ember editions that an older ember algorithm than the generator's "
-            "rendered; by default each run withdraws them from the asset host, so that the "
-            "backfill renders them again in the current look. The flag alone means yes "
-            f"(env: {ENV_KEEP_STALE_EMBER}; default: no)"
+            "Do not withdraw live ember editions that an older ember algorithm than the "
+            "generator's rendered: each stays online until the backfill replaces it in place "
+            "with the current look (--max-backfill per run), so no token is without an ember "
+            "edition meanwhile; with --max-backfill 0 as well, every live edition is held as "
+            "it is. By default each run withdraws them from the asset host at once, and a "
+            "token has no ember edition until the backfill has rendered it again. The flag "
+            f"alone means yes (env: {ENV_KEEP_STALE_EMBER}; default: no)"
         ),
     )
     p.add_argument(
@@ -2646,7 +2896,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def sync(args: argparse.Namespace) -> int:
-    """One sync run: withdraw stale ember editions, plan the incomplete packages, generate and
+    """One sync run: retire stale ember editions, plan the incomplete packages, generate and
     upload them; the exit status.
 
     Returns 0 if every planned seed succeeded (an urgent package uploaded without its ember
@@ -2699,16 +2949,17 @@ def sync(args: argparse.Namespace) -> int:
     ember_capable = True
     generator_identity: GeneratorIdentity | None = None
     max_backfill: int = args.max_backfill
-    # The ember look the generator renders; None leaves every live ember edition as it is.
+    # The ember look the generator renders; while it is unknown (None) no live ember edition
+    # can be recognised as stale, so none is withdrawn or planned for replacement.
     ember_algorithm: str | None = None
     if exec_cmd is not None:
         generator_identity = GeneratorIdentity.of(exec_cmd[0])
         ember_capable = generator_supports_ember(exec_cmd)
-        if not ember_capable:
+        if ember_capable:
+            ember_algorithm = generator_ember_algorithm(exec_cmd)
+        else:
             log_stale_generator(exec_cmd)
             max_backfill = 0
-        elif not args.keep_stale_ember:
-            ember_algorithm = generator_ember_algorithm(exec_cmd)
 
     LOCAL_OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -2728,17 +2979,19 @@ def sync(args: argparse.Namespace) -> int:
     if remote_files is None:
         log.error("Cannot tell which packages are incomplete without the remote listing. Exiting.")
         return 1
-    # Withdrawn editions leave their packages lacking only the ember edition, so the plan below
-    # already counts them as backfill seeds.
-    withdrawal_ok = True
+    # Stale editions are withdrawn or, with --keep-stale-ember, left online to be replaced in
+    # place. Either way the listing no longer holds their files, so the plan below counts their
+    # packages as backfill seeds.
+    retirement_ok = True
     if ember_algorithm is not None:
-        remote_files, withdrawal_ok = withdraw_stale_ember_editions(
+        remote_files, retirement_ok = retire_stale_ember_editions(
             seeds,
             remote_files,
             ember_algorithm,
             args.ssh_host,
             args.ssh_user,
             args.remote_dir,
+            keep=args.keep_stale_ember,
             dry_run=args.dry_run,
         )
     urgent, backfill = find_missing_seeds(seeds, remote_files)
@@ -2752,7 +3005,7 @@ def sync(args: argparse.Namespace) -> int:
             len(seeds),
             fmt_duration(elapsed),
         )
-        return 0 if withdrawal_ok else 1
+        return 0 if retirement_ok else 1
 
     log.info(
         "Found %d seeds with incomplete asset packages (out of %d total): %d new or incomplete, "
@@ -2768,13 +3021,14 @@ def sync(args: argparse.Namespace) -> int:
     ledger.retain(backfill_seeds)
     given_up = given_up_seeds(backfill, ledger, args.max_backfill_attempts)
     for seed in given_up:
-        if seed in ledger.orbit_mismatches:
+        if seed in ledger.identity_mismatches:
             log.warning(
                 "0x%s: ember backfill given up: this generator binary regenerates a different "
-                "orbit than the live package (rebuild the generator, or delete the seed from "
-                "orbit_mismatches in %s, to try again; --backfill-mode full would replace the "
-                "whole published package)",
+                "orbit or view than the live package (rebuild the generator, or delete the seed "
+                "from %s in %s, to try again; --backfill-mode full would replace the whole "
+                "published package)",
                 seed,
+                _MISMATCHES_KEY,
                 BACKFILL_FAILURES,
             )
         else:
@@ -2798,7 +3052,7 @@ def sync(args: argparse.Namespace) -> int:
             "; paused: the generator predates the ember edition" if not ember_capable else "",
         )
     if not missing:
-        return 0 if withdrawal_ok else 1
+        return 0 if retirement_ok else 1
 
     # --- Phase 2: generate and upload sequentially ---
 
@@ -2834,7 +3088,7 @@ def sync(args: argparse.Namespace) -> int:
             backfill=args.backfill_mode if is_backfill else None,
             ember_capable=ember_capable,
         )
-        if outcome in (Outcome.FAILED, Outcome.EMBER_FAILED, Outcome.ORBIT_MISMATCH):
+        if outcome in (Outcome.FAILED, Outcome.EMBER_FAILED, Outcome.IDENTITY_MISMATCH):
             fail_count += 1
             failed_seeds.append(seed)
             if outcome is not Outcome.FAILED:
@@ -2888,7 +3142,7 @@ def sync(args: argparse.Namespace) -> int:
     log.info("  Wall time            : %s", fmt_duration(elapsed))
     log.info("=" * 60)
 
-    return 1 if fail_count > 0 or not withdrawal_ok else 0
+    return 1 if fail_count > 0 or not retirement_ok else 0
 
 
 if __name__ == "__main__":
