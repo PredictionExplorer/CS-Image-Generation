@@ -3041,8 +3041,8 @@ mod tests {
     }
 
     /// The coarse but complete configuration of the golden test (`tests/ember_determinism.rs`),
-    /// with a longer fresh-ink memory (a quarter of the orbit): a 96×64 render of the tilted
-    /// figure-eight takes seconds.
+    /// with a short pre-roll and valve lead, so that the brief arc of [`TINY_STEPS`] is long
+    /// enough to ink: a 96×64 render of it takes seconds.
     fn tiny_ember_config() -> EmberConfig {
         let mut config = EmberConfig::default();
         config.fluid.rows = 64;
@@ -3052,8 +3052,8 @@ mod tests {
         config.fluid.max_snapshot_interval = 0.01;
         config.contact.vorticity_gate = 1.0;
         config.contact.soak_depth = 0.12;
-        config.contact.pre_roll = 1.0;
-        config.contact.valve_lead = 0.2;
+        config.contact.pre_roll = 0.3;
+        config.contact.valve_lead = 0.1;
         config.look.hold_fraction = 0.25;
         config.look.fade_fraction = 0.25;
         config.paper.formation_modes = 64;
@@ -3094,10 +3094,12 @@ mod tests {
         false
     }
 
-    /// Recorded steps of the tiny video render: a short arc of [`tilted_figure_eight_bodies`],
-    /// which its frontal view spreads over the 96×64 sheet, so that under [`tiny_ember_config`]
-    /// the render and the encodes of its frames take a few seconds.
-    const TINY_VIDEO_STEPS: usize = 404;
+    /// Recorded steps of the tiny ember renders: a short arc of [`tilted_figure_eight_bodies`],
+    /// which its frontal view spreads over the 96×64 sheet. There is a frame per step, and the
+    /// fluid lands on [`EMBER_SLOW_FACTOR`] snapshots per frame in every mode, so the step count
+    /// sets the tests' cost: a few seconds under [`tiny_ember_config`], whose short pre-roll
+    /// lets the arc (0.75 fluid time units) ink for half of its length.
+    const TINY_STEPS: usize = 240;
 
     /// A package directory with the ember edition's output paths, each built from its named
     /// constant.
@@ -3242,7 +3244,7 @@ mod tests {
             return;
         }
         let package = TinyEmberPackage::new();
-        let summary = package.render(3_000, true, false);
+        let summary = package.render(TINY_STEPS, true, false);
         package.assert_png_is_the_certified_still(&summary);
 
         // Still only: no frame stream, no videos; the statistics count the still alone.
@@ -3271,8 +3273,8 @@ mod tests {
         let inputs = &certificate["inputs"];
         assert_eq!(certificate["config"]["look"]["fade_fraction"], 0.25);
         assert_eq!(certificate["config"]["fluid"]["rows"], 64);
-        assert_eq!((&inputs["seed"], &inputs["steps"]), (&"46205528".into(), &3_000.into()));
-        assert_eq!(inputs["frames"]["count"], ember_frame_schedule(3_000).len());
+        assert_eq!((&inputs["seed"], &inputs["steps"]), (&"46205528".into(), &TINY_STEPS.into()));
+        assert_eq!(inputs["frames"]["count"], ember_frame_schedule(TINY_STEPS).len());
         assert_eq!(
             inputs["paper_seed_sha256"],
             hex::encode(Sha256::digest(ember_paper_seed(&[0x46, 0x20, 0x55, 0x28])))
@@ -3294,15 +3296,15 @@ mod tests {
         // The preflight plans what the render then does.
         let config = tiny_ember_config();
         let bodies = tilted_figure_eight_bodies();
-        let view = frontal_view(&bodies, TINY_VIDEO_STEPS, 96, 64);
-        let plan = preflight_ember_edition(&bodies, &view, TINY_VIDEO_STEPS, 96, 64, &config)
+        let view = frontal_view(&bodies, TINY_STEPS, 96, 64);
+        let plan = preflight_ember_edition(&bodies, &view, TINY_STEPS, 96, 64, &config)
             .expect("the tiny orbit plans");
 
         let package = TinyEmberPackage::new();
-        let summary = package.render(TINY_VIDEO_STEPS, false, true);
+        let summary = package.render(TINY_STEPS, false, true);
         package.assert_png_is_the_certified_still(&summary);
 
-        let frames = ember_frame_schedule(TINY_VIDEO_STEPS).len();
+        let frames = ember_frame_schedule(TINY_STEPS).len();
         assert_eq!(summary.frames_emitted, frames);
         let frames_sha256 = summary.frames_sha256.as_deref().expect("a video render hashes frames");
         let certificate = package.certificate();
@@ -3341,7 +3343,7 @@ mod tests {
 
         // The manifest lists each with the duration of its frame count at the product rate.
         let manifest = EmberManifest::from_summary(&summary, true);
-        write_asset_manifest(package.seed_dir(), 96, 64, TINY_VIDEO_STEPS, false, Some(&manifest))
+        write_asset_manifest(package.seed_dir(), 96, 64, TINY_STEPS, false, Some(&manifest))
             .expect("manifest");
         let bytes = fs::read(package.dir.path().join("metadata/assets.json")).expect("assets.json");
         let assets: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
