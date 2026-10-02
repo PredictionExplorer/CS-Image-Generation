@@ -58,8 +58,8 @@ current sumi look, but showed the orbit in its own principal plane rather than i
 artwork's view, and had no slow film. The sync loop renders every published edition of an older
 look again (see [Stale ember editions](#stale-ember-editions)).
 
-The measurements so far are of `ember-v2`. On the production host, a 64-core Threadripper, the
-ember render of seed `0x46205528` took 78 minutes with `ember-v2` (measured while a sync run
+Earlier measurements, of `ember-v2`: on the production host, a 64-core Threadripper, the
+ember render of seed `0x46205528` took 78 minutes (measured while a sync run
 shared the host; 23 minutes with `ember-v1`), so a default package took an estimated 2 hours
 there (about 70 minutes with `ember-v1`). That render matched an Apple M4 Max's bit for bit; on
 the M4 Max, shared with other work, it took 2 h 05 min on its own and the seed's whole package
@@ -135,7 +135,7 @@ CLI reference:
 | `--seed` | `0x100033` | Hex seed (with or without `0x` prefix, must have an even number of hex digits) |
 | `-o, --output` | `output` | Base name for output files |
 | `--sims` | `100000` | Number of orbits evaluated in the Borda search |
-| `--steps` | `1000000` | Simulation steps per orbit. The ember edition needs an orbit that lasts more than 0.75 fluid time units, which short test runs usually do not (seeds tried: rejected at 20,000 steps, accepted from 100,000). Its preflight then rejects the orbit right after selection: the run renders the rest of the package and exits with status 3 (see [Exit status](#exit-status)); pass `--no-ember` for such runs |
+| `--steps` | `1000000` | Simulation steps per orbit. The ember edition needs an orbit that lasts more than 0.75 fluid time units, which short test runs usually do not. How long an orbit lasts depends on the main edition's view (its projection, drift and symmetry scale): published tokens last 2.2 to 22 units at the default 1,000,000 steps, so a test run at a tenth of the steps may be rejected; the `Ember preflight:` line of a `--metadata-only` run gives a seed's figure. Its preflight then rejects the orbit right after selection: the run renders the rest of the package and exits with status 3 (see [Exit status](#exit-status)); pass `--no-ember` for such runs |
 | `-r, --resolution` | `3456x2234` | Output resolution as `WIDTHxHEIGHT` |
 | `--drift` | `elliptical` | Camera drift mode: `none`, `linear`, `brownian`, `elliptical`. The ember edition follows the drift, except `brownian`, which it cannot follow: such a run writes the rest of the package and exits with status 3 (see [Exit status](#exit-status)) |
 | `--chaos-weight` | random | Borda weight for chaos (FFT regularity); omit to sample from a curated range |
@@ -278,7 +278,7 @@ Only API-listed seeds are considered. If any required file of an API seed's remo
 
 Packages uploaded before the ember edition existed, packages uploaded after their ember edition failed, and packages whose stale ember edition was withdrawn (see [below](#stale-ember-editions)) lack only its seven files. A package that holds an edition of an older look is a backfill seed too: an `ember-v2` edition lacks the slow film, and with `--keep-stale-ember` every older edition that is still online is planned the same way. `run.py` regenerates them all as a backfill that yields to new mints.
 
-**Scheduling and mint latency.** Each run plans its queue once, at the start: every urgent seed first, then at most `--max-backfill` backfill seeds (default 1, env `COSMICSIG_MAX_BACKFILL`; `0` pauses the backfill), those with the fewest failed runs first (see the retry cap below), then in API order. A token minted while a run is in progress is picked up by the next run. It waits for the rest of the current run (after that run's own new mints, at most `--max-backfill` backfill packages, each a full render that takes hours: an estimated 2 hours on the production host), plus the timer's 5-minute pause after each run, and then for its own package.
+**Scheduling and mint latency.** Each run plans its queue once, at the start: every urgent seed first, then at most `--max-backfill` backfill seeds (default 1, env `COSMICSIG_MAX_BACKFILL`; `0` pauses the backfill), those with the fewest failed runs first (see the retry cap below), then in API order. A token minted while a run is in progress is picked up by the next run. It waits for the rest of the current run (after that run's own new mints, at most `--max-backfill` backfill packages, each a full render that takes hours: about 3 hours on the production host), plus the timer's 5-minute pause after each run, and then for its own package.
 
 **Backfill modes** (`--backfill-mode`, env `COSMICSIG_BACKFILL_MODE`):
 
@@ -299,7 +299,7 @@ Any other failure of a backfill seed (the generator exits `1` or is killed by a 
 
 The counts live in `backfill_failures.json` in `run.py`'s working directory: `ember_failures` (toward the cap) and `other_failures` (for the order), together with the generator binary's identity (resolved path, size and modification time). Rebuilding the generator resets every count, so a fixed binary retries all the seeds it had given up. To retry one given-up seed with the same binary, delete its entry from `ember_failures` (and from `identity_mismatches`, if it is listed there). In a run where a backfill seed fails, `run.py` exits with `1`, so the failure is visible to systemd (the service shows `failed`): until the seed is given up, or for as long as it fails for another reason.
 
-**Duration and disk space.** A backfill pass regenerates every waiting token once, one package per run by default: a full render, then the upload and the timer's 5-minute pause. The ember look introduced with `ember-v2` costs substantially more than the first one: a package takes an estimated 2 hours on the production host, against about 70 minutes measured with `ember-v1` (read the measured figure from the `OK  seed=0x…  (total …)` log lines), so a pass over N tokens takes about N × 2 hours: about 4–4.5 days for 48 tokens. A render that hangs is stopped by the per-seed `--timeout` (10 hours by default). An `ember-v3` package takes about 3 hours on the production host: its ember stage alone took 2 h 06 min for one token on the otherwise idle host. A pass over 48 tokens therefore takes about 6 days. Its ember edition holds 0.4 to 0.6 GB (three tokens measured: `ember.png` about 36 MB, the web `ember.mp4` 39 to 70 MB, the slow film `ember_slow.mp4` 176 to 294 MB, the HQ `ember.mp4` 134 to 225 MB).
+**Duration and disk space.** A backfill pass regenerates every waiting token once, one package per run by default: a full render, then the upload and the timer's 5-minute pause. An `ember-v3` package takes about 3 hours on the production host (its ember stage alone took 2 h 06 min for one token on the otherwise idle host; `ember-v2` packages took about 2 hours, `ember-v1` about 70 minutes), so a pass over N tokens takes about N × 3 hours: about 6 days for 48 tokens. The `OK  seed=0x…  (total …)` log lines give each package's time. A render that hangs is stopped by the per-seed `--timeout` (10 hours by default). Its ember edition holds 0.4 to 0.6 GB (three tokens measured: `ember.png` about 36 MB, the web `ember.mp4` 39 to 70 MB, the slow film `ember_slow.mp4` 176 to 294 MB, the HQ `ember.mp4` 134 to 225 MB).
 
 ### Stale ember editions
 
@@ -489,7 +489,7 @@ After a deploy that changes the ember look, the first sync run withdraws every o
 - on the asset host, its `metadata/ember.json` records the new algorithm and its `metadata/assets.json` lists the six `ember_*` roles;
 - `images/source/master.png` is unchanged: its `sha256sum` equals the `sha256` of the manifest's `source_master` entry.
 
-That line's `total` is the time per token for the rest of the pass (see [The ember backfill](#the-ember-backfill)). An `ember-v2` edition takes about 0.55 GB on the asset host, against about 0.4 GB for an `ember-v1` one: make sure the host has room for the difference over every token. See [docs/deployment.md](docs/deployment.md#when-a-deploy-changes-the-ember-look).
+That line's `total` is the time per token for the rest of the pass (see [The ember backfill](#the-ember-backfill)). An `ember-v3` edition takes 0.4 to 0.6 GB on the asset host (about 29 GB for 48 tokens), and one more edition is staged beside the live files while it is uploaded: make sure the host has room for that. See [docs/deployment.md](docs/deployment.md#when-a-deploy-changes-the-ember-look).
 
 ## Batch Testing
 

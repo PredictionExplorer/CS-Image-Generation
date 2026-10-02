@@ -519,8 +519,11 @@ pub enum CertificateError {
         found: u32,
     },
 
-    /// The outputs disagree about the frames: frames emitted without a frames digest, or a
-    /// frames digest over another number of frames than `inputs.frames.count`.
+    /// The outputs disagree about the frames: frames emitted without a frames digest, a frames
+    /// digest over another number of frames than `inputs.frames.count`, or the same of the slow
+    /// film (slow frames without a slow digest, a slow digest without the normal film's, or
+    /// another number of slow frames than the schedule, `derived.slow_first_frame` and
+    /// `inputs.frames.slow_factor` give).
     #[error("inconsistent ember certificate: {reason}")]
     InconsistentOutputs {
         /// What disagrees, naming the fields and their values.

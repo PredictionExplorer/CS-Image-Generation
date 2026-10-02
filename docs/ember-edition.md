@@ -735,7 +735,7 @@ otherwise idle host.
 - **Whole packages:** 6 h 02 min to 6 h 35 min with three at once, each peaking at 122 GB (the
   main render). Alone, a package takes about 3 hours: about 10 min of orbit search, about 40 min
   of main render and videos, and the ember stage.
-- **Files:** the web film 39 to 70 MB, the slow film 176 to 294 MB (4 min 38 s to 4 min 43 s),
+- **Files:** the web film 39 to 70 MB, the slow film 176 to 294 MB (4 min 11 s to 4 min 43 s),
   the archival film 134 to 225 MB, `ember.png` about 36 MB.
 
 **`ember-v2`, the earlier measurements:**

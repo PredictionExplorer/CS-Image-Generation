@@ -324,11 +324,6 @@ impl EmberPlan {
         self.slow.frames
     }
 
-    /// The scheduled frame at which the slow film starts.
-    pub fn slow_first_frame(&self) -> usize {
-        self.slow.first_frame
-    }
-
     /// Fluid steps the orbit needs at least: the bodies' own speeds through the solver's step
     /// rule. The stirred water is faster in places, so a render takes somewhat more.
     pub fn estimated_fluid_steps(&self) -> f64 {
