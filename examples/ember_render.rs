@@ -230,17 +230,25 @@ fn verify(path: &Path) -> Result<bool> {
         },
         &summary,
     );
-    let counts = |outputs: &certificate::CertificateOutputs| {
+    // The frame counts of the outputs (their digests are compared above).
+    let counts = |outputs: &Value| {
         serde_json::json!({
-            "frames_emitted": outputs.frames_emitted,
-            "slow_frames_emitted": outputs.slow_frames_emitted,
+            "frames_emitted": outputs["frames_emitted"],
+            "slow_frames_emitted": outputs["slow_frames_emitted"],
         })
     };
-    let sections = [
-        ("outputs", counts(outputs), counts(&rerendered.outputs)),
-        ("derived", recorded["derived"].clone(), serde_json::to_value(&rerendered.derived)?),
-        ("stats", recorded["stats"].clone(), serde_json::to_value(rerendered.stats)?),
-    ];
+    let rendered = serde_json::json!({
+        "outputs": rerendered.outputs,
+        "derived": rerendered.derived,
+        "stats": rerendered.stats,
+    });
+    let sections = ["outputs", "derived", "stats"].map(|name| {
+        let section = |document: &Value| match name {
+            "outputs" => counts(&document[name]),
+            _ => document[name].clone(),
+        };
+        (name, section(&recorded), section(&rendered))
+    });
     for (name, recorded, rendered) in sections {
         match first_difference(name, &recorded, &rendered, "rendered") {
             None => println!("{name:<8} MATCH"),
