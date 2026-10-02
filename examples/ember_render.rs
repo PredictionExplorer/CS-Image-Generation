@@ -52,7 +52,8 @@ use nalgebra::Vector3;
 use serde_json::Value;
 use three_body_problem::app;
 use three_body_problem::ember::certificate::{
-    self, CertificateDerived, CertificateOutputs, EmberCertificate,
+    ALGORITHM_VERSION, CertificateDerived, CertificateOutputs, EmberCertificate, INTEGRATOR,
+    paper_seed_sha256, schedule_sha256,
 };
 use three_body_problem::ember::{
     EmberConfig, EmberError, EmberFrame, EmberMode, EmberRequest, EmberSummary, View, render_ember,
@@ -287,18 +288,16 @@ fn reproducibility_problems(
 ) -> Result<Vec<String>> {
     let inputs = &record.inputs;
     let mut problems = Vec::new();
-    if record.algorithm != certificate::ALGORITHM_VERSION {
+    if record.algorithm != ALGORITHM_VERSION {
         problems.push(format!(
             "algorithm: the certificate was rendered by {:?}, this build implements {:?}",
-            record.algorithm,
-            certificate::ALGORITHM_VERSION
+            record.algorithm, ALGORITHM_VERSION
         ));
     }
-    if inputs.integrator != certificate::INTEGRATOR {
+    if inputs.integrator != INTEGRATOR {
         problems.push(format!(
             "inputs.integrator: the certificate records {:?}, this build integrates with {:?}",
-            inputs.integrator,
-            certificate::INTEGRATOR
+            inputs.integrator, INTEGRATOR
         ));
     }
     for (field, recorded, ours) in [
@@ -314,7 +313,7 @@ fn reproducibility_problems(
             ));
         }
     }
-    let paper = certificate::paper_seed_sha256(paper_seed);
+    let paper = paper_seed_sha256(paper_seed);
     if inputs.paper_seed_sha256 != paper {
         problems.push(format!(
             "inputs.paper_seed_sha256: the certificate records {}, this build derives {paper} \
@@ -322,7 +321,7 @@ fn reproducibility_problems(
             inputs.paper_seed_sha256, inputs.seed
         ));
     }
-    let schedule = certificate::schedule_sha256(frame_steps);
+    let schedule = schedule_sha256(frame_steps);
     if inputs.frames.sha256 != schedule {
         problems.push(format!(
             "inputs.frames.sha256: the certificate records {} ({} frames), this build schedules \
