@@ -2387,28 +2387,44 @@ mod tests {
         ];
         let mut worst = 0.0_f64;
         for (case, projection) in projections.into_iter().enumerate() {
-            for drift_mode in ["none", "linear", "elliptical"] {
+            // The seeded defaults of each mode, an elliptical drift that sweeps a turn and a half
+            // on an eccentric ellipse (its mean anomaly wraps), and one with no arc, which adds
+            // nothing: the view records what was added, not what was configured.
+            let drifts: [(&str, Option<[f64; 3]>); 5] = [
+                ("none", None),
+                ("linear", None),
+                ("elliptical", None),
+                ("elliptical", Some([1.3, crate::drift::MAX_ARC_FRACTION, 0.9])),
+                ("elliptical", Some([1.0, 0.0, 0.3])),
+            ];
+            for (index, (drift_mode, explicit)) in drifts.into_iter().enumerate() {
                 // The main pipeline, as `main` runs it.
-                let seed = [case as u8, drift_mode.len() as u8];
+                let seed = [case as u8, index as u8];
                 let mut rng = Sha3RandomByteStream::new(&seed, 100.0, 300.0, 300.0, 1.0);
                 let mut positions = apply_projection(&raw, projection);
                 let rotation = apply_view_orientation(&mut positions, &rng, stack);
+                let [scale, arc, eccentricity] = match explicit {
+                    Some(values) => values.map(Some),
+                    None => [None; 3],
+                };
                 let drift = apply_drift_transformation(
                     &mut positions,
                     drift_mode,
-                    None,
-                    None,
-                    None,
+                    scale,
+                    arc,
+                    eccentricity,
                     &mut rng,
                 )
                 .expect("the drift resolves")
                 .applied;
-                assert_eq!(drift == AppliedDrift::None, drift_mode == "none", "{drift_mode}");
+                let adds_nothing = drift_mode == "none" || arc == Some(0.0);
+                assert_eq!(drift == AppliedDrift::None, adds_nothing, "{drift_mode} {explicit:?}");
 
                 for symmetry in symmetries {
                     for (width, height) in [(96_u32, 64_u32), (64, 96)] {
-                        let label =
-                            format!("{projection:?}, {drift_mode}, {symmetry:?}, {width}x{height}");
+                        let label = format!(
+                            "{projection:?}, {drift_mode} {explicit:?}, {symmetry:?}, {width}x{height}"
+                        );
                         let context =
                             render::context::RenderContext::new(width, height, &positions, true);
                         let bounds = context.bounds();
