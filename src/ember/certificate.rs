@@ -637,11 +637,9 @@ impl EmberCertificate {
         if header.edition != EDITION {
             return Err(CertificateError::WrongEdition { found: header.edition });
         }
-        let certificate: Self = serde_json::from_str(text)?;
-        certificate
-            .outputs
-            .check_frames(&certificate.inputs.frames, certificate.derived.slow_first_frame)?;
-        Ok(certificate)
+        let parsed: Self = serde_json::from_str(text)?;
+        parsed.outputs.check_frames(&parsed.inputs.frames, parsed.derived.slow_first_frame)?;
+        Ok(parsed)
     }
 }
 
