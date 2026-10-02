@@ -12,7 +12,7 @@ something needs a human.
 - [How a deploy works](#how-a-deploy-works)
 - [The CI gate](#the-ci-gate)
 - [When a deploy changes the ember look](#when-a-deploy-changes-the-ember-look): the old
-  editions are withdrawn and rendered again
+  editions are withdrawn, or kept online until replaced, and rendered again
 - [Operating it](#operating-it): status, logs, pause and resume, retry, rollback, manual runs
 - [Troubleshooting](#troubleshooting)
 - [Security model](#security-model)
@@ -268,12 +268,25 @@ and considers only check runs named `CI passed`, created by the GitHub Actions a
 ## When a deploy changes the ember look
 
 Every package's `metadata/ember.json` records the ember algorithm that rendered it
-(`"algorithm": "ember-v1"`), and the generator reports its own:
-`three_body_problem --ember-algorithm` prints, for example, `ember-v2`. A change that alters the
+(`"algorithm": "ember-v2"`), and the generator reports its own:
+`three_body_problem --ember-algorithm` prints, for example, `ember-v3`. A change that alters the
 ember edition's rendered bits bumps that id. The sync run the agent starts right after deploying
 such a change takes every edition of the older look off the asset host, and the ember backfill
-renders them again in the new one. Nothing needs doing by hand; this section says what to expect
-and how to steer it.
+renders them again in the new one. Nothing needs doing by hand after the merge; this section
+says what to settle before it, what to expect and how to steer it.
+
+**Before merging the change.** Merging to `main` deploys, and the first sync run acts at once,
+so settle these on the generator host first, in the checkout's `.env`:
+
+1. Decide whether the old editions are withdrawn at once (the default, described first) or
+   [stay online until each is replaced](#keeping-the-old-editions-online)
+   (`COSMICSIG_KEEP_STALE_EMBER=yes`).
+2. Check `COSMICSIG_MAX_BACKFILL`. If the backfill is paused (`COSMICSIG_MAX_BACKFILL=0`) and
+   the switch is not set, the first run after the deploy withdraws every older edition and
+   renders none again: every listed token loses its ember edition until someone removes the
+   pause. Before the new look is deployed, either remove the pause or set
+   `COSMICSIG_KEEP_STALE_EMBER=yes` (which, with the pause, holds every live edition as it is).
+3. Check the room on the asset host (see *How long it takes, and how much room it needs*).
 
 **What the first run does.** Before it plans, `run.py`:
 
@@ -283,15 +296,16 @@ and how to steer it.
    current seed list. Per package, in this order: it deletes `metadata/ember.json`, replaces
    `metadata/assets.json` with the same manifest without its `ember_*` entries (uploaded as
    `assets.json.part` and renamed into place; every other entry and field is kept as it was),
-   and deletes the five ember media files. The main art, the spectral files and the other
-   metadata are never touched;
+   and deletes the edition's media files: those of the current look (absent ones are fine) and
+   any other ember file that the withdrawn manifest listed. The main art, the spectral files
+   and the other metadata are never touched;
 3. plans as usual. The withdrawn packages now lack only the ember edition, so they are ember
    backfill seeds: regenerated at `--max-backfill` per run (default 1), after any new mint,
-   with the usual orbit check (see the README's *The ember backfill*).
+   with the [orbit and view check](#the-orbit-and-view-check) below.
 
 The journal shows one line per package,
-`WITHDRAWN  seed=0x…  its ember-v1 ember edition is off the asset host`, and one summary,
-`Withdrew N stale ember editions (ember-v1 -> ember-v2): the ember backfill renders them again`.
+`WITHDRAWN  seed=0x…  its ember-v2 ember edition is off the asset host`, and one summary,
+`Withdrew N stale ember editions (ember-v2 -> ember-v3): the ember backfill renders them again`.
 Every later run finds nothing stale: a re-rendered package's certificate records the new id.
 
 **Tokens have no ember edition until they are re-rendered.** This is intended. The artist
@@ -300,19 +314,44 @@ backfill works through the collection. A withdrawn package is a valid package wi
 edition (its manifest lists no `ember_*` role), exactly like one uploaded before the edition
 existed, which consumers already handle; each re-render adds the new edition back.
 
-**How long it takes.** Every listed token is rendered again once, one per run by default: a
-full package render, then its upload and the timer's 5-minute pause. The new look costs
-substantially more than the old one; its render time on this host is measured after the deploy.
-Read it from the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the journal and
-multiply by the number of withdrawn tokens for the whole pass. At the default `--max-backfill`
-of 1, a new mint waits for at most one backfill package (the rest of the run in progress). The
-per-seed timeout is 10 hours (`run.py --timeout`), well below the sync unit's 24-hour limit.
+**What a re-rendered package holds.** An `ember-v3` edition is seven files: the still
+(`images/source/ember.png`), its two WebP derivatives, the film (`videos/web/ember.mp4`), the
+slow film (`videos/web/ember_slow.mp4`, the same film ten times slower), the archival film
+(`videos/hq/ember.mp4`) and the certificate (`metadata/ember.json`, layout 4). The manifest
+lists the six media under the roles `ember_source_master`, `ember_web_full`,
+`ember_web_preview`, `ember_web`, `ember_slow_web` and `ember_hq`. An `ember-v2` edition had
+six files and five roles: everything but the slow film. A package is complete only with all
+seven, so an `ember-v2` package also reads as *missing only the ember edition*, whatever its
+certificate says.
+
+**How long it takes, and how much room it needs.** Every listed token is rendered again once,
+one per run by default: a full package render, then its upload and the timer's 5-minute pause.
+The slow film has up to ten times the frames of the film, so an `ember-v3` package costs more
+to render and is larger than an `ember-v2` one. No figure is given here: both are measured on
+this host after the deploy.
+
+- Time: read it from the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the
+  journal and multiply by the number of tokens for the whole pass.
+- Size: the slow film is expected to be a few hundred MB to about 1 GB per token. Read the real
+  sizes from the `UPLOAD … (N MB, timeout Ns)` lines of the first re-rendered package, and check
+  that the asset host has room for that many tokens *before* the pass is far along. An edition
+  is staged beside the live files before it is swapped in, so the host also needs room for one
+  whole new edition on top of what is online. A full disk fails the transfer that hits it:
+  `UPLOAD FAILED`, nothing of the live package is changed, the staged files are deleted, and
+  the seed is tried again by a later run (and fails again, after another full render, until
+  there is room).
+
+At the default `--max-backfill` of 1, a new mint waits for at most one backfill package (the
+rest of the run in progress). The per-seed timeout is 10 hours (`run.py --timeout`), well below
+the sync unit's 24-hour limit; it only has to catch a render that hangs. An scp transfer may take
+15 minutes, or one second per MB if that is longer.
 
 **Watching progress.**
 
 ```bash
-journalctl --user -u cosmicsig-sync -f                                 # live
-grep -E 'WITHDRAWN|Withdrew|ember edition uploaded' imgcheck.log         # the whole history
+journalctl --user -u cosmicsig-sync -f                                      # live
+grep -E 'WITHDRAWN|Withdrew|Kept|ember edition uploaded' imgcheck.log         # the whole history
+grep -E 'IDENTITY MISMATCH|EMBER FAILED|given up' imgcheck.log                # tokens left behind
 python3 run.py --dry-run   # between runs: "... N missing only the ember edition"
 ```
 
@@ -348,18 +387,99 @@ never starts one.
   were left. A live `metadata/assets.json` that cannot be read or parsed leaves the package
   untouched, with an ERROR on every run until it is repaired on the asset host. A failed
   withdrawal makes the run exit `1`.
-- A re-render whose orbit differs from the live package's uploads nothing and is given up with
-  that binary (see the README's *The ember backfill*, retry cap). That token then stays without
-  an ember edition until someone decides: a rebuilt generator, or `--backfill-mode full`.
+- A re-render whose orbit or view differs from the live package's uploads nothing and is given
+  up with that binary (the [check](#the-orbit-and-view-check) below). That token then stays
+  without an ember edition until someone decides: a rebuilt generator, or
+  `--backfill-mode full`.
 
-**Keeping the old editions.** Set `COSMICSIG_KEEP_STALE_EMBER=yes` in the checkout's `.env` (or
-pass `--keep-stale-ember` to a manual run): every run then leaves the live editions as they are,
-and since their packages are complete, they are not rendered again either. Set it *before* the
-change is deployed: the sync run the agent starts right after the switch withdraws every stale
-edition at once. Remove it, or set `no`, to
-have the next run withdraw them. `COSMICSIG_MAX_BACKFILL=0` (`--max-backfill 0`) is different: it
-pauses only the re-rendering, so the stale editions are still withdrawn and the tokens stay
-without an ember edition until the backfill resumes.
+### The orbit and view check
+
+An ember edition is uploaded next to main art that stays as published, so it must draw the same
+orbit, and since `ember-v3` its bodies follow the main edition's view: the same projection,
+viewing rotation, drift and framing. Before `run.py` uploads the ember edition of a re-rendered
+package (`--backfill-mode ember`, the default), it compares ten fields of the regenerated
+`metadata/nft_traits.json` with the live one's, as exact JSON values (numbers by their exact
+decimal value, never as floats):
+
+| What | Fields |
+|------|--------|
+| the orbit | `simulation.masses`, `generation.borda.selected_index`, `generation.borda.retry_count` |
+| the view | `generation.structure.stack_label`, `generation.projection`, `generation.symmetry`, `generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction`, `generation.drift.orbit_eccentricity` |
+
+- **All equal.** The log shows `same orbit and view as the live package, by every recorded field
+  (its viewing rotation and frame are not recorded, and are assumed to match); uploading only
+  its ember edition`, then `OK  seed=0x…  (total …)  ember edition uploaded`.
+- **One differs, or the regenerated file lacks one.** Nothing is uploaded. An ERROR names the
+  seed and each differing field with both values (`… shows a DIFFERENT ORBIT OR VIEW than the
+  live one (generation.drift.scale: live 1.16…, regenerated 1.2…)`), and the seed's last line is
+  `IDENTITY MISMATCH  seed=0x…  (total …)  nothing uploaded; given up with this binary`. The
+  generator is deterministic, so the same binary would render the same package again: the seed
+  is given up at once, listed under `identity_mismatches` in `backfill_failures.json`, and every
+  later run logs `ember backfill given up: this generator binary regenerates a different orbit
+  or view than the live package`. A rebuilt generator tries it again.
+- **The live file lacks one.** Every generator that wrote `nft_traits.json` wrote all ten (its
+  schema requires them), so such a file is damaged and its orbit or view is not guessed:
+  nothing is rendered or uploaded, and an ERROR (`the live package cannot be used for an ember
+  backfill: metadata/nft_traits.json lacks …`) repeats on every run until the file is repaired
+  on the asset host. This is checked before the render, so it costs none, and it never gives
+  the seed up.
+
+**What the check does not verify.** The viewing rotation and the frame themselves are not
+recorded in the live package, so `run.py` cannot compare them: they are *assumed* to match once
+the ten fields do. The generator derives them while it renders. The rotation is the best of
+four by a score that depends on the layer stack, computed with platform floating point, which
+is why the stack (`generation.structure.stack_label`) is compared as its recorded proxy. Look at
+the first re-rendered token next to its main art before trusting the rest of the pass.
+
+### Keeping the old editions online
+
+By default an older edition is withdrawn at once, and its token has no ember edition until its
+turn in the backfill. To have no such gap, set `COSMICSIG_KEEP_STALE_EMBER=yes` in the
+checkout's `.env` (or pass `--keep-stale-ember` to a manual run) *before* the change is
+deployed: the sync run the agent starts right after the switch otherwise withdraws every stale
+edition at once.
+
+With the switch no run withdraws anything. Each run still reads the certificates, logs
+`Kept N stale ember editions online (ember-v2 -> ember-v3): the ember backfill replaces each in
+place`, and plans those packages as ember backfill seeds, `--max-backfill` per run as usual.
+When a package's turn comes, its re-render passes the [check](#the-orbit-and-view-check) above
+and replaces the old edition **in place**, staged and then swapped (every ember-mode backfill
+uploads this way, whether or not an edition is live):
+
+1. every file of the new edition (the six media, the merged manifest, the certificate) is
+   uploaded as `<name>.part` beside its destination. Nothing live changes meanwhile;
+2. once all have landed, one SSH call swaps the edition in: it deletes the old certificate (and
+   any ember file the old manifest listed that the new edition does not have; `ember-v2` has
+   none), renames each medium into place, then the manifest, then the certificate, last.
+
+- The price of no gap is that both looks are online until the pass is over.
+- A transfer that fails (a lost connection, a full asset host) changes nothing: the old edition
+  stays online byte for byte, the staged `.part` files are deleted, and a later run renders the
+  package again. Staging needs room for the old and the new media at once.
+- Only the swap itself has in-between states, and it transfers nothing, so it lasts a moment:
+  the package has no certificate, and its manifest lists the old edition's entries (with the
+  old checksums) over media that are each still the old file or already the new one, then the
+  new entries over the new media. No file is ever truncated under its real name. A swap that
+  is cut off leaves the package in one of those states, as a backfill seed, until a later run
+  renders it again and repeats the upload.
+- A re-render that fails, or whose orbit or view differs, uploads nothing, so that token keeps
+  its old edition: after a retry cap or an identity mismatch, until the generator binary
+  changes.
+- Removing the switch, or setting `no`, has the next run withdraw every old edition that is
+  still waiting.
+
+| Settings | Older editions | Tokens meanwhile |
+|----------|----------------|------------------|
+| default | withdrawn at once, by the first run; re-rendered `--max-backfill` per run | no ember edition until re-rendered |
+| `COSMICSIG_KEEP_STALE_EMBER=yes` | left online; replaced in place, `--max-backfill` per run | the old look until replaced |
+| `COSMICSIG_KEEP_STALE_EMBER=yes` and `COSMICSIG_MAX_BACKFILL=0` | left online; nothing is re-rendered | every live edition exactly as it is |
+| `COSMICSIG_MAX_BACKFILL=0` alone | withdrawn at once; nothing is re-rendered | no ember edition until the backfill resumes |
+
+So `COSMICSIG_MAX_BACKFILL=0` (`--max-backfill 0`), together with the switch, is what holds the
+live editions exactly as they are; it pauses the backfill of packages that have no ember edition
+yet as well, while new mints are still generated, in the current look. The switch alone does not
+hold anything: before `ember-v3` it kept the older editions for good (their packages were
+complete, so nothing re-rendered them), and that meaning is gone.
 
 ## Operating it
 
