@@ -154,7 +154,9 @@ lacks:
 A mint that arrives while a backfill package is rendering waits for it: at most
 `--max-backfill` packages, each a full render (hours on the production host; see
 [Runtime](#runtime)), plus the timer's 5-minute delay. The per-seed timeout is 10 hours
-(`--timeout`).
+(`--timeout`). A run starts a seed only while that seed's timeout and an hour for its upload
+still fit inside the sync unit's 24-hour limit, and leaves the rest to the next run (`Run budget
+reached; N seeds wait for the next run`), so a burst of mints spans several runs.
 
 **Stale editions.** The certificate's `algorithm` names the look that rendered an edition, and
 `three_body_problem --ember-algorithm` prints the look the generator renders. Before planning,
@@ -172,9 +174,12 @@ The package is then a backfill seed, and the same run already plans it. The toke
 edition until the backfill renders it again in the current look: the retired look never stays
 online. Only a readable, older id counts. An unreadable certificate, a generator without
 `--ember-algorithm`, a failed listing, a newer live id (a rolled-back generator) and a seed that
-is not listed all withdraw nothing. A package that also lacks a core file is left alone, because
-the same run regenerates it in full. A failed listing or withdrawal makes the run exit with
-status 1, and a later run retries it; `--dry-run` only logs what it would withdraw.
+is not listed all withdraw nothing. When the looks cannot be read at all (no
+`--ember-algorithm`, or a failed listing), no backfill seed that holds an ember edition is
+planned either, in either mode, so no edition of an unknown look is replaced. A package that
+also lacks a core file is left alone, because the same run regenerates it in full. A failed
+listing or withdrawal makes the run exit with status 1, and a later run retries it; `--dry-run`
+only logs what it would withdraw.
 
 With `--keep-stale-ember` (env `COSMICSIG_KEEP_STALE_EMBER=yes`) nothing is withdrawn. Each run
 still reads the certificates, logs `Kept N stale ember editions online (ember-v2 -> ember-v3):
@@ -197,19 +202,20 @@ replaces on the asset host:
 
 In `ember` mode the seed is still generated in full locally. Before uploading, `run.py` fetches
 the live `metadata/nft_traits.json` and `metadata/assets.json` over ssh, and checks that the
-local render shows the **same orbit in the same view**. Ten fields must be equal, compared as
+local render shows the **same orbit in the same view**. Twelve fields must be equal, compared as
 exact JSON values (numbers by their exact decimal value): the orbit, `simulation.masses`,
 `generation.borda.selected_index` and `generation.borda.retry_count`, and the view,
 `generation.structure.stack_label`, `generation.projection`, `generation.symmetry`,
-`generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction` and
-`generation.drift.orbit_eccentricity`. The check is needed because the orbit search scores
-candidates with platform floating point (see
+`generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction`,
+`generation.drift.orbit_eccentricity`, `generation.resolution.width` and
+`generation.resolution.height`. The check is needed because
+the orbit search scores candidates with platform floating point (see
 [the determinism contract](#the-determinism-contract)), so a rebuilt binary could in principle
 select another orbit for the same seed, and because the ember bodies follow the main edition's
 view, so the edition must be rendered in the view of the published art. The viewing rotation and
 the frame themselves are not recorded in the live package, so `run.py` assumes that they match
-once the ten fields do; it compares the layer stack as the rotation's recorded proxy. A live
-`nft_traits.json` that lacks one of the ten fields cannot be used: nothing is rendered or
+once the twelve fields do; it compares the layer stack as the rotation's recorded proxy. A live
+`nft_traits.json` that lacks one of the twelve fields cannot be used: nothing is rendered or
 uploaded until it is repaired on the asset host.
 
 - **Same orbit and view.** The log shows `same orbit and view as the live package, by every
@@ -247,7 +253,11 @@ regenerates and uploads it in full.
 package directory, then uploads the status-3 package with its core files. The token gets its
 artwork and traits at once, and the seed becomes a backfill seed with one failed attempt. A
 backfill seed that exits 3 uploads nothing in either mode, because its core package is already
-live, and records a failed attempt.
+live, and records a failed attempt. A new mint whose render runs past `--timeout` is rendered
+again with `--no-ember`, if the run's budget leaves room for it, and that core package is
+uploaded the same way, with one failed attempt. If that render overruns too, nothing is
+uploaded and the overrun is counted (`urgent_overruns` in `backfill_failures.json`); new mints go
+in order of their overruns, fewest first, so one that keeps overrunning goes behind the others.
 
 **Retry cap.** Most ember failures (a rejected orbit, a non-finite flow) are deterministic for a
 given orbit and binary, and would fail again on every retry with the same binary. After
@@ -259,6 +269,7 @@ deterministic (a full disk, an encoder crash), so read a given-up seed's log bef
 is broken, and delete its ledger entry (see below) to retry it. These count as failed attempts:
 
 - generator exit status 3;
+- a backfill render that runs past `--timeout` (the ember edition is what makes a render long);
 - in `ember` mode, regenerated metadata that cannot show its orbit and view or give its ember
   entries;
 - in `ember` mode, an orbit or view mismatch. It also gives the seed up at once, whatever the
@@ -269,7 +280,7 @@ is broken, and delete its ledger entry (see below) to retry it. These count as f
   package`;
 - a regenerated package whose ember files are incomplete.
 
-Upload and ssh failures, timeouts, a generator killed by a signal (such as SIGTERM), a live
+Upload and ssh failures, a generator killed by a signal (such as SIGTERM), a live
 package that cannot be used and a run that is shutting down do not count: they only move the
 seed back in the queue. The counts are kept in `backfill_failures.json`, in
 `run.py`'s working directory, together with the generator binary's identity (resolved path,
