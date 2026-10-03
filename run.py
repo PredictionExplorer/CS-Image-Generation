@@ -112,10 +112,30 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # runs ten times slower and so has up to ten times the frames. Its time on the production host is
 # re-measured after every deploy that changes the look (the `OK  seed=... (total ...)` log
 # lines); no figure is quoted here. The timeout only has to catch a render that hangs, so it
-# leaves ample headroom, but it must stay well below the service's 24-hour TimeoutStartSec: a
-# render that hangs then fails and moves back in the queue, instead of using up every run until
-# systemd stops it (a stopped run counts no failure, so the same seed would come first again).
+# leaves ample headroom, but it must stay well below the service's 24-hour TimeoutStartSec
+# (RUN_CEILING): a render that hangs is then stopped by run.py, not by systemd (a stopped run counts
+# no failure, so the same seed would come first again, every run). A backfill seed whose render
+# overruns counts one failed ember attempt, so an orbit that always overruns is given up after
+# --max-backfill-attempts renders; an urgent seed is rendered again without the ember edition
+# (CORE_ONLY_TIMEOUT), so the token gets its main art and the edition joins the backfill.
 DEFAULT_TIMEOUT = 10 * 3600  # 10 hours
+# The timeout of that render without the ember edition, or --timeout if that is shorter. A core
+# package takes about 50 minutes on the production host, so this too only catches a hang, and it is
+# small enough that after a run's first seed overran twice (DEFAULT_TIMEOUT, then this), the next
+# seed can still start in the same run: 10 + 2 hours leave an hour of the run budget's 13 for the
+# uploads and checks in between (a test keeps that slack).
+CORE_ONLY_TIMEOUT = 2 * 3600  # 2 hours
+# The longest a whole run may take: the sync unit's TimeoutStartSec
+# (ops/systemd/cosmicsig-sync.service; a test keeps the two equal), after which systemd stops it
+# mid-render. A run starts a seed only while that seed's --timeout and UPLOAD_MARGIN still fit
+# before the ceiling, and leaves the rest of its queue to the next run (the run budget), so the
+# ceiling is a safety net that is never expected to fire.
+RUN_CEILING = 24 * 3600  # 24 hours
+# The room a run keeps after a render's timeout for its upload and the end of the run.
+UPLOAD_MARGIN = 3600  # 1 hour
+# The longest --timeout accepted: a run must be able to start a seed with it and still have room,
+# within RUN_CEILING, for that seed's render without the ember edition and for its upload.
+MAX_TIMEOUT = RUN_CEILING - CORE_ONLY_TIMEOUT - UPLOAD_MARGIN
 API_TOKEN_FETCH_LIMIT = 999999
 DEFAULT_ARBITRUM_RPC_URL = "https://arb1.arbitrum.io/rpc"
 DEFAULT_NFT_CONTRACT = "0xbb84Be3500A63581d3F2d5AC3bdF8685AAedad25"
@@ -130,6 +150,14 @@ BACKFILL_FAILURES = Path("backfill_failures.json")
 # holder, for the error message of a run that finds it taken. ops/deploy/cosmicsig_deploy.py
 # takes it too while it switches the checkout and the generator binary between runs.
 RUN_LOCK = Path("run.lock")
+
+# The exit status of ssh itself failing (the connection could not be made, or was lost), as
+# opposed to the remote command's own status.
+SSH_FAILURE = 255
+# Attempts of each idempotent ssh call made after a render (reading the live package back,
+# preparing the upload, swapping the edition in, deleting staged files): a connection that fails
+# once must not throw away hours of rendering.
+SSH_ATTEMPTS = 3
 
 SSH_BASE_OPTS = [
     "-o",
@@ -150,6 +178,16 @@ SCP_MIN_BYTES_PER_SECOND = 1_000_000
 
 # A staged upload (UploadStep.staged) writes each file as <name>.part and then renames it.
 PART_SUFFIX = ".part"
+
+# Every ssh command that changes a package on the asset host and may run twice (a retry after a
+# lost connection or a timeout, while the first attempt may still be running there) holds an
+# exclusive lock on this file in the package directory (util-linux flock; locked()), so a retry
+# waits for the earlier attempt to finish and then runs again idempotently. The file is empty,
+# stays in the package directory, and is not part of the package: list_remote_files() leaves it
+# out, and no manifest lists it.
+PACKAGE_LOCK = ".ember.lock"
+# How long a locked command waits for the lock: less than the ssh calls' own timeouts (30 s).
+PACKAGE_LOCK_WAIT = 20
 
 # The generator capability probe: `<generator> --help` must list this flag, which the ember
 # edition introduced (tests/cli.rs pins it). A binary without it predates the edition.
@@ -232,14 +270,16 @@ ORBIT_IDENTITY_FIELDS = (
     ("generation", "borda", "retry_count"),
 )
 # The ember bodies follow the main edition's view: its projection (position space or one of the
-# phase-space projections), its symmetry (which scales the primary copy the bodies follow) and
-# its camera drift. ("mode" is "none" exactly when the drift is off, so "enabled" adds nothing;
-# "randomized" says how the values were chosen, not what they are.) The viewing rotation and the
-# frame are derived while rendering and are not recorded in nft_traits.json, so they cannot be
-# compared: they are ASSUMED to match once these fields do. The layer stack is compared as their
-# recorded proxy: the rotation is the best of four by a score that depends on the adaptively
-# chosen stack (computed with platform floating point), so another stack means the rotation was
-# chosen for another picture.
+# phase-space projections), its symmetry (which scales the primary copy the bodies follow), its
+# camera drift, and the output resolution, whose size and aspect set the frame and the symmetry's
+# scale (run.py never passes the generator's -r, but a package rendered at another size must not
+# get an edition framed for this one). ("mode" is "none" exactly when the drift is off, so
+# "enabled" adds nothing; "randomized" says how the values were chosen, not what they are.) The
+# viewing rotation and the frame are derived while rendering and are not recorded in
+# nft_traits.json, so they cannot be compared: they are ASSUMED to match once these fields do.
+# The layer stack is compared as their recorded proxy: the rotation is the best of four by a
+# score that depends on the adaptively chosen stack (computed with platform floating point), so
+# another stack means the rotation was chosen for another picture.
 VIEW_IDENTITY_FIELDS = (
     ("generation", "structure", "stack_label"),
     ("generation", "projection"),
@@ -248,6 +288,8 @@ VIEW_IDENTITY_FIELDS = (
     ("generation", "drift", "scale"),
     ("generation", "drift", "arc_fraction"),
     ("generation", "drift", "orbit_eccentricity"),
+    ("generation", "resolution", "width"),
+    ("generation", "resolution", "height"),
 )
 IDENTITY_FIELDS = ORBIT_IDENTITY_FIELDS + VIEW_IDENTITY_FIELDS
 
@@ -261,7 +303,7 @@ GENERATOR_EXIT_EMBER_FAILED = 3
 # Backfill seeds (packages missing only the ember edition) generated per run. Each run first
 # generates every seed missing a core file (new mints), so a mint waits for at most this many
 # backfill packages, each a full render that takes hours (see DEFAULT_TIMEOUT), plus the timer's
-# restart delay.
+# restart delay; a burst of mints larger than one run's budget (RUN_CEILING) spans several runs.
 DEFAULT_MAX_BACKFILL = 1
 
 # Failed ember attempts after which a backfill seed is given up. The count is kept per generator
@@ -505,17 +547,41 @@ def run_subprocess(
 
 
 def run_remote(
-    ssh_host: str, ssh_user: str, command: str, *, timeout: int, label: str
+    ssh_host: str,
+    ssh_user: str,
+    command: str,
+    *,
+    timeout: int,
+    label: str,
+    attempts: int = 1,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a shell command on the remote host.
 
     Returns None if ssh timed out or could not be started (already logged); any exit status is
-    returned to the caller, which knows what it means (255 is an ssh error).
+    returned to the caller, which knows what it means (SSH_FAILURE, 255, is an ssh error). With
+    `attempts` > 1, a run that ended so (a dropped or refused connection, a timeout) is tried
+    again, after a backoff, up to `attempts` times in all, but no retry starts once a shutdown is
+    requested. Such a run may have stopped half way through `command`, so only a command that
+    can run again from the start (idempotent) may be given more than one attempt.
     """
-    try:
-        return run_subprocess([*ssh_cmd(ssh_host, ssh_user), command], timeout=timeout, label=label)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            result = run_subprocess(
+                [*ssh_cmd(ssh_host, ssh_user), command], timeout=timeout, label=label
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            result = None
+        if result is not None and result.returncode != SSH_FAILURE:
+            return result
+        if attempt == attempts or shutdown_requested:
+            break
+        backoff = 2**attempt
+        log.warning(
+            "[%s] ssh failed (attempt %d/%d); retrying in %ds", label, attempt, attempts, backoff
+        )
+        time.sleep(backoff)
+    return result
 
 
 def normalize_seed(seed: str | int) -> str:
@@ -853,7 +919,11 @@ def list_remote_files(ssh_host: str, ssh_user: str, remote_dir: str) -> set[str]
         )
         return None
 
-    files = {line.strip().removeprefix("./") for line in result.stdout.splitlines() if line.strip()}
+    files = {
+        line.strip().removeprefix("./")
+        for line in result.stdout.splitlines()
+        if line.strip() and posixpath.basename(line.strip()) != PACKAGE_LOCK
+    }
     log.info("Found %d existing package files on remote server", len(files))
     return files
 
@@ -930,11 +1000,19 @@ def plan_seed_queue(
 ) -> list[str]:
     """Seeds to generate this run: every urgent seed, then at most `max_backfill` backfill seeds.
 
+    Urgent seeds go in order of their overruns (BackfillLedger.urgent_overruns: fewest first,
+    then API order), so a new mint whose render keeps running past --timeout goes behind the
+    others, which the run budget would otherwise never reach.
+
     The cap bounds the latency of new mints. A run plans its queue once, at the start, so a token
     minted during a run waits for that run to finish: after the run's own new mints, at most
-    `max_backfill` backfill packages, each a full render. (Nothing else bounds a run: systemd's
-    RuntimeMaxSec has no effect on a Type=oneshot service, and the unit's TimeoutStartSec is a
-    24-hour safety net.)
+    `max_backfill` backfill packages, each a full render. A run also starts a seed only while its
+    --timeout fits in the run budget (RUN_CEILING, less UPLOAD_MARGIN), and leaves the rest of
+    its queue to the next run, which plans afresh 5 minutes later (picking up the tokens minted
+    meanwhile, first): a burst of new mints, such as the several tokens a round's end mints at
+    once, spans several runs. The unit's TimeoutStartSec, which systemd enforces, is only the
+    safety net behind that budget, and is never expected to fire (systemd's RuntimeMaxSec has no
+    effect on a Type=oneshot service).
 
     Backfill seeds go in order of their failed backfill runs, whatever the reason
     (BackfillLedger.failed_runs(): fewest first, then API order). A seed that failed is retried
@@ -947,7 +1025,8 @@ def plan_seed_queue(
     """
     eligible = [seed for seed in backfill if not ledger.given_up(seed, max_attempts)]
     ordered = sorted(eligible, key=ledger.failed_runs)
-    return [*urgent, *ordered[: max(max_backfill, 0)]]
+    first = sorted(urgent, key=lambda seed: ledger.urgent_overruns.get(seed, 0))
+    return [*first, *ordered[: max(max_backfill, 0)]]
 
 
 # ---------------------------------------------------------------------------
@@ -959,10 +1038,18 @@ class Outcome(enum.Enum):
     """How far a seed got: the result of generating it, and then of processing it."""
 
     FAILED = "failed"
-    """Nothing usable, for a reason other than the ember edition: the generator failed, timed
-    out or was killed, the core package is incomplete, the live package of an ember-mode
-    backfill cannot be read or used, or ssh/scp failed. Not an ember attempt: for a backfill seed
-    the ledger counts it as another failure, which only moves the seed back in the queue."""
+    """Nothing usable, for a reason other than the ember edition: the generator failed or was
+    killed, the core package is incomplete, the live package of an ember-mode backfill cannot be
+    read or used, or ssh/scp failed. Not an ember attempt: for a backfill seed the ledger counts
+    it as another failure, which only moves the seed back in the queue."""
+    TIMED_OUT = "timed out"
+    """The generator ran past --timeout and was stopped; nothing was uploaded. For a backfill
+    seed it counts one failed ember attempt (the ember edition is what makes a package slow), so
+    an orbit that always overruns is given up after --max-backfill-attempts renders. An urgent
+    seed is rendered again without the ember edition and uploaded as CORE_ONLY; it ends
+    TIMED_OUT when that render could not start (the run budget, or a shutdown) or overran too,
+    and counts one overrun (BackfillLedger.urgent_overruns), which puts it behind the new mints
+    that overran less often, so a seed that keeps overrunning cannot hold up the others."""
     COMPLETE = "complete"
     """The full package, ember edition included (for an ember-mode backfill: its ember edition
     was uploaded)."""
@@ -1040,15 +1127,18 @@ class BackfillLedger:
 
     ember_failures: dict[str, int] = dataclasses.field(default_factory=dict)
     """Failed ember attempts: generator exit 3, an incomplete ember edition (CORE_ONLY and
-    EMBER_FAILED outcomes), or an orbit or view that differs from the live package's
-    (IDENTITY_MISMATCH)."""
+    EMBER_FAILED outcomes), an orbit or view that differs from the live package's
+    (IDENTITY_MISMATCH), or a backfill render that ran past --timeout (TIMED_OUT)."""
     other_failures: dict[str, int] = dataclasses.field(default_factory=dict)
     """Backfill runs that failed for any other reason (FAILED outcomes: the generator exited 1,
-    crashed, timed out or was killed, the live package cannot be used, an upload failed)."""
+    crashed or was killed, the live package cannot be used, an upload failed)."""
     identity_mismatches: set[str] = dataclasses.field(default_factory=set)
     """Seeds whose regenerated orbit or view differed from the live package's
     (IDENTITY_MISMATCH): given up at once, whatever --max-backfill-attempts says, until the
     generator binary changes."""
+    urgent_overruns: dict[str, int] = dataclasses.field(default_factory=dict)
+    """Urgent seeds (new mints) whose renders overran and uploaded nothing (TIMED_OUT): their
+    place among the urgent seeds (plan_seed_queue()). Never a reason to give a seed up."""
 
     def given_up(self, seed: str, max_attempts: int) -> bool:
         """True if `seed` is given up with this generator binary: an identity mismatch, or at
@@ -1059,12 +1149,16 @@ class BackfillLedger:
         """Every failed backfill run of `seed`, whatever the reason: its place in the queue."""
         return self.ember_failures.get(seed, 0) + self.other_failures.get(seed, 0)
 
-    def retain(self, seeds: Container[str]) -> None:
-        """Forget the counts of every seed not in `seeds` (those still waiting for a backfill)."""
-        for counts in self._all_counts():
+    def retain(self, seeds: Container[str], urgent: Container[str] = ()) -> None:
+        """Forget the counts of every seed not in `seeds` (those still waiting for a backfill),
+        and the overruns of every seed not in `urgent` (those still waiting for a package)."""
+        for counts in (self.ember_failures, self.other_failures):
             for seed in [seed for seed in counts if seed not in seeds]:
                 del counts[seed]
         self.identity_mismatches = {seed for seed in self.identity_mismatches if seed in seeds}
+        self.urgent_overruns = {
+            seed: count for seed, count in self.urgent_overruns.items() if seed in urgent
+        }
 
     def record(
         self, seed: str, outcome: Outcome, *, backfill: bool, interrupted: bool = False
@@ -1074,9 +1168,10 @@ class BackfillLedger:
         COMPLETE clears the seed's counts. CORE_ONLY and EMBER_FAILED count one failed ember
         attempt, for an urgent seed too: a new mint uploaded without its ember edition becomes a
         backfill seed with one attempt. IDENTITY_MISMATCH counts one too, and gives the seed up.
-        FAILED counts one other failure for a `backfill` seed only (every run retries urgent
-        seeds anyway). Nothing is counted while the run is `interrupted` (shutting down), since
-        the failure may be the signal's doing.
+        TIMED_OUT counts one failed ember attempt for a `backfill` seed, and one overrun for an
+        urgent seed. FAILED counts one other failure for a `backfill` seed only (every run retries
+        urgent seeds anyway). Nothing is counted while the run is `interrupted` (shutting down),
+        since the failure may be the signal's doing.
         """
         if outcome is Outcome.COMPLETE:
             cleared = [counts.pop(seed) for counts in self._all_counts() if seed in counts]
@@ -1088,15 +1183,20 @@ class BackfillLedger:
         if interrupted:
             log.info("0x%s: failed run not counted (shutting down)", seed)
             return False
-        counts = self.other_failures if outcome is Outcome.FAILED else self.ember_failures
+        if outcome is Outcome.TIMED_OUT and not backfill:
+            counts = self.urgent_overruns
+        elif outcome is Outcome.FAILED:
+            counts = self.other_failures
+        else:
+            counts = self.ember_failures
         counts[seed] = counts.get(seed, 0) + 1
         if outcome is Outcome.IDENTITY_MISMATCH:
             self.identity_mismatches.add(seed)
         return True
 
-    def _all_counts(self) -> tuple[dict[str, int], dict[str, int]]:
-        """Both count maps."""
-        return self.ember_failures, self.other_failures
+    def _all_counts(self) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+        """Every count map."""
+        return self.ember_failures, self.other_failures, self.urgent_overruns
 
 
 # The ledger's list of given-up mismatches, and its name in files written while the check
@@ -1116,11 +1216,11 @@ def load_backfill_ledger(
     """The failure counts of earlier runs with the same generator binary.
 
     The file is `{"generator": {"path", "size", "mtime_ns"}, "ember_failures": {seed: count},
-    "other_failures": {seed: count}, "identity_mismatches": [seed, ...]}`. "identity_mismatches"
-    may be absent (files written before it existed); "orbit_mismatches", its earlier name, is
-    then read in its place. The ledger is empty if the file is absent, unreadable or malformed
-    (logged), or was written for another generator binary (the counts reset when the binary
-    changes).
+    "other_failures": {seed: count}, "identity_mismatches": [seed, ...], "urgent_overruns":
+    {seed: count}}`. "identity_mismatches" may be absent (files written before it existed);
+    "orbit_mismatches", its earlier name, is then read in its place. "urgent_overruns" may be
+    absent too. The ledger is empty if the file is absent, unreadable or malformed (logged), or
+    was written for another generator binary (the counts reset when the binary changes).
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -1146,12 +1246,14 @@ def load_backfill_ledger(
         )
         return BackfillLedger()
     mismatches = data.get(_MISMATCHES_KEY, data.get(_LEGACY_MISMATCHES_KEY, []))
+    overruns = data.get("urgent_overruns", {})
     return BackfillLedger(
         _ledger_counts(data["ember_failures"]),
         _ledger_counts(data["other_failures"]),
         {seed for seed in mismatches if isinstance(seed, str)}
         if isinstance(mismatches, list)
         else set(),
+        _ledger_counts(overruns) if isinstance(overruns, dict) else {},
     )
 
 
@@ -1166,6 +1268,7 @@ def save_backfill_ledger(
         "ember_failures": dict(sorted(ledger.ember_failures.items())),
         "other_failures": dict(sorted(ledger.other_failures.items())),
         _MISMATCHES_KEY: sorted(ledger.identity_mismatches),
+        "urgent_overruns": dict(sorted(ledger.urgent_overruns.items())),
     }
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -1231,7 +1334,7 @@ def generator_ember_algorithm(exec_cmd: list[str]) -> str | None:
     exited 0 (e.g. "ember-v2"). None, with one WARNING, for anything else: a binary that predates
     the flag (its argument parser exits with status 2), another failure or a timeout, or any
     other output. Without the id no live ember edition can be recognised as stale, so the caller
-    withdraws none.
+    withdraws or replaces none (held_editions()).
     """
     flag = GENERATOR_EMBER_ALGORITHM_FLAG
     try:
@@ -1251,7 +1354,7 @@ def generator_ember_algorithm(exec_cmd: list[str]) -> str | None:
             problem = f"printed {algorithm[:80]!r}, not an ember algorithm id"
     log.warning(
         "%s %s %s: stale ember editions cannot be detected with this generator, so no live "
-        "ember edition is withdrawn",
+        "ember edition is withdrawn or replaced",
         exec_cmd[0],
         flag,
         problem,
@@ -1286,15 +1389,21 @@ def log_stale_generator(exec_cmd: list[str]) -> None:
 def generate(exec_cmd: list[str], seed: str, timeout: int) -> Outcome:
     """Run the generator for one seed; the outcome follows its exit status.
 
-    COMPLETE for 0, CORE_ONLY for GENERATOR_EXIT_EMBER_FAILED, FAILED for anything else
-    (including a timeout, or a kill by a signal).
+    COMPLETE for 0, CORE_ONLY for GENERATOR_EXIT_EMBER_FAILED, TIMED_OUT if it ran past
+    `timeout` (it is killed), FAILED for anything else (a kill by a signal included).
     """
     cmd_parts = [*exec_cmd, "--seed", f"0x{seed}", "--output", f"0x{seed}"]
-    log.info("GENERATE  seed=0x%s", seed)
+    log.info(
+        "GENERATE  seed=0x%s%s",
+        seed,
+        "  (core package only)" if GENERATOR_EMBER_FLAG in exec_cmd else "",
+    )
 
     try:
         result = run_subprocess(cmd_parts, timeout=timeout, label=f"gen-0x{seed}")
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
+        return Outcome.TIMED_OUT
+    except OSError:
         return Outcome.FAILED
 
     if result.returncode == 0:
@@ -1416,18 +1525,42 @@ def remove_remote_ember_files(
     return True
 
 
-def prepare_remote_dirs(
-    ssh_host: str, ssh_user: str, remote_dirs: Iterable[str], remove: Iterable[str] = ()
-) -> bool:
-    """Create the remote directories (and parents) an upload writes into; delete `remove` first.
+def locked(package: str, command: str) -> str:
+    """`command`, run on the asset host under the PACKAGE_LOCK of the remote `package` directory
+    (which is created first if it is absent). The lock is released when the command ends; one
+    that cannot be taken within PACKAGE_LOCK_WAIT seconds fails the command (flock's status 1)."""
+    lock = shlex.quote(posixpath.join(package, PACKAGE_LOCK))
+    return (
+        f"mkdir -p -- {shlex.quote(package)} && "
+        f"flock -w {PACKAGE_LOCK_WAIT} {lock} sh -c {shlex.quote(command)}"
+    )
 
-    One ssh call. False (logged) if it failed.
+
+def prepare_remote_dirs(
+    ssh_host: str,
+    ssh_user: str,
+    package: str,
+    remote_dirs: Iterable[str],
+    remove: Iterable[str] = (),
+) -> bool:
+    """Create the remote directories (and parents) an upload into `package` writes into; delete
+    `remove` first.
+
+    One ssh call, under the package's lock (both steps can run again, so a failed connection is
+    retried: SSH_ATTEMPTS). False (logged) if it failed.
     """
     command = "mkdir -p -- " + " ".join(shlex.quote(path) for path in sorted(set(remote_dirs)))
     stale = " ".join(shlex.quote(path) for path in remove)
     if stale:
         command = f"rm -f -- {stale} && {command}"
-    result = run_remote(ssh_host, ssh_user, command, timeout=30, label="ssh-prepare")
+    result = run_remote(
+        ssh_host,
+        ssh_user,
+        locked(package, command),
+        timeout=30,
+        label="ssh-prepare",
+        attempts=SSH_ATTEMPTS,
+    )
     if result is None:
         return False
     if result.returncode == 0:
@@ -1543,25 +1676,17 @@ def scp_transfer(sources: Sequence[Path], remote_target: str, label: str, retrie
 
 
 def rename_remote_files(
-    ssh_host: str,
-    ssh_user: str,
-    renames: Sequence[tuple[str, str]],
-    label: str,
-    *,
-    remove: Sequence[str] = (),
+    ssh_host: str, ssh_user: str, renames: Sequence[tuple[str, str]], label: str
 ) -> bool:
     """Rename remote files in order, with one ssh call; False (logged) if it failed.
 
     `mv -f` within one directory is an atomic rename(2): each target is either its old file (or
     absent) or the complete new one. A failure stops at that rename, so later targets keep their
-    old state. The files in `remove` are deleted first, in the same call (absent ones are fine).
+    old state.
     """
-    commands = [
+    command = " && ".join(
         f"mv -f -- {shlex.quote(source)} {shlex.quote(target)}" for source, target in renames
-    ]
-    if remove:
-        commands.insert(0, "rm -f -- " + " ".join(shlex.quote(path) for path in remove))
-    command = " && ".join(commands)
+    )
     result = run_remote(ssh_host, ssh_user, command, timeout=30, label=f"ssh-mv-{label}")
     if result is not None and result.returncode == 0:
         return True
@@ -1599,7 +1724,7 @@ def upload_steps(
         return remote_package
 
     stale = [posixpath.join(remote_package, path) for path in remove]
-    if not prepare_remote_dirs(ssh_host, ssh_user, map(destination, steps), stale):
+    if not prepare_remote_dirs(ssh_host, ssh_user, remote_package, map(destination, steps), stale):
         return False
 
     for index, step in enumerate(steps, 1):
@@ -1652,11 +1777,21 @@ def upload_package(
     )
 
 
-def _discard_remote_parts(ssh_host: str, ssh_user: str, parts: Iterable[str], label: str) -> None:
-    """Delete the staged `.part` files of a failed upload, so that they do not hold room on the
-    asset host until the package's next attempt (which deletes them in any case). Best effort."""
+def _discard_remote_parts(
+    ssh_host: str, ssh_user: str, package: str, parts: Iterable[str], label: str
+) -> None:
+    """Delete the staged `.part` files of a failed upload into `package`, under its lock, so that
+    they do not hold room on the asset host until the package's next attempt (which deletes them
+    in any case). Best effort."""
     command = "rm -f -- " + " ".join(shlex.quote(part) for part in parts)
-    result = run_remote(ssh_host, ssh_user, command, timeout=30, label=f"ssh-rm-parts-{label}")
+    result = run_remote(
+        ssh_host,
+        ssh_user,
+        locked(package, command),
+        timeout=30,
+        label=f"ssh-rm-parts-{label}",
+        attempts=SSH_ATTEMPTS,
+    )
     if result is None or result.returncode != 0:
         log.warning(
             "%s: could not delete the staged %s files of the failed upload; the next upload of "
@@ -1664,6 +1799,48 @@ def _discard_remote_parts(ssh_host: str, ssh_user: str, parts: Iterable[str], la
             label,
             PART_SUFFIX,
         )
+
+
+def ember_swap_command(renames: Sequence[tuple[str, str]], stale: Sequence[str]) -> str:
+    """The shell command that swaps a staged ember edition in, which can safely run again.
+
+    `renames` pairs each staged file with its destination, in order, the certificate last;
+    `stale` lists the live files to delete before the first rename (the live certificate, which
+    is the last destination, and the retired files). The deletion runs only while the staged
+    certificate is still there, that is until the swap has finished (the certificate is renamed
+    last), and each rename only while its staged file is there. So a run that was cut off is
+    finished by running the command again, and a run after a complete one changes nothing: it
+    never deletes the new certificate.
+
+    Before any deletion or rename, while the staged certificate is there, it checks that the
+    staged files form what a cut-off run leaves: a prefix of the renames done (each of those
+    staged files gone and its destination present), then every later staged file still there.
+    While the live certificate is there, no rename has been done yet (it is deleted first), so
+    every staged file must be. Anything else (a staged medium that vanished, say) fails the
+    command with status 3 before it changes anything, instead of landing the new manifest and
+    certificate over an old or missing file.
+    """
+    certificate_part = shlex.quote(renames[-1][0])
+    certificate = shlex.quote(renames[-1][1])
+    # `prefix` is "yes" while the staged files checked so far may be gone because a cut-off run
+    # renamed them; the first one still staged ends the prefix.
+    checks = [f"prefix=yes; [ -e {certificate} ] && prefix=no"]
+    for part, target in renames:
+        missing = shlex.quote(f"the staged ember edition is incomplete: {part} is missing")
+        checks.append(
+            f"if [ -e {shlex.quote(part)} ]; then prefix=no; "
+            f'elif [ "$prefix" = no ] || [ ! -e {shlex.quote(target)} ]; then '
+            f"echo {missing} >&2; exit 3; fi"
+        )
+    deletions = " ".join(shlex.quote(path) for path in stale)
+    steps = [
+        f"if [ -e {certificate_part} ]; then {'; '.join(checks)}; fi",
+        f"{{ [ ! -e {certificate_part} ] || rm -f -- {deletions}; }}",
+    ]
+    for part, target in renames:
+        quoted = shlex.quote(part)
+        steps.append(f"{{ [ ! -e {quoted} ] || mv -f -- {quoted} {shlex.quote(target)}; }}")
+    return " && ".join(steps)
 
 
 def upload_ember_edition(
@@ -1686,13 +1863,17 @@ def upload_ember_edition(
          live manifest), then metadata/ember.json. No live file changes meanwhile, so a transfer
          that fails (a lost connection, a full asset host) leaves the package, an ember edition
          of an older look included, byte for byte as it was; the staged files are then deleted;
-      3. only when all have landed, ONE ssh call swaps the edition in: it deletes the live
-         metadata/ember.json and `retired` (the live edition's files that the current look does
-         not have, retired_ember_files(); relative to the package), then renames each medium
-         into place, then the manifest, then the certificate, last of all.
+      3. only when all have landed, ONE ssh call swaps the edition in (ember_swap_command()): it
+         deletes the live metadata/ember.json and `retired` (the live edition's files that the
+         current look does not have, retired_ember_files(); relative to the package), then
+         renames each medium into place, then the manifest, then the certificate, last of all.
     Every change of step 3 is an unlink or an atomic rename(2) within one directory, so no file
-    is ever truncated under its real name. Staging needs room on the asset host for the new
-    media next to the old ones.
+    is ever truncated under its real name, and the swap refuses to run over a staged file that
+    vanished (ember_swap_command()). Staging needs room on the asset host for the new media next
+    to the old ones. The ssh calls of steps 1 and 3, and the deletion of the staged files after a
+    failure, can all run again, so a failed connection is retried (SSH_ATTEMPTS) before the
+    staged files are given up; each holds the package's lock (locked()), so a retry never
+    overlaps an earlier attempt that is still running on the asset host.
 
     What a reader of the asset host can observe:
       * until the swap: the package as it was, with no ember edition or with the complete old
@@ -1711,7 +1892,7 @@ def upload_ember_edition(
     targets = [posixpath.join(remote_package, path) for path in files]
     parts = [f"{target}{PART_SUFFIX}" for target in targets]
     directories = [posixpath.dirname(target) for target in targets]
-    if not prepare_remote_dirs(ssh_host, ssh_user, directories, parts):
+    if not prepare_remote_dirs(ssh_host, ssh_user, remote_package, directories, parts):
         return False
 
     name = local_seed_dir.name
@@ -1719,13 +1900,25 @@ def upload_ember_edition(
         label = f"{name} [{index}/{len(files)}]"
         staged = f"{ssh_user}@{ssh_host}:{part}"
         if not scp_transfer((local_seed_dir / path,), staged, label, retries):
-            _discard_remote_parts(ssh_host, ssh_user, parts, name)
+            _discard_remote_parts(ssh_host, ssh_user, remote_package, parts, name)
             return False
 
     stale = [posixpath.join(remote_package, path) for path in (EMBER_CERTIFICATE, *retired)]
-    renames = list(zip(parts, targets, strict=True))
-    if not rename_remote_files(ssh_host, ssh_user, renames, name, remove=stale):
-        _discard_remote_parts(ssh_host, ssh_user, parts, name)
+    command = locked(
+        remote_package, ember_swap_command(list(zip(parts, targets, strict=True)), stale)
+    )
+    result = run_remote(
+        ssh_host, ssh_user, command, timeout=30, label=f"ssh-swap-{name}", attempts=SSH_ATTEMPTS
+    )
+    if result is None or result.returncode != 0:
+        log.error(
+            "UPLOAD FAILED: %s  could not swap the staged ember edition into place%s",
+            name,
+            f" (rc={result.returncode}): {result.stderr.strip()[:300]}"
+            if result is not None
+            else "",
+        )
+        _discard_remote_parts(ssh_host, ssh_user, remote_package, parts, name)
         return False
     log.info("UPLOADED the ember edition of %s -> %s", name, remote_package)
     return True
@@ -1776,6 +1969,12 @@ def _format_json_value(value: object) -> str:
     """A compact rendering of a parsed JSON value for log messages (strings in quotes)."""
     if isinstance(value, list):
         return "[" + ", ".join(_format_json_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        members = (
+            f"{_format_json_value(str(key))}: {_format_json_value(item)}"
+            for key, item in value.items()
+        )
+        return "{" + ", ".join(members) + "}"
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
@@ -1927,9 +2126,11 @@ def manifest_json(manifest: dict[str, object]) -> str:
 
 
 def read_remote_file(ssh_host: str, ssh_user: str, remote_path: str) -> str | None:
-    """The text of a remote file, or None (logged) if ssh or the read failed."""
+    """The text of a remote file, or None (logged) if ssh or the read failed (a failed connection
+    is retried: SSH_ATTEMPTS)."""
+    command = f"cat -- {shlex.quote(remote_path)}"
     result = run_remote(
-        ssh_host, ssh_user, f"cat -- {shlex.quote(remote_path)}", timeout=60, label="ssh-cat"
+        ssh_host, ssh_user, command, timeout=60, label="ssh-cat", attempts=SSH_ATTEMPTS
     )
     if result is None:
         log.error("Could not read %s:%s (ssh did not complete)", ssh_host, remote_path)
@@ -2315,7 +2516,7 @@ def retire_stale_ember_editions(
     *,
     keep: bool,
     dry_run: bool,
-) -> tuple[set[str], bool]:
+) -> tuple[set[str], bool] | None:
     """Retire every stale live ember edition (stale_ember_editions()) before the run plans.
 
     A stale edition shows a look the generator no longer renders, so its package is planned as a
@@ -2337,9 +2538,11 @@ def retire_stale_ember_editions(
 
     Returns `remote_files` without the EMBER_PACKAGE_FILES of every retired edition (withdrawn,
     kept for the backfill to replace, or that a dry run would withdraw), so this run's planning
-    sees those packages as backfill seeds, and False if the certificates could not be read or a
-    withdrawal failed (both logged; the other withdrawals go ahead). A later run retries a failed
-    withdrawal, or backfills the package if its certificate is already gone.
+    sees those packages as backfill seeds, and False if a withdrawal failed (logged; the other
+    withdrawals go ahead). A later run retries a failed withdrawal, or backfills the package if
+    its certificate is already gone. Returns None (logged) if the certificates could not be
+    read: the look of every live edition is then unknown, and the caller must not plan a
+    package that holds one (held_editions()).
     """
     if not any(path.endswith(f"/{EMBER_CERTIFICATE}") for path in remote_files):
         return remote_files, True
@@ -2349,7 +2552,7 @@ def retire_stale_ember_editions(
             "Stale ember editions cannot be recognised, so none is %s this run",
             "replaced" if keep else "withdrawn",
         )
-        return remote_files, False
+        return None
     stale = stale_ember_editions(seeds, live, generator_algorithm, remote_files)
     if not stale:
         return remote_files, True
@@ -2391,9 +2594,60 @@ def retire_stale_ember_editions(
     return remote_files - gone, not failed
 
 
+def held_editions(backfill: Sequence[str], remote_files: set[str]) -> list[str]:
+    """The backfill seeds whose live package holds an ember edition (a certificate), for a run
+    that could not tell the look of the live editions (the generator's id or the certificates
+    could not be read; logged).
+
+    Such an edition may be of an older look: replacing it would put the new look online next to
+    the old one (by default, the old one is withdrawn first), and the run could not withdraw it
+    or know that it may be replaced. So the run leaves these seeds out of its backfill, and a
+    later run that can read the looks plans them. An ember-v2 package, for one, lacks the slow
+    film, so it would otherwise be planned for its missing file alone.
+    """
+    held = [seed for seed in backfill if f"0x{seed}/{EMBER_CERTIFICATE}" in remote_files]
+    if held:
+        log.warning(
+            "%d ember backfill seeds hold a live ember edition whose look this run cannot check, "
+            "so they wait for a run that can (none of them is replaced or withdrawn): %s",
+            len(held),
+            ", ".join(f"0x{seed}" for seed in held),
+        )
+    return held
+
+
 # ---------------------------------------------------------------------------
 # One seed, end to end
 # ---------------------------------------------------------------------------
+
+
+def _generate_core_only(exec_cmd: list[str], seed: str, timeout: int, deadline: float) -> Outcome:
+    """After an urgent seed's render ran past `timeout`: render it again without the ember
+    edition (GENERATOR_EMBER_FLAG), so the token gets its main art and the edition joins the
+    backfill instead of costing a full render on every run.
+
+    CORE_ONLY if that render worked; TIMED_OUT, without starting it (logged), if its own timeout
+    (CORE_ONLY_TIMEOUT, or `timeout` if shorter) does not fit before `deadline` (the run budget)
+    or a shutdown is requested; otherwise its own outcome (FAILED, or TIMED_OUT).
+    """
+    core_timeout = min(timeout, CORE_ONLY_TIMEOUT)
+    if shutdown_requested or time.monotonic() + core_timeout > deadline:
+        log.warning(
+            "0x%s: its render ran past --timeout, and %s, so it is not rendered again without "
+            "the ember edition this run; the next run renders it again",
+            seed,
+            "a shutdown is requested" if shutdown_requested else "the run budget has no room",
+        )
+        return Outcome.TIMED_OUT
+    log.warning(
+        "0x%s: its render ran past --timeout (%s): rendering it again without the ember edition, "
+        "so the token gets its main art and the ember edition joins the backfill",
+        seed,
+        fmt_duration(timeout),
+    )
+    cleanup_seed_dir(seed)  # the package must hold this render's output only
+    generated = generate([*exec_cmd, GENERATOR_EMBER_FLAG], seed, core_timeout)
+    return Outcome.CORE_ONLY if generated is Outcome.COMPLETE else generated
 
 
 def _generate_and_upload(
@@ -2405,6 +2659,7 @@ def _generate_and_upload(
     timeout: int,
     backfill: BackfillMode | None,
     ember_capable: bool,
+    deadline: float,
 ) -> Outcome:
     """process_seed() without the dry run, the cleanup and the final log line."""
     # An ember-mode backfill needs the live package's orbit, view and manifest: check them before
@@ -2415,8 +2670,10 @@ def _generate_and_upload(
     ):
         return Outcome.FAILED
     generated = generate(exec_cmd, seed, timeout)
-    if generated is Outcome.FAILED:
-        return Outcome.FAILED
+    if generated is Outcome.TIMED_OUT and backfill is None:
+        generated = _generate_core_only(exec_cmd, seed, timeout, deadline)
+    if generated in (Outcome.FAILED, Outcome.TIMED_OUT):
+        return generated
     if backfill is not None and generated is Outcome.CORE_ONLY:
         log.warning(
             "0x%s: its ember edition failed again (generator exit %d). Its core package is "
@@ -2441,7 +2698,8 @@ def _generate_and_upload(
     if backfill is BackfillMode.EMBER:
         return upload_ember_backfill(seed, seed_dir, ssh_host, ssh_user, remote_dir)
 
-    # A package without the ember edition: exit 3, or a generator that predates the edition.
+    # A package without the ember edition: exit 3, a render without it after a timeout, or a
+    # generator that predates the edition.
     if generated is Outcome.CORE_ONLY or not has_ember_edition(seed_dir):
         if not remove_ember_files(seed_dir):
             return Outcome.FAILED
@@ -2468,6 +2726,7 @@ def process_seed(
     *,
     backfill: BackfillMode | None = None,
     ember_capable: bool = True,
+    deadline: float = math.inf,
 ) -> Outcome:
     """Full pipeline for one seed: generate -> validate package -> upload -> cleanup.
 
@@ -2475,18 +2734,22 @@ def process_seed(
     broken upload) and the backfill mode for a seed whose remote package lacks only the ember
     edition. `ember_capable` is False for a generator that predates the ember edition
     (generator_supports_ember()): its exit-0 packages are checked against the core files only.
+    `deadline` (time.monotonic()) is the end of the run budget: an urgent seed's render without
+    the ember edition, after a timeout, starts only if it fits before it.
 
     Returns:
         COMPLETE: the package was uploaded with its ember edition (an ember-mode backfill: the
             ember edition alone, after the orbit and view check).
         CORE_ONLY: an urgent seed's package was uploaded without the ember edition (generator
-            exit 3, or a generator that predates the edition), after any stale ember file was
-            deleted from its remote directory.
+            exit 3, a render without the edition after a timeout, or a generator that predates
+            the edition), after any stale ember file was deleted from its remote directory.
         EMBER_FAILED: the ember edition failed and nothing was uploaded (a backfill seed's exit
             3, an incomplete local ember edition).
         IDENTITY_MISMATCH: an ember-mode backfill regenerated another orbit or another view
             than the live package's; nothing was uploaded, and the seed is given up with this
             binary.
+        TIMED_OUT: the render ran past `timeout` and nothing was uploaded: a backfill seed's,
+            or an urgent seed's whose render without the edition could not start or run.
         FAILED: nothing was uploaded for any other reason (for an ember-mode backfill, this
             includes a live package that cannot be read or used, checked before generating).
     The local package is deleted before generating and afterwards, whatever the outcome.
@@ -2512,7 +2775,15 @@ def process_seed(
     cleanup_seed_dir(seed)  # the package must hold this run's output only
     try:
         outcome = _generate_and_upload(
-            seed, exec_cmd, ssh_host, ssh_user, remote_dir, timeout, backfill, ember_capable
+            seed,
+            exec_cmd,
+            ssh_host,
+            ssh_user,
+            remote_dir,
+            timeout,
+            backfill,
+            ember_capable,
+            deadline,
         )
     finally:
         cleanup_seed_dir(seed)
@@ -2530,6 +2801,13 @@ def process_seed(
             "IDENTITY MISMATCH  seed=0x%s  (total %s)  nothing uploaded; given up with this binary",
             seed,
             elapsed,
+        )
+    elif outcome is Outcome.TIMED_OUT:
+        log.error(
+            "TIMED OUT  seed=0x%s  (total %s)  nothing uploaded%s",
+            seed,
+            elapsed,
+            "; counts as a failed ember attempt" if backfill is not None else "",
         )
     else:
         log.error("FAILURE  seed=0x%s  (total %s)  nothing uploaded", seed, elapsed)
@@ -2719,6 +2997,19 @@ def positive_int(value: str) -> int:
     return number
 
 
+def run_timeout(value: str) -> int:
+    """argparse type: a per-seed timeout in seconds, from 1 to MAX_TIMEOUT."""
+    number = positive_int(value)
+    if number > MAX_TIMEOUT:
+        raise argparse.ArgumentTypeError(
+            f"{number} is more than {MAX_TIMEOUT} seconds: a run must be able to start a seed with "
+            f"that timeout and still have room for its render without the ember edition "
+            f"({CORE_ONLY_TIMEOUT} s) and its upload ({UPLOAD_MARGIN} s) within the sync unit's "
+            f"{RUN_CEILING}-second limit"
+        )
+    return number
+
+
 def backfill_mode(value: str) -> BackfillMode:
     """argparse type: a BackfillMode by its value ("ember" or "full")."""
     try:
@@ -2782,9 +3073,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--timeout",
-        type=int,
+        type=run_timeout,
         default=DEFAULT_TIMEOUT,
-        help=f"Per-seed generator timeout in seconds (default: {DEFAULT_TIMEOUT})",
+        help=(
+            f"Per-seed generator timeout in seconds, at most {MAX_TIMEOUT} "
+            f"(default: {DEFAULT_TIMEOUT})"
+        ),
     )
     p.add_argument(
         "--max-backfill",
@@ -2899,10 +3193,11 @@ def sync(args: argparse.Namespace) -> int:
     """One sync run: retire stale ember editions, plan the incomplete packages, generate and
     upload them; the exit status.
 
-    Returns 0 if every planned seed succeeded (an urgent package uploaded without its ember
-    edition counts as a success) and 1 on a configuration error, a failed seed list or remote
-    listing, any failed seed (a failed ember backfill included), or live ember certificates that
-    could not be read or a stale ember edition that could not be withdrawn.
+    Returns 0 if every seed it processed succeeded (an urgent package uploaded without its ember
+    edition counts as a success; seeds left to the next run by the run budget do not count) and
+    1 on a configuration error, a failed seed list or remote listing, any failed seed (a failed
+    ember backfill included), or live ember certificates that could not be read or a stale ember
+    edition that could not be withdrawn.
     """
     missing_cfg = validate_config(args)
     if missing_cfg:
@@ -2981,10 +3276,12 @@ def sync(args: argparse.Namespace) -> int:
         return 1
     # Stale editions are withdrawn or, with --keep-stale-ember, left online to be replaced in
     # place. Either way the listing no longer holds their files, so the plan below counts their
-    # packages as backfill seeds.
+    # packages as backfill seeds. While the looks of the live editions are unknown, no package
+    # that holds one is planned (held_editions()).
     retirement_ok = True
+    looks_known = False
     if ember_algorithm is not None:
-        remote_files, retirement_ok = retire_stale_ember_editions(
+        retired = retire_stale_ember_editions(
             seeds,
             remote_files,
             ember_algorithm,
@@ -2994,9 +3291,15 @@ def sync(args: argparse.Namespace) -> int:
             keep=args.keep_stale_ember,
             dry_run=args.dry_run,
         )
+        looks_known = retired is not None
+        if retired is None:
+            retirement_ok = False
+        else:
+            remote_files, retirement_ok = retired
     urgent, backfill = find_missing_seeds(seeds, remote_files)
     incomplete = len(urgent) + len(backfill)
     backfill_seeds = set(backfill)
+    held = held_editions(backfill, remote_files) if ember_capable and not looks_known else []
 
     if incomplete == 0:
         elapsed = time.monotonic() - t_start
@@ -3016,9 +3319,18 @@ def sync(args: argparse.Namespace) -> int:
         len(backfill),
     )
 
-    # Only seeds still waiting for the backfill keep their failure counts.
+    # Only seeds still waiting for the backfill keep their failure counts, and only new mints
+    # still waiting for a package their overruns.
     ledger = load_backfill_ledger(generator_identity)
-    ledger.retain(backfill_seeds)
+    ledger.retain(backfill_seeds, urgent=set(urgent))
+    for seed in urgent:
+        if seed in ledger.urgent_overruns:
+            log.warning(
+                "0x%s: its render ran past --timeout in %d earlier runs without a package to "
+                "upload, so it goes behind the other new mints",
+                seed,
+                ledger.urgent_overruns[seed],
+            )
     given_up = given_up_seeds(backfill, ledger, args.max_backfill_attempts)
     for seed in given_up:
         if seed in ledger.identity_mismatches:
@@ -3040,7 +3352,8 @@ def sync(args: argparse.Namespace) -> int:
                 ledger.ember_failures[seed],
                 BACKFILL_FAILURES,
             )
-    missing = plan_seed_queue(urgent, backfill, max_backfill, ledger, args.max_backfill_attempts)
+    plannable = [seed for seed in backfill if seed not in held]
+    missing = plan_seed_queue(urgent, plannable, max_backfill, ledger, args.max_backfill_attempts)
     deferred = incomplete - len(given_up) - len(missing)
     if deferred:
         log.info(
@@ -3061,11 +3374,36 @@ def sync(args: argparse.Namespace) -> int:
     failed_seeds: list[str] = []
     core_only_seeds: list[str] = []
     ember_failed_seeds: list[str] = []
+    # The run budget: a seed starts only if its render can time out and still be uploaded before
+    # systemd's ceiling (RUN_CEILING); the rest waits for the next run.
+    deadline = t_start + RUN_CEILING - UPLOAD_MARGIN
+    budget_left = 0
+    budget_stalled = False
 
     for i, seed in enumerate(missing, 1):
         if shutdown_requested:
             remaining = len(missing) - i + 1
             log.info("Shutdown requested -- skipping remaining %d seeds", remaining)
+            break
+        if time.monotonic() + args.timeout > deadline:
+            budget_left = len(missing) - i + 1
+            if i == 1:
+                # MAX_TIMEOUT leaves room for the first seed, unless planning took hours.
+                log.error(
+                    "Run budget reached before the first seed, after %s of planning: nothing is "
+                    "generated",
+                    fmt_duration(time.monotonic() - t_start),
+                )
+                budget_stalled = True
+            log.info(
+                "Run budget reached; %d seeds wait for the next run (after %s, a seed's --timeout "
+                "of %s and %s for its upload would not fit in this run's %s)",
+                budget_left,
+                fmt_duration(time.monotonic() - t_start),
+                fmt_duration(args.timeout),
+                fmt_duration(UPLOAD_MARGIN),
+                fmt_duration(RUN_CEILING),
+            )
             break
 
         is_backfill = seed in backfill_seeds
@@ -3087,11 +3425,17 @@ def sync(args: argparse.Namespace) -> int:
             args.dry_run,
             backfill=args.backfill_mode if is_backfill else None,
             ember_capable=ember_capable,
+            deadline=deadline,
         )
-        if outcome in (Outcome.FAILED, Outcome.EMBER_FAILED, Outcome.IDENTITY_MISMATCH):
+        if outcome in (
+            Outcome.FAILED,
+            Outcome.TIMED_OUT,
+            Outcome.EMBER_FAILED,
+            Outcome.IDENTITY_MISMATCH,
+        ):
             fail_count += 1
             failed_seeds.append(seed)
-            if outcome is not Outcome.FAILED:
+            if outcome is not Outcome.FAILED and (is_backfill or outcome is not Outcome.TIMED_OUT):
                 ember_failed_seeds.append(seed)
         else:
             ok_count += 1
@@ -3108,7 +3452,7 @@ def sync(args: argparse.Namespace) -> int:
 
     # --- Summary ---
 
-    skipped = len(missing) - ok_count - fail_count
+    skipped = len(missing) - ok_count - fail_count - budget_left
     elapsed = time.monotonic() - t_start
 
     log.info("=" * 60)
@@ -3135,6 +3479,8 @@ def sync(args: argparse.Namespace) -> int:
             len(ember_failed_seeds),
             ", ".join(f"0x{s}" for s in ember_failed_seeds),
         )
+    if budget_left:
+        log.info("  Next run (budget)    : %d", budget_left)
     if skipped > 0:
         log.info("  Skipped (shutdown)   : %d", skipped)
     if failed_seeds:
@@ -3142,7 +3488,7 @@ def sync(args: argparse.Namespace) -> int:
     log.info("  Wall time            : %s", fmt_duration(elapsed))
     log.info("=" * 60)
 
-    return 1 if fail_count > 0 or not retirement_ok else 0
+    return 1 if fail_count > 0 or not retirement_ok or budget_stalled else 0
 
 
 if __name__ == "__main__":

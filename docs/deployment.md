@@ -343,8 +343,25 @@ measured on 2026-10-02).
 
 At the default `--max-backfill` of 1, a new mint waits for at most one backfill package (the
 rest of the run in progress). The per-seed timeout is 10 hours (`run.py --timeout`), well below
-the sync unit's 24-hour limit; it only has to catch a render that hangs. An scp transfer may take
-15 minutes, or one second per MB if that is longer.
+the sync unit's 24-hour limit; it only has to catch a render that hangs. A backfill render that
+runs past it counts as a failed ember attempt, so an orbit that always overruns is given up at
+the retry cap; an urgent seed's is rendered again without the ember edition (a core package
+takes about 50 minutes; that render's own timeout is 2 hours), so its token gets its main art and
+its ember edition joins the backfill. A new mint whose renders overrun both times uploads
+nothing; its overrun is counted (`urgent_overruns` in `backfill_failures.json`), and new mints
+go in order of their overruns, fewest first, so one whose renders keep hanging goes behind the
+others. `--timeout` is at most 21 hours (75,600 seconds), so that a seed, its render without the
+ember edition and its upload always fit in a run. An scp transfer may take 15 minutes, or one
+second per MB if that is longer.
+
+**The run budget.** A run starts a seed only while that seed's `--timeout` and an hour for its
+upload still fit inside the sync unit's 24-hour limit, and otherwise logs `Run budget reached;
+N seeds wait for the next run`, ends normally (exit `0` unless something else failed) and
+leaves the rest to the next run, which plans afresh 5 minutes later and also picks up the
+tokens minted meanwhile. At about 3 hours a package, about five packages fit in one run, so the
+several tokens a round's end mints at once span two runs; systemd's 24-hour limit is a safety
+net that is never expected to fire. A run's first seed whose render overruns twice (10 and 2
+hours) still leaves room for the next seed to start in the same run.
 
 **Watching progress.**
 
@@ -369,10 +386,14 @@ never starts one.
 
 - Nothing is withdrawn unless the generator reports its id. A binary without
   `--ember-algorithm` (built before the flag existed) logs a WARNING on every run and withdraws
-  nothing.
+  or replaces nothing.
 - A certificate whose algorithm cannot be read is kept, with a WARNING naming it. If the
-  certificates cannot be read at all (SSH fails), nothing is withdrawn that run: an ERROR, the
-  run exits `1`, and the next run tries again.
+  certificates cannot be read at all (SSH fails), nothing is withdrawn or replaced that run: an
+  ERROR, the run exits `1`, and the next run tries again.
+- While the looks of the live editions are unknown (either case above), no backfill seed that
+  holds an ember edition is planned, in either mode: an `ember-v2` package, which lacks the slow
+  film, would otherwise be replaced for that alone, and by default the old look must not be
+  replaced before it is withdrawn. A WARNING names those seeds.
 - Only an older id is stale. After a rollback to a generator with an older id, the newer live
   editions are kept (one WARNING per run: `… are newer than this generator's …`) and new mints
   get the older look; deploying the newer generator again re-renders only those.
@@ -397,14 +418,14 @@ never starts one.
 An ember edition is uploaded next to main art that stays as published, so it must draw the same
 orbit, and since `ember-v3` its bodies follow the main edition's view: the same projection,
 viewing rotation, drift and framing. Before `run.py` uploads the ember edition of a re-rendered
-package (`--backfill-mode ember`, the default), it compares ten fields of the regenerated
+package (`--backfill-mode ember`, the default), it compares twelve fields of the regenerated
 `metadata/nft_traits.json` with the live one's, as exact JSON values (numbers by their exact
 decimal value, never as floats):
 
 | What | Fields |
 |------|--------|
 | the orbit | `simulation.masses`, `generation.borda.selected_index`, `generation.borda.retry_count` |
-| the view | `generation.structure.stack_label`, `generation.projection`, `generation.symmetry`, `generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction`, `generation.drift.orbit_eccentricity` |
+| the view | `generation.structure.stack_label`, `generation.projection`, `generation.symmetry`, `generation.drift.mode`, `generation.drift.scale`, `generation.drift.arc_fraction`, `generation.drift.orbit_eccentricity`, `generation.resolution.width`, `generation.resolution.height` (the output's size and aspect set the frame) |
 
 - **All equal.** The log shows `same orbit and view as the live package, by every recorded field
   (its viewing rotation and frame are not recorded, and are assumed to match); uploading only
@@ -417,7 +438,7 @@ decimal value, never as floats):
   is given up at once, listed under `identity_mismatches` in `backfill_failures.json`, and every
   later run logs `ember backfill given up: this generator binary regenerates a different orbit
   or view than the live package`. A rebuilt generator tries it again.
-- **The live file lacks one.** Every generator that wrote `nft_traits.json` wrote all ten (its
+- **The live file lacks one.** Every generator that wrote `nft_traits.json` wrote all twelve (its
   schema requires them), so such a file is damaged and its orbit or view is not guessed:
   nothing is rendered or uploaded, and an ERROR (`the live package cannot be used for an ember
   backfill: metadata/nft_traits.json lacks …`) repeats on every run until the file is repaired
@@ -426,7 +447,7 @@ decimal value, never as floats):
 
 **What the check does not verify.** The viewing rotation and the frame themselves are not
 recorded in the live package, so `run.py` cannot compare them: they are *assumed* to match once
-the ten fields do. The generator derives them while it renders. The rotation is the best of
+the twelve fields do. The generator derives them while it renders. The rotation is the best of
 four by a score that depends on the layer stack, computed with platform floating point, which
 is why the stack (`generation.structure.stack_label`) is compared as its recorded proxy. Look at
 the first re-rendered token next to its main art before trusting the rest of the pass.
@@ -456,6 +477,14 @@ uploads this way, whether or not an edition is live):
 - A transfer that fails (a lost connection, a full asset host) changes nothing: the old edition
   stays online byte for byte, the staged `.part` files are deleted, and a later run renders the
   package again. Staging needs room for the old and the new media at once.
+- An SSH call after the render (reading the live package back, preparing the upload, the swap,
+  deleting staged files) whose connection fails is tried again, twice, with the staged files
+  kept; the swap can safely run again, even after a run of it that was cut off. Every command
+  that changes the package holds a lock on `.ember.lock` in the package's directory (`flock`,
+  util-linux), so a retry waits for an earlier attempt that may still be running on the asset
+  host. That empty file stays there; it is not part of the package, and `run.py` ignores it.
+- The swap refuses to run (nothing is deleted or renamed, the upload fails) if a staged file it
+  needs is gone, so the new manifest and certificate never land over an old or missing medium.
 - Only the swap itself has in-between states, and it transfers nothing, so it lasts a moment:
   the package has no certificate, and its manifest lists the old edition's entries (with the
   old checksums) over media that are each still the old file or already the new one, then the
