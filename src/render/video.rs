@@ -1,7 +1,8 @@
 //! Video encoding functionality
 //!
-//! Provides website-compatible H.264 plus high-quality H.265 encoding, for the main renderer's
-//! Display P3 frames and (the `*_srgb` variants) the ember edition's sRGB frames.
+//! Provides website-compatible H.264 plus high-quality H.265 encoding: sRGB frames (the
+//! `*_srgb` variants: every web video, and the ember edition's archival copy) and the main
+//! renderer's Display P3 frames (its archival copies).
 //!
 //! Frames are piped to the encoders as they are rendered, without temporary files: one stream
 //! to several encoders ([`create_videos_from_frames_singlepass`]), or several streams at once,
@@ -18,9 +19,9 @@ use crate::render::error::{RenderError, Result};
 /// Configuration for video encoding
 ///
 /// This struct provides fine-grained control over `FFmpeg` encoding parameters.
-/// Use [`VideoEncodingOptions::web_compatible`] for the public website MP4 and
-/// [`VideoEncodingOptions::high_quality`] for the archival HEVC copy (and their `*_srgb`
-/// counterparts for sRGB frames).
+/// Use [`VideoEncodingOptions::web_compatible_srgb`] for a public website MP4 (sRGB frames) and
+/// [`VideoEncodingOptions::high_quality`] for the main renderer's archival HEVC copy (Display
+/// P3 frames; [`VideoEncodingOptions::high_quality_srgb`] for sRGB frames).
 #[derive(Debug, Clone)]
 pub struct VideoEncodingOptions {
     /// Output bitrate (for a bitrate-targeted encode). Leave empty for CRF mode (quality-based
@@ -70,41 +71,52 @@ impl Default for VideoEncodingOptions {
     }
 }
 
-/// Colour handling of the ember edition's sRGB video variants.
+/// Colour handling of every encode: RGB frames in, BT.709 limited-range `Y'CbCr` out.
 ///
-/// The frames piped to `FFmpeg` are sRGB-encoded RGB (BT.709 primaries, D65 white, IEC 61966-2-1
-/// transfer). The variants convert them to `Y'CbCr` with the BT.709 matrix at limited ("tv")
-/// range and tag the bitstream and the MP4 `colr` box as BT.709 primaries / IEC 61966-2-1
-/// transfer / BT.709 matrix / tv range. Two details make this hold on every `FFmpeg` the
-/// product meets:
+/// The frames piped to `FFmpeg` are RGB with the IEC 61966-2-1 (sRGB) transfer curve and one of
+/// two sets of primaries, both with the D65 white: BT.709 (sRGB frames: every web video, and
+/// the ember edition's archival copy) or Display P3 (`smpte432`: the main renderer's archival
+/// copies). Each encode converts them to `Y'CbCr` with the BT.709 matrix at limited ("tv")
+/// range and tags the bitstream and the MP4 `colr` box with the frames' primaries, the
+/// IEC 61966-2-1 transfer, the BT.709 matrix and tv range. Two details make this hold on every
+/// `FFmpeg` the product meets:
 ///
 /// * The RGB→`Y'CbCr` conversion is an explicit `scale=out_color_matrix=bt709:out_range=tv`.
 ///   `FFmpeg` 7.1 derives the matrix of its automatically inserted scaler from `-colorspace`,
 ///   but older releases (the production host runs 6.1) convert RGB with BT.601 while still
 ///   tagging BT.709. That mismatch moves saturated colours by up to 24 levels (8-bit scale,
 ///   measured on primaries and the warm red `(177, 34, 16)`); the matched round trip stays
-///   within 3 levels at 8-bit 4:2:0 and 0.25 levels at 10 bits.
-/// * `setparams` stamps every frame with the sRGB tags. `FFmpeg` 7.1 takes the encoder's
-///   primaries and transfer from the frames and drops the `-color_primaries`/`-color_trc`
-///   output options, so without it H.264 streams and the `colr` box say "unspecified". The
-///   output options stay for older releases, whose encoders read them instead.
+///   within 3 levels at 8-bit 4:2:0 and 0.25 levels at 10 bits. (Main-edition films encoded
+///   before the conversion was explicit decode closer to their still with BT.601 than with
+///   their BT.709 tag.)
+/// * `setparams` stamps every frame with the tags. `FFmpeg` 7.1 takes the encoder's primaries
+///   and transfer from the frames and drops the `-color_primaries`/`-color_trc` output options,
+///   so without it H.264 streams and the `colr` box say "unspecified". The output options stay
+///   for older releases, whose encoders read them instead.
 ///
-/// Measured with `FFmpeg` 7.1.1 by the ignored test `srgb_variants_round_trip_through_bt709`
-/// (`cargo test --lib srgb_variants_round_trip -- --ignored`, needs `ffmpeg` and `ffprobe`).
-mod srgb {
-    /// `scale` + `format` + `setparams`: sRGB RGB → BT.709 limited-range `Y'CbCr` in
-    /// `pixel_format`, every frame tagged sRGB.
-    pub(super) fn filter(pixel_format: &str) -> String {
+/// Checked on every test run with `ffmpeg` and `ffprobe` on PATH (required under CI) by
+/// `variants_round_trip_through_bt709`; measured with `FFmpeg` 7.1.1 and 6.1.1
+/// (`cargo test --release --lib variants_round_trip -- --nocapture` prints the errors).
+mod ycbcr {
+    /// `FFmpeg` name of the BT.709 (sRGB) primaries.
+    pub(super) const SRGB_PRIMARIES: &str = "bt709";
+    /// `FFmpeg` name of the Display P3 primaries (SMPTE EG 432-1, D65 white).
+    pub(super) const DISPLAY_P3_PRIMARIES: &str = "smpte432";
+
+    /// `scale` + `format` + `setparams`: RGB with `primaries` → BT.709 limited-range `Y'CbCr`
+    /// in `pixel_format`, every frame tagged with `primaries` and the sRGB transfer.
+    pub(super) fn filter(pixel_format: &str, primaries: &str) -> String {
         format!(
             "scale=out_color_matrix=bt709:out_range=tv,format={pixel_format},\
-             setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=tv"
+             setparams=color_primaries={primaries}:color_trc=iec61966-2-1:colorspace=bt709:\
+             range=tv"
         )
     }
 
     /// `-vf` with the conversion [`filter`], then the container/stream tags.
-    pub(super) fn args(pixel_format: &str) -> Vec<String> {
-        let mut args = vec!["-vf".to_string(), filter(pixel_format)];
-        args.extend(super::color_tag_args("bt709", "iec61966-2-1"));
+    pub(super) fn args(pixel_format: &str, primaries: &str) -> Vec<String> {
+        let mut args = vec!["-vf".to_string(), filter(pixel_format, primaries)];
+        args.extend(super::color_tag_args(primaries, "iec61966-2-1"));
         args
     }
 }
@@ -180,52 +192,16 @@ impl VideoEncodingOptions {
         }
     }
 
-    /// Website-compatible H.264 MP4 for `QuickTime` and broad browser playback.
-    #[must_use]
-    pub fn web_compatible() -> Self {
-        Self::h264_web(color_tag_args("bt709", "bt709"))
-    }
-
-    /// High-quality HEVC copy preserving the existing 10-bit 4:2:2 encode path.
-    #[must_use]
-    pub fn high_quality() -> Self {
-        Self::hevc_archival("smpte432", Vec::new(), color_tag_args("smpte432", "iec61966-2-1"))
-    }
-
-    /// [`web_compatible`](Self::web_compatible) for sRGB frames: H.264, CRF 18 by default,
-    /// 8-bit 4:2:0, converted with the BT.709 matrix at limited range and tagged BT.709
-    /// primaries, IEC 61966-2-1 transfer, BT.709 matrix, tv range.
+    /// Software-only fast encode (`--fast-encode`, for drafts): `libx264`, preset fast, CRF 21,
+    /// 10-bit 4:2:0 (High 10), converted and tagged for frames with `primaries`.
     ///
-    /// The ember edition encodes `videos/web/ember.mp4` with these options but overrides the
-    /// rate factor with [`app::EMBER_WEB_CRF`](crate::app::EMBER_WEB_CRF) (22): its textured
-    /// paper frames would be about 1.7 times larger at CRF 18 for no visible gain.
-    ///
-    /// See the notes on the private `srgb` module for why the conversion is explicit.
-    #[must_use]
-    pub fn web_compatible_srgb() -> Self {
-        Self::h264_web(srgb::args("yuv420p"))
-    }
-
-    /// [`high_quality`](Self::high_quality) for sRGB frames (the ember edition): HEVC, preset
-    /// slower, CRF 17, 10-bit 4:2:2 with the same tuning, converted with the BT.709 matrix at
-    /// limited range and tagged sRGB in the container, the stream and the x265 VUI
-    /// (`colorprim=bt709:transfer=iec61966-2-1:colormatrix=bt709`).
-    #[must_use]
-    pub fn high_quality_srgb() -> Self {
-        Self::hevc_archival("bt709", srgb::args("yuv422p10le"), Vec::new())
-    }
-
-    /// Software-only fast encode of sRGB frames (the ember edition under `--fast-encode`):
-    /// `libx264`, preset fast, CRF 21, 10-bit 4:2:0 (High 10), with the sRGB conversion and tags.
-    ///
-    /// Like [`fast_encode`](Self::fast_encode) it is software only, with the sRGB conversion and
-    /// tags of the ember edition instead of Display P3.
-    #[must_use]
-    pub fn software_fast_srgb() -> Self {
+    /// Software only, on every platform: nothing in the generator uses a GPU or a hardware
+    /// encoder, so a draft runs the same command everywhere.
+    fn software_fast(primaries: &str) -> Self {
         let pixel_format = "yuv420p10le";
         let mut extra_args: Vec<String> =
             ["-tune", "film", "-movflags", "+faststart"].map(str::to_string).to_vec();
-        extra_args.extend(srgb::args(pixel_format));
+        extra_args.extend(ycbcr::args(pixel_format, primaries));
         Self {
             codec: "libx264".to_string(),
             preset: "fast".to_string(),
@@ -237,35 +213,54 @@ impl VideoEncodingOptions {
         }
     }
 
-    /// Fast encode of the main edition's Display P3 frames (`--fast-encode`, for drafts):
-    /// `libx264`, preset fast, CRF 21, 10-bit 4:2:0, tagged Display P3.
+    /// Archival HEVC of the main renderer's Display P3 frames: preset slower, CRF 17, 10-bit
+    /// 4:2:2 (Main 4:2:2 10), converted with the BT.709 matrix at limited range and tagged
+    /// Display P3 (`smpte432`) with the sRGB transfer in the container, the stream and the
+    /// x265 VUI.
+    #[must_use]
+    pub fn high_quality() -> Self {
+        let primaries = ycbcr::DISPLAY_P3_PRIMARIES;
+        Self::hevc_archival(primaries, ycbcr::args("yuv422p10le", primaries), Vec::new())
+    }
+
+    /// Website-compatible H.264 MP4 of sRGB frames, for `QuickTime` and broad browser playback:
+    /// CRF 18 by default, 8-bit 4:2:0, converted with the BT.709 matrix at limited range and
+    /// tagged BT.709 primaries, IEC 61966-2-1 transfer, BT.709 matrix, tv range.
     ///
-    /// Software only, on every platform: nothing in the generator uses a GPU or a hardware
-    /// encoder, so a draft runs the same command everywhere.
+    /// Every web video is sRGB: the main renderer converts its Display P3 frames first
+    /// ([`display_p3::to_srgb_samples`](crate::render::display_p3::to_srgb_samples)). The
+    /// ember edition encodes `videos/web/ember.mp4` with these options but overrides the rate
+    /// factor with [`app::EMBER_WEB_CRF`](crate::app::EMBER_WEB_CRF) (22): its textured paper
+    /// frames would be about 1.7 times larger at CRF 18 for no visible gain.
+    ///
+    /// See the notes on the private `ycbcr` module for why the conversion is explicit.
+    #[must_use]
+    pub fn web_compatible_srgb() -> Self {
+        Self::h264_web(ycbcr::args("yuv420p", ycbcr::SRGB_PRIMARIES))
+    }
+
+    /// [`high_quality`](Self::high_quality) for sRGB frames (the ember edition): HEVC, preset
+    /// slower, CRF 17, 10-bit 4:2:2 with the same tuning, converted with the BT.709 matrix at
+    /// limited range and tagged sRGB in the container, the stream and the x265 VUI
+    /// (`colorprim=bt709:transfer=iec61966-2-1:colormatrix=bt709`).
+    #[must_use]
+    pub fn high_quality_srgb() -> Self {
+        let primaries = ycbcr::SRGB_PRIMARIES;
+        Self::hevc_archival(primaries, ycbcr::args("yuv422p10le", primaries), Vec::new())
+    }
+
+    /// Software-only fast encode of sRGB frames (the ember edition under `--fast-encode`):
+    /// `libx264`, preset fast, CRF 21, 10-bit 4:2:0 (High 10), with the sRGB conversion and tags.
+    #[must_use]
+    pub fn software_fast_srgb() -> Self {
+        Self::software_fast(ycbcr::SRGB_PRIMARIES)
+    }
+
+    /// Fast encode of the main renderer's Display P3 frames (`--fast-encode`, for drafts):
+    /// [`software_fast_srgb`](Self::software_fast_srgb) converted and tagged Display P3.
     #[must_use]
     pub fn fast_encode() -> Self {
-        Self {
-            codec: "libx264".to_string(),
-            preset: "fast".to_string(),
-            crf: 21,
-            bitrate: String::new(),
-            pixel_format: "yuv420p10le".to_string(),
-            input_pixel_format: "rgb48le".to_string(),
-            extra_args: vec![
-                "-tune".to_string(),
-                "film".to_string(),
-                "-movflags".to_string(),
-                "+faststart".to_string(),
-                "-colorspace".to_string(),
-                "bt709".to_string(),
-                "-color_primaries".to_string(),
-                "smpte432".to_string(),
-                "-color_trc".to_string(),
-                "iec61966-2-1".to_string(),
-                "-color_range".to_string(),
-                "tv".to_string(),
-            ],
-        }
+        Self::software_fast(ycbcr::DISPLAY_P3_PRIMARIES)
     }
 }
 
@@ -757,10 +752,10 @@ pub fn create_videos_from_frames_singlepass(
 /// # use std::io::Write;
 /// let output = |file: &str, options| VideoOutputSpec { output_file: file.to_string(), options };
 /// let film = [
-///     output("film.mp4", VideoEncodingOptions::web_compatible()),
-///     output("film-hq.mp4", VideoEncodingOptions::high_quality()),
+///     output("film.mp4", VideoEncodingOptions::web_compatible_srgb()),
+///     output("film-hq.mp4", VideoEncodingOptions::high_quality_srgb()),
 /// ];
-/// let slow_film = [output("film-slow.mp4", VideoEncodingOptions::web_compatible())];
+/// let slow_film = [output("film-slow.mp4", VideoEncodingOptions::web_compatible_srgb())];
 /// let frame = vec![0u8; 1920 * 1080 * 6];
 /// create_video_groups_from_frames(1920, 1080, 60, &[&film, &slow_film], |writers| {
 ///     let [normal, slow] = writers else { return Err("expected two writers".into()) };
@@ -810,8 +805,11 @@ mod tests {
 
     #[test]
     fn test_web_compatible_options() {
-        let options = VideoEncodingOptions::web_compatible();
-        assert_eq!(options.codec, "libx264");
+        let options = VideoEncodingOptions::web_compatible_srgb();
+        assert_eq!(
+            (options.codec.as_str(), options.preset.as_str(), options.crf),
+            ("libx264", "medium", 18)
+        );
         assert_eq!(options.pixel_format, "yuv420p");
         assert_eq!(options.input_pixel_format, "rgb48le");
         assert!(options.extra_args.contains(&"-movflags".to_string()));
@@ -928,31 +926,10 @@ mod tests {
         args.iter().map(ToString::to_string).collect()
     }
 
-    /// The main renderer's encodes keep their exact arguments (the shared builders only
-    /// deduplicate code).
+    /// The main renderer's archival encode, argument for argument: the archival tuning, then
+    /// the explicit BT.709 conversion with the Display P3 tags.
     #[test]
-    fn test_existing_options_are_unchanged() {
-        let web = VideoEncodingOptions::web_compatible();
-        assert_eq!(
-            (web.codec.as_str(), web.preset.as_str(), web.crf, web.pixel_format.as_str()),
-            ("libx264", "medium", 18, "yuv420p")
-        );
-        assert_eq!(
-            web.extra_args,
-            strings(&[
-                "-movflags",
-                "+faststart",
-                "-colorspace",
-                "bt709",
-                "-color_primaries",
-                "bt709",
-                "-color_trc",
-                "bt709",
-                "-color_range",
-                "tv",
-            ])
-        );
-
+    fn test_main_archival_options_are_pinned() {
         let hq = VideoEncodingOptions::high_quality();
         assert_eq!(
             (hq.codec.as_str(), hq.preset.as_str(), hq.crf, hq.pixel_format.as_str()),
@@ -971,6 +948,10 @@ mod tests {
                 "grain",
                 "-movflags",
                 "+faststart",
+                "-vf",
+                "scale=out_color_matrix=bt709:out_range=tv,format=yuv422p10le,\
+                 setparams=color_primaries=smpte432:color_trc=iec61966-2-1:colorspace=bt709:\
+                 range=tv",
                 "-colorspace",
                 "bt709",
                 "-color_primaries",
@@ -985,21 +966,24 @@ mod tests {
         );
     }
 
-    fn srgb_variants() -> [(&'static str, VideoEncodingOptions); 3] {
+    /// Every encode of the generator with the primaries of the frames it receives.
+    fn every_variant() -> [(&'static str, VideoEncodingOptions, &'static str); 5] {
         [
-            ("web", VideoEncodingOptions::web_compatible_srgb()),
-            ("hq", VideoEncodingOptions::high_quality_srgb()),
-            ("fast", VideoEncodingOptions::software_fast_srgb()),
+            ("web", VideoEncodingOptions::web_compatible_srgb(), "bt709"),
+            ("hq", VideoEncodingOptions::high_quality_srgb(), "bt709"),
+            ("fast", VideoEncodingOptions::software_fast_srgb(), "bt709"),
+            ("main-hq", VideoEncodingOptions::high_quality(), "smpte432"),
+            ("main-fast", VideoEncodingOptions::fast_encode(), "smpte432"),
         ]
     }
 
     #[test]
-    fn test_srgb_variants_convert_with_bt709_and_tag_srgb() {
-        for (label, options) in srgb_variants() {
+    fn test_every_variant_converts_with_bt709_and_tags_its_primaries() {
+        for (label, options, primaries) in every_variant() {
             let args = &options.extra_args;
             assert_eq!(options.input_pixel_format, "rgb48le", "{label}");
             assert_eq!(value_of(args, "-colorspace"), "bt709", "{label}");
-            assert_eq!(value_of(args, "-color_primaries"), "bt709", "{label}");
+            assert_eq!(value_of(args, "-color_primaries"), primaries, "{label}");
             assert_eq!(value_of(args, "-color_trc"), "iec61966-2-1", "{label}");
             assert_eq!(value_of(args, "-color_range"), "tv", "{label}");
             assert_eq!(value_of(args, "-movflags"), "+faststart", "{label}");
@@ -1010,23 +994,68 @@ mod tests {
             );
             assert!(filter.contains(&format!(",format={},", options.pixel_format)), "{label}");
             assert!(
-                filter.ends_with(
-                    "setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:\
-                     range=tv"
-                ),
-                "{label}: frames must carry the sRGB tags: {filter}"
+                filter.ends_with(&format!(
+                    "setparams=color_primaries={primaries}:color_trc=iec61966-2-1:\
+                     colorspace=bt709:range=tv"
+                )),
+                "{label}: frames must carry their tags: {filter}"
             );
             assert_eq!(args.iter().filter(|arg| *arg == "-vf").count(), 1, "{label}");
         }
     }
 
+    /// The H.264 encodes, argument for argument: every public web film (the main film, the
+    /// sweep and the ember films) and the archival copy of a `--fast-encode` draft.
     #[test]
-    fn test_srgb_web_variant_matches_web_settings() {
-        let web = VideoEncodingOptions::web_compatible();
-        let srgb = VideoEncodingOptions::web_compatible_srgb();
+    fn test_h264_options_are_pinned() {
+        let web = VideoEncodingOptions::web_compatible_srgb();
         assert_eq!(
-            (srgb.codec, srgb.preset, srgb.crf, srgb.pixel_format),
-            (web.codec, web.preset, web.crf, web.pixel_format)
+            (web.codec.as_str(), web.preset.as_str(), web.crf, web.pixel_format.as_str()),
+            ("libx264", "medium", 18, "yuv420p")
+        );
+        assert_eq!(
+            web.extra_args,
+            strings(&[
+                "-movflags",
+                "+faststart",
+                "-vf",
+                "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,\
+                 setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=tv",
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "iec61966-2-1",
+                "-color_range",
+                "tv",
+            ])
+        );
+        let fast = VideoEncodingOptions::fast_encode();
+        assert_eq!(
+            (fast.codec.as_str(), fast.preset.as_str(), fast.crf, fast.pixel_format.as_str()),
+            ("libx264", "fast", 21, "yuv420p10le")
+        );
+        assert_eq!(
+            fast.extra_args,
+            strings(&[
+                "-tune",
+                "film",
+                "-movflags",
+                "+faststart",
+                "-vf",
+                "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p10le,\
+                 setparams=color_primaries=smpte432:color_trc=iec61966-2-1:colorspace=bt709:\
+                 range=tv",
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "smpte432",
+                "-color_trc",
+                "iec61966-2-1",
+                "-color_range",
+                "tv",
+            ])
         );
     }
 
@@ -1045,9 +1074,26 @@ mod tests {
             value_of(&hq.extra_args, "-x265-params"),
             "only the primaries differ from the archival tuning"
         );
-        assert_eq!(value_of(&srgb.extra_args, "-profile:v"), "main422-10");
-        assert_eq!(value_of(&srgb.extra_args, "-tune"), "grain");
-        assert_eq!(value_of(&srgb.extra_args, "-tag:v"), "hvc1");
+        let swap = |args: &[String]| -> Vec<String> {
+            args.iter()
+                .map(|arg| arg.replace("bt709", "PRIM").replace("smpte432", "PRIM"))
+                .collect()
+        };
+        assert_eq!(swap(&srgb.extra_args), swap(&hq.extra_args), "same arguments otherwise");
+    }
+
+    #[test]
+    fn test_main_fast_encode_matches_srgb_fast_encode() {
+        let p3 = VideoEncodingOptions::fast_encode();
+        let srgb = VideoEncodingOptions::software_fast_srgb();
+        assert_eq!(
+            (&p3.codec, &p3.preset, p3.crf, &p3.pixel_format),
+            (&srgb.codec, &srgb.preset, srgb.crf, &srgb.pixel_format)
+        );
+        let swap = |args: &[String]| -> Vec<String> {
+            args.iter().map(|arg| arg.replace("smpte432", "bt709")).collect()
+        };
+        assert_eq!(swap(&p3.extra_args), srgb.extra_args, "only the primaries differ");
     }
 
     #[test]
@@ -1151,10 +1197,15 @@ mod tests {
     /// Empirical check of the sRGB variants with the local `FFmpeg`: solid colours piped as
     /// `rgb48le` through each option set must decode back (BT.709, limited range) within the
     /// codec's quantisation, while a BT.601 decode must be far off (so the check discriminates),
-    /// and the stream and container must both carry the sRGB tags.
+    /// and the stream and container must both carry the frames' primaries with the sRGB
+    /// transfer. (The test colours are code values: the matrix does not depend on the
+    /// primaries.)
     #[test]
-    #[ignore = "needs ffmpeg and ffprobe on PATH; run with --ignored"]
-    fn srgb_variants_round_trip_through_bt709() {
+    fn variants_round_trip_through_bt709() {
+        let test = "variants_round_trip_through_bt709";
+        if !crate::test_support::media_tools_available(test, &["ffmpeg", "ffprobe"]) {
+            return;
+        }
         let width = PATCH * ROUND_TRIP_COLOURS.len() as u32;
         let height = PATCH;
         let mut frame = Vec::with_capacity((width * height * 6) as usize);
@@ -1168,7 +1219,7 @@ mod tests {
             }
         }
         let dir = tempfile::tempdir().expect("temp dir");
-        for (label, options) in srgb_variants() {
+        for (label, options, primaries) in every_variant() {
             let tolerance = if options.pixel_format.contains("10") { 1.0 } else { 4.0 };
             let path = dir.path().join(format!("{label}.mp4"));
             let spec = VideoOutputSpec {
@@ -1203,15 +1254,22 @@ mod tests {
             assert!(bt601 > 10.0, "{label}: a BT.601 decode should be clearly wrong ({bt601:.2})");
 
             let tags = probe_stream_tags(&path);
+            let primaries_tag = format!("color_primaries={primaries}");
             for expected in [
                 "color_range=tv",
                 "color_space=bt709",
                 "color_transfer=iec61966-2-1",
-                "color_primaries=bt709",
+                primaries_tag.as_str(),
             ] {
                 assert!(tags.contains(expected), "{label}: stream tags {tags} lack {expected}");
             }
-            assert_eq!(colr_box(&path), Some((1, 13, 1, false)), "{label}: MP4 colr box");
+            // H.273 code points: primaries 1 = BT.709, 12 = Display P3; transfer 13 = sRGB.
+            let primaries_code = if primaries == "smpte432" { 12 } else { 1 };
+            assert_eq!(
+                colr_box(&path),
+                Some((primaries_code, 13, 1, false)),
+                "{label}: MP4 colr box"
+            );
         }
     }
 

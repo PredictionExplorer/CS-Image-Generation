@@ -721,9 +721,10 @@ channel (brightness) represents how much light the pixel received overall.
 After tone mapping (Section 6), the display values are matrixed from Rec.2020 to
 Display P3 primaries and quantised to 16 bits. The master PNG is labelled with P3
 `cHRM` chromaticities and `gAMA` 1/2.2. Video frames go to FFmpeg as 16-bit
-`rgb48le`. Only the high-quality HEVC copy (or the H.264 that replaces it under
-`--fast-encode`) is tagged with P3 primaries (`smpte432`). The web H.264 copy gets
-the same P3 pixels but is tagged BT.709.
+`rgb48le`. The high-quality HEVC copy (or the H.264 that replaces it under
+`--fast-encode`) keeps the P3 frames and is tagged with P3 primaries (`smpte432`).
+The web H.264 copy and the WebPs get the frames converted to sRGB first (Section
+6.4).
 
 ---
 
@@ -802,11 +803,23 @@ curve is applied) is matrixed from Rec.2020 to Display P3 primaries and quantise
 to 16-bit RGB (`quantize_display_buffer_to_16bit`). The PNG writer sets `gAMA`
 1/2.2 and a `cHRM` chunk with the P3 primaries and D65 white. It also fills the
 cICP field (primaries 12, transfer 13, matrix 0, full range), but the `png` 0.18
-encoder ignores that field, so the file has no `cICP` chunk. Of the video encodes,
-only the HEVC copy (or its `--fast-encode` H.264 replacement) is tagged P3:
-`-color_primaries smpte432 -color_trc iec61966-2-1`, plus `colorprim=smpte432` in
-the x265 VUI. The web H.264 copy is tagged BT.709 primaries and transfer even
-though its pixels are P3.
+encoder ignores that field, so the file has no `cICP` chunk. Colour-managed viewers
+therefore decode the PNG with a pure 2.2 power curve, slightly darker in the deepest
+shadows than the sRGB curve the code values follow.
+
+The archival video (the HEVC copy, or its `--fast-encode` H.264 replacement) keeps
+the P3 frames: `-color_primaries smpte432 -color_trc iec61966-2-1`, plus
+`colorprim=smpte432` in the x265 VUI. Everything a browser shows directly is sRGB:
+the web H.264 copies of the main and sweep videos and the two WebPs get the P3
+frames converted by `render::display_p3::to_srgb_samples` (decode the sRGB curve,
+linear P3 → linear BT.709 primaries with the exact 3×3 matrix of the two primary
+sets, clip each channel to [0, 1], encode the sRGB curve; neutral pixels are copied
+unchanged), and the web videos are tagged BT.709 primaries, `iec61966-2-1`
+transfer. Every encode converts RGB to Y′CbCr with an explicit
+`scale=out_color_matrix=bt709:out_range=tv` and stamps its tags on the frames with
+`setparams`, so FFmpeg 6.1 (which otherwise converts with BT.601 while tagging
+BT.709) and 7.1 (which otherwise drops the primaries and transfer options) write
+the same, correctly tagged streams.
 
 ```
 for each pixel of the tone-mapped buffer:
@@ -831,10 +844,10 @@ To produce a single spectral image (16-bit PNG):
 6. tonemap(rgba_buffer, channel_levels) -> display-space RGBA
 7. process_image(rgba_buffer)       -> unchanged display RGBA (image chain is always empty)
 8. quantize to 16-bit Display P3 (Rec.2020 -> P3 matrix on the tone-mapped values)
-9. Save as images/source/master.png (16-bit RGB, P3-tagged), then derive
+9. Save as images/source/master.png (16-bit RGB, P3-tagged), then convert the
+   frame to sRGB (Section 6.4) and pipe it to FFmpeg/libwebp for
    images/web/full.webp (full size) and images/web/preview.webp (at most 640 px
-   wide) with FFmpeg/libwebp (preset picture, quality 82, compression level 6,
-   metadata stripped)
+   wide; preset picture, quality 82, compression level 6, metadata stripped)
 ```
 
 In a default run the still is the last frame of pass 2 (checkpoint
@@ -908,32 +921,35 @@ For each checkpoint (frame) in sequence:
 7. Quantize: linear_rec2020_to_display_p3, clamp to [0, 1],
    round(x * 65535) -> packed 16-bit RGB (rgb48le, 6 bytes per pixel)
 
-8. Write the frame bytes to the stdin pipe of every encoder (web, then HQ)
+8. Write the P3 frame bytes to the HQ encoder's stdin pipe, then the frame
+   converted to sRGB (Section 6.4) to the web encoder's
 ```
 
 The frame of the final step (`total_steps - 1`) is also kept. After
 encoding it is saved as the master still `images/source/master.png`, with
-its WebP derivatives. The fully accumulated `accum_spd` is returned for the
+its WebP derivatives (from the sRGB conversion of that frame). The fully accumulated `accum_spd` is returned for the
 spectral gallery (Section 9) and the sweep video (Section 10).
 
 ### Video Encoding
 
 Frames are streamed as raw `rgb48le` data (16-bit RGB, little-endian, no
-alpha) to two FFmpeg processes started up front. Both read the same frame
-stream (`create_videos_from_frames_singlepass`):
+alpha) to two FFmpeg processes started up front, as two streams
+(`create_video_groups_from_frames`): the sRGB conversion of every frame to the
+web encoder and the Display P3 frames to the HQ encoder:
 
-| Parameter | `videos/web/main.mp4` (`web_compatible`) | `videos/hq/main.mp4` (`high_quality`) | HQ with `--fast-encode` (`fast_encode`) |
+| Parameter | `videos/web/main.mp4` (`web_compatible_srgb`) | `videos/hq/main.mp4` (`high_quality`) | HQ with `--fast-encode` (`fast_encode`) |
 |-----------|------|------|------|
 | Codec | libx264 | libx265 (Main 4:2:2 10, `hvc1` tag) | libx264 |
 | Preset | medium | slower | fast |
 | CRF | 18 | 17 | 21 |
 | Pixel format | yuv420p (8-bit 4:2:0) | yuv422p10le (10-bit 4:2:2) | yuv420p10le (10-bit 4:2:0) |
 | Tuning | - | `-tune grain`, `-profile:v main422-10`; `-x265-params bframes=8:ref=6:rc-lookahead=250:aq-mode=3:aq-strength=1.0:psy-rd=2.5:psy-rdoq=1.5:deblock=-1,-1:no-sao=0:colorprim=smpte432:transfer=iec61966-2-1:colormatrix=bt709:qg-size=8:rdoq-level=2` | `-tune film` |
-| Colour tags | BT.709 primaries, BT.709 transfer, BT.709 matrix, tv range | Display P3 primaries (`smpte432`), sRGB transfer (`iec61966-2-1`), BT.709 matrix, tv range | as HQ |
+| Frames | sRGB (converted) | Display P3 | Display P3 |
+| Colour | explicit BT.709 conversion; BT.709 primaries, sRGB transfer (`iec61966-2-1`), BT.709 matrix, tv range | explicit BT.709 conversion; Display P3 primaries (`smpte432`), sRGB transfer, BT.709 matrix, tv range | as HQ |
 | Input / FPS | rgb48le / 60 | rgb48le / 60 | rgb48le / 60 |
 
-All three use `+faststart`. The render loop writes each frame to the web
-encoder's pipe, then to the HQ encoder's. The writes block, and there is no
+All three use `+faststart`. The render loop writes each frame to the HQ
+encoder's pipe, then its sRGB conversion to the web encoder's. The writes block, and there is no
 intermediate queue or writer thread, so rendering runs at the pace of the
 slower encoder. If the render or a write fails, every encoder is killed
 before its pipe closes and no video is finalised.
@@ -1091,9 +1107,10 @@ to 16-bit. Gaussian bloom is not used.
 ### 10.6 Encoding
 
 Frames are written as raw `rgb48le` bytes via
-`create_videos_from_frames_singlepass`, which feeds one frame stream to two
-encoders with the same profiles as the main trajectory video: the web H.264
-copy, and the HQ HEVC copy (libx264 10-bit under `--fast-encode`).
+`create_video_groups_from_frames`, in two streams with the same profiles as the
+main trajectory video: the sRGB conversion of each frame (Section 6.4) to the web
+H.264 copy, and the Display P3 frames to the HQ HEVC copy (libx264 10-bit under
+`--fast-encode`).
 
 ---
 

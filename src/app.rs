@@ -19,18 +19,18 @@ use crate::generation_log::{
 use crate::render::{
     self, ChannelLevels, RenderConfig, SpectralRenderSettings, SpectralScene, ToneMappingControls,
     VideoEncodingOptions, VideoOutputSpec, constants, create_video_groups_from_frames,
-    create_videos_from_frames_singlepass, generate_body_color_sequences,
-    pass_1_build_histogram_spectral, pass_2_write_frames_spectral, save_image_as_png_16bit,
-    save_image_as_srgb_png_16bit,
+    generate_body_color_sequences, pass_1_build_histogram_spectral, pass_2_write_frames_spectral,
+    save_image_as_png_16bit, save_image_as_srgb_png_16bit,
 };
 use crate::sim::{self, Body, Sha3RandomByteStream, TrajectoryResult};
 use chrono::Local;
 use image::{ImageBuffer, Rgb};
 use nalgebra::{Matrix3, Vector3};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::fs::{self, File};
 use std::io::Write as _;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 use tracing::{info, warn};
 
@@ -393,9 +393,42 @@ fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
     (WEB_PREVIEW_MAX_WIDTH, preview_height.max(1))
 }
 
-fn run_webp_encode(input_path: &str, output_path: &str, scale_filter: Option<&str>) -> Result<()> {
+/// `-vf` filter of the preview WebP: at most [`WEB_PREVIEW_MAX_WIDTH`] wide, same aspect ratio.
+const WEB_PREVIEW_SCALE_FILTER: &str = "scale=w=min(640\\,iw):h=-1";
+
+/// The image a WebP encode reads.
+#[derive(Clone, Copy)]
+enum WebpSource<'a> {
+    /// A PNG file, encoded as its samples read (the ember still: already sRGB).
+    Png(&'a str),
+    /// Interleaved 16-bit sRGB samples, piped to `FFmpeg` as `rgb48le`.
+    Srgb16 {
+        /// `[r, g, b, r, g, b, …]`, row by row.
+        samples: &'a [u16],
+        /// Image width in pixels.
+        width: u32,
+        /// Image height in pixels.
+        height: u32,
+    },
+}
+
+fn run_webp_encode(
+    source: WebpSource<'_>,
+    output_path: &str,
+    scale_filter: Option<&str>,
+) -> Result<()> {
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-y", "-i", input_path, "-map_metadata", "-1"]);
+    cmd.arg("-y");
+    match source {
+        WebpSource::Png(input_path) => {
+            cmd.args(["-i", input_path]);
+        }
+        WebpSource::Srgb16 { width, height, .. } => {
+            cmd.args(["-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", &format!("{width}x{height}")]);
+            cmd.args(["-i", "-"]);
+        }
+    }
+    cmd.args(["-map_metadata", "-1"]);
     if let Some(filter) = scale_filter {
         cmd.args(["-vf", filter]);
     }
@@ -413,7 +446,23 @@ fn run_webp_encode(input_path: &str, output_path: &str, scale_filter: Option<&st
         output_path,
     ]);
 
-    let status = cmd.status().map_err(render::error::RenderError::VideoEncoding)?;
+    let status = match source {
+        WebpSource::Png(_) => cmd.status().map_err(render::error::RenderError::VideoEncoding)?,
+        WebpSource::Srgb16 { samples, .. } => {
+            let mut child = cmd
+                .stdin(Stdio::piped())
+                .spawn()
+                .map_err(render::error::RenderError::VideoEncoding)?;
+            // A write fails only if the encoder quit; its exit status is the better report.
+            let written =
+                child.stdin.take().map(|mut stdin| stdin.write_all(bytemuck::cast_slice(samples)));
+            let status = child.wait().map_err(render::error::RenderError::VideoEncoding)?;
+            if let (true, Some(Err(error))) = (status.success(), written) {
+                return Err(render::error::RenderError::VideoEncoding(error).into());
+            }
+            status
+        }
+    };
     if !status.success() {
         return Err(render::error::RenderError::ImageEncoding {
             reason: format!("ffmpeg WebP encode failed for {output_path}"),
@@ -425,10 +474,25 @@ fn run_webp_encode(input_path: &str, output_path: &str, scale_filter: Option<&st
     Ok(())
 }
 
-/// Generate full-size and preview WebP derivatives from the master PNG.
+/// Generate full-size and preview WebP derivatives from an sRGB master PNG (the ember still).
 pub fn generate_webp_images(paths: ImageOutputPaths<'_>) -> Result<()> {
-    run_webp_encode(paths.master_png, paths.full_webp, None)?;
-    run_webp_encode(paths.master_png, paths.preview_webp, Some("scale=w=min(640\\,iw):h=-1"))
+    let source = WebpSource::Png(paths.master_png);
+    run_webp_encode(source, paths.full_webp, None)?;
+    run_webp_encode(source, paths.preview_webp, Some(WEB_PREVIEW_SCALE_FILTER))
+}
+
+/// Generate the main edition's full-size and preview `WebP`s from its 16-bit Display P3 still,
+/// converted to sRGB first ([`render::display_p3::to_srgb_samples`]): a `WebP` carries no
+/// colour profile, so every viewer shows it as sRGB.
+pub fn generate_main_webp_images(
+    master: &ImageBuffer<Rgb<u16>, Vec<u16>>,
+    paths: ImageOutputPaths<'_>,
+) -> Result<()> {
+    let samples = render::display_p3::to_srgb_samples(master.as_raw());
+    let (width, height) = master.dimensions();
+    let source = WebpSource::Srgb16 { samples: &samples, width, height };
+    run_webp_encode(source, paths.full_webp, None)?;
+    run_webp_encode(source, paths.preview_webp, Some(WEB_PREVIEW_SCALE_FILTER))
 }
 
 /// Write a website-oriented asset manifest for the generated package.
@@ -1177,7 +1241,20 @@ pub fn build_histogram_and_levels(
     ))
 }
 
+/// The 16-bit samples of a frame as pass 2 hands it to its sink: native-endian `rgb48le` bytes
+/// of a `u16` buffer (borrowed when aligned, as they are; copied otherwise).
+fn frame_samples(rgb48: &[u8]) -> Cow<'_, [u16]> {
+    bytemuck::try_cast_slice(rgb48).map_or_else(
+        |_| Cow::Owned(rgb48.chunks_exact(2).map(|b| u16::from_ne_bytes([b[0], b[1]])).collect()),
+        Cow::Borrowed,
+    )
+}
+
 /// Render full video, returning the fully accumulated SPD buffer for spectral outputs.
+///
+/// Pass 2's Display P3 frames go to the archival encoder as they are and, converted to sRGB
+/// ([`render::display_p3::to_srgb_samples`]), to the web encoder; the last frame becomes the
+/// P3 master PNG and, converted the same way, its WebP derivatives.
 pub fn render_video(
     scene: SpectralScene<'_>,
     levels: &ChannelLevels,
@@ -1202,24 +1279,26 @@ pub fn render_video(
     } else {
         VideoEncodingOptions::high_quality()
     };
-    let video_outputs = [
-        VideoOutputSpec {
-            output_file: output_videos.web.to_string(),
-            options: VideoEncodingOptions::web_compatible(),
-        },
-        VideoOutputSpec {
-            output_file: output_videos.high_quality.to_string(),
-            options: video_options,
-        },
-    ];
+    let web = [VideoOutputSpec {
+        output_file: output_videos.web.to_string(),
+        options: VideoEncodingOptions::web_compatible_srgb(),
+    }];
+    let archival = [VideoOutputSpec {
+        output_file: output_videos.high_quality.to_string(),
+        options: video_options,
+    }];
 
     let mut accum_spd = Vec::new();
 
-    create_videos_from_frames_singlepass(
+    create_video_groups_from_frames(
         settings.resolved_config.width,
         settings.resolved_config.height,
         frame_rate,
-        |out| {
+        &[&web, &archival],
+        |films| {
+            let [web_film, archival_film] = films else {
+                return Err("expected the web and the archival film".into());
+            };
             pass_2_write_frames_spectral(
                 render::Pass2Params {
                     scene,
@@ -1229,20 +1308,22 @@ pub fn render_video(
                     last_frame_out: &mut last_frame_png,
                     accum_spd: &mut accum_spd,
                 },
-                |buf_8bit| {
-                    out.write_all(buf_8bit).map_err(render::error::RenderError::VideoEncoding)?;
+                |rgb48| {
+                    let pipe = render::error::RenderError::VideoEncoding;
+                    archival_film.write_all(rgb48).map_err(pipe)?;
+                    let srgb = render::display_p3::to_srgb_samples(&frame_samples(rgb48));
+                    web_film.write_all(bytemuck::cast_slice(&srgb)).map_err(pipe)?;
                     Ok(())
                 },
             )?;
             Ok(())
         },
-        &video_outputs,
     )?;
 
     if let Some(frame) = last_frame_png {
         info!("Saving still image from final video frame: {}", output_images.master_png);
         save_image_as_png_16bit(&frame, output_images.master_png)?;
-        generate_webp_images(output_images)?;
+        generate_main_webp_images(&frame, output_images)?;
     } else {
         warn!("Warning: No final frame was generated to save as PNG.");
     }
@@ -1265,7 +1346,7 @@ pub fn render_still_image(
     let frame = render::render_final_frame_spectral(scene, levels, settings)?;
     info!("Saving still image: {}", output_images.master_png);
     save_image_as_png_16bit(&frame, output_images.master_png)?;
-    generate_webp_images(output_images)
+    generate_main_webp_images(&frame, output_images)
 }
 
 /// Generate the spectral gallery: 64 per-bin 16-bit PNGs in `spectral_dir`.
@@ -1908,6 +1989,7 @@ pub fn log_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::media_tools_available;
 
     #[test]
     fn test_parse_seed_valid() {
@@ -3084,32 +3166,6 @@ mod tests {
         bodies
     }
 
-    /// Whether every one of `tools` (`ffmpeg`, `ffprobe`) runs here. When one does not, the
-    /// calling test `test` should return early: locally it is skipped with a message; under CI
-    /// (the `CI` environment variable is set) this panics instead, so that a runner without the
-    /// tools fails rather than passes without testing.
-    fn media_tools_available(test: &str, tools: &[&str]) -> bool {
-        let missing: Vec<&str> = tools
-            .iter()
-            .copied()
-            .filter(|tool| {
-                !Command::new(tool)
-                    .arg("-version")
-                    .output()
-                    .is_ok_and(|output| output.status.success())
-            })
-            .collect();
-        if missing.is_empty() {
-            return true;
-        }
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "{test} needs {missing:?} on PATH, and CI is set: install FFmpeg in this job"
-        );
-        eprintln!("skipping {test}: {missing:?} not on PATH");
-        false
-    }
-
     /// Recorded steps of the tiny ember renders: a short arc of [`tilted_figure_eight_bodies`],
     /// which its frontal view spreads over the 96×64 sheet. There is a frame per step, and the
     /// fluid lands on [`EMBER_SLOW_FACTOR`] snapshots per frame in every mode, so the step count
@@ -3379,5 +3435,65 @@ mod tests {
             entry(&assets, "ember_web")["duration_seconds"],
             "the ember videos are frame-locked to main.mp4"
         );
+    }
+
+    #[test]
+    fn test_preview_filter_matches_the_preview_width() {
+        assert!(
+            WEB_PREVIEW_SCALE_FILTER.contains(&format!("min({WEB_PREVIEW_MAX_WIDTH}\\,iw)")),
+            "{WEB_PREVIEW_SCALE_FILTER}"
+        );
+    }
+
+    /// The main edition's `WebP`s show the sRGB conversion of its Display P3 still, not its P3
+    /// code values read as sRGB. Needs `ffmpeg` (skipped without it locally, failing under CI).
+    #[test]
+    fn test_main_webp_images_are_srgb_conversions_of_the_display_p3_still() {
+        let test = "test_main_webp_images_are_srgb_conversions_of_the_display_p3_still";
+        if !media_tools_available(test, &["ffmpeg"]) {
+            return;
+        }
+        const PATCH: u32 = 32;
+        // A saturated P3 colour inside sRGB, a warm colour just outside it, and a grey.
+        let patches: [[u16; 3]; 3] = [[44_000, 14_000, 9_000], [60_000, 9_000, 6_000], [30_000; 3]];
+        let (width, height) = (PATCH * patches.len() as u32, PATCH);
+        let mut samples = Vec::with_capacity((width * height * 3) as usize);
+        for _ in 0..height {
+            for patch in patches {
+                for _ in 0..PATCH {
+                    samples.extend_from_slice(&patch);
+                }
+            }
+        }
+        let master = ImageBuffer::from_raw(width, height, samples).expect("image");
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
+        let (png, full, preview) = (path("master.png"), path("full.webp"), path("preview.webp"));
+        let paths = ImageOutputPaths { master_png: &png, full_webp: &full, preview_webp: &preview };
+        generate_main_webp_images(&master, paths).expect("WebP encode");
+        assert!(std::path::Path::new(&preview).exists(), "preview.webp");
+
+        let decoded = Command::new("ffmpeg")
+            .args(["-v", "error", "-i", &full, "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"])
+            .output()
+            .expect("ffmpeg decode");
+        assert!(decoded.status.success(), "{}", String::from_utf8_lossy(&decoded.stderr));
+        let level = |code: u16| f64::from(code) / 257.0;
+        for (index, patch) in patches.iter().enumerate() {
+            let expected = render::display_p3::to_srgb_samples(patch);
+            let at = (((PATCH / 2) * width + index as u32 * PATCH + PATCH / 2) * 6) as usize;
+            for (channel, &want) in expected.iter().enumerate() {
+                let offset = at + 2 * channel;
+                let got = u16::from_le_bytes([decoded.stdout[offset], decoded.stdout[offset + 1]]);
+                let error = (level(got) - level(want)).abs();
+                assert!(error <= 4.0, "patch {index} channel {channel}: off by {error:.1} levels");
+            }
+            if index < 2 {
+                let shift = (0..3)
+                    .map(|c| (level(expected[c]) - level(patch[c])).abs())
+                    .fold(0.0, f64::max);
+                assert!(shift >= 10.0, "patch {index} must discriminate ({shift:.1} levels)");
+            }
+        }
     }
 }

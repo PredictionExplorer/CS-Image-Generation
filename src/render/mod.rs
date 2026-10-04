@@ -23,6 +23,7 @@ pub mod batch_drawing;
 pub mod color;
 pub mod constants;
 pub mod context;
+pub mod display_p3;
 pub mod drawing;
 pub mod effect_randomizer;
 pub mod effects;
