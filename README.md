@@ -3,7 +3,7 @@
 [![CI](https://github.com/PredictionExplorer/CS-Image-Generation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PredictionExplorer/CS-Image-Generation/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PredictionExplorer/CS-Image-Generation/badge)](https://scorecard.dev/viewer/?uri=github.com/PredictionExplorer/CS-Image-Generation)
 
-Seeded three-body simulation and renderer for generating a 16-bit PNG and H.265 MP4 from a single run, plus the **ember edition**: the same orbit drawn in sumi ink by the fluid it stirs.
+Seeded three-body simulation and renderer: a single run produces a 16-bit Display P3 PNG still (with WebP derivatives), the orbit's reveal video `main.mp4` as a web H.264 copy and an archival HEVC copy, a 64-image spectral gallery and a spectral sweep video in the same two encodings, plus the **ember edition**: the same orbit drawn in sumi ink by the fluid it stirs.
 
 The Rust crate and binary are named **`three_body_problem`** (see `Cargo.toml`). Your checkout directory may use a different name (for example `CS-Image-Generation`).
 
