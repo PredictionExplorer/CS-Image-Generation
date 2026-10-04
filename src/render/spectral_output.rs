@@ -9,13 +9,14 @@ use super::context::PixelBuffer;
 use super::drawing::parallel_blur_2d_rgba;
 use super::error::{RenderError, Result};
 use super::save_image_as_png_16bit;
-use super::video::{VideoEncodingOptions, VideoOutputSpec, create_videos_from_frames_singlepass};
+use super::video::{VideoEncodingOptions, VideoOutputSpec, create_video_groups_from_frames};
 use crate::post_effects::{CinematicColorGrade, ColorGradeParams, GaussianBloom, PostEffect};
 use crate::spectrum::{
     NUM_BINS, linear_srgb_to_display_p3, wavelength_nm_for_bin, wavelength_to_rgb,
 };
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
+use std::io::Write as _;
 use tracing::info;
 
 /// Pre-computed per-bin float RGB images used by both the gallery and sweep video.
@@ -540,45 +541,36 @@ pub fn generate_spectral_sweep_video(
     } else {
         VideoEncodingOptions::high_quality()
     };
-    let outputs = [
-        VideoOutputSpec {
-            output_file: output_web_path.to_string(),
-            options: VideoEncodingOptions::web_compatible(),
-        },
-        VideoOutputSpec { output_file: output_hq_path.to_string(), options },
-    ];
+    // The web film is sRGB, converted from the Display P3 frames the archival film keeps.
+    let web = [VideoOutputSpec {
+        output_file: output_web_path.to_string(),
+        options: VideoEncodingOptions::web_compatible_srgb(),
+    }];
+    let archival = [VideoOutputSpec { output_file: output_hq_path.to_string(), options }];
 
-    create_videos_from_frames_singlepass(
-        width,
-        height,
-        fps,
-        |out| {
-            let mut frame_buf: PixelBuffer = Vec::new();
-            let start = active_start as f64;
-            let end = active_end as f64;
-            let sigma = constants::SWEEP_GAUSSIAN_SIGMA;
+    create_video_groups_from_frames(width, height, fps, &[&web, &archival], |films| {
+        let [web_film, archival_film] = films else {
+            return Err("expected the web and the archival film".into());
+        };
+        let mut frame_buf: PixelBuffer = Vec::new();
+        let start = active_start as f64;
+        let end = active_end as f64;
+        let sigma = constants::SWEEP_GAUSSIAN_SIGMA;
 
-            for frame in 0..total_frames {
-                let motion = spectral_sweep_motion(frame, total_frames, start, end);
-                compose_cinematic_sweep_frame(
-                    &bin_buffers,
-                    &sweep_look,
-                    motion,
-                    sigma,
-                    &mut frame_buf,
-                );
+        for frame in 0..total_frames {
+            let motion = spectral_sweep_motion(frame, total_frames, start, end);
+            compose_cinematic_sweep_frame(&bin_buffers, &sweep_look, motion, sigma, &mut frame_buf);
 
-                let processed = apply_sweep_effects(bloom.as_ref(), &color_grade, &frame_buf, w, h)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let processed = apply_sweep_effects(bloom.as_ref(), &color_grade, &frame_buf, w, h)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-                let quantized = quantize_to_u16_rgb(&processed);
-                let bytes: &[u8] = bytemuck::cast_slice(&quantized);
-                out.write_all(bytes).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            }
-            Ok(())
-        },
-        &outputs,
-    )?;
+            let quantized = quantize_to_u16_rgb(&processed);
+            archival_film.write_all(bytemuck::cast_slice(&quantized))?;
+            let srgb = super::display_p3::to_srgb_samples(&quantized);
+            web_film.write_all(bytemuck::cast_slice(&srgb))?;
+        }
+        Ok(())
+    })?;
 
     info!("   Spectral sweep video complete => {output_web_path}, {output_hq_path}");
     Ok(())

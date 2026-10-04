@@ -176,13 +176,13 @@ statuses too.
 Under `output/<name>/` (default name `output`, so default paths look like `output/output/...` unless you pass `--output`):
 
 - `images/source/master.png` — maximum-quality 16-bit Display P3 still frame
-- `images/web/full.webp` — full-resolution WebP website image
-- `images/web/preview.webp` — smaller same-aspect-ratio WebP preview/poster
-- `videos/web/main.mp4` — browser-compatible H.264 trajectory video
-- `videos/hq/main.mp4` — high-quality HEVC trajectory video
+- `images/web/full.webp` — full-resolution WebP website image (sRGB, converted from the master)
+- `images/web/preview.webp` — smaller same-aspect-ratio WebP preview/poster (sRGB)
+- `videos/web/main.mp4` — browser-compatible H.264 trajectory video (sRGB, converted from the Display P3 frames)
+- `videos/hq/main.mp4` — high-quality HEVC trajectory video (Display P3, 10-bit 4:2:2)
 - `spectral/` — 64 per-wavelength-bin 16-bit PNGs (`00_…nm.png` … `63_…nm.png`)
-- `videos/web/spectral_sweep.mp4` — browser-compatible spectral sweep video
-- `videos/hq/spectral_sweep.mp4` — high-quality HEVC spectral sweep video
+- `videos/web/spectral_sweep.mp4` — browser-compatible spectral sweep video (sRGB)
+- `videos/hq/spectral_sweep.mp4` — high-quality HEVC spectral sweep video (Display P3)
 - `images/source/ember.png` — the ember edition's 16-bit sRGB still (the orbit's final step)
 - `images/web/ember_full.webp` / `images/web/ember_preview.webp` — full-size and preview WebPs of the ember still
 - `videos/web/ember.mp4` — browser-compatible H.264 ember video (sRGB, 60 fps, in step with `main.mp4`)

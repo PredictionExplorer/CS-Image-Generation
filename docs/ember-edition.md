@@ -698,20 +698,23 @@ The frames are sRGB (BT.709 primaries, D65, IEC 61966-2-1 transfer). The ember v
   the frames' own tags.
 - **Result.** The H.264 and HEVC streams and the MP4 `colr` box all carry the same sRGB tags.
 
-The ignored test `srgb_variants_round_trip_through_bt709` checks this with the local `FFmpeg`:
-solid sRGB colours, including a saturated warm red `(177, 34, 16)`, must round-trip within 4
-levels (8-bit 4:2:0) or 1 level (10-bit) on an 8-bit scale, a BT.601 decode must be more than 10
-levels off (so the check discriminates), and both tag locations must be correct. It passes with
-`FFmpeg` 7.1.1 and with the production host's `FFmpeg` 6.1.1. Its worst errors were recorded
-only for 7.1.1: 3 levels (8-bit) and 0.25 levels (10-bit), against 22–24 for a BT.601 decode.
-Run it on any encoding host:
+The main edition's encodes share this recipe: its web videos are sRGB too (converted from its
+Display P3 frames), and its archival copies are tagged Display P3 (`smpte432`) instead of BT.709.
+
+The ignored test `variants_round_trip_through_bt709` checks every encode with the local `FFmpeg`:
+solid colours, including a saturated warm red `(177, 34, 16)`, must round-trip within 4 levels
+(8-bit 4:2:0) or 1 level (10-bit) on an 8-bit scale, a BT.601 decode must be more than 10 levels
+off (so the check discriminates), and both tag locations must carry the variant's primaries. Its
+worst errors are the same with `FFmpeg` 7.1.1 and with the production host's `FFmpeg` 6.1.1:
+3 levels (8-bit) and 0.25 levels (10-bit), against 22–24 for a BT.601 decode. Run it on any
+encoding host:
 
 ```bash
-cargo test --release --lib srgb_variants_round_trip -- --ignored --nocapture
+cargo test --release --lib variants_round_trip -- --ignored --nocapture
 ```
 
-The WebPs are derived from the sRGB PNG with the same recipe as the main images. WebP is sRGB by
-definition.
+The WebPs are derived from the sRGB PNG with the same `FFmpeg` recipe as the main edition's.
+WebP is sRGB by definition.
 
 ## Runtime
 

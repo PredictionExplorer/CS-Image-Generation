@@ -191,6 +191,140 @@ fn no_ember_removes_the_ember_files_of_an_earlier_run() {
     assert_no_ember_files(&package);
 }
 
+/// Size and side of the blocks the colour checks average over (4:2:0 chroma noise on thin lines
+/// averages out; a colour conversion does not).
+const WIRING_SIZE: (usize, usize) = (160, 104);
+const WIRING_BLOCK: usize = 4;
+
+/// Decodes `path` to 16-bit RGB frames. Videos are converted with the BT.709 matrix every encode
+/// is tagged with; `select` (an `FFmpeg` frame-select expression) or `from_end` (seconds before
+/// the end) limits the frames.
+fn decode_rgb48(path: &Path, select: Option<&str>, from_end: Option<&str>) -> Vec<Vec<u16>> {
+    let mut command = Command::new("ffmpeg");
+    command.args(["-v", "error"]);
+    if let Some(seconds) = from_end {
+        command.args(["-sseof", seconds]);
+    }
+    command.arg("-i").arg(path);
+    let is_video = path.extension().is_some_and(|ext| ext == "mp4");
+    if is_video {
+        let scale = "scale=in_color_matrix=bt709:in_range=tv";
+        let filter = select.map_or(scale.to_string(), |s| format!("select='{s}',{scale}"));
+        command.args(["-vf", &filter, "-fps_mode", "passthrough"]);
+    }
+    let output = command
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb48le", "-"])
+        .output()
+        .expect("ffmpeg decodes");
+    assert!(
+        output.status.success(),
+        "decode {}: {}",
+        path.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let samples: Vec<u16> =
+        output.stdout.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+    samples.chunks_exact(WIRING_SIZE.0 * WIRING_SIZE.1 * 3).map(<[u16]>::to_vec).collect()
+}
+
+/// Block means of a frame, in 8-bit levels.
+fn block_means(frame: &[u16]) -> Vec<[f64; 3]> {
+    let (width, height) = WIRING_SIZE;
+    let mut means = vec![[0.0; 3]; (width / WIRING_BLOCK) * (height / WIRING_BLOCK)];
+    let scale = 257.0 * (WIRING_BLOCK * WIRING_BLOCK) as f64;
+    for y in 0..height {
+        for x in 0..width {
+            let block = (y / WIRING_BLOCK) * (width / WIRING_BLOCK) + x / WIRING_BLOCK;
+            for channel in 0..3 {
+                means[block][channel] += f64::from(frame[(y * width + x) * 3 + channel]) / scale;
+            }
+        }
+    }
+    means
+}
+
+/// Squared error of `decoded` against `good` over `bad` (the other encoding), summed over the
+/// blocks where the two encodings differ by more than 4 levels, and the number of such blocks.
+fn colour_errors(decoded: &[u16], good: &[u16], bad: &[u16]) -> (f64, f64, usize) {
+    let (decoded, good, bad) = (block_means(decoded), block_means(good), block_means(bad));
+    let mut errors = (0.0, 0.0, 0);
+    for ((d, g), b) in decoded.iter().zip(&good).zip(&bad) {
+        if (0..3).any(|c| (g[c] - b[c]).abs() > 4.0) {
+            errors.0 += (0..3).map(|c| (d[c] - g[c]).powi(2)).sum::<f64>();
+            errors.1 += (0..3).map(|c| (d[c] - b[c]).powi(2)).sum::<f64>();
+            errors.2 += 1;
+        }
+    }
+    errors
+}
+
+/// Asserts that `decoded` frames are much closer to `good` than to `bad`.
+fn assert_encoding(label: &str, frames: &[(Vec<u16>, Vec<u16>, Vec<u16>)]) {
+    let (mut good, mut bad, mut blocks) = (0.0, 0.0, 0);
+    for (decoded, want, other) in frames {
+        let (g, b, n) = colour_errors(decoded, want, other);
+        good += g;
+        bad += b;
+        blocks += n;
+    }
+    assert!(blocks >= 40, "{label}: only {blocks} blocks tell the encodings apart");
+    assert!(
+        good < 0.5 * bad,
+        "{label}: error {good:.0} against the right encoding, {bad:.0} against the other"
+    );
+}
+
+#[test]
+fn web_files_are_srgb_and_archival_films_display_p3() {
+    // The web films and WebPs show the sRGB conversion of the Display P3 frames; the archival
+    // films keep the P3 frames. Checked on the main film's last frame (the still), the WebP and
+    // frames across the spectral sweep. Swapping the streams fails every check.
+    if !ffmpeg_available("web_files_are_srgb_and_archival_films_display_p3") {
+        return;
+    }
+    use three_body_problem::render::display_p3::to_srgb_samples;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let output = run_binary_in(
+        dir.path(),
+        &[
+            "--seed",
+            "0x01",
+            "--sims",
+            "2",
+            "--steps",
+            "3600",
+            "--resolution",
+            &format!("{}x{}", WIRING_SIZE.0, WIRING_SIZE.1),
+            "--output",
+            "wiring",
+            "--no-ember",
+            "--fast-encode",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", log_of(&output));
+    let package = dir.path().join("output/wiring");
+    let file = |path: &str| package.join(path);
+
+    let master = decode_rgb48(&file("images/source/master.png"), None, None).remove(0);
+    let srgb = to_srgb_samples(&master);
+    let last = |path: &str| decode_rgb48(&file(path), None, Some("-0.2")).pop().expect("frames");
+    assert_encoding("web main.mp4", &[(last("videos/web/main.mp4"), srgb.clone(), master.clone())]);
+    assert_encoding("hq main.mp4", &[(last("videos/hq/main.mp4"), master.clone(), srgb.clone())]);
+    let webp = decode_rgb48(&file("images/web/full.webp"), None, None).remove(0);
+    assert_encoding("full.webp", &[(webp, srgb, master)]);
+
+    let every_50th = Some("not(mod(n\\,50))");
+    let sweep_hq = decode_rgb48(&file("videos/hq/spectral_sweep.mp4"), every_50th, None);
+    let sweep_web = decode_rgb48(&file("videos/web/spectral_sweep.mp4"), every_50th, None);
+    assert_eq!(sweep_hq.len(), sweep_web.len(), "same sweep frames");
+    let sweep: Vec<_> = sweep_web
+        .into_iter()
+        .zip(sweep_hq)
+        .map(|(web, hq)| (web, to_srgb_samples(&hq), hq))
+        .collect();
+    assert_encoding("web spectral_sweep.mp4", &sweep);
+}
+
 #[test]
 fn version_flag_exits_successfully() {
     let output = run_binary(&["--version"]);

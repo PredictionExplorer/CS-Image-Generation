@@ -59,6 +59,9 @@ pub mod spectrum_simd;
 pub(crate) mod traits_analysis;
 pub(crate) mod utils;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 /// Re-exported common types for convenience.
 pub use error::{AppError, AppRenderError, ConfigError, Result, SimulationError};
 
