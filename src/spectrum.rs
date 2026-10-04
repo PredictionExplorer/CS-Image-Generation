@@ -2,8 +2,9 @@
 //!
 //! Our "spectral accumulation" keeps one energy value per wavelength bin
 //! (bins are equally spaced from 380-700 nm at 5 nm intervals).  Rendering
-//! draws into this SPD buffer, then we convert the spectrum → linear-sRGB
-//! right before the normal tone-mapping / bloom pipeline.
+//! draws into this SPD buffer, then we convert the spectrum → linear Rec.2020
+//! (via CIE XYZ) right before the finish effects and tone mapping; the
+//! display image is converted to Display P3 when it is quantized.
 
 use crate::oklab::{
     GamutMapMode, linear_srgb_to_oklab, max_display_p3_chroma_for_lh, oklab_to_oklch,
@@ -310,9 +311,8 @@ pub static BIN_XYZ_LUT: std::sync::LazyLock<[(f64, f64, f64, f64); NUM_BINS]> =
         arr
     });
 
-/// Convert an SPD sample (per-bin energy) to linear-sRGB premultiplied RGBA.
-/// Alpha equals total energy (capped at 1.0) so downstream blending treats it
-/// similarly to our old pipeline.
+/// Convert an SPD sample (per-bin energy) to linear Rec.2020 premultiplied RGBA.
+/// Alpha is `1 − exp(−Σ mapped energy)`.
 ///
 /// Automatically selects the best SIMD path for the current platform:
 /// - `x86_64` AVX2: 4 bins/iter via 256-bit FMA
