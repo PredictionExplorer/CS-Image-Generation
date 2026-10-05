@@ -108,16 +108,16 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # ---------------------------------------------------------------------------
 
 # Per-seed generator timeout. A package is a full render, and the ember edition is the most
-# expensive part of it: a fine fluid grid, supersampling and two films, of which the slow one
-# runs ten times slower and so has up to ten times the frames. Its time on the production host is
-# re-measured after every deploy that changes the look (the `OK  seed=... (total ...)` log
-# lines); no figure is quoted here. The timeout only has to catch a render that hangs, so it
-# leaves ample headroom, but it must stay well below the service's 36-hour TimeoutStartSec
-# (RUN_CEILING): a render that hangs is then stopped by run.py, not by systemd (a stopped run counts
-# no failure, so the same seed would come first again, every run). A backfill seed whose render
-# overruns counts one failed ember attempt, so an orbit that always overruns is given up after
-# --max-backfill-attempts renders; an urgent seed is rendered again without the ember edition
-# (CORE_ONLY_TIMEOUT), so the token gets its main art and the edition joins the backfill.
+# expensive part of it: a fine fluid grid, supersampling and three films, the film and the same film
+# four and ten times slower, with up to four and ten times its frames. Its time on the production
+# host is re-measured after every deploy that changes the look (the `OK  seed=... (total ...)` log
+# lines); no figure is quoted here. The timeout only has to catch a render that hangs, so it leaves
+# ample headroom, but it must stay well below the service's 36-hour TimeoutStartSec (RUN_CEILING): a
+# render that hangs is then stopped by run.py, not by systemd (a stopped run counts no failure, so
+# the same seed would come first again, every run). A backfill seed whose render overruns counts one
+# failed ember attempt, so an orbit that always overruns is given up after --max-backfill-attempts
+# renders; an urgent seed is rendered again without the ember edition (CORE_ONLY_TIMEOUT), so the
+# token gets its main art and the edition joins the backfill.
 DEFAULT_TIMEOUT = 16 * 3600  # 16 hours
 # The timeout of that render without the ember edition, or --timeout if that is shorter. A core
 # package takes about 50 minutes on the production host, so this too only catches a hang, and it is
@@ -170,9 +170,9 @@ SSH_BASE_OPTS = [
 
 # An scp transfer may take SCP_MIN_TIMEOUT seconds, or longer when it carries more than
 # SCP_MIN_TIMEOUT * SCP_MIN_BYTES_PER_SECOND bytes. The ember edition's videos are the large
-# transfers: with the ember-v3 look the slow film is 176 to 294 MB and the archival film 134 to
-# 225 MB (three tokens measured on the production host); the `UPLOAD ... (N MB, timeout Ns)`
-# log lines give each transfer's size.
+# transfers: with the ember-v3 look the slow film measured 176 to 926 MB and the archival film 134
+# to 568 MB on the production host, and the medium film of ember-v4 is about half the slow film's
+# size; the `UPLOAD ... (N MB, timeout Ns)` log lines give each transfer's size.
 SCP_MIN_TIMEOUT = 900
 SCP_MIN_BYTES_PER_SECOND = 1_000_000
 
@@ -222,12 +222,12 @@ CORE_PACKAGE_FILES = (
     ASSET_MANIFEST,
     NFT_TRAITS,
 )
-# The ember edition (the orbit drawn in sumi ink by the fluid it stirs, in the main edition's
-# view) and its determinism certificate: the still and its two WebP derivatives, the film, the
-# slow film (the same film ten times slower), the archival film, the certificate. Packages
-# generated before the edition existed, whose ember edition failed, or whose stale edition was
-# withdrawn or lacks a file of the current look, lack only these files: they are regenerated as a
-# backfill that yields to new mints (see find_missing_seeds, plan_seed_queue, --backfill-mode and
+# The ember edition (the orbit drawn in sumi ink by the fluid it stirs, in the main edition's view)
+# and its determinism certificate: the still and its two WebP derivatives, the film, the medium film
+# and the slow film (the same film four and ten times slower), the archival film, the certificate.
+# Packages generated before the edition existed, whose ember edition failed, or whose stale edition
+# was withdrawn or lacks a file of the current look, lack only these files: they are regenerated as
+# a backfill that yields to new mints (see find_missing_seeds, plan_seed_queue, --backfill-mode and
 # retire_stale_ember_editions). Keep in sync with app::EMBER_OUTPUT_PATHS, order included: a Rust
 # unit test reads this tuple from the source text, so it stays one plain string literal per line.
 EMBER_PACKAGE_FILES = (
@@ -235,6 +235,7 @@ EMBER_PACKAGE_FILES = (
     "images/web/ember_full.webp",
     "images/web/ember_preview.webp",
     "videos/web/ember.mp4",
+    "videos/web/ember_medium.mp4",
     "videos/web/ember_slow.mp4",
     "videos/hq/ember.mp4",
     "metadata/ember.json",
@@ -255,6 +256,7 @@ EMBER_MANIFEST_ROLES = (
     "ember_web_full",
     "ember_web_preview",
     "ember_web",
+    "ember_medium_web",
     "ember_slow_web",
     "ember_hq",
 )
@@ -2088,8 +2090,9 @@ def retired_ember_files(live: object, seed: str) -> list[str]:
     (an urgent seed, or --backfill-mode full), the removal before a package without the edition
     is uploaded (generator exit 3), and a withdrawal cut off after its stripped manifest landed
     delete only EMBER_PACKAGE_FILES, and would leave such a file on the asset host, listed by no
-    manifest. No look so far has dropped a file (ember-v2's files are a subset of ember-v3's); a
-    look that does must extend those paths.
+    manifest. No look so far has dropped a file (each look's files are a subset of the next one's:
+    ember-v3 added the slow film, ember-v4 the medium film); a look that does must extend those
+    paths.
 
     The manifest is data read from the asset host, so only a path that _is_ember_file_path()
     accepts is returned: nothing outside the package, and no core or spectral file, can be
@@ -2602,8 +2605,9 @@ def held_editions(backfill: Sequence[str], remote_files: set[str]) -> list[str]:
     Such an edition may be of an older look: replacing it would put the new look online next to
     the old one (by default, the old one is withdrawn first), and the run could not withdraw it
     or know that it may be replaced. So the run leaves these seeds out of its backfill, and a
-    later run that can read the looks plans them. An ember-v2 package, for one, lacks the slow
-    film, so it would otherwise be planned for its missing file alone.
+    later run that can read the looks plans them. An edition of an older look lacks a film of the
+    current one (an ember-v3 edition the medium film, an ember-v2 edition the slow film too), so
+    it would otherwise be planned for its missing files alone.
     """
     held = [seed for seed in backfill if f"0x{seed}/{EMBER_CERTIFICATE}" in remote_files]
     if held:

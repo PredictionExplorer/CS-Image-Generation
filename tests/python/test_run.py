@@ -81,34 +81,54 @@ VIEW_FIELD_PATHS = {
 
 # The ember look the fake generator renders (FAKE_GEN_EMBER_ALGORITHM overrides it), an older
 # one, which live packages of the earlier look record, and one this generator does not know yet.
-CURRENT_ALGORITHM = "ember-v3"
-STALE_ALGORITHM = "ember-v2"
-NEWER_ALGORITHM = "ember-v4"
+CURRENT_ALGORITHM = "ember-v4"
+STALE_ALGORITHM = "ember-v3"
+NEWER_ALGORITHM = "ember-v5"
 
-# The ember files and manifest roles of the current look, in the generator's order, and those of
-# an ember-v2 package as the release before ember-v3 published it (six files, five roles, a
-# layout-3 certificate). Spelled out, never derived from run.py's tuples: the first pins those
-# tuples, and the second is what the current run.py finds on the asset host after the deploy.
-EMBER_V3_FILES = (
+# The ember files and manifest roles of the current look (ember-v4), in the generator's order, and
+# those of the two looks before it as their releases published them: an ember-v3 package (seven
+# files, six roles: no medium film; a layout-4 certificate) and an ember-v2 package (six files,
+# five roles: no medium or slow film; a layout-3 certificate). Spelled out, never derived from
+# run.py's tuples: the first pins those tuples, the others are what the current run.py finds on
+# the asset host after the deploy.
+EMBER_V4_FILES = (
     "images/source/ember.png",
     "images/web/ember_full.webp",
     "images/web/ember_preview.webp",
     "videos/web/ember.mp4",
+    "videos/web/ember_medium.mp4",
     "videos/web/ember_slow.mp4",
     "videos/hq/ember.mp4",
     "metadata/ember.json",
 )
 # The order in which an ember-mode backfill stages them and then swaps them in: the media, the
 # merged manifest, the certificate last.
-EMBER_UPLOAD_ORDER = (*EMBER_V3_FILES[:-1], "metadata/assets.json", "metadata/ember.json")
-EMBER_V3_ROLES = (
+EMBER_UPLOAD_ORDER = (*EMBER_V4_FILES[:-1], "metadata/assets.json", "metadata/ember.json")
+EMBER_V4_ROLES = (
     "ember_source_master",
     "ember_web_full",
     "ember_web_preview",
     "ember_web",
+    "ember_medium_web",
     "ember_slow_web",
     "ember_hq",
 )
+EMBER_V3_MEDIA_ROLES = {
+    "images/source/ember.png": "ember_source_master",
+    "images/web/ember_full.webp": "ember_web_full",
+    "images/web/ember_preview.webp": "ember_web_preview",
+    "videos/web/ember.mp4": "ember_web",
+    "videos/web/ember_slow.mp4": "ember_slow_web",
+    "videos/hq/ember.mp4": "ember_hq",
+}
+EMBER_V3_FILES = (*EMBER_V3_MEDIA_ROLES, "metadata/ember.json")
+EMBER_V3_CERTIFICATE = """{
+  "schema_version": 4,
+  "edition": "ember",
+  "algorithm": "ember-v3",
+  "contract": "the live render"
+}
+"""
 EMBER_V2_MEDIA_ROLES = {
     "images/source/ember.png": "ember_source_master",
     "images/web/ember_full.webp": "ember_web_full",
@@ -194,7 +214,7 @@ def certificate_text(algorithm: str, tag: str) -> str:
     the top-level key is the line `  "algorithm": "<id>",`. The nested "algorithm" is a decoy that
     must never be read as the certificate's."""
     certificate = {
-        "schema_version": 4,
+        "schema_version": 5,
         "edition": "ember",
         "algorithm": algorithm,
         "contract": f"the {tag} render",
@@ -585,17 +605,34 @@ class SyncTestCase(unittest.TestCase):
         )
         return package
 
+    def remote_published_package(
+        self,
+        seed: str,
+        media_roles: dict[str, str],
+        certificate: str,
+        extra_entries: Sequence[dict[str, object]] = (),
+    ) -> Path:
+        """A live package holding an ember edition of an older look, tagged "live": the media of
+        `media_roles` (path: role), listed in its manifest before `extra_entries`, and the
+        certificate text `certificate`."""
+        ember = [manifest_entry(path, role, "live") for path, role in media_roles.items()]
+        package = self.remote_package(seed, extra_entries=[*ember, *extra_entries])
+        for path in media_roles:
+            (package / path).write_text(f"{path} live\n", encoding="utf-8")
+        (package / "metadata/ember.json").write_text(certificate, encoding="utf-8")
+        return package
+
     def remote_v2_package(
         self, seed: str, *, extra_entries: Sequence[dict[str, object]] = ()
     ) -> Path:
-        """A live package holding an ember-v2 edition, tagged "live": the EMBER_V2_* literals
-        (its manifest lists `extra_entries` after the five ember-v2 entries)."""
-        ember = [manifest_entry(path, role, "live") for path, role in EMBER_V2_MEDIA_ROLES.items()]
-        package = self.remote_package(seed, extra_entries=[*ember, *extra_entries])
-        for path in EMBER_V2_MEDIA_ROLES:
-            (package / path).write_text(f"{path} live\n", encoding="utf-8")
-        (package / "metadata/ember.json").write_text(EMBER_V2_CERTIFICATE, encoding="utf-8")
-        return package
+        """A live package holding an ember-v2 edition (the EMBER_V2_* literals)."""
+        return self.remote_published_package(
+            seed, EMBER_V2_MEDIA_ROLES, EMBER_V2_CERTIFICATE, extra_entries
+        )
+
+    def remote_v3_package(self, seed: str) -> Path:
+        """A live package holding an ember-v3 edition (the EMBER_V3_* literals)."""
+        return self.remote_published_package(seed, EMBER_V3_MEDIA_ROLES, EMBER_V3_CERTIFICATE)
 
     def package_files(self, seed: str) -> dict[str, str]:
         """The remote package of `seed`: {path relative to the package: content}."""
@@ -724,32 +761,32 @@ class SyncTestCase(unittest.TestCase):
     def assert_current_edition(self, seed: str, published: dict[str, str]) -> None:
         """The remote package of `seed` holds the current look's ember edition, rendered by the
         fake generator ("new"), and is otherwise `published`, its files before the run, byte for
-        byte: the ember files, roles and certificate are compared with the EMBER_V3_* literals."""
+        byte: the ember files, roles and certificate are compared with the EMBER_V4_* literals."""
         package = self.package_files(seed)
         self.assertEqual(
-            sorted(package), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V3_FILES])
+            sorted(package), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V4_FILES])
         )
-        for path in EMBER_V3_FILES[:-1]:
+        for path in EMBER_V4_FILES[:-1]:
             self.assertEqual(package[path], f"{path} new\n")
         certificate = json.loads(package["metadata/ember.json"])
         self.assertEqual(
             (certificate["algorithm"], certificate["schema_version"], certificate["contract"]),
-            ("ember-v3", 4, "the new render"),
+            ("ember-v4", 5, "the new render"),
         )
-        untouched = set(package) - {*EMBER_V3_FILES, "metadata/assets.json"}
+        untouched = set(package) - {*EMBER_V4_FILES, "metadata/assets.json"}
         self.assertEqual(
             {path: package[path] for path in untouched},
             {path: published[path] for path in untouched},
         )
         # The manifest: the published entries of everything else, verbatim and in order, then
-        # the six entries of the new edition. No entry of the old edition is left.
+        # the seven entries of the new edition. No entry of the old edition is left.
         manifest = json.loads(package["metadata/assets.json"])
         published_manifest = json.loads(published["metadata/assets.json"])
         kept = [entry for entry in published_manifest["assets"] if not run.is_ember_asset(entry)]
         self.assertEqual(manifest["assets"][: len(kept)], kept)
         ember = manifest["assets"][len(kept) :]
-        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V3_ROLES))
-        self.assertEqual([entry["path"] for entry in ember], list(EMBER_V3_FILES[:-1]))
+        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V4_ROLES))
+        self.assertEqual([entry["path"] for entry in ember], list(EMBER_V4_FILES[:-1]))
         self.assertTrue(all(entry["sha256"].startswith("new:") for entry in ember))
 
     def assert_no_ember_edition(self, seed: str, published: dict[str, str]) -> None:
@@ -818,12 +855,13 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(run.plan_seed_queue([], ["b1", "b2"], 5, ledger, 4), ["b2", "b1"])
         self.assertEqual(run.given_up_seeds(["b1", "b2"], ledger, 4), [])
 
-    def test_a_package_of_the_previous_look_lacks_only_the_slow_film(self) -> None:
-        remote = remote_listing(SEED_A, [*run.CORE_PACKAGE_FILES, *EMBER_V2_FILES])
-        self.assertEqual(
-            run.missing_remote_package_parts(SEED_A, remote), ["videos/web/ember_slow.mp4"]
-        )
-        self.assertEqual(run.find_missing_seeds([SEED_A], remote), ([], [SEED_A]))
+    def test_packages_of_older_looks_lack_only_the_films_they_never_had(self) -> None:
+        medium, slow = "videos/web/ember_medium.mp4", "videos/web/ember_slow.mp4"
+        for files, missing in ((EMBER_V3_FILES, [medium]), (EMBER_V2_FILES, [medium, slow])):
+            with self.subTest(missing=missing):
+                remote = remote_listing(SEED_A, [*run.CORE_PACKAGE_FILES, *files])
+                self.assertEqual(run.missing_remote_package_parts(SEED_A, remote), missing)
+                self.assertEqual(run.find_missing_seeds([SEED_A], remote), ([], [SEED_A]))
 
     def test_an_identity_mismatch_gives_a_seed_up_at_once(self) -> None:
         ledger = run.BackfillLedger(ember_failures={"b1": 1}, identity_mismatches={"b1"})
@@ -1325,9 +1363,11 @@ class ProcessSeedTests(SyncTestCase):
         with self.assertLogs(run.log, level="ERROR"):
             outcome = self.process(SEED_A, backfill=run.BackfillMode.EMBER)
         self.assertIs(outcome, run.Outcome.FAILED)
-        # Five media had been staged when the sixth failed: none is under its real name, the
-        # certificate and the manifest are untouched, and no staged file is left behind.
-        self.assertEqual(len(self.calls("scp")), 5 + 2)
+        # Six media had been staged when the archival film, the seventh, failed (two attempts):
+        # none is under its real name, the certificate and the manifest are untouched, and no
+        # staged file is left behind.
+        self.assertEqual(EMBER_UPLOAD_ORDER.index("videos/hq/ember.mp4"), 6)
+        self.assertEqual(len(self.calls("scp")), 6 + 2)
         leftover_path = str(leftover.relative_to(self.remote))
         self.assertEqual(
             self.remote_snapshot(), {p: c for p, c in live.items() if p != leftover_path}
@@ -1423,7 +1463,7 @@ class ProcessSeedTests(SyncTestCase):
         self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A, retired=[teaser]))
         after = self.package_files(SEED_A)
         self.assertEqual(
-            sorted(after), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V3_FILES])
+            sorted(after), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V4_FILES])
         )
         # Nothing but the ember edition changed: not the main art the decoy named, not SEED_B.
         unchanged = set(before_a) - {*EMBER_V2_FILES, teaser, run.ASSET_MANIFEST}
@@ -1431,7 +1471,7 @@ class ProcessSeedTests(SyncTestCase):
         self.assertEqual(self.package_files(SEED_B), before_b)
         manifest = json.loads(after[run.ASSET_MANIFEST])
         ember = [entry for entry in manifest["assets"] if run.is_ember_asset(entry)]
-        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V3_ROLES))
+        self.assertEqual([entry["role"] for entry in ember], list(EMBER_V4_ROLES))
 
     def test_backfill_whose_ember_edition_fails_uploads_nothing(self) -> None:
         self.remote_package(SEED_A)
@@ -1876,7 +1916,7 @@ class StaleEmberTests(SyncTestCase):
     def test_kept_editions_stay_online_and_are_planned_as_backfill_seeds(self) -> None:
         self.remote_package(SEED_A, ember=True)
         self.remote_package(SEED_B, ember=True, algorithm=STALE_ALGORITHM)  # every current file
-        self.remote_v2_package(SEED_C)  # lacks the slow film as well
+        self.remote_v3_package(SEED_C)  # lacks the medium film as well
         live = self.remote_snapshot()
         for dry_run in (False, True):
             with self.subTest(dry_run=dry_run), self.assertLogs(run.log, level="INFO") as logs:
@@ -1992,17 +2032,27 @@ class EmberBackfillHelperTests(unittest.TestCase):
     def test_the_ember_files_and_roles_of_the_current_look(self) -> None:
         # The generator lists its ember outputs in exactly this order (app::EMBER_OUTPUT_PATHS; a
         # Rust unit test compares that with run.py's tuple), and writes these manifest roles.
-        self.assertEqual(run.EMBER_PACKAGE_FILES, EMBER_V3_FILES)
-        self.assertEqual(run.EMBER_MANIFEST_ROLES, EMBER_V3_ROLES)
-        self.assertEqual(run.EMBER_MEDIA_FILES, EMBER_V3_FILES[:-1])
-        self.assertEqual(run.EMBER_CERTIFICATE, EMBER_V3_FILES[-1])
-        self.assertEqual(run.REQUIRED_PACKAGE_FILES[-len(EMBER_V3_FILES) :], EMBER_V3_FILES)
-        # The look before it had every file but the slow film, and every role but its role.
+        self.assertEqual(run.EMBER_PACKAGE_FILES, EMBER_V4_FILES)
+        self.assertEqual(run.EMBER_MANIFEST_ROLES, EMBER_V4_ROLES)
+        self.assertEqual(run.EMBER_MEDIA_FILES, EMBER_V4_FILES[:-1])
+        self.assertEqual(run.EMBER_CERTIFICATE, EMBER_V4_FILES[-1])
+        self.assertEqual(run.REQUIRED_PACKAGE_FILES[-len(EMBER_V4_FILES) :], EMBER_V4_FILES)
+        # Each look before it had every file but the films that came later, and every role but
+        # theirs; no look dropped a file, so an older edition retires none.
+        self.assertEqual(set(EMBER_V4_FILES) - set(EMBER_V3_FILES), {"videos/web/ember_medium.mp4"})
+        self.assertEqual(
+            set(EMBER_V4_ROLES) - set(EMBER_V3_MEDIA_ROLES.values()), {"ember_medium_web"}
+        )
         self.assertEqual(set(EMBER_V3_FILES) - set(EMBER_V2_FILES), {"videos/web/ember_slow.mp4"})
         self.assertEqual(
-            set(EMBER_V3_ROLES) - set(EMBER_V2_MEDIA_ROLES.values()), {"ember_slow_web"}
+            set(EMBER_V3_MEDIA_ROLES.values()) - set(EMBER_V2_MEDIA_ROLES.values()),
+            {"ember_slow_web"},
         )
         self.assertLessEqual(set(EMBER_V2_FILES), set(EMBER_V3_FILES))
+        self.assertLessEqual(set(EMBER_V3_FILES), set(EMBER_V4_FILES))
+        for media_roles in (EMBER_V2_MEDIA_ROLES, EMBER_V3_MEDIA_ROLES):
+            published = {"assets": [{"role": r, "path": p} for p, r in media_roles.items()]}
+            self.assertEqual(run.retired_ember_files(published, SEED_A), [])
 
     def test_only_ember_files_are_named_ember(self) -> None:
         # retired_ember_files() relies on it: a file it may delete is never a core file.
@@ -2291,6 +2341,10 @@ class EmberBackfillHelperTests(unittest.TestCase):
         self.assertEqual(run.scp_timeout(floor_bytes), run.SCP_MIN_TIMEOUT)
         self.assertEqual(run.scp_timeout(floor_bytes + 1), run.SCP_MIN_TIMEOUT + 1)
         self.assertEqual(run.scp_timeout(2_000_000_001), 2001)
+        # Each ember film is staged in a transfer of its own: the largest slow film measured
+        # (926 MB) gets a little more than the floor, a medium film (about 40% of it) the floor.
+        self.assertEqual(run.scp_timeout(926_000_000), 926)
+        self.assertEqual(run.scp_timeout(400_000_000), run.SCP_MIN_TIMEOUT)
 
 
 # ---------------------------------------------------------------------------
@@ -2567,10 +2621,10 @@ class MainTests(SyncTestCase):
             self.assertIn(
                 f"WITHDRAWN  seed=0x{seed}  its ember-v2 ember edition is off the asset host", text
             )
-        self.assertIn("Withdrew 2 stale ember editions (ember-v2 -> ember-v3)", text)
+        self.assertIn("Withdrew 2 stale ember editions (ember-v2 -> ember-v4)", text)
         self.assertNotIn("Kept", text)
         # Both editions went before the plan: six files and five manifest entries each. The
-        # backfill rendered one of them again, with the seven files and six roles of ember-v3.
+        # backfill rendered one of them again, with the eight files and seven roles of ember-v4.
         self.assertEqual(self.generated(), [SEED_A])
         self.assert_current_edition(SEED_A, published_a)
         self.assert_no_ember_edition(SEED_B, published_b)
@@ -2594,7 +2648,7 @@ class MainTests(SyncTestCase):
             self.assertEqual(self.main([SEED_A, SEED_B], *keep), 0)
         text = "\n".join(logs.output)
         self.assertIn(
-            "Kept 2 stale ember editions online (ember-v2 -> ember-v3): the ember backfill "
+            "Kept 2 stale ember editions online (ember-v2 -> ember-v4): the ember backfill "
             "replaces each in place",
             text,
         )
@@ -2602,8 +2656,9 @@ class MainTests(SyncTestCase):
         self.assertNotIn("Withdrew", text)
         # Nothing was withdrawn: SEED_B is the published ember-v2 package, byte for byte.
         self.assertEqual(self.package_files(SEED_B), published_b)
-        # SEED_A was replaced in place: its five old media replaced, the slow film added, the
-        # manifest's five ember entries replaced by six, a layout-4 ember-v3 certificate.
+        # SEED_A was replaced in place: its five old media replaced, the medium and slow films
+        # added, the manifest's five ember entries replaced by seven, a layout-5 ember-v4
+        # certificate.
         self.assertEqual(self.generated(), [SEED_A])
         self.assert_current_edition(SEED_A, published_a)
         # Every file was staged beside the live edition, which stayed whole until one ssh call
@@ -2630,6 +2685,40 @@ class MainTests(SyncTestCase):
         self.assertNotIn("Kept", text)
         self.assertEqual(self.generated(), [SEED_A, SEED_B])
         self.assertEqual(self.remote_snapshot(), live)
+
+    def test_a_kept_ember_v3_edition_is_replaced_in_place_by_ember_v4(self) -> None:
+        # The rollout production runs: the switch on, the default one backfill package a run.
+        self.remote_v3_package(SEED_A)
+        published = self.package_files(SEED_A)
+        self.assertEqual(
+            sorted(published), sorted([*run.CORE_PACKAGE_FILES, *SPECTRAL_FILES, *EMBER_V3_FILES])
+        )
+        os.environ[run.ENV_KEEP_STALE_EMBER] = "yes"
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A]), 0)
+        text = "\n".join(logs.output)
+        self.assertIn(
+            "Kept 1 stale ember editions online (ember-v3 -> ember-v4): the ember backfill "
+            "replaces each in place",
+            text,
+        )
+        self.assertNotIn("WITHDRAWN", text)
+        self.assertIn("1 missing only the ember edition", text)
+        self.assertEqual(self.generated(), [SEED_A])
+        # All eight files of ember-v4: the six old media replaced, the medium film added; the
+        # manifest's six ember entries replaced by seven; a layout-5 ember-v4 certificate; the
+        # rest of the package byte for byte as published.
+        self.assert_current_edition(SEED_A, published)
+        # Staged and then swapped, like every ember upload: no live file went before the swap,
+        # and none was retired (ember-v3 has no file that ember-v4 lacks).
+        self.assertEqual(self.uploaded(), [[path] for path in EMBER_UPLOAD_ORDER])
+        self.assertEqual(self.changes(), self.ember_upload_commands(SEED_A))
+
+        # Done: the next run finds the token complete, in the current look.
+        with self.assertLogs(run.log, level="INFO") as logs:
+            self.assertEqual(self.main([SEED_A]), 0)
+        self.assertIn("complete asset packages on remote. Nothing to do.", "\n".join(logs.output))
+        self.assertEqual(self.generated(), [SEED_A])
 
     def test_a_kept_edition_survives_a_failed_upload_untouched(self) -> None:
         self.remote_v2_package(SEED_A)
@@ -2673,7 +2762,7 @@ class MainTests(SyncTestCase):
             self.assertEqual(self.main([SEED_A], "--keep-stale-ember"), 1)
         del os.environ["FAKE_SSH_CUT_AFTER"]
 
-        swapped = EMBER_V3_FILES[:4]
+        swapped = EMBER_V4_FILES[:4]
         expected = {path: text for path, text in published.items() if path != "metadata/ember.json"}
         expected.update({path: f"{path} new\n" for path in swapped})
         # No file is truncated or half new: each medium is the old one or the new one, the
@@ -2720,7 +2809,7 @@ class MainTests(SyncTestCase):
         with self.assertLogs(run.log, level="INFO") as logs:
             self.assertEqual(self.main([SEED_A, SEED_B], "--max-backfill", "0"), 0)
         self.assertIn(
-            "Withdrew 1 stale ember editions (ember-v2 -> ember-v3)", "\n".join(logs.output)
+            "Withdrew 1 stale ember editions (ember-v2 -> ember-v4)", "\n".join(logs.output)
         )
         self.assertEqual(self.generated(), [])
         self.assert_no_ember_edition(SEED_A, published)
@@ -2978,7 +3067,7 @@ class MainTests(SyncTestCase):
         )
 
     def test_editions_of_an_unknown_look_wait_for_a_run_that_can_tell(self) -> None:
-        self.remote_v2_package(SEED_A)  # lacks the slow film, but holds an edition
+        self.remote_v2_package(SEED_A)  # lacks the medium and slow films, but holds an edition
         self.remote_package(SEED_B)  # holds none
         published = self.package_files(SEED_A)
         certificates = f"cd {shlex.quote(str(self.remote))} || exit 1; for "

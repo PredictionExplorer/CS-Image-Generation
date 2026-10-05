@@ -28,6 +28,7 @@ use image::{ImageBuffer, Rgb};
 use nalgebra::{Matrix3, Vector3};
 use serde::Serialize;
 use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::Write as _;
 use std::process::{Command, Stdio};
@@ -47,29 +48,62 @@ pub const EMBER_FULL_WEBP_PATH: &str = "images/web/ember_full.webp";
 pub const EMBER_PREVIEW_WEBP_PATH: &str = "images/web/ember_preview.webp";
 /// Package-relative path of the ember edition's browser-compatible H.264 video.
 pub const EMBER_WEB_VIDEO_PATH: &str = "videos/web/ember.mp4";
+/// Package-relative path of the ember edition's medium film (browser-compatible H.264): the same
+/// film 4 times slower, 2 minutes at the default steps ([`EMBER_SLOW_FILMS`]).
+pub const EMBER_MEDIUM_WEB_VIDEO_PATH: &str = "videos/web/ember_medium.mp4";
 /// Package-relative path of the ember edition's slow film (browser-compatible H.264): the same
-/// film [`EMBER_SLOW_FACTOR`] times slower.
+/// film 10 times slower, 5 minutes at the default steps ([`EMBER_SLOW_FILMS`]).
 pub const EMBER_SLOW_WEB_VIDEO_PATH: &str = "videos/web/ember_slow.mp4";
 /// Package-relative path of the ember edition's archival HEVC video.
 pub const EMBER_HQ_VIDEO_PATH: &str = "videos/hq/ember.mp4";
 /// Package-relative path of the ember edition's determinism certificate.
 pub const EMBER_CERTIFICATE_PATH: &str = "metadata/ember.json";
 /// Package-relative paths of every file the ember edition writes, in [`EmberOutputPaths`] field
-/// order: still, full WebP, preview WebP, web video, slow web video, HQ video, certificate.
-/// `run.py` requires each of them in a complete package (`EMBER_PACKAGE_FILES`).
-pub const EMBER_OUTPUT_PATHS: [&str; 7] = [
+/// order: still, full WebP, preview WebP, web video, medium web video, slow web video, HQ video,
+/// certificate. `run.py` requires each of them in a complete package (`EMBER_PACKAGE_FILES`).
+pub const EMBER_OUTPUT_PATHS: [&str; 8] = [
     EMBER_STILL_PATH,
     EMBER_FULL_WEBP_PATH,
     EMBER_PREVIEW_WEBP_PATH,
     EMBER_WEB_VIDEO_PATH,
+    EMBER_MEDIUM_WEB_VIDEO_PATH,
     EMBER_SLOW_WEB_VIDEO_PATH,
     EMBER_HQ_VIDEO_PATH,
     EMBER_CERTIFICATE_PATH,
 ];
 
-/// How many times slower the ember edition's slow film is: it shows this many frames for each
-/// frame of the normal film, every one of them simulated (`ember::EmberRequest::slow_factor`).
-pub const EMBER_SLOW_FACTOR: u32 = 10;
+/// One of the ember edition's slow films: `videos/web/ember.mp4` `factor` times slower, every
+/// frame of it simulated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmberSlowFilm {
+    /// How many times slower than the film of normal speed it is.
+    pub factor: u32,
+    /// Package-relative path of its browser-compatible H.264 video.
+    pub path: &'static str,
+    /// Its role in the asset manifest.
+    pub role: &'static str,
+}
+
+/// The ember edition's slow films, by increasing factor: the medium film (2 minutes at the
+/// default steps) and the slow film (5 minutes). Both start a little before the ink appears, so
+/// each is somewhat shorter.
+pub const EMBER_SLOW_FILMS: [EmberSlowFilm; 2] = [
+    EmberSlowFilm { factor: 4, path: EMBER_MEDIUM_WEB_VIDEO_PATH, role: "ember_medium_web" },
+    EmberSlowFilm { factor: 10, path: EMBER_SLOW_WEB_VIDEO_PATH, role: "ember_slow_web" },
+];
+
+/// The factors of [`EMBER_SLOW_FILMS`], in order: every ember render asks for these slow films
+/// (`ember::EmberRequest::slow_factors`), whose least common multiple also sets its snapshot
+/// lattice, the still's included.
+pub const EMBER_SLOW_FACTORS: [u32; EMBER_SLOW_FILMS.len()] = {
+    let mut factors = [0; EMBER_SLOW_FILMS.len()];
+    let mut film = 0;
+    while film < factors.len() {
+        factors[film] = EMBER_SLOW_FILMS[film].factor;
+        film += 1;
+    }
+    factors
+};
 
 /// Appended to the package seed bytes to seed the ember edition's kozo sheet: a separate,
 /// versioned domain, so the paper texture never correlates with any other seeded choice and
@@ -337,8 +371,9 @@ impl AssetEntry {
 pub struct EmberManifest {
     /// Frames in each ember video of normal speed (`0` when no video was encoded).
     pub frames_emitted: usize,
-    /// Frames in the slow film (`0` when no video was encoded).
-    pub slow_frames_emitted: usize,
+    /// Frames in each slow film, in the order of [`EMBER_SLOW_FILMS`] (`0` when no video was
+    /// encoded).
+    pub slow_frames_emitted: [usize; EMBER_SLOW_FILMS.len()],
     /// Frames per second of the ember videos.
     pub frame_rate: u32,
     /// Whether the ember videos were encoded (not under `--image-only`).
@@ -349,15 +384,36 @@ pub struct EmberManifest {
 
 impl EmberManifest {
     /// Manifest facts of a finished ember render encoded at the product frame rate.
+    ///
+    /// # Panics
+    ///
+    /// If the render's slow films are not [`EMBER_SLOW_FILMS`]: every ember render of the
+    /// product asks for them ([`render_ember_edition`]).
     pub fn from_summary(summary: &EmberSummary, fast_encode: bool) -> Self {
         Self {
             frames_emitted: summary.frames_emitted,
-            slow_frames_emitted: summary.slow_frames_emitted,
+            slow_frames_emitted: per_slow_film(
+                summary.slow_films.iter().map(|film| (film.factor, film.frames_emitted)),
+            ),
             frame_rate: constants::DEFAULT_VIDEO_FPS,
             has_video: summary.frames_emitted > 0,
             fast_encode,
         }
     }
+}
+
+/// The frame counts of a render's slow films, `(factor, frames)` in the order of the request's
+/// factors, as one count per film of [`EMBER_SLOW_FILMS`]. A plan and a summary list every film
+/// the request asked for, in every mode, so a render of the product's films
+/// ([`EMBER_SLOW_FACTORS`]) always maps.
+///
+/// # Panics
+///
+/// If the films are not those of [`EMBER_SLOW_FILMS`], in that order.
+fn per_slow_film(films: impl Iterator<Item = (u32, usize)>) -> [usize; EMBER_SLOW_FILMS.len()] {
+    let (factors, frames): (Vec<u32>, Vec<usize>) = films.unzip();
+    assert_eq!(factors, EMBER_SLOW_FACTORS, "an ember render of the product's slow films");
+    std::array::from_fn(|film| frames[film])
 }
 
 fn file_size(seed_dir: &str, relative_path: &str) -> Option<u64> {
@@ -609,11 +665,15 @@ fn ember_entries(seed_dir: &str, size: (u32, u32), ember: &EmberManifest) -> Vec
     ];
     if ember.has_video {
         let [web, hq] = ember_video_options(ember.fast_encode);
-        for (path, role, options, frames) in [
-            (EMBER_WEB_VIDEO_PATH, "ember_web", &web, ember.frames_emitted),
-            (EMBER_SLOW_WEB_VIDEO_PATH, "ember_slow_web", &web, ember.slow_frames_emitted),
-            (EMBER_HQ_VIDEO_PATH, "ember_hq", &hq, ember.frames_emitted),
-        ] {
+        let slow_films = EMBER_SLOW_FILMS
+            .iter()
+            .zip(ember.slow_frames_emitted)
+            .map(|(film, frames)| (film.path, film.role, &web, frames));
+        let videos =
+            std::iter::once((EMBER_WEB_VIDEO_PATH, "ember_web", &web, ember.frames_emitted))
+                .chain(slow_films)
+                .chain([(EMBER_HQ_VIDEO_PATH, "ember_hq", &hq, ember.frames_emitted)]);
+        for (path, role, options, frames) in videos {
             let facts = VideoFacts {
                 duration_seconds: frames as f64 / f64::from(ember.frame_rate),
                 frame_rate: ember.frame_rate,
@@ -1388,8 +1448,9 @@ pub struct EmberOutputPaths<'a> {
     pub preview_webp: &'a str,
     /// Browser-compatible H.264 video (not written for image-only renders).
     pub web_video: &'a str,
-    /// The slow film as browser-compatible H.264 (not written for image-only renders).
-    pub slow_web_video: &'a str,
+    /// Each slow film of [`EMBER_SLOW_FILMS`] as browser-compatible H.264, in that order (not
+    /// written for image-only renders).
+    pub slow_web_videos: [&'a str; EMBER_SLOW_FILMS.len()],
     /// Archival HEVC video, or the software fast encode (not written for image-only renders).
     pub hq_video: &'a str,
     /// Determinism certificate (`metadata/ember.json`).
@@ -1447,8 +1508,11 @@ pub struct EmberPreflight {
     pub valve_time: f64,
     /// Frames of the ember video; the last one is the still.
     pub frames: usize,
-    /// Frames of the slow film.
-    pub slow_frames: usize,
+    /// Frames of each slow film, in the order of [`EMBER_SLOW_FILMS`].
+    pub slow_frames: [usize; EMBER_SLOW_FILMS.len()],
+    /// Snapshot intervals per frame interval are a multiple of this, in every mode: the least
+    /// common multiple of [`EMBER_SLOW_FACTORS`] (the render's cost grows with it).
+    pub snapshot_lattice: usize,
     /// Fluid steps the orbit needs at least (the render's cost grows with them).
     pub estimated_fluid_steps: f64,
     /// Fastest body speed on the canvas, in units of the median speed.
@@ -1586,7 +1650,7 @@ pub fn preflight_ember_edition(
         masses: ember_masses(bodies)?,
         view,
         frame_steps: &frame_steps,
-        slow_factor: EMBER_SLOW_FACTOR,
+        slow_factors: &EMBER_SLOW_FACTORS,
         width,
         height,
         paper_seed: &[],
@@ -1595,22 +1659,32 @@ pub fn preflight_ember_edition(
     })?;
     info!(
         "   => Ember preflight: orbit lasts {:.3} fluid time units (inking {:.3}..{:.3}), {} \
-         frames, {} in the slow film",
+         frames{}",
         preflight.duration,
         config.contact.pre_roll,
         preflight.valve_time,
         preflight.frames,
-        preflight.slow_frames
+        slow_film_counts(&preflight.slow_frames)
     );
     info!(
-        "   => Ember plan: at least {:.0} fluid steps; peak body speed {:.1}x the median; \
-         bodies come within {:.3} of the sheet's edge and overlap for {:.1}% of the orbit",
+        "   => Ember plan: at least {:.0} fluid steps, a multiple of {} snapshots per frame; peak \
+         body speed {:.1}x the median; bodies come within {:.3} of the sheet's edge and overlap \
+         for {:.1}% of the orbit",
         preflight.estimated_fluid_steps,
+        preflight.snapshot_lattice,
         preflight.peak_speed,
         preflight.edge_clearance,
         100.0 * preflight.overlap_fraction
     );
     Ok(preflight)
+}
+
+/// `, N in the 4x film, M in the 10x film`: the frames of each slow film of [`EMBER_SLOW_FILMS`].
+fn slow_film_counts(frames: &[usize; EMBER_SLOW_FILMS.len()]) -> String {
+    EMBER_SLOW_FILMS.iter().zip(frames).fold(String::new(), |mut text, (film, frames)| {
+        let _ = write!(text, ", {frames} in the {}x film", film.factor);
+        text
+    })
 }
 
 /// Plans an ember request ([`ember::plan_ember`]): the checks [`ember::render_ember`] makes
@@ -1622,7 +1696,8 @@ fn check_ember_request(request: &EmberRequest<'_>) -> Result<EmberPreflight> {
         duration: plan.duration(),
         valve_time: plan.valve_time(),
         frames: plan.frames(),
-        slow_frames: plan.slow_frames(),
+        slow_frames: per_slow_film(plan.slow_films().iter().map(|film| (film.factor, film.frames))),
+        snapshot_lattice: plan.snapshot_lattice(),
         estimated_fluid_steps: plan.estimated_fluid_steps(),
         peak_speed: plan.peak_speed(),
         edge_clearance: plan.edge_clearance(),
@@ -1658,10 +1733,10 @@ fn ember_video_options(fast_encode: bool) -> [VideoEncodingOptions; 2] {
 /// The orbit is re-simulated raw with [`sim::get_positions`] and the main edition's view is
 /// re-applied to it with portable arithmetic (`ember::View`), so that the bodies move as they
 /// do in `main.mp4` and every CPU reproduces the result bit for bit. Frames follow
-/// `main.mp4`'s schedule at [`constants::DEFAULT_VIDEO_FPS`], with the slow film's in-between
-/// frames ([`EMBER_SLOW_FACTOR`]); they are streamed to the encoders as they are shaded (unless
+/// `main.mp4`'s schedule at [`constants::DEFAULT_VIDEO_FPS`], with the slow films' in-between
+/// frames ([`EMBER_SLOW_FILMS`]); they are streamed to the encoders as they are shaded (unless
 /// `image_only`), the final frame is saved as a 16-bit sRGB PNG with two WebP derivatives, and
-/// `metadata/ember.json` certifies the SHA-256 digests of the raw frames of both films and of
+/// `metadata/ember.json` certifies the SHA-256 digests of the raw frames of every film and of
 /// the still.
 ///
 /// An error can leave some outputs behind (partial videos, the PNG of a still whose WebP
@@ -1683,7 +1758,7 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
         masses: ember_masses(request.bodies)?,
         view: request.view,
         frame_steps: &frame_steps,
-        slow_factor: EMBER_SLOW_FACTOR,
+        slow_factors: &EMBER_SLOW_FACTORS,
         width: request.width,
         height: request.height,
         paper_seed: &paper_seed,
@@ -1731,14 +1806,14 @@ pub fn render_ember_edition(request: &EmberEditionRequest<'_>) -> Result<EmberSu
     Ok(summary)
 }
 
-/// Renders every frame straight into the encoders of the two films (`rgb48le` streams, no
+/// Renders every frame straight into the encoders of every film (`rgb48le` streams, no
 /// temporary files) and returns the render's summary: the normal film goes to its web and HQ
-/// encoders, the slow film to its web encoder.
+/// encoders, each slow film of [`EMBER_SLOW_FILMS`] to its own web encoder.
 ///
 /// Errors:
 /// - a render failure (e.g. [`EmberError::NonFinite`]) is returned as such; the encoders are
 ///   killed and no video is finalised;
-/// - an encoder of either film that dies mid-stream breaks its frame pipe: the video module's
+/// - an encoder of any film that dies mid-stream breaks its frame pipe: the video module's
 ///   error is returned, naming the encoder and its exit status followed by the pipe error, and
 ///   every other encoder is killed without finalising its file;
 /// - an encoder that fails after the last frame is reported by the video module with its exit
@@ -1748,26 +1823,35 @@ fn encode_ember_videos(
     paths: EmberOutputPaths<'_>,
     [web, hq]: [VideoEncodingOptions; 2],
 ) -> Result<EmberSummary> {
-    let slow =
-        [VideoOutputSpec { output_file: paths.slow_web_video.to_string(), options: web.clone() }];
+    // One encoder group per film: the normal film (web and archival), then each slow film in the
+    // order of `EMBER_SLOW_FILMS`, which is also the order of the frames' `slow_indices`.
+    let web_film =
+        |path: &str| VideoOutputSpec { output_file: path.to_string(), options: web.clone() };
     let normal = [
-        VideoOutputSpec { output_file: paths.web_video.to_string(), options: web },
+        web_film(paths.web_video),
         VideoOutputSpec { output_file: paths.hq_video.to_string(), options: hq },
     ];
+    let slow = paths.slow_web_videos.map(|path| [web_film(path)]);
+    let groups: Vec<&[VideoOutputSpec]> =
+        std::iter::once(&normal[..]).chain(slow.iter().map(|film| &film[..])).collect();
     let mut outcome: Option<EmberResult<EmberSummary>> = None;
     let encoded = create_video_groups_from_frames(
         request.width,
         request.height,
         constants::DEFAULT_VIDEO_FPS,
-        &[&normal, &slow],
+        &groups,
         |films| {
             let pipe = |e: std::io::Error| EmberError::Sink(format!("video encoder pipe: {e}"));
             let mut sink = |frame: &EmberFrame<'_>| -> EmberResult<()> {
+                let (normal, slow_films) =
+                    films.split_first_mut().expect("the normal film's group");
                 if frame.index.is_some() {
-                    films[0].write_all(frame.rgb48le).map_err(pipe)?;
+                    normal.write_all(frame.rgb48le).map_err(pipe)?;
                 }
-                if frame.slow_index.is_some() {
-                    films[1].write_all(frame.rgb48le).map_err(pipe)?;
+                for (film, index) in slow_films.iter_mut().zip(frame.slow_indices) {
+                    if index.is_some() {
+                        film.write_all(frame.rgb48le).map_err(pipe)?;
+                    }
                 }
                 Ok(())
             };
@@ -1833,9 +1917,14 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
     let stats = &summary.stats;
     let timings = &summary.timings;
     let seconds = |frames: usize| frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+    let slow_films = summary.slow_films.iter().fold(String::new(), |mut text, film| {
+        let (frames, factor) = (film.frames_emitted, film.factor);
+        let _ = write!(text, ", {frames} in the {factor}x film ({:.2}s)", seconds(frames));
+        text
+    });
     info!(
         "   => Ember edition: orbit {:.3} fluid time units (valve at {:.3}), fluid {}x{}, ink \
-         nodes {}x{}, {} frames ({:.2}s of video), {} in the slow film ({:.2}s)",
+         nodes {}x{}, {} frames ({:.2}s of video){slow_films}",
         summary.duration,
         summary.valve_time,
         summary.fluid_grid[0],
@@ -1844,8 +1933,6 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
         summary.ink_grid[1],
         summary.frames_emitted,
         seconds(summary.frames_emitted),
-        summary.slow_frames_emitted,
-        seconds(summary.slow_frames_emitted),
     );
     info!(
         "   => Ember look: ink black for {:.3} and fading with tau {:.3} fluid time units; tidal \
@@ -1861,8 +1948,10 @@ fn log_ember_summary(summary: &EmberSummary, stage_seconds: f64) {
     if let Some(frames_sha256) = &summary.frames_sha256 {
         info!("   => Ember frames: sha256 {frames_sha256} (rgb48le stream)");
     }
-    if let Some(slow_sha256) = &summary.slow_frames_sha256 {
-        info!("   => Ember slow film: sha256 {slow_sha256} (rgb48le stream)");
+    for film in &summary.slow_films {
+        if let Some(sha256) = &film.frames_sha256 {
+            info!("   => Ember {}x film: sha256 {sha256} (rgb48le stream)", film.factor);
+        }
     }
     info!(
         "   => Ember work: {} fluid steps (dt {:.2e}..{:.2e}, max flow speed {:.2}), {} \
@@ -2796,11 +2885,16 @@ mod tests {
             still_sha256: String::new(),
             frames_emitted,
             frames_sha256: None,
-            slow_factor: EMBER_SLOW_FACTOR,
-            slow_first_frame: 0,
-            slow_frames_emitted: frames_emitted.saturating_sub(1) * EMBER_SLOW_FACTOR as usize
-                + usize::from(frames_emitted > 0),
-            slow_frames_sha256: None,
+            slow_films: EMBER_SLOW_FILMS
+                .iter()
+                .map(|film| ember::SlowFilmSummary {
+                    factor: film.factor,
+                    first_frame: 0,
+                    frames_emitted: frames_emitted.saturating_sub(1) * film.factor as usize
+                        + usize::from(frames_emitted > 0),
+                    frames_sha256: None,
+                })
+                .collect(),
             duration: 10.0,
             valve_time: 9.75,
             hold_time: 0.25,
@@ -2821,7 +2915,7 @@ mod tests {
             video,
             EmberManifest {
                 frames_emitted: 1_802,
-                slow_frames_emitted: 18_011,
+                slow_frames_emitted: [7_205, 18_011],
                 frame_rate: constants::DEFAULT_VIDEO_FPS,
                 has_video: true,
                 fast_encode: true,
@@ -2897,7 +2991,8 @@ mod tests {
         ["main_web", "main_hq", "spectral_sweep_web", "spectral_sweep_hq", "spectral_bins"];
     const EMBER_STILL_ROLES: [&str; 3] =
         ["ember_source_master", "ember_web_full", "ember_web_preview"];
-    const EMBER_VIDEO_ROLES: [&str; 3] = ["ember_web", "ember_slow_web", "ember_hq"];
+    const EMBER_VIDEO_ROLES: [&str; 4] =
+        ["ember_web", "ember_medium_web", "ember_slow_web", "ember_hq"];
 
     #[test]
     fn test_manifest_without_ember_keeps_the_legacy_entries() {
@@ -2956,12 +3051,13 @@ mod tests {
         let dir = package_fixture(&[
             EMBER_STILL_PATH,
             EMBER_WEB_VIDEO_PATH,
+            EMBER_MEDIUM_WEB_VIDEO_PATH,
             EMBER_SLOW_WEB_VIDEO_PATH,
             EMBER_HQ_VIDEO_PATH,
         ]);
         let ember = EmberManifest {
             frames_emitted: 1_802,
-            slow_frames_emitted: 17_941,
+            slow_frames_emitted: [7_177, 17_941],
             frame_rate: 60,
             has_video: true,
             fast_encode: false,
@@ -3003,7 +3099,18 @@ mod tests {
                 "sha256": fixture_sha256(EMBER_WEB_VIDEO_PATH),
             })
         );
-        // The slow film: the web encode's settings, and its own, longer duration.
+        // The slow films: the web encode's settings, and each its own, longer duration.
+        assert_eq!(
+            *entry(&manifest, "ember_medium_web"),
+            serde_json::json!({
+                "path": "videos/web/ember_medium.mp4", "kind": "video", "role": "ember_medium_web",
+                "format": "mp4", "width": 3456, "height": 2234,
+                "duration_seconds": 7_177.0 / 60.0, "frame_rate": 60,
+                "codec": "h264", "pixel_format": "yuv420p", "color_space": "srgb",
+                "bytes": EMBER_MEDIUM_WEB_VIDEO_PATH.len(),
+                "sha256": fixture_sha256(EMBER_MEDIUM_WEB_VIDEO_PATH),
+            })
+        );
         assert_eq!(
             *entry(&manifest, "ember_slow_web"),
             serde_json::json!({
@@ -3030,7 +3137,7 @@ mod tests {
         for steps in [100_000, 1_000_000, 1_234_567] {
             // The ember videos are frame-locked to `main.mp4`: same frames, same duration.
             let frames = ember_frame_schedule(steps).len();
-            let slow_frames = (frames - 1) * EMBER_SLOW_FACTOR as usize + 1;
+            let slow_frames = EMBER_SLOW_FACTORS.map(|factor| (frames - 1) * factor as usize + 1);
             let ember = EmberManifest {
                 frames_emitted: frames,
                 slow_frames_emitted: slow_frames,
@@ -3050,9 +3157,12 @@ mod tests {
             let main = duration("main_web").as_f64().expect("duration");
             assert_eq!(main.to_bits(), seconds.to_bits(), "{main} s for {frames} frames");
             assert_eq!(duration("spectral_sweep_web"), 10.0, "the sweep is unchanged");
-            // The slow film has its own length.
-            let slow = slow_frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
-            assert_eq!(duration("ember_slow_web").as_f64().map(f64::to_bits), Some(slow.to_bits()));
+            // Each slow film has its own length.
+            for (film, frames) in EMBER_SLOW_FILMS.iter().zip(slow_frames) {
+                let seconds = frames as f64 / f64::from(constants::DEFAULT_VIDEO_FPS);
+                let listed = duration(film.role).as_f64().map(f64::to_bits);
+                assert_eq!(listed, Some(seconds.to_bits()), "{}", film.role);
+            }
         }
     }
 
@@ -3061,7 +3171,7 @@ mod tests {
         let dir = package_fixture(&[]);
         let ember = EmberManifest {
             frames_emitted: 120,
-            slow_frames_emitted: 1_191,
+            slow_frames_emitted: [477, 1_191],
             frame_rate: 60,
             has_video: true,
             fast_encode: true,
@@ -3070,9 +3180,14 @@ mod tests {
         let hq = entry(&manifest, "ember_hq");
         assert_eq!((&hq["codec"], &hq["pixel_format"]), (&"h264".into(), &"yuv420p10le".into()));
         assert_eq!(hq["duration_seconds"], 2.0);
-        // The fast encode replaces the HQ slot only; the slow film keeps the web settings.
-        let slow = entry(&manifest, "ember_slow_web");
-        assert_eq!((&slow["codec"], &slow["pixel_format"]), (&"h264".into(), &"yuv420p".into()));
+        // The fast encode replaces the HQ slot only; the slow films keep the web settings.
+        for film in EMBER_SLOW_FILMS {
+            let slow = entry(&manifest, film.role);
+            assert_eq!(
+                (&slow["codec"], &slow["pixel_format"]),
+                (&"h264".into(), &"yuv420p".into())
+            );
+        }
     }
 
     #[test]
@@ -3082,7 +3197,7 @@ mod tests {
 
         let still_only = EmberManifest {
             frames_emitted: 0,
-            slow_frames_emitted: 0,
+            slow_frames_emitted: [0, 0],
             frame_rate: 60,
             has_video: false,
             fast_encode: false,
@@ -3108,6 +3223,10 @@ mod tests {
             .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
             .collect();
         assert_eq!(listed, EMBER_OUTPUT_PATHS, "run.py must require exactly the ember outputs");
+        // Every slow film's video among them, so a failed edition leaves none of them behind.
+        for film in EMBER_SLOW_FILMS {
+            assert!(EMBER_OUTPUT_PATHS.contains(&film.path), "{film:?}");
+        }
     }
 
     #[test]
@@ -3168,7 +3287,8 @@ mod tests {
 
     /// Recorded steps of the tiny ember renders: a short arc of [`tilted_figure_eight_bodies`],
     /// which its frontal view spreads over the 96×64 sheet. There is a frame per step, and the
-    /// fluid lands on [`EMBER_SLOW_FACTOR`] snapshots per frame in every mode, so the step count
+    /// fluid lands on at least 20 snapshots per frame in every mode (the least common multiple of
+    /// [`EMBER_SLOW_FACTORS`]), so the step count
     /// sets the tests' cost: a few seconds under [`tiny_ember_config`], whose short pre-roll
     /// lets the arc (0.75 fluid time units) ink for half of its length.
     const TINY_STEPS: usize = 240;
@@ -3181,7 +3301,7 @@ mod tests {
         full_webp: String,
         preview_webp: String,
         web_video: String,
-        slow_web_video: String,
+        slow_web_videos: [String; EMBER_SLOW_FILMS.len()],
         hq_video: String,
         certificate: String,
     }
@@ -3200,7 +3320,7 @@ mod tests {
                 full_webp: path(EMBER_FULL_WEBP_PATH),
                 preview_webp: path(EMBER_PREVIEW_WEBP_PATH),
                 web_video: path(EMBER_WEB_VIDEO_PATH),
-                slow_web_video: path(EMBER_SLOW_WEB_VIDEO_PATH),
+                slow_web_videos: EMBER_SLOW_FILMS.map(|film| path(film.path)),
                 hq_video: path(EMBER_HQ_VIDEO_PATH),
                 certificate: path(EMBER_CERTIFICATE_PATH),
                 dir,
@@ -3233,7 +3353,7 @@ mod tests {
                     full_webp: &self.full_webp,
                     preview_webp: &self.preview_webp,
                     web_video: &self.web_video,
-                    slow_web_video: &self.slow_web_video,
+                    slow_web_videos: self.slow_web_videos.each_ref().map(String::as_str),
                     hq_video: &self.hq_video,
                     certificate: &self.certificate,
                 },
@@ -3324,12 +3444,16 @@ mod tests {
         let outputs = &certificate["outputs"];
         assert!(outputs["frames_rgb48le_sha256"].is_null(), "{outputs}");
         assert_eq!((outputs["frames_emitted"].as_u64(), summary.frames_emitted), (Some(0), 0));
-        assert!(outputs["slow_frames_rgb48le_sha256"].is_null());
-        assert_eq!(
-            (outputs["slow_frames_emitted"].as_u64(), summary.slow_frames_emitted),
-            (Some(0), 0)
-        );
-        for video in [&package.web_video, &package.slow_web_video, &package.hq_video] {
+        // The slow films are planned (their first frames are recorded) but not rendered.
+        assert_eq!(summary.slow_films.len(), EMBER_SLOW_FILMS.len());
+        for (index, film) in summary.slow_films.iter().enumerate() {
+            let record = &outputs["slow_films"][index];
+            assert!(record["frames_rgb48le_sha256"].is_null());
+            assert_eq!((record["frames_emitted"].as_u64(), film.frames_emitted), (Some(0), 0));
+            assert_eq!(record["first_frame"], film.first_frame);
+        }
+        let videos = [&package.web_video, &package.hq_video];
+        for video in videos.into_iter().chain(&package.slow_web_videos) {
             assert!(!std::path::Path::new(video).exists(), "{video}");
         }
         let stats = summary.stats;
@@ -3356,8 +3480,8 @@ mod tests {
 
     /// The production path end to end, at a tiny size: every frame is shaded and streamed into
     /// the encoders of its film (`--fast-encode`: software H.264 in every slot), each video holds
-    /// exactly the frames of its film (the scheduled frames, or the slow film's), the certificate
-    /// records both frame streams the render hashed, and the asset manifest lists the three
+    /// exactly the frames of its film (the scheduled frames, or a slow film's), the certificate
+    /// records every frame stream the render hashed, and the asset manifest lists the four
     /// videos, each with the duration of its frame count.
     #[test]
     fn test_render_ember_edition_writes_its_videos() {
@@ -3371,6 +3495,11 @@ mod tests {
         let view = frontal_view(&bodies, TINY_STEPS, 96, 64);
         let plan = preflight_ember_edition(&bodies, &view, TINY_STEPS, 96, 64, &config)
             .expect("the tiny orbit plans");
+        // Every frame interval is simulated on a multiple of 20 snapshots, the least common
+        // multiple of the 4x and 10x films, and the slow films (a moment shared by both is
+        // rendered once).
+        assert_eq!(EMBER_SLOW_FACTORS, [4, 10]);
+        assert_eq!(plan.snapshot_lattice, 20);
 
         let package = TinyEmberPackage::new();
         let summary = package.render(TINY_STEPS, false, true);
@@ -3383,27 +3512,37 @@ mod tests {
         let outputs = &certificate["outputs"];
         assert_eq!(outputs["frames_rgb48le_sha256"], frames_sha256, "{outputs}");
         assert_eq!(outputs["frames_emitted"], frames);
-        // The slow film: every scheduled frame from its first one on, and the frames between.
-        let slow_frames = summary.slow_frames_emitted;
-        assert_eq!(plan.slow_frames, slow_frames);
+        // Each slow film: every scheduled frame from its first one on, and the frames between.
         assert_eq!(
-            slow_frames,
-            (frames - 1 - summary.slow_first_frame) * EMBER_SLOW_FACTOR as usize + 1
+            certificate["inputs"]["frames"]["slow_factors"],
+            serde_json::json!(EMBER_SLOW_FACTORS)
         );
-        let slow_sha256 = summary.slow_frames_sha256.as_deref().expect("the slow film is hashed");
-        assert_eq!(outputs["slow_frames_rgb48le_sha256"], slow_sha256);
-        assert_eq!(outputs["slow_frames_emitted"], slow_frames);
-        assert_eq!(certificate["inputs"]["frames"]["slow_factor"], EMBER_SLOW_FACTOR);
-        assert_eq!(certificate["derived"]["slow_first_frame"], summary.slow_first_frame);
+        let mut slow_frames = [0; EMBER_SLOW_FILMS.len()];
+        for (index, film) in summary.slow_films.iter().enumerate() {
+            assert_eq!(film.factor, EMBER_SLOW_FACTORS[index]);
+            assert_eq!(plan.slow_frames[index], film.frames_emitted);
+            assert_eq!(
+                film.frames_emitted,
+                (frames - 1 - film.first_frame) * film.factor as usize + 1
+            );
+            let record = &outputs["slow_films"][index];
+            let sha256 = film.frames_sha256.as_deref().expect("the slow film is hashed");
+            assert_eq!(record["frames_rgb48le_sha256"], sha256);
+            assert_eq!(record["frames_emitted"], film.frames_emitted);
+            assert_eq!(record["first_frame"], film.first_frame);
+            slow_frames[index] = film.frames_emitted;
+        }
         let stats = summary.stats;
         assert!(stats.contact_events > 0, "the bodies inked the water: {stats:?}");
         assert_eq!(certificate["stats"]["contact_events"], stats.contact_events);
 
         // Every video exists and decodes to exactly the frames of its film.
         let [web, hq] = ember_video_options(true);
+        let [medium, slow] = &package.slow_web_videos;
         let videos = [
             ("ember_web", &package.web_video, &web, frames),
-            ("ember_slow_web", &package.slow_web_video, &web, slow_frames),
+            ("ember_medium_web", medium, &web, slow_frames[0]),
+            ("ember_slow_web", slow, &web, slow_frames[1]),
             ("ember_hq", &package.hq_video, &hq, frames),
         ];
         for (_, video, options, film_frames) in videos {

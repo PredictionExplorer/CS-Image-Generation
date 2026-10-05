@@ -25,7 +25,7 @@
 //!    Catmull-Rom semi-Lagrangian interpolation.
 //! 4. `look`, `optics` and `paper` — tone law, spectral shading of the paper and encoding.
 //! 5. [`pipeline`] — orchestration: one frame per main-video checkpoint (the last frame is the
-//!    still), and the slow film's frames between them.
+//!    still), and the slow films' frames between them.
 //! 6. [`certificate`] — the per-package determinism certificate `metadata/ember.json`, written and
 //!    read back.
 //!
@@ -35,12 +35,12 @@
 //! # Determinism
 //!
 //! The frame streams and the still are a pure function of the orbit and its recorded time step,
-//! the view, the output size, the frame schedule, the slow factor (it sets the snapshot lattice
-//! in every mode), the paper seed and [`EmberConfig`]: bit-identical on every IEEE-754 CPU
-//! architecture. The module uses only
-//! exactly rounded arithmetic, the pure-Rust [`libm`](https://docs.rs/libm) crate for
-//! transcendental functions (through `math`), its own FFT, fixed-order reductions, and parallelism
-//! only over independent outputs. See `metadata/ember.json` for the per-package certificate.
+//! the view, the output size, the frame schedule, the slow factors (their least common multiple
+//! sets the snapshot lattice in every mode), the paper seed and [`EmberConfig`]: bit-identical on
+//! every IEEE-754 CPU architecture. The module uses only exactly rounded arithmetic, the
+//! pure-Rust [`libm`](https://docs.rs/libm) crate for transcendental functions (through `math`),
+//! its own FFT, fixed-order reductions, and parallelism only over independent outputs. See
+//! `metadata/ember.json` for the per-package certificate.
 
 pub mod certificate;
 pub mod config;
@@ -64,6 +64,6 @@ pub use error::{EmberError, EmberResult};
 pub use fft::bench as fft_bench;
 pub use pipeline::{
     EmberFrame, EmberMode, EmberPlan, EmberRequest, EmberStats, EmberSummary, EmberTimings,
-    plan_ember, render_ember,
+    SlowFilm, SlowFilmSummary, plan_ember, render_ember,
 };
 pub use view::{View, ViewDrift, ViewFrame, ViewProjection};
