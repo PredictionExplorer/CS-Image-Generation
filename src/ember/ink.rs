@@ -230,7 +230,7 @@ pub(crate) fn remap(
 /// [`remap`] of the visible nodes only: the margin nodes of `next` keep whatever they held, and
 /// the statistics count visible nodes. Every visible node gets the bits [`remap`] gives it.
 ///
-/// For fields that are shaded and discarded (the slow film's in-between frames): the shader
+/// For fields that are shaded and discarded (the slow films' in-between frames): the shader
 /// reads visible nodes only, and the margin, about a fifth of the nodes, matters only to the
 /// next remap.
 pub(crate) fn remap_visible(

@@ -371,8 +371,17 @@ fn render_ember_stage(
     view: &View,
     config: &EmberConfig,
 ) -> Result<app::EmberManifest> {
-    let [still_png, full_webp, preview_webp, web_video, slow_web_video, hq_video, certificate] =
-        app::EMBER_OUTPUT_PATHS.map(|relative| format!("{seed_dir}/{relative}"));
+    let path = |relative: &str| format!("{seed_dir}/{relative}");
+    let [still_png, full_webp, preview_webp, web_video, hq_video, certificate] = [
+        app::EMBER_STILL_PATH,
+        app::EMBER_FULL_WEBP_PATH,
+        app::EMBER_PREVIEW_WEBP_PATH,
+        app::EMBER_WEB_VIDEO_PATH,
+        app::EMBER_HQ_VIDEO_PATH,
+        app::EMBER_CERTIFICATE_PATH,
+    ]
+    .map(path);
+    let slow_web_videos = app::EMBER_SLOW_FILMS.map(|film| path(film.path));
     let summary = app::render_ember_edition(&app::EmberEditionRequest {
         seed_hex: hex_seed,
         seed_bytes,
@@ -389,7 +398,7 @@ fn render_ember_stage(
             full_webp: &full_webp,
             preview_webp: &preview_webp,
             web_video: &web_video,
-            slow_web_video: &slow_web_video,
+            slow_web_videos: slow_web_videos.each_ref().map(String::as_str),
             hq_video: &hq_video,
             certificate: &certificate,
         },

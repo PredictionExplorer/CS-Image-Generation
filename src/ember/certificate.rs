@@ -3,7 +3,7 @@
 //! The certificate records everything the ember frames are a function of — the selected orbit's
 //! initial conditions and the main edition's view of it (both as exact bit patterns), the
 //! integration settings, the frame schedule, the paper seed and the full [`EmberConfig`] —
-//! together with SHA-256 digests of the raw frame streams (the film and the slow film) and of
+//! together with SHA-256 digests of the raw frame streams (the film and each slow film) and of
 //! the still's pixels. Rendering the same inputs on any CPU architecture must reproduce every
 //! digest exactly. Encoded containers (MP4, WebP, PNG) are derived artefacts: their bytes
 //! also depend on encoder versions, so they are not part of the contract. The `build` and
@@ -18,7 +18,7 @@
 //! * `inputs.frames.sha256` — the frame schedule as little-endian `u64` knot indices
 //!   ([`schedule_sha256`]);
 //! * `inputs.paper_seed_sha256` — the paper-seed bytes ([`paper_seed_sha256`]);
-//! * `outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+//! * `outputs.frames_rgb48le_sha256`, `outputs.slow_films[*].frames_rgb48le_sha256`,
 //!   `outputs.still_rgb48le_sha256` — the pixels as `rgb48le` (16-bit little-endian R, G, B per
 //!   pixel, row-major from the top-left pixel; the frames of a film concatenated in the order
 //!   they are shown).
@@ -30,13 +30,14 @@
 //! to it, every float bit for bit (the crate enables `serde_json`'s `float_roundtrip`, which
 //! parses every decimal exactly). The reader is strict: it rejects other layout versions
 //! ([`CERTIFICATE_SCHEMA_VERSION`]) and editions, missing fields — the nullable ones
-//! (`outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+//! (`outputs.frames_rgb48le_sha256`, `outputs.slow_films[*].frames_rgb48le_sha256`,
 //! `config.look.floor_tau`) included, which must be present, as `null` or a value — unknown
 //! fields at every level (a field this build does not understand could be an input it would
 //! silently ignore), and outputs that disagree about the frames
 //! ([`CertificateError::InconsistentOutputs`]: frames emitted without a frames digest, which
 //! would pass as a still-only certificate, a frames digest over another number of frames than
-//! the film has, or a slow film without the normal one).
+//! the film has, a slow film without the normal one, or slow films other than the inputs'
+//! `slow_factors`).
 //!
 //! The initial conditions are also written, and read back, as exact IEEE-754 bit patterns
 //! ([`F64Bits`]); [`CertificateInputs::bodies`] rebuilds them from those, never from the decimal
@@ -54,7 +55,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use super::config::EmberConfig;
-use super::pipeline::{EmberStats, EmberSummary, EmberTimings};
+use super::pipeline::{EmberStats, EmberSummary, EmberTimings, slow_lattice};
 use super::view::View;
 use crate::sim::Body;
 
@@ -74,7 +75,11 @@ use crate::sim::Body;
 ///   `inputs.view`, `inputs.frames.slow_factor`, `derived.slow_first_frame`,
 ///   `outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`; the principal-plane
 ///   projection (`config.projection`, `derived.projection`) is gone.
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 4;
+/// * 5 — several slow films (`ember-v4`): `inputs.frames.slow_factors` replaces
+///   `inputs.frames.slow_factor`, and `outputs.slow_films` (one record per factor: its factor,
+///   first frame, frames emitted and digest) replaces `derived.slow_first_frame`,
+///   `outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`.
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 5;
 
 /// Version of the rendering algorithm, `ember-v<N>`. Bump `N` whenever a change alters rendered
 /// bits; the sync loop (`run.py`) withdraws and re-renders every published edition of an older
@@ -84,7 +89,10 @@ pub const CERTIFICATE_SCHEMA_VERSION: u32 = 4;
 /// * `ember-v2` — sumi on kozo, tidally stretched bodies, the fade timed in film time.
 /// * `ember-v3` — the bodies follow the main edition's view (projection space, viewing rotation,
 ///   drift and frame); a slow film; the soak frame is symmetric.
-pub const ALGORITHM_VERSION: &str = "ember-v3";
+/// * `ember-v4` — a second slow film, 4 times slower, beside the one 10 times slower: every
+///   frame interval is simulated on a multiple of 20 snapshots (their least common multiple)
+///   instead of 10.
+pub const ALGORITHM_VERSION: &str = "ember-v4";
 
 /// The certificate's `edition`.
 pub const EDITION: &str = "ember";
@@ -97,11 +105,11 @@ pub const PIXEL_ENCODING: &str =
     "sRGB (IEC 61966-2-1) 16-bit, CAT16-adapted from the gallery LED-V1 illuminant to D65";
 
 /// The statement the digests certify.
-const CONTRACT: &str = "outputs.frames_rgb48le_sha256, outputs.slow_frames_rgb48le_sha256 and \
-outputs.still_rgb48le_sha256 are a pure function of `inputs` and `config`: rendering them again \
-on any IEEE-754 CPU (x86_64, aarch64, any thread count) reproduces every digest bit for bit. \
-MP4, WebP and PNG files are encodings of these pixels whose bytes also depend on encoder \
-versions.";
+const CONTRACT: &str = "outputs.frames_rgb48le_sha256, every \
+outputs.slow_films[*].frames_rgb48le_sha256 and outputs.still_rgb48le_sha256 are a pure \
+function of `inputs` and `config`: rendering them again on any IEEE-754 CPU (x86_64, aarch64, \
+any thread count) reproduces every digest bit for bit. MP4, WebP and PNG files are encodings of \
+these pixels whose bytes also depend on encoder versions.";
 
 /// The full certificate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -285,22 +293,23 @@ pub struct FrameScheduleRecord {
     pub frame_rate: u32,
     /// [`schedule_sha256`] of the schedule.
     pub sha256: String,
-    /// How many times slower the slow film is: it has this many frames per scheduled interval,
-    /// and the snapshot lattice of every render is a multiple of it.
-    pub slow_factor: u32,
+    /// How many times slower each slow film is, strictly increasing: a film has this many
+    /// frames per scheduled interval, and the snapshot lattice of every render is a multiple of
+    /// all of them.
+    pub slow_factors: Vec<u32>,
 }
 
 impl FrameScheduleRecord {
-    /// The record of `frame_steps` shown at `frame_rate` frames per second, with a slow film
-    /// `slow_factor` times slower.
-    pub fn new(frame_steps: &[usize], frame_rate: u32, slow_factor: u32) -> Self {
+    /// The record of `frame_steps` shown at `frame_rate` frames per second, with slow films
+    /// `slow_factors` times slower.
+    pub fn new(frame_steps: &[usize], frame_rate: u32, slow_factors: &[u32]) -> Self {
         Self {
             count: frame_steps.len(),
             first_step: frame_steps.first().copied().unwrap_or(0),
             last_step: frame_steps.last().copied().unwrap_or(0),
             frame_rate,
             sha256: schedule_sha256(frame_steps),
-            slow_factor,
+            slow_factors: slow_factors.to_vec(),
         }
     }
 }
@@ -325,8 +334,6 @@ pub struct CertificateDerived {
     pub fluid_dx: f64,
     /// Ink node grid `[cols, rows]`, margin included.
     pub ink_grid: [usize; 2],
-    /// The scheduled frame at which the slow film starts (a little before the ink appears).
-    pub slow_first_frame: usize,
 }
 
 /// The derived quantities of a render.
@@ -341,7 +348,6 @@ impl From<&EmberSummary> for CertificateDerived {
             fluid_grid: summary.fluid_grid,
             fluid_dx: summary.fluid_dx,
             ink_grid: summary.ink_grid,
-            slow_first_frame: summary.slow_first_frame,
         }
     }
 }
@@ -357,18 +363,30 @@ pub struct CertificateOutputs {
     /// Frames in the stream: 0 for still-only renders, every scheduled frame
     /// (`inputs.frames.count`) for video renders. The reader checks both.
     pub frames_emitted: usize,
-    /// SHA-256 of the slow film's concatenated `rgb48le` frames (`null` unless it was rendered).
-    /// Required when reading, like the normal film's.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub slow_frames_rgb48le_sha256: Option<String>,
-    /// Frames in the slow film's stream: 0 unless it was rendered, else every scheduled frame
-    /// from `derived.slow_first_frame` on and `inputs.frames.slow_factor - 1` frames between
-    /// each two of them. The reader checks both.
-    pub slow_frames_emitted: usize,
+    /// One record per slow film, in the order of `inputs.frames.slow_factors` (also when the
+    /// slow films were not rendered: their first frames are recorded all the same).
+    pub slow_films: Vec<SlowFilmRecord>,
     /// SHA-256 of the still as `rgb48le`.
     pub still_rgb48le_sha256: String,
-    /// Colour encoding of all three ([`PIXEL_ENCODING`]).
+    /// Colour encoding of every digest ([`PIXEL_ENCODING`]).
     pub encoding: String,
+}
+
+/// One slow film of a render.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlowFilmRecord {
+    /// How many times slower than the normal film it is.
+    pub factor: u32,
+    /// The scheduled frame at which it starts (a little before the ink appears).
+    pub first_frame: usize,
+    /// Frames in its stream: 0 unless it was rendered, else every scheduled frame from
+    /// `first_frame` on and `factor - 1` frames between each two of them. The reader checks it.
+    pub frames_emitted: usize,
+    /// SHA-256 of its concatenated `rgb48le` frames (`null` unless it was rendered). Required
+    /// when reading, like the normal film's.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub frames_rgb48le_sha256: Option<String>,
 }
 
 /// The digests and frame counts of a render.
@@ -377,8 +395,16 @@ impl From<&EmberSummary> for CertificateOutputs {
         Self {
             frames_rgb48le_sha256: summary.frames_sha256.clone(),
             frames_emitted: summary.frames_emitted,
-            slow_frames_rgb48le_sha256: summary.slow_frames_sha256.clone(),
-            slow_frames_emitted: summary.slow_frames_emitted,
+            slow_films: summary
+                .slow_films
+                .iter()
+                .map(|film| SlowFilmRecord {
+                    factor: film.factor,
+                    first_frame: film.first_frame,
+                    frames_emitted: film.frames_emitted,
+                    frames_rgb48le_sha256: film.frames_sha256.clone(),
+                })
+                .collect(),
             still_rgb48le_sha256: summary.still_sha256.clone(),
             encoding: PIXEL_ENCODING.to_owned(),
         }
@@ -391,21 +417,11 @@ impl CertificateOutputs {
     /// a video render a digest over every scheduled frame. What a verifier checks follows from
     /// the digest, so a certificate with frames but no digest would pass as still-only.
     ///
-    /// The slow film follows the same rule against its own length,
-    /// `(count - 1 - slow_first_frame)·slow_factor + 1`, and is only ever rendered together
-    /// with the normal film.
-    fn check_frames(
-        &self,
-        schedule: &FrameScheduleRecord,
-        slow_first_frame: usize,
-    ) -> Result<(), CertificateError> {
-        // `None` for numbers no film has (a first frame beyond the schedule, an overflow).
-        let slow_frames = slow_first_frame
-            .checked_add(1)
-            .and_then(|skipped| schedule.count.checked_sub(skipped))
-            .and_then(|intervals| intervals.checked_mul(schedule.slow_factor as usize))
-            .and_then(|between| between.checked_add(1));
-        let reason = match (&self.frames_rgb48le_sha256, self.frames_emitted) {
+    /// Each slow film follows the same rule against its own length,
+    /// `(count - 1 - first_frame)·factor + 1`, is only ever rendered together with the normal
+    /// film, and the films are those of `schedule.slow_factors`, in order.
+    fn check_frames(&self, schedule: &FrameScheduleRecord) -> Result<(), CertificateError> {
+        let normal = match (&self.frames_rgb48le_sha256, self.frames_emitted) {
             (None, 0) => None,
             (None, emitted) => Some(format!(
                 "outputs.frames_rgb48le_sha256 is null, but outputs.frames_emitted is {emitted} (a \
@@ -417,28 +433,84 @@ impl CertificateOutputs {
                 schedule.count
             )),
             (Some(_), _) => None,
-        }
-        .or_else(|| match (&self.slow_frames_rgb48le_sha256, self.slow_frames_emitted) {
+        };
+        let factors: Vec<u32> = self.slow_films.iter().map(|film| film.factor).collect();
+        // The slow films are rendered together or not at all (`EmberMode`).
+        let rendered = |film: &SlowFilmRecord| film.frames_rgb48le_sha256.is_some();
+        let slow_rendered = self.slow_films.first().is_some_and(rendered);
+        let reason = normal
+            .or_else(|| {
+                slow_lattice(&schedule.slow_factors)
+                    .err()
+                    .map(|reason| format!("inputs.frames.slow_factors: {reason}"))
+            })
+            .or_else(|| {
+                (factors != schedule.slow_factors).then(|| {
+                    format!(
+                        "outputs.slow_films are of the factors {factors:?}, but \
+                         inputs.frames.slow_factors is {:?}",
+                        schedule.slow_factors
+                    )
+                })
+            })
+            .or_else(|| {
+                self.slow_films.iter().enumerate().find_map(|(index, film)| {
+                    film.inconsistency(index, schedule.count, self.frames_rgb48le_sha256.is_some())
+                })
+            })
+            .or_else(|| {
+                let index =
+                    self.slow_films.iter().position(|film| rendered(film) != slow_rendered)?;
+                let state = |set: bool| if set { "set" } else { "null" };
+                Some(format!(
+                    "outputs.slow_films[{index}].frames_rgb48le_sha256 is {}, but \
+                     outputs.slow_films[0].frames_rgb48le_sha256 is {} (the slow films are \
+                     rendered together or not at all)",
+                    state(!slow_rendered),
+                    state(slow_rendered)
+                ))
+            });
+        reason.map_or(Ok(()), |reason| Err(CertificateError::InconsistentOutputs { reason }))
+    }
+}
+
+impl SlowFilmRecord {
+    /// Why this record (`outputs.slow_films[index]`, of a schedule of `count` frames) disagrees
+    /// with itself or with the normal film (`normal_rendered`), if it does.
+    fn inconsistency(&self, index: usize, count: usize, normal_rendered: bool) -> Option<String> {
+        let field = format!("outputs.slow_films[{index}]");
+        let (factor, first_frame) = (self.factor, self.first_frame);
+        let Some(intervals) = first_frame.checked_add(1).and_then(|shown| count.checked_sub(shown))
+        else {
+            return Some(format!(
+                "{field}.first_frame is {first_frame}, but the schedule has {count} frames: the \
+                 {factor}x film has no frames"
+            ));
+        };
+        let Some(frames) =
+            intervals.checked_mul(factor as usize).and_then(|between| between.checked_add(1))
+        else {
+            return Some(format!(
+                "the {factor}x film of {count} scheduled frames (inputs.frames.count) from frame \
+                 {first_frame} has more frames than a count can hold"
+            ));
+        };
+        match (&self.frames_rgb48le_sha256, self.frames_emitted) {
             (None, 0) => None,
             (None, emitted) => Some(format!(
-                "outputs.slow_frames_rgb48le_sha256 is null, but outputs.slow_frames_emitted is \
-                 {emitted} (a certificate without the slow film records 0 frames)"
+                "{field}.frames_rgb48le_sha256 is null, but its frames_emitted is {emitted} (a \
+                 film that was not rendered records 0 frames)"
             )),
-            (Some(_), _) if self.frames_rgb48le_sha256.is_none() => Some(
-                "outputs.slow_frames_rgb48le_sha256 is set, but outputs.frames_rgb48le_sha256 is \
-                 null (the slow film is rendered together with the normal one)"
-                    .to_owned(),
-            ),
-            (Some(_), emitted) if Some(emitted) != slow_frames => Some(format!(
-                "outputs.slow_frames_emitted is {emitted}, but the slow film of {} scheduled \
-                 frames from frame {slow_first_frame} at factor {} has {} frames",
-                schedule.count,
-                schedule.slow_factor,
-                slow_frames.map_or("no".to_owned(), |frames| frames.to_string())
+            (Some(_), _) if !normal_rendered => Some(format!(
+                "{field}.frames_rgb48le_sha256 is set, but outputs.frames_rgb48le_sha256 is null \
+                 (the slow films are rendered together with the normal one)"
+            )),
+            (Some(_), emitted) if emitted != frames => Some(format!(
+                "{field}.frames_emitted is {emitted}, but the {factor}x film of {count} scheduled \
+                 frames from frame {first_frame} has {frames} frames"
             )),
             (Some(_), _) => None,
-        });
-        reason.map_or(Ok(()), |reason| Err(CertificateError::InconsistentOutputs { reason }))
+        }
     }
 }
 
@@ -520,10 +592,10 @@ pub enum CertificateError {
     },
 
     /// The outputs disagree about the frames: frames emitted without a frames digest, a frames
-    /// digest over another number of frames than `inputs.frames.count`, or the same of the slow
+    /// digest over another number of frames than `inputs.frames.count`, or the same of a slow
     /// film (slow frames without a slow digest, a slow digest without the normal film's, or
-    /// another number of slow frames than the schedule, `derived.slow_first_frame` and
-    /// `inputs.frames.slow_factor` give).
+    /// another number of slow frames than the schedule, its first frame and its factor give),
+    /// or slow films other than `inputs.frames.slow_factors`.
     #[error("inconsistent ember certificate: {reason}")]
     InconsistentOutputs {
         /// What disagrees, naming the fields and their values.
@@ -583,7 +655,7 @@ impl EmberCertificate {
                 frames: FrameScheduleRecord::new(
                     context.frame_steps,
                     context.frame_rate,
-                    summary.slow_factor,
+                    &summary.slow_films.iter().map(|film| film.factor).collect::<Vec<_>>(),
                 ),
             },
             config: context.config.clone(),
@@ -638,7 +710,7 @@ impl EmberCertificate {
             return Err(CertificateError::WrongEdition { found: header.edition });
         }
         let parsed: Self = serde_json::from_str(text)?;
-        parsed.outputs.check_frames(&parsed.inputs.frames, parsed.derived.slow_first_frame)?;
+        parsed.outputs.check_frames(&parsed.inputs.frames)?;
         Ok(parsed)
     }
 }
@@ -648,6 +720,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+    use crate::ember::pipeline::SlowFilmSummary;
     use crate::ember::view::{ViewDrift, ViewFrame, ViewProjection};
 
     /// Initial conditions with awkward decimals: 17 significant digits (one of which `serde_json`
@@ -691,10 +764,20 @@ mod tests {
             still_sha256: "ab".repeat(32),
             frames_emitted: 20,
             frames_sha256: Some("cd".repeat(32)),
-            slow_factor: 10,
-            slow_first_frame: 2,
-            slow_frames_emitted: 171,
-            slow_frames_sha256: Some("ef".repeat(32)),
+            slow_films: vec![
+                SlowFilmSummary {
+                    factor: 4,
+                    first_frame: 2,
+                    frames_emitted: 69,
+                    frames_sha256: Some("12".repeat(32)),
+                },
+                SlowFilmSummary {
+                    factor: 10,
+                    first_frame: 2,
+                    frames_emitted: 171,
+                    frames_sha256: Some("ef".repeat(32)),
+                },
+            ],
             duration: 8.779_257_088_198_804,
             valve_time: 8.779_257_088_198_804 - 0.2,
             hold_time: 8.779_257_088_198_804 * 0.8 / 30.0,
@@ -861,9 +944,9 @@ mod tests {
             schedule_sha256(&schedule()),
             "122527417c8f79a93d4697ff39ac74e11cbfffdeeaca9ac8f4d6d3ea3170cb6f"
         );
-        let record = FrameScheduleRecord::new(&schedule(), 60, 10);
+        let record = FrameScheduleRecord::new(&schedule(), 60, &[4, 10]);
         assert_eq!((record.count, record.first_step, record.last_step), (20, 150, 2_999));
-        assert_eq!((record.frame_rate, record.slow_factor), (60, 10));
+        assert_eq!((record.frame_rate, record.slow_factors.as_slice()), (60, &[4, 10][..]));
         assert_eq!(record.sha256, schedule_sha256(&schedule()));
     }
 
@@ -952,7 +1035,6 @@ mod tests {
                 "fluid_grid",
                 "hold_time",
                 "ink_grid",
-                "slow_first_frame",
                 "tidal_reference",
                 "valve_time"
             ]
@@ -966,7 +1048,7 @@ mod tests {
         assert_eq!(json["inputs"]["view"]["frame"]["scale"], "0x3fe15f229fbe76c8");
         assert_eq!(
             keys(&json["inputs"]["frames"]),
-            ["count", "first_step", "frame_rate", "last_step", "sha256", "slow_factor"]
+            ["count", "first_step", "frame_rate", "last_step", "sha256", "slow_factors"]
         );
         assert_eq!(
             keys(&json["stats"]),
@@ -987,11 +1069,15 @@ mod tests {
                 "encoding",
                 "frames_emitted",
                 "frames_rgb48le_sha256",
-                "slow_frames_emitted",
-                "slow_frames_rgb48le_sha256",
+                "slow_films",
                 "still_rgb48le_sha256"
             ]
         );
+        assert_eq!(
+            keys(&json["outputs"]["slow_films"][1]),
+            ["factor", "first_frame", "frames_emitted", "frames_rgb48le_sha256"]
+        );
+        assert_eq!(json["inputs"]["frames"]["slow_factors"], serde_json::json!([4, 10]));
         assert_eq!(json["inputs"]["bodies"][1]["bits"]["mass"], "0x3ff0000000000000");
         assert_eq!(json["edition"], EDITION);
         assert_eq!(json["algorithm"], ALGORITHM_VERSION);
@@ -1010,7 +1096,7 @@ mod tests {
         assert!(parse(&|_| {}).is_ok());
         assert_eq!(json["schema_version"], CERTIFICATE_SCHEMA_VERSION);
         // Any other version is reported as such, not as a malformed file …
-        for version in [0, 1, 2, 3, CERTIFICATE_SCHEMA_VERSION + 1] {
+        for version in [0, 1, 2, 3, 4, CERTIFICATE_SCHEMA_VERSION + 1] {
             let error = parse(&|v| v["schema_version"] = version.into()).expect_err("rejected");
             assert!(
                 matches!(error, CertificateError::UnsupportedSchema { found } if found == version),
@@ -1049,7 +1135,7 @@ mod tests {
         // still-only, or without its fading floor.
         for (section, key) in [
             ("outputs", "frames_rgb48le_sha256"),
-            ("outputs", "slow_frames_rgb48le_sha256"),
+            ("outputs", "slow_films"),
             ("inputs", "view"),
             ("look", "floor_tau"),
             ("derived", "tidal_reference"),
@@ -1068,11 +1154,22 @@ mod tests {
         let still_only = parse(&|v| {
             v["outputs"]["frames_rgb48le_sha256"] = Value::Null;
             v["outputs"]["frames_emitted"] = 0.into();
-            v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null;
-            v["outputs"]["slow_frames_emitted"] = 0.into();
+            for film in v["outputs"]["slow_films"].as_array_mut().expect("films") {
+                film["frames_rgb48le_sha256"] = Value::Null;
+                film["frames_emitted"] = 0.into();
+            }
         })
         .expect("an explicit null is read");
         assert_eq!(still_only.outputs.frames_rgb48le_sha256, None);
+        // A slow film's nullable digest is required as well.
+        let error = parse(&|v| {
+            v["outputs"]["slow_films"][0]
+                .as_object_mut()
+                .expect("film")
+                .remove("frames_rgb48le_sha256");
+        })
+        .expect_err("a missing key is rejected");
+        assert!(error.to_string().contains("missing field `frames_rgb48le_sha256`"), "{error}");
         let no_fade = parse(&|v| v["config"]["look"]["floor_tau"] = Value::Null).expect("null");
         assert_eq!(no_fade.config.look.floor_tau, None);
         let bits = parse(&|v| v["inputs"]["bodies"][0]["bits"]["mass"] = "0x12".into())
@@ -1105,7 +1202,9 @@ mod tests {
         // frames, and the full 20-frame schedule (the still is its last knot).
         let mut still_summary = summary();
         (still_summary.frames_sha256, still_summary.frames_emitted) = (None, 0);
-        (still_summary.slow_frames_sha256, still_summary.slow_frames_emitted) = (None, 0);
+        for film in &mut still_summary.slow_films {
+            (film.frames_sha256, film.frames_emitted) = (None, 0);
+        }
         let still_only = certificate_of(&awkward_bodies(), &config(), &still_summary);
         assert_eq!(still_only.inputs.frames.count, 20);
         let text = serde_json::to_string(&still_only).expect("serialises");
@@ -1116,36 +1215,96 @@ mod tests {
             &|v| v["outputs"]["frames_rgb48le_sha256"] = Value::Null,
             "outputs.frames_rgb48le_sha256 is null, but outputs.frames_emitted is 20",
         );
-        // The slow film follows the same rules against its own length: 17 scheduled intervals
-        // after frame 2, ten frames each, and the first frame.
-        assert_eq!(video["outputs"]["slow_frames_emitted"], 171);
-        assert_eq!(video["derived"]["slow_first_frame"], 2);
+        // Each slow film follows the same rules against its own length: 17 scheduled intervals
+        // after frame 2, four or ten frames each, and the first frame.
+        assert_eq!(video["outputs"]["slow_films"][0]["frames_emitted"], 69);
+        assert_eq!(video["outputs"]["slow_films"][1]["frames_emitted"], 171);
         let normal_only = parse(&|v| {
-            v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null;
-            v["outputs"]["slow_frames_emitted"] = 0.into();
+            for film in v["outputs"]["slow_films"].as_array_mut().expect("films") {
+                film["frames_rgb48le_sha256"] = Value::Null;
+                film["frames_emitted"] = 0.into();
+            }
         })
         .expect("a certificate of the normal film alone is read");
-        assert_eq!(normal_only.outputs.slow_frames_rgb48le_sha256, None);
+        assert_eq!(normal_only.outputs.slow_films[1].frames_rgb48le_sha256, None);
         inconsistent(
-            &|v| v["outputs"]["slow_frames_rgb48le_sha256"] = Value::Null,
-            "outputs.slow_frames_rgb48le_sha256 is null, but outputs.slow_frames_emitted is 171",
+            &|v| v["outputs"]["slow_films"][1]["frames_rgb48le_sha256"] = Value::Null,
+            "outputs.slow_films[1].frames_rgb48le_sha256 is null, but its frames_emitted is 171",
         );
-        for emitted in [170, 172, 0, 181] {
+        for (film, emitted, frames, factor) in [(1, 170, 171, 10), (1, 172, 171, 10), (0, 0, 69, 4)]
+        {
             inconsistent(
-                &|v| v["outputs"]["slow_frames_emitted"] = emitted.into(),
+                &|v| v["outputs"]["slow_films"][film]["frames_emitted"] = emitted.into(),
                 &format!(
-                    "outputs.slow_frames_emitted is {emitted}, but the slow film of 20 scheduled \
-                     frames from frame 2 at factor 10 has 171 frames"
+                    "outputs.slow_films[{film}].frames_emitted is {emitted}, but the {factor}x \
+                     film of 20 scheduled frames from frame 2 has {frames} frames"
                 ),
             );
         }
-        inconsistent(&|v| v["derived"]["slow_first_frame"] = 20.into(), "has no frames");
+        inconsistent(
+            &|v| v["outputs"]["slow_films"][0]["first_frame"] = 20.into(),
+            "outputs.slow_films[0].first_frame is 20, but the schedule has 20 frames",
+        );
         inconsistent(
             &|v| {
                 v["outputs"]["frames_rgb48le_sha256"] = Value::Null;
                 v["outputs"]["frames_emitted"] = 0.into();
             },
-            "outputs.slow_frames_rgb48le_sha256 is set, but outputs.frames_rgb48le_sha256 is null",
+            "outputs.slow_films[0].frames_rgb48le_sha256 is set, but \
+             outputs.frames_rgb48le_sha256 is null",
+        );
+        // The films are those of the inputs, in order: none missing, none extra, none swapped.
+        type FilmsEdit = fn(&mut Vec<Value>);
+        let edits: [(FilmsEdit, &str); 3] = [
+            (|films| films.reverse(), "[10, 4]"),
+            (|films| drop(films.pop()), "[4]"),
+            (|films| films.clear(), "[]"),
+        ];
+        for (edit, factors) in edits {
+            inconsistent(
+                &|v| edit(v["outputs"]["slow_films"].as_array_mut().expect("films")),
+                &format!(
+                    "outputs.slow_films are of the factors {factors}, but \
+                     inputs.frames.slow_factors is [4, 10]"
+                ),
+            );
+        }
+        // The slow films are rendered together or not at all.
+        inconsistent(
+            &|v| {
+                let film = &mut v["outputs"]["slow_films"][0];
+                (film["frames_rgb48le_sha256"], film["frames_emitted"]) = (Value::Null, 0.into());
+            },
+            "outputs.slow_films[1].frames_rgb48le_sha256 is set, but \
+             outputs.slow_films[0].frames_rgb48le_sha256 is null",
+        );
+        // The recorded factors follow the renderer's rule (checked before the films' own).
+        for (factors, rule) in [("[10, 4]", "strictly increasing"), ("[0, 4]", "at least 1")] {
+            inconsistent(
+                &|v| {
+                    v["inputs"]["frames"]["slow_factors"] =
+                        serde_json::from_str(factors).expect("a JSON list");
+                },
+                &format!("inputs.frames.slow_factors: the slow factors {factors} must be {rule}"),
+            );
+        }
+        // A film too long to count is named as such, not as a first frame beyond the schedule.
+        inconsistent(
+            &|v| {
+                let outputs = &mut v["outputs"];
+                (outputs["frames_rgb48le_sha256"], outputs["frames_emitted"]) =
+                    (Value::Null, 0.into());
+                for film in outputs["slow_films"].as_array_mut().expect("films") {
+                    (film["frames_rgb48le_sha256"], film["frames_emitted"]) =
+                        (Value::Null, 0.into());
+                }
+                v["inputs"]["frames"]["count"] = u64::MAX.into();
+            },
+            &format!(
+                "the 4x film of {} scheduled frames (inputs.frames.count) from frame 2 has more \
+                 frames than a count can hold",
+                u64::MAX
+            ),
         );
         // A digest over fewer, more or no frames than the schedule has …
         for emitted in [19, 21, 0] {

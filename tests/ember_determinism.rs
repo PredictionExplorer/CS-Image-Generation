@@ -1,17 +1,17 @@
 //! Cross-architecture golden tests of the ember edition.
 //!
-//! A small but complete ember render (the view, tidal bodies, fluid, ink, paper, shading, both
-//! frame streams) of a fixed orbit is hashed and compared with digests recorded on another
+//! A small but complete ember render (the view, tidal bodies, fluid, ink, paper, shading, every
+//! frame stream) of a fixed orbit is hashed and compared with digests recorded on another
 //! machine. CI runs this file on `x86_64` Linux and `aarch64` macOS, so any
 //! architecture-dependent arithmetic in the ember path fails here.
 //!
 //! Every test renders exactly once, in its own small rayon pool, and compares its own render
 //! with the golden digests: the tests stay cheap when a runner such as `cargo nextest` gives each
 //! one its own process, and parallel test processes do not oversubscribe the CPU. Agreement of
-//! the renders (3-thread with the slow film, 2-thread still-only, 2-thread video without the
-//! slow film, 1-thread with it) with the same digests also proves that neither the mode nor the
-//! thread count changes a bit: the still and the normal film do not depend on whether the slow
-//! film is rendered.
+//! the renders (3-thread with the slow films, 2-thread still-only, 2-thread video without them,
+//! 1-thread with them) with the same digests also proves that neither the mode nor the thread
+//! count changes a bit: the still and the normal film do not depend on whether the slow films
+//! are rendered.
 //!
 //! To re-bless after an intentional change of the rendering algorithm, run
 //!
@@ -40,9 +40,11 @@ use three_body_problem::sim::{Body, get_positions};
 /// SHA-256 of the golden render's `rgb48le` frame stream.
 const GOLDEN_FRAMES_SHA256: &str =
     "b76659708de75e7d36e7a5c82c3ed5875f27c1e93ba32fa3473e7c3205732ef7";
-/// SHA-256 of the golden render's slow film as `rgb48le`.
-const GOLDEN_SLOW_FRAMES_SHA256: &str =
-    "951181709982cff22126e822dd1074476e70bd74c836dee28f604e6c7b2747d5";
+/// SHA-256 of the golden render's slow films as `rgb48le`, in the order of [`SLOW_FACTORS`].
+const GOLDEN_SLOW_FRAMES_SHA256: [&str; 2] = [
+    "1dbb8c32ad6dd26cf8a7f5901a653d597b3113d9e2386c61cccb1af998045c2c",
+    "951181709982cff22126e822dd1074476e70bd74c836dee28f604e6c7b2747d5",
+];
 /// SHA-256 of the golden render's still as `rgb48le`.
 const GOLDEN_STILL_SHA256: &str =
     "28afdf5b8ddc114dfcd97b85d5886494ab627de921c3300a5e3b745909685f9f";
@@ -57,8 +59,11 @@ const WIDTH: u32 = 96;
 const HEIGHT: u32 = 64;
 const STEPS: usize = 3_000;
 const FRAME_INTERVAL: usize = 150;
-/// How many times slower the golden render's slow film is.
-const SLOW_FACTOR: usize = 4;
+/// How many times slower the golden render's slow films are: the moment half-way through each
+/// interval belongs to both, so the render shares it. Their least common multiple, 4, is the
+/// snapshot lattice of `ember-v3`'s single 4x golden film, so the still, the normal film and the
+/// 4x film keep that look's digests.
+const SLOW_FACTORS: [u32; 2] = [2, 4];
 
 /// The figure-eight choreography (Chenciner–Montgomery), slightly tilted out of its plane, with
 /// unit masses and velocities rescaled from `G = 1` to the simulator's `G` (period ≈ 2.02 time
@@ -100,7 +105,7 @@ fn golden_view() -> View {
 ///
 /// On a 64-row grid the (enlarged) bodies cannot spin their boundary layers up to the production
 /// gate of |ω| = 40, so the gate is lowered. The golden orbit is short (about six fluid units):
-/// the bodies start inking half-way through it, so the slow film skips the first frames of bare
+/// the bodies start inking half-way through it, so the slow films skip the first frames of bare
 /// paper, and the hold and the fade are a quarter of it each, so fresh black, fading grey and
 /// the floor wash all appear in the frames.
 fn golden_config() -> EmberConfig {
@@ -134,8 +139,11 @@ struct GoldenRun {
     summary: EmberSummary,
     /// The scheduled frames (the normal film).
     frames: Vec<Vec<u16>>,
-    /// The slow film: scheduled frames from its first one on, and the frames between them.
-    slow_frames: Vec<Vec<u16>>,
+    /// Each slow film, in the order of [`SLOW_FACTORS`]: scheduled frames from its first one on,
+    /// and the frames between them.
+    slow_frames: [Vec<Vec<u16>>; 2],
+    /// Frames the sink received: every moment once, however many films show it.
+    sink_calls: usize,
 }
 
 /// Renders the golden orbit with `config` in a rayon pool of `threads` threads.
@@ -151,7 +159,7 @@ fn render(threads: usize, mode: EmberMode, config: &EmberConfig) -> GoldenRun {
         masses,
         view: &view,
         frame_steps: &schedule,
-        slow_factor: SLOW_FACTOR as u32,
+        slow_factors: &SLOW_FACTORS,
         width: WIDTH,
         height: HEIGHT,
         paper_seed: b"ember-golden-paper",
@@ -169,29 +177,34 @@ fn render(threads: usize, mode: EmberMode, config: &EmberConfig) -> GoldenRun {
             plan.peak_speed()
         );
     }
-    let (mut frames, mut slow_frames) = (Vec::new(), Vec::new());
+    let (mut frames, mut slow_frames) = (Vec::new(), [Vec::new(), Vec::new()]);
+    let (mut sink_calls, mut last_time) = (0, f64::NEG_INFINITY);
     let summary = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .build()
         .expect("thread pool builds")
         .install(|| {
             render_ember(&request, &mut |frame| {
-                // The sink sees the frames of both films in time order, each exactly once.
-                assert!(frame.index.is_some() || frame.slow_index.is_some());
+                // The sink sees the frames of every film in time order, each moment once.
+                assert!(frame.index.is_some() || frame.slow_indices.iter().any(Option::is_some));
+                assert!(frame.time > last_time, "{} after {last_time}", frame.time);
+                (sink_calls, last_time) = (sink_calls + 1, frame.time);
                 if let Some(index) = frame.index {
                     assert_eq!(index, frames.len());
                     assert_eq!(frame.orbit_step, Some(schedule[index]));
                     frames.push(frame.rgb.to_vec());
                 }
-                if let Some(index) = frame.slow_index {
-                    assert_eq!(index, slow_frames.len());
-                    slow_frames.push(frame.rgb.to_vec());
+                for (film, index) in slow_frames.iter_mut().zip(frame.slow_indices) {
+                    if let Some(index) = *index {
+                        assert_eq!(index, film.len());
+                        film.push(frame.rgb.to_vec());
+                    }
                 }
                 Ok(())
             })
         })
         .expect("the golden render succeeds");
-    GoldenRun { summary, frames, slow_frames }
+    GoldenRun { summary, frames, slow_frames, sink_calls }
 }
 
 /// Whether the digests are being re-blessed (`EMBER_BLESS` set).
@@ -228,7 +241,8 @@ fn assert_golden(label: &str, summary: &EmberSummary) {
     let stats = &summary.stats;
     if blessing() {
         println!("{label}: GOLDEN_FRAMES_SHA256 = {:?}", summary.frames_sha256);
-        println!("{label}: GOLDEN_SLOW_FRAMES_SHA256 = {:?}", summary.slow_frames_sha256);
+        let slow: Vec<_> = summary.slow_films.iter().map(|film| &film.frames_sha256).collect();
+        println!("{label}: GOLDEN_SLOW_FRAMES_SHA256 = {slow:?}");
         println!("{label}: GOLDEN_STILL_SHA256 = {}", summary.still_sha256);
         println!("{label}: GOLDEN_CONTACT_EVENTS = {}", stats.contact_events);
         println!("{label}: GOLDEN_STILL_INK_NODES = {}", still_ink_nodes(stats));
@@ -238,8 +252,10 @@ fn assert_golden(label: &str, summary: &EmberSummary) {
     if let Some(frames) = summary.frames_sha256.as_deref() {
         assert_eq!(frames, GOLDEN_FRAMES_SHA256, "{label}: frame stream digest changed");
     }
-    if let Some(frames) = summary.slow_frames_sha256.as_deref() {
-        assert_eq!(frames, GOLDEN_SLOW_FRAMES_SHA256, "{label}: slow film digest changed");
+    for (film, golden) in summary.slow_films.iter().zip(GOLDEN_SLOW_FRAMES_SHA256) {
+        if let Some(frames) = film.frames_sha256.as_deref() {
+            assert_eq!(frames, golden, "{label}: the {}x film's digest changed", film.factor);
+        }
     }
     assert_eq!(summary.still_sha256, GOLDEN_STILL_SHA256, "{label}: still digest changed");
     // The statistics are part of the certificate's deterministic contract too.
@@ -255,7 +271,7 @@ fn distance(a: &[u16], b: &[u16]) -> u64 {
 #[test]
 fn the_golden_films_match_on_every_architecture() {
     let run = render(3, EmberMode::VideoAndSlow, &golden_config());
-    assert_golden("both films, 3 threads", &run.summary);
+    assert_golden("all films, 3 threads", &run.summary);
     let summary = &run.summary;
 
     // Every scheduled frame reaches the sink, and the last one is the still.
@@ -264,16 +280,32 @@ fn the_golden_films_match_on_every_architecture() {
     assert_eq!(summary.frames_emitted, count);
     assert_eq!(run.frames.last().expect("frames"), &summary.still);
 
-    // The slow film starts at one of the scheduled frames, shows every later one, and
-    // `SLOW_FACTOR - 1` frames between each two of them.
-    let first = summary.slow_first_frame;
-    assert_eq!(summary.slow_factor as usize, SLOW_FACTOR);
-    assert_eq!(run.slow_frames.len(), (count - 1 - first) * SLOW_FACTOR + 1);
-    assert_eq!(summary.slow_frames_emitted, run.slow_frames.len());
-    for (offset, scheduled) in run.frames[first..].iter().enumerate() {
-        assert!(run.slow_frames[offset * SLOW_FACTOR] == *scheduled, "scheduled frame {offset}");
+    // Each slow film starts at one of the scheduled frames, shows every later one, and
+    // `factor - 1` frames between each two of them.
+    assert_eq!(summary.slow_films.len(), SLOW_FACTORS.len());
+    for (film, frames) in summary.slow_films.iter().zip(&run.slow_frames) {
+        let (first, factor) = (film.first_frame, film.factor as usize);
+        assert_eq!(frames.len(), (count - 1 - first) * factor + 1, "{factor}x");
+        assert_eq!(film.frames_emitted, frames.len(), "{factor}x");
+        for (offset, scheduled) in run.frames[first..].iter().enumerate() {
+            assert!(frames[offset * factor] == *scheduled, "{factor}x: scheduled frame {offset}");
+        }
+        assert_eq!(frames.last().expect("slow frames"), &summary.still);
+        // It starts on bare paper, a little before the ink.
+        assert!(first > 0, "the golden {factor}x film must skip some of the pre-roll");
+        assert_eq!(frames[0], run.frames[0]);
     }
-    assert_eq!(run.slow_frames.last().expect("slow frames"), &summary.still);
+    // Both films start together, and the 2x film's frames are every other frame of the 4x film:
+    // the same moments, rendered once (the sink gets the scheduled frames and the 4x film's
+    // three moments per interval, nothing more).
+    let [half, quarter] = &run.slow_frames;
+    let first = summary.slow_films[0].first_frame;
+    assert_eq!(summary.slow_films[1].first_frame, first);
+    assert_eq!(quarter.len(), 2 * half.len() - 1);
+    for (index, frame) in half.iter().enumerate() {
+        assert!(quarter[2 * index] == *frame, "2x frame {index}");
+    }
+    assert_eq!(run.sink_calls, count + (count - 1 - first) * 3);
 
     // The golden orbit actually draws: fluid, contacts and sumi, with tidally stretched bodies.
     let stats = summary.stats;
@@ -288,53 +320,51 @@ fn the_golden_films_match_on_every_architecture() {
     // The first frames precede the pre-roll: bare paper, identical to each other.
     assert_eq!(run.frames[0], run.frames[1]);
     assert_ne!(run.frames[0], summary.still);
-    // The slow film starts on bare paper, a little before the ink.
-    assert!(first > 0, "the golden slow film must skip some of the pre-roll");
-    assert_eq!(run.slow_frames[0], run.frames[0]);
 }
 
-/// The slow film is not choppy: its in-between frames are real, evenly spaced moments of the
-/// same flow. It opens with a short lead of bare paper; once the ink is on the sheet, the picture
-/// changes from every frame of the slow film to the next by about the same amount, whether the
-/// next frame is an in-between frame or a scheduled one (no frame repeats, none jumps), and it
-/// keeps going the same way (two frames apart, the picture has changed more than in either step
-/// between them: nothing flickers back).
+/// The slow films are not choppy: their in-between frames are real, evenly spaced moments of the
+/// same flow. Each opens with a short lead of bare paper; once the ink is on the sheet, the
+/// picture changes from every frame of the film to the next by about the same amount, whether
+/// the next frame is an in-between frame or a scheduled one (no frame repeats, none jumps), and
+/// it keeps going the same way (two frames apart, the picture has changed more than in either
+/// step between them: nothing flickers back).
 #[test]
-fn the_slow_film_moves_evenly_between_scheduled_frames() {
+fn the_slow_films_move_evenly_between_scheduled_frames() {
     let run = render(2, EmberMode::VideoAndSlow, &golden_config());
-    let first = run.summary.slow_first_frame;
     let bare = &run.frames[0];
-    let steps: Vec<u64> =
-        run.slow_frames.windows(2).map(|pair| distance(&pair[0], &pair[1])).collect();
-    if blessing() {
-        for (interval, steps) in steps.chunks(SLOW_FACTOR).enumerate() {
-            println!("interval {}: steps {steps:?}", first + interval);
-        }
-    }
-
-    // The ink first shows in the scheduled frame `inked`, so it starts in the interval before
-    // it. The slow film starts 6 scheduled frames before that interval (the pipeline's lead),
-    // and its first inked frame is one of that interval's.
+    // The ink first shows in the scheduled frame `inked`, so it starts in the interval before it.
     let inked = run.frames.iter().position(|frame| frame != bare).expect("ink in the film");
-    assert_eq!(inked - 1 - first, 6, "the lead of bare paper: inked {inked}, first {first}");
-    let inked_from = run.slow_frames.iter().position(|frame| frame != bare).expect("ink");
-    let interval = (inked - 1 - first) * SLOW_FACTOR;
-    assert!(
-        interval < inked_from && inked_from <= interval + SLOW_FACTOR,
-        "the first inked slow frame {inked_from} is outside the interval from {interval}"
-    );
+    for (film, frames) in run.summary.slow_films.iter().zip(&run.slow_frames) {
+        let (first, factor) = (film.first_frame, film.factor as usize);
+        let steps: Vec<u64> = frames.windows(2).map(|pair| distance(&pair[0], &pair[1])).collect();
+        if blessing() {
+            for (interval, steps) in steps.chunks(factor).enumerate() {
+                println!("{factor}x interval {}: steps {steps:?}", first + interval);
+            }
+        }
 
-    // From the second inked frame on (the first is the ink's sudden onset), every step of the
-    // film is within a factor of its neighbour, across the scheduled frames too.
-    let moving = &steps[inked_from..];
-    assert!(moving.len() >= 5 * SLOW_FACTOR, "only {} inked steps", moving.len());
-    for (index, pair) in moving.windows(2).enumerate() {
-        let frame = inked_from + index;
-        let (small, large) = (pair[0].min(pair[1]), pair[0].max(pair[1]));
-        assert!(small > 0, "slow frame {frame}: a repeated frame");
-        assert!(2 * large <= 3 * small, "slow frame {frame}: uneven steps {pair:?}");
-        let across = distance(&run.slow_frames[frame], &run.slow_frames[frame + 2]);
-        assert!(across > large, "slow frame {frame}: steps {pair:?} lead back ({across} across)");
+        // The film starts 6 scheduled frames before the interval in which the ink starts (the
+        // pipeline's lead), and its first inked frame is one of that interval's.
+        assert_eq!(inked - 1 - first, 6, "{factor}x: the lead of bare paper, first {first}");
+        let inked_from = frames.iter().position(|frame| frame != bare).expect("ink");
+        let interval = (inked - 1 - first) * factor;
+        assert!(
+            interval < inked_from && inked_from <= interval + factor,
+            "{factor}x: the first inked frame {inked_from} is outside the interval from {interval}"
+        );
+
+        // From the second inked frame on (the first is the ink's sudden onset), every step of
+        // the film is within a factor of its neighbour, across the scheduled frames too.
+        let moving = &steps[inked_from..];
+        assert!(moving.len() >= 5 * factor, "{factor}x: only {} inked steps", moving.len());
+        for (index, pair) in moving.windows(2).enumerate() {
+            let frame = inked_from + index;
+            let (small, large) = (pair[0].min(pair[1]), pair[0].max(pair[1]));
+            assert!(small > 0, "{factor}x frame {frame}: a repeated frame");
+            assert!(2 * large <= 3 * small, "{factor}x frame {frame}: uneven steps {pair:?}");
+            let across = distance(&frames[frame], &frames[frame + 2]);
+            assert!(across > large, "{factor}x frame {frame}: steps {pair:?} lead back");
+        }
     }
 }
 
@@ -342,20 +372,23 @@ fn the_slow_film_moves_evenly_between_scheduled_frames() {
 fn still_only_mode_reproduces_the_golden_still() {
     let run = render(2, EmberMode::StillOnly, &golden_config());
     assert!(run.frames.is_empty(), "still-only renders never call the sink");
-    assert!(run.slow_frames.is_empty());
+    assert!(run.slow_frames.iter().all(Vec::is_empty));
     assert_eq!(run.summary.frames_emitted, 0);
     assert_eq!(run.summary.frames_sha256, None);
-    assert_eq!(run.summary.slow_frames_sha256, None);
+    for film in &run.summary.slow_films {
+        assert_eq!((film.frames_emitted, &film.frames_sha256), (0, &None));
+    }
     assert_golden("still only, 2 threads", &run.summary);
 }
 
-/// The normal film and the still do not depend on whether the slow film is rendered.
+/// The normal film and the still do not depend on whether the slow films are rendered.
 #[test]
-fn the_video_without_the_slow_film_reproduces_the_golden_frames() {
+fn the_video_without_the_slow_films_reproduces_the_golden_frames() {
     let run = render(2, EmberMode::Video, &golden_config());
-    assert!(run.slow_frames.is_empty(), "no slow frame reaches the sink");
-    assert_eq!(run.summary.slow_frames_emitted, 0);
-    assert_eq!(run.summary.slow_frames_sha256, None);
+    assert!(run.slow_frames.iter().all(Vec::is_empty), "no slow frame reaches the sink");
+    for film in &run.summary.slow_films {
+        assert_eq!((film.frames_emitted, &film.frames_sha256), (0, &None));
+    }
     assert!(run.summary.frames_sha256.is_some());
     assert_golden("video, 2 threads", &run.summary);
 }
@@ -363,7 +396,7 @@ fn the_video_without_the_slow_film_reproduces_the_golden_frames() {
 #[test]
 fn a_single_thread_reproduces_every_bit() {
     let run = render(1, EmberMode::VideoAndSlow, &golden_config());
-    assert_golden("both films, 1 thread", &run.summary);
+    assert_golden("all films, 1 thread", &run.summary);
 }
 
 /// Pools larger than the fluid solver's thread cap run the solver in a dedicated, smaller pool;
@@ -372,7 +405,7 @@ fn a_single_thread_reproduces_every_bit() {
 #[ignore = "40-thread pool; run on many-core machines and when re-blessing"]
 fn a_large_pool_with_a_capped_fluid_pool_reproduces_every_bit() {
     let run = render(40, EmberMode::VideoAndSlow, &golden_config());
-    assert_golden("both films, 40 threads", &run.summary);
+    assert_golden("all films, 40 threads", &run.summary);
 }
 
 /// The golden render must exercise the tidal shapes: with rigid discs (`max_aspect = 1`) the
