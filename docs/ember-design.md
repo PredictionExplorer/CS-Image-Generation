@@ -21,10 +21,11 @@ runs on the CPU, down to the video encoders (§8.5). It renders:
 - one frame per checkpoint of the main video (`render::main_video_checkpoints`), so frame `i`
   of `ember.mp4` shows the same orbit step as frame `i` of `main.mp4`, with the three bodies
   where `main.mp4` draws the heads of its trails (§3);
-- the slow film, `ember_slow.mp4`: the same film ten times slower, with nine simulated frames
-  between every two of those frames (§8.3);
+- two slow films, the medium film `ember_medium.mp4` and the slow film `ember_slow.mp4`: the
+  same film four and ten times slower, with three and nine simulated frames between every two of
+  those frames (§8.3);
 - a 16-bit sRGB still of the final recorded step (knot `steps - 1`), which is the last frame of
-  both films, byte for byte.
+  every film, byte for byte.
 
 The look is `tidal_11_exp_film`, the artist's choice from a look-development study: black
 pine-soot sumi on a kozo sheet, laid into the water by three tidally stretched bodies. Fresh ink
@@ -34,7 +35,7 @@ that the three bodies (the selected orbit, seen exactly as the main edition show
 Brinkman-penalised ellipses of constant area, each stretched by the tidal field of the other two
 (§3.10). Beyond the prototype, the edition has the main edition's view (§3.1–§3.5), the tidal
 shapes, solid bodies that hold no ink (§5.3), a **presence-clamped tone law**, under which ink
-diluted with clear water weakens linearly (§6.1), the film-time clock (§6.1) and the slow film
+diluted with clear water weakens linearly (§6.1), the film-time clock (§6.1) and the slow films
 (§8.3). For unmixed water the tone law is the prototype's reservoir feed. The values agree with
 it up to the `f32` storage and per-frame ageing of `E` (§5.3): the prototype evaluates each ink
 sample's exact age, while the port stores `E` as `f32` and multiplies it by the frame's fade
@@ -54,7 +55,7 @@ every frame (a relative rounding of about 2⁻²⁴ per frame).
 - writes certificate schema 3 (§8.4), and the generator reports its algorithm with
   `--ember-algorithm` (§8.5).
 
-**Changes from `ember-v2`.** `ember-v3`, the current algorithm:
+**Changes from `ember-v2`.** `ember-v3`:
 
 - follows the main edition's view. `ember-v2` projected the raw orbit onto its own principal
   plane (a PCA) and scaled it to a `projection.fill` fraction of the sheet. `ember-v3` applies
@@ -72,6 +73,28 @@ every frame (a relative rounding of about 2⁻²⁴ per frame).
   parcel's path in the soak frame then ran through the body's centre, and gated parcels
   recorded contacts that never happened;
 - writes certificate schema 4 (§8.4): `inputs.view`, `inputs.frames.slow_factor`,
+  `derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
+  `outputs.slow_frames_emitted`.
+
+**Changes from `ember-v3`.** `ember-v4`, the current algorithm:
+
+- renders a second slow film, the medium film, four times slower (`ember_medium.mp4`, role
+  `ember_medium_web`), beside the slow film ten times slower (§8.3, §8.5);
+- takes a list of slow films: `EmberRequest::slow_factors` replaces `slow_factor` (and
+  `MAX_SLOW_LATTICE` bounds their least common multiple where `MAX_SLOW_FACTOR` bounded the
+  factor), `EmberPlan::slow_films` and `snapshot_lattice` replace `slow_frames`,
+  `EmberFrame::slow_indices` (a frame's position in each film) replaces `slow_index` and
+  `slow_count`, `EmberSummary::slow_films` (one `SlowFilmSummary` per factor) replaces
+  `slow_factor`, `slow_first_frame`, `slow_frames_emitted` and `slow_frames_sha256`, and
+  `app::EMBER_SLOW_FILMS` replaces `app::EMBER_SLOW_FACTOR` (§8.1, §8.2, §8.5);
+- rounds the snapshot count of every scheduled frame interval up to a multiple of 20, the
+  factors' least common multiple, instead of 10 (§5.1). The lattice is the same in every mode,
+  so the still and the normal film are computed through finer steps than `ember-v3`'s too, and
+  their bits change;
+- renders a moment that both films show (the middle of every frame interval) once, and hands it
+  to both (§8.3);
+- writes certificate schema 5 (§8.4): `inputs.frames.slow_factors` replaces
+  `inputs.frames.slow_factor`, and `outputs.slow_films`, one record per slow film, replaces
   `derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
   `outputs.slow_frames_emitted`.
 
@@ -144,10 +167,13 @@ Unit tests pin SHA-256 digests of small but complete computations:
 - `math.rs`: the libm bits (`libm_bits_are_pinned`);
 - `view.rs`: the bits of the canvas track for every projection space under every drift, through
   a tilted rotation and a scaled frame (`the_canvas_track_matches_the_golden_hash`);
-- `tests/ember_determinism.rs`: the end-to-end frame streams of both films and the still of a
-  small render of a tilted figure-eight with tidal bodies, seen through a fixed view given as
-  exact literals (a tilted rotation, an elliptical drift, a frame scale of 0.9), and two of its
-  statistics, `stats.contact_events` and the still's inked node count.
+- `tests/ember_determinism.rs`: the end-to-end frame streams of every film (the normal film and
+  two slow films, 2 and 4 times slower) and the still of a small render of a tilted figure-eight
+  with tidal bodies, seen through a fixed view given as exact literals (a tilted rotation, an
+  elliptical drift, a frame scale of 0.9), and two of its statistics, `stats.contact_events` and
+  the still's inked node count. The slow factors' least common multiple, 4, is the snapshot
+  lattice of `ember-v3`'s single 4x golden film, so `ember-v4` kept that look's digests of the
+  still, the normal film and the 4x film, and added the 2x film's.
 
 CI runs them on x86_64 Linux, aarch64 Linux and aarch64 macOS, and once more on x86_64 built
 for `x86-64-v3` (AVX2/FMA code generation; `ci/README.md`). A digest that changes on one architecture only is a
@@ -161,15 +187,16 @@ affected digest and verify the new values on both architectures:
   new value next to the recorded one. Run `cargo test --release --lib ember` and copy the
   printed values into the constants.
 - **End-to-end goldens**: `EMBER_BLESS=1 cargo test --release --test ember_determinism --
-  --include-ignored --nocapture` prints them: the digests of the frame stream, the slow film and
-  the still (`GOLDEN_FRAMES_SHA256`, `GOLDEN_SLOW_FRAMES_SHA256`, `GOLDEN_STILL_SHA256`), the
-  render's `stats.contact_events` (`GOLDEN_CONTACT_EVENTS`) and the still's inked node count
-  (`GOLDEN_STILL_INK_NODES` = `still_ink_fraction · WIDTH·HEIGHT·q²`, recovered exactly: the
-  render divides one integer count by that denominator once). Update all five constants. Every
-  render must print the same values (with the slow film, without it and still-only: the mode
-  changes no bit of what it renders), and the ignored `the_golden_render_stretches_its_bodies`
-  must pass: with `tidal.max_aspect = 1` the golden orbit draws a different still, so the
-  goldens cover the shape arithmetic (see the file's header for the full procedure).
+  --include-ignored --nocapture` prints them: the digests of the frame stream, of each slow film
+  and of the still (`GOLDEN_FRAMES_SHA256`, `GOLDEN_SLOW_FRAMES_SHA256` with one digest per
+  factor, `GOLDEN_STILL_SHA256`), the render's `stats.contact_events` (`GOLDEN_CONTACT_EVENTS`)
+  and the still's inked node count (`GOLDEN_STILL_INK_NODES` =
+  `still_ink_fraction · WIDTH·HEIGHT·q²`, recovered exactly: the render divides one integer count
+  by that denominator once). Update all five constants. Every render must print the same values
+  (with the slow films, without them and still-only: the mode changes no bit of what it
+  renders), and the ignored `the_golden_render_stretches_its_bodies` must pass: with
+  `tidal.max_aspect = 1` the golden orbit draws a different still, so the goldens cover the
+  shape arithmetic (see the file's header for the full procedure).
 
 A `libm` bump is such a change, and it re-blesses **every** ember golden, unit and end-to-end:
 the `math` wrappers feed the view, the FFT twiddles, the fluid, the ink, the paper and the
@@ -195,8 +222,9 @@ Dependabot ignores `libm`; bump it by hand.
 4. **Errors.** Fallible constructors return `EmberResult<T>` (`error.rs`). No `unwrap` or
    `expect` outside tests except on provably infallible invariants, with the reason stated.
 5. **Performance.** The production render (1,000,000 steps, 3456 × 2234 pixels, 1802 frames,
-   and up to 18,011 in the slow film) must be reasonable on a 16-core CPU: buffers are
-   allocated once and reused, hot loops do not allocate, data is structure-of-arrays.
+   and up to 7,205 in the medium film and 18,011 in the slow film) must be reasonable on a
+   16-core CPU: buffers are allocated once and reused, hot loops do not allocate, data is
+   structure-of-arrays.
    Correctness and determinism come first. Everything runs on the CPU: no GPU and no hardware
    video encoder, anywhere. The cost of the default resolution is in §4.2.
 
@@ -230,9 +258,9 @@ Dependabot ignores `libm`; bump it by hand.
   evaluated as `(T·k)/(N - 1)` except that `t_{N-1} = T` exactly.
 - **Film time.** The frame schedule (§8.5) shows the whole orbit, 1,802 frames at 60 fps (about
   30 s) at the default 1,000,000 steps, so film time is proportional to fluid time and a fraction
-  of `T` is the same fraction of the film. The look is timed that way (§6.1). The slow film
-  (§8.3) shows the same fluid times ten times slower, so every film time of the look lasts ten
-  times as long in it.
+  of `T` is the same fraction of the film. The look is timed that way (§6.1). The slow films
+  (§8.3) show the same fluid times four and ten times slower, so every film time of the look
+  lasts four or ten times as long in them.
 - **Paper.** The sheet is measured in millimetres with `x` right and `y` **down** from the
   top-left corner (§7.5).
 
@@ -255,23 +283,23 @@ Dependabot ignores `libm`; bump it by hand.
 | `look.rs` | Tone law, timed in film time → the pine-soot load (§6). | `Look` |
 | `optics.rs` | 36-band Kubelka–Munk/Saunderson shading of the pine-soot load and the display encoding (§7.1–7.4). | `Optics` |
 | `paper.rs` | The kozo sheet: formation and fibres → mottle and ink gain (§7.5). | `KozoSheet`, `PaperSample` |
-| `pipeline.rs` | Planning, the frame loop, the slow film, shading, digests (§8.1–8.3). | `plan_ember`, `render_ember`, `EmberRequest`, `EmberMode`, `EmberFrame`, `EmberSummary` |
+| `pipeline.rs` | Planning, the frame loop, the slow films, shading, digests (§8.1–8.3). | `plan_ember`, `render_ember`, `EmberRequest`, `EmberMode`, `EmberFrame`, `EmberSummary`, `SlowFilm`, `SlowFilmSummary` |
 | `certificate.rs` | The determinism certificate, written and read back (§8.4). | `EmberCertificate`, `schedule_sha256`, `ALGORITHM_VERSION` |
 
 **Public API** (`three_body_problem::ember`): `EmberConfig`, `EmberError`, `EmberResult`,
 `EmberRequest`, `EmberMode`, `EmberFrame`, `EmberPlan`, `EmberSummary`, `EmberStats`,
-`EmberTimings`, `View`, `ViewProjection`, `ViewDrift`, `ViewFrame`, `plan_ember`,
-`render_ember`, `EmberCertificate`, `CertificateError`, and the `certificate`, `config`,
-`error`, `pipeline` and `view` modules. Everything else is `pub(crate)`. `fft_bench` is a hidden
-export for `benches/ember_fft.rs`.
+`EmberTimings`, `SlowFilm`, `SlowFilmSummary`, `View`, `ViewProjection`, `ViewDrift`,
+`ViewFrame`, `plan_ember`, `render_ember`, `EmberCertificate`, `CertificateError`, and the
+`certificate`, `config`, `error`, `pipeline` and `view` modules. Everything else is
+`pub(crate)`. `fft_bench` is a hidden export for `benches/ember_fft.rs`.
 
 **Around the module**: `app.rs` (`ember_view`, `ember_frontal_view`,
 `preflight_ember_edition`, `render_ember_edition`, `ember_masses`, the paper seed, the frame
-schedule and `EMBER_SLOW_FACTOR`), `main.rs` (stage order, exit status and `--ember-algorithm`,
+schedule and `EMBER_SLOW_FILMS`), `main.rs` (stage order, exit status and `--ember-algorithm`,
 §8.5), `drift.rs` (`AppliedDrift`, what a drift added) and `render/batch_drawing.rs`
 (`primary_symmetry_scale`), which the view is captured from (§3.5), `render/video.rs` (the
 `*_srgb` encoders, all software, and `create_video_groups_from_frames`, which feeds the
-encoders of both films from one render), `examples/ember_render.rs` (verification and look
+encoders of every film from one render), `examples/ember_render.rs` (verification and look
 development, §8.6), `tests/ember_determinism.rs` (the end-to-end golden test) and
 `benches/ember_fft.rs`.
 
@@ -617,11 +645,17 @@ Vorticity–streamfunction form on the doubly periodic box, pseudo-spectral, 2/3
   sink 61 s) and its whole package 3 h 40 m. On the production host, where the `ember-v1` render
   of the same seed took 23.4 minutes and a sync run of an `ember-v1` package about 70 minutes
   end to end, an `ember-v2` package is estimated at about 2 hours and its ember stage at about
-  75–80 minutes. All of these are `ember-v2` figures. With `ember-v3` the orbit's duration and
+  75–80 minutes. All of these are `ember-v2` figures. Since `ember-v3` the orbit's duration and
   speeds are those of the canvas track (§3.6), so the same seed takes another number of steps,
-  and the slow film adds ink and shading work (§8.3): on the otherwise idle production host the
+  and the slow films add ink and shading work (§8.3): on the otherwise idle production host the
   `ember-v3` render of token `0x70f70932` took 2 h 06 min (55,622 fluid steps), against 36 min
-  with `ember-v2`, and a package takes about 3 hours (`docs/ember-edition.md`, Runtime).
+  with `ember-v2`, and a package took 3 to 5½ hours (`docs/ember-edition.md`, Runtime).
+  `ember-v4` costs more: its snapshot lattice (§5.1) gives every frame interval at least 20
+  snapshots instead of 10, so the solver lands more often and every remap traces through more
+  steps, and the medium film adds side remaps, shading and an encoder (§8.3). Rendered beside
+  `ember-v3` under the same load, the costliest published orbit took 1.14 times as many fluid
+  steps (`0x70f70932`: 67,606, 1.22 times) and 1.74 times as long in the ink; the stage takes
+  about 1.35 to 1.55 times as long at full size (`docs/ember-edition.md`, Runtime).
 - **Statistics** (deterministic): steps, smallest and largest `h`, largest `u_max`. A non-finite
   flow, body state or step is `EmberError::NonFinite`.
 - **Tests**: a single Fourier mode decays exactly as `e^{-D·t}`; the advection term matches an
@@ -646,15 +680,16 @@ at knots `from` and `to`:
 S₀     = max(⌈Δt / max_snapshot_interval⌉, ⌈max_b path_b / (max_snapshot_travel·body_radius)⌉, 1)
 path_b = Σ_{k ∈ (from, to]} ( |pos_b(t_k) - pos_b(t_{k-1})|
                               + deformation_speed_b(t_{k-1})·(t_k - t_{k-1}) )
-S      = ⌈S₀ / F⌉·F
+S      = ⌈S₀ / L⌉·L
 ```
 
-with `Δt = t_to - t_from` and `F` the slow factor (`EmberRequest::slow_factor`, 10 in the
-product). `S₀` is the count the cadence needs (`snapshot_intervals`), and `S` the next multiple
-of `F` (`lattice_intervals`): the snapshots lie on a uniform lattice on which every in-between
-frame of the slow film ends on a snapshot (§8.3). The lattice is the same in every mode, so the
-fluid's steps, the scheduled frames and the still do not depend on whether the slow film is
-rendered.
+with `Δt = t_to - t_from` and `L` the snapshot lattice: the least common multiple of the slow
+factors (`EmberRequest::slow_factors`, 4 and 10 in the product, so `L = 20`; 1 without slow
+factors; `EmberPlan::snapshot_lattice`). `S₀` is the count the cadence needs
+(`snapshot_intervals`), and `S` the next multiple of `L` (`lattice_intervals`): the snapshots lie
+on a uniform lattice on which every in-between frame of every slow film ends on a snapshot
+(§8.3). The lattice is the same in every mode, so the fluid's steps, the scheduled frames and the
+still do not depend on whether the slow films are rendered.
 
 `path_b` is the farthest any material of body `b` can travel: the length of its centre's
 recorded polyline through the knots `from..=to` (not its displacement, which misses a body that
@@ -666,7 +701,7 @@ start times the interval (a tidally turning ellipse sweeps water even where its 
 semi-axis `R/√max_aspect ≈ 0.0289`, so the soak test's straight segments (§5.2) keep the
 thinnest stretched body resolved in time). `FlowWindow` borrows the `S + 1` snapshots and the
 bodies (centres and outlines) at each snapshot time; a single snapshot is an empty window. A
-side remap of the slow film borrows a prefix of them, `τ_0 … τ_{j·S/F}` (§8.3).
+side remap of a slow film of factor `F` borrows a prefix of them, `τ_0 … τ_{j·S/F}` (§8.3).
 
 ### 5.2 Backward trace (`trace_back(window, rules, start) → Trace`)
 
@@ -771,7 +806,7 @@ clear water and is counted; the pipeline turns any such count into `EmberError::
 `remap_visible` is the same remap of the visible nodes only: the `M` margin nodes on every side
 of `next` keep whatever they held, the statistics count visible nodes, and every visible node
 gets the bits `remap` gives it (a test compares the two). It serves fields that are shaded and
-discarded, the slow film's in-between frames (§8.3): the shader reads visible nodes only, and
+discarded, the slow films' in-between frames (§8.3): the shader reads visible nodes only, and
 the margin matters only to the next remap.
 
 Tests cover pure translation and rotation flows, a disc inking exactly its swept band, analytic
@@ -969,13 +1004,15 @@ the floor wash (§6.1).
 fluid starts: `EmberConfig::validate`; the output size (non-empty, at most 16,384 per side); the
 kozo sheet's fibre count at that size (at most 2²⁴ = 16,777,216, §7.5: it depends on the fibre
 density and the output's aspect together, which `validate` cannot see); the frame schedule
-(non-empty, strictly increasing, ending on the final knot `N - 1`, `N ≥ 2`); the slow factor
-(1 to `MAX_SLOW_FACTOR` = 240, else `InvalidSchedule`); the view and the canvas track it gives
+(non-empty, strictly increasing, ending on the final knot `N - 1`, `N ≥ 2`); the slow factors
+(strictly increasing, each at least 1, their least common multiple, the snapshot lattice, at
+most `MAX_SLOW_LATTICE` = 240, else `InvalidSchedule`); the view and the canvas track it gives
 the orbit (`View::canvas_track`, §3.1–§3.4); the orbit's duration and tidal model
 (`BodyTrack::new`, §3.6–§3.10, which also checks the masses); the valve time
 `t_valve = T - valve_lead`, which must exceed `pre_roll` (`OrbitTooShort`); the fluid grid and
-the ink node grid; the slow film's first frame and length (§8.3); and the survey below. It costs
-one pass of the view over the orbit and the orbit's tables (the median speed over 3 × 200,001
+the ink node grid; each slow film's first frame and length (`EmberPlan::slow_films`, §8.3); and
+the survey below. It costs one pass of the view over the orbit and the orbit's tables (the
+median speed over 3 × 200,001
 samples, the tidal reference over 3 × 4,001 and the shape-aware speed table of 400,001 entries,
 each evaluating every body's shape at `t` and `t + δ`: fixed counts, whatever the number of
 knots) and allocates nothing proportional to the output. `render_ember` plans again itself;
@@ -997,8 +1034,8 @@ cost and how it sits on the sheet before any fluid is simulated:
   centres are closer than `2·body_radius`.
 
 The preflight logs them next to the orbit's duration, the inking window and the frame counts of
-both films (the lines `Ember preflight: …` and `Ember plan: …`), and returns them as
-`app::EmberPreflight`.
+the film and of each slow film (the lines `Ember preflight: …` and `Ember plan: …`), and returns
+them as `app::EmberPreflight`.
 
 Barring resource exhaustion, a request that plans successfully can fail later only on a
 non-finite flow or a failing sink. Planning checks ranges; it does not budget memory or time,
@@ -1006,7 +1043,9 @@ which grow with the output size, the fluid grid and the snapshot cadence. At the
 standalone `ember-v2` render peaked at 4.9 GB resident on an Apple M4 Max, far below the peak of
 a whole package of the same seed there (85 GB resident), which belongs to the main render.
 The `ember-v3` render of token `0x70f70932` peaked at 4.0 GB on the production host: its slow film
-reuses the two ink-field buffers and the frame buffer.
+reuses the two ink-field buffers and the frame buffer. The `ember-v4` render of the same token
+peaked at 7.0 GB: its slow films reuse the same buffers, but its snapshot window holds at least
+21 snapshots (`S ≥ 20`, §5.1) where `ember-v3`'s held at least 11.
 
 ### 8.2 The frame loop (`render_ember`)
 
@@ -1018,8 +1057,9 @@ fields = 0; window[0] = snapshot at t = 0, bodies at t = 0; t_prev = 0; previous
 for each scheduled knot k_f (frame f):
     t_f = t_{k_f};  S = snapshot intervals from the previous knot to k_f (§5.1)
     for s in 1..=S: solver.advance_to(τ_s); snapshot → window[s]; bodies(τ_s)
-    if mode == VideoAndSlow and f > slow_first_frame and S > 0:
-        the F - 1 in-between frames of the slow film (§8.3)
+    if mode == VideoAndSlow:
+        for s in 1..S that is a multiple of S/F for at least one slow film F with f > its first frame:
+            the in-between frame at τ_s, rendered once and shared by every such film (§8.3)
     if S > 0 and t_f ≥ pre_roll:
         floor_fade = floor_tau ? exp(-(t_f - t_prev)/floor_tau) : 1
         decay = InkDecay(t_f, τ, exp(-(t_f - t_prev)/τ), floor_fade)
@@ -1030,23 +1070,26 @@ for each scheduled knot k_f (frame f):
         rgb48le = little-endian bytes of the samples
         if mode != StillOnly:
             frames SHA-256 ← rgb48le
-            if mode == VideoAndSlow and f ≥ slow_first_frame: slow SHA-256 ← rgb48le
+            if mode == VideoAndSlow:
+                for each slow film with f ≥ its first frame: its SHA-256 ← rgb48le
             sink(frame)
     window[0] ← window[S]; t_prev = t_f
 still = the last frame; still digest = SHA-256(rgb48le of the still)
 ```
 
 - **Modes.** `EmberMode::Video` shades every scheduled frame and hands it to the sink in order
-  (the normal film). `EmberMode::VideoAndSlow` also renders the slow film: its in-between frames
-  reach the sink between the scheduled ones (§8.3). `EmberMode::StillOnly` shades only the last
-  frame and never calls the sink. The fluid, its snapshot lattice and the scheduled ink remaps
-  are the same in all three, so the still and the scheduled frames do not depend on the mode.
+  (the normal film). `EmberMode::VideoAndSlow` also renders the slow films: their in-between
+  frames reach the sink between the scheduled ones, in time order (§8.3). `EmberMode::StillOnly`
+  shades only the last frame and never calls the sink. The fluid, its snapshot lattice and the
+  scheduled ink remaps are the same in all three, so the still and the scheduled frames do not
+  depend on the mode.
 - **The sink** receives every `EmberFrame` once, in time order. `index` is the frame's position
   in the normal film (`None` for an in-between frame) and `orbit_step` the recorded knot it
-  shows; `slow_index` is its position in the slow film (`None` for a frame that is not part of
-  it: every frame in `Video` mode, and the scheduled frames before the slow film starts);
-  `count` and `slow_count` are the lengths of the two films; `time` is the fluid time; `rgb` and
-  `rgb48le` hold the pixels.
+  shows; `slow_indices` holds its position in each slow film, in the order of
+  `EmberRequest::slow_factors` (`None` for a film it is not part of: the scheduled frames before
+  the films start, and an in-between frame off that film's grid), and is empty unless the mode
+  is `VideoAndSlow`; `count` is the length of the normal film (the slow films' lengths are in
+  `EmberPlan::slow_films`); `time` is the fluid time; `rgb` and `rgb48le` hold the pixels.
 - **Before the pre-roll** the fields stay 0 (bare paper); the first remap after it drops every
   contact earlier than `pre_roll` (§5.2 step 5).
 - **The snapshot window** keeps its buffers between frames (it grows to the largest `S` seen) and
@@ -1061,103 +1104,130 @@ still = the last frame; still digest = SHA-256(rgb48le of the still)
   (the fraction of the still's visible ink nodes, `width·height·q²`, margin excluded, with a
   non-zero carbon load) and `still_gamut_mapped_pixels`. The counts are integers summed exactly
   and the fraction is one count divided once, so all are thread-count invariant (§0.1). Every
-  interval gets its scheduled remap in every mode and the slow film's side remaps add nothing,
+  interval gets its scheduled remap in every mode and the slow films' side remaps add nothing,
   so the statistics are the same in `Video`, `VideoAndSlow` and `StillOnly`. Wall-clock
-  `EmberTimings` (fluid, ink, shade, sink, total) are informational; the slow film's remaps,
+  `EmberTimings` (fluid, ink, shade, sink, total) are informational; the slow films' remaps,
   shading and sink time are counted in them.
-- **Summary.** `EmberSummary` also carries the slow film's `slow_factor`, `slow_first_frame`,
-  `slow_frames_emitted` and `slow_frames_sha256`, and `duration`, `valve_time`, `hold_time`
-  (`hold`), `fade_time` (`τ`), `tidal_reference` (`Δ_ref`) and the grids: the certificate's
-  `derived` section (§8.4).
+- **Summary.** `EmberSummary` also carries `duration`, `valve_time`, `hold_time` (`hold`),
+  `fade_time` (`τ`), `tidal_reference` (`Δ_ref`) and the grids, the certificate's `derived`
+  section, and `slow_films`, one `SlowFilmSummary` per slow factor (`factor`, `first_frame`,
+  `frames_emitted`, `frames_sha256`), the certificate's `outputs.slow_films` (§8.4): planned in
+  every mode, rendered and hashed in `VideoAndSlow`.
 
-### 8.3 The slow film
+### 8.3 The slow films
 
-`EmberMode::VideoAndSlow` renders a second film from the same simulation: the normal film `F`
-times slower (`F` = `EmberRequest::slow_factor`; the generator passes `app::EMBER_SLOW_FACTOR`
-= 10), with `F - 1` in-between frames inside every interval between two scheduled frames. Every
+`EmberMode::VideoAndSlow` renders more films from the same simulation: for every factor `F` of
+`EmberRequest::slow_factors`, the normal film `F` times slower, with `F - 1` in-between frames
+inside every interval between two scheduled frames. The generator asks for two
+(`app::EMBER_SLOW_FILMS`, §8.5): the medium film, `F = 4`, and the slow film, `F = 10`. Every
 in-between frame is simulated: none is interpolated from its neighbours.
 
-- **Lattice.** The snapshot count `S` of every scheduled frame interval is a multiple of `F`
-  (§5.1), in every mode. In-between frame `j ∈ 1..F` of an interval therefore falls on its
-  snapshot `j·S/F`, at `τ = τ_{j·S/F}`: a time the solver lands on anyway, with the bodies'
-  state at exactly that time. Because the lattice follows from it, the slow factor is an input
-  of the still and the normal film too (`inputs.frames.slow_factor`). It must lie in
-  `1..=MAX_SLOW_FACTOR` (240); 1 gives no in-between frames.
-- **Side remaps.** In-between frame `j` is the previous scheduled frame's fields remapped
-  through the prefix of the interval's flow window that ends at snapshot `j·S/F` (the snapshots
-  and bodies `0..=j·S/F`), with the decay of the elapsed time, `InkDecay(τ, fade τ,
-  exp(-(τ - t_prev)/fade τ), floor_fade)` and `floor_fade` over `τ - t_prev`. It runs the
-  tracer and the remap of §5.2–§5.3 unchanged, over real snapshots; `remap_visible` computes
-  it, since only visible nodes are shaded. The result is shaded, hashed, handed to the sink and
-  discarded: it lives in the scratch buffer that the interval's scheduled remap overwrites
-  afterwards. An in-between frame before the pre-roll (`τ < t_on`) shows the previous
-  scheduled frame's fields as they are, which is bare paper.
+- **Lattice.** The factors are strictly increasing and at least 1 each (1 gives a film without
+  in-between frames). Their least common multiple `L` (`EmberPlan::snapshot_lattice`; 20 in the
+  product) must not exceed `MAX_SLOW_LATTICE` (240). The snapshot count `S` of every scheduled
+  frame interval is a multiple of `L` (§5.1), in every mode, so for every factor `F`
+  in-between frame `j ∈ 1..F` of an interval falls on its snapshot `j·S/F`, at
+  `τ = τ_{j·S/F}`: a time the solver lands on anyway, with the bodies' state at exactly that
+  time. Because the lattice follows from them, the slow factors are an input of the still and
+  the normal film too (`inputs.frames.slow_factors`). Only their least common multiple matters
+  there: factors with the same `L` give the same still and normal film (§0.2).
+- **Side remaps.** In-between frame `j` of a film is the previous scheduled frame's fields
+  remapped through the prefix of the interval's flow window that ends at snapshot `j·S/F` (the
+  snapshots and bodies `0..=j·S/F`), with the decay of the elapsed time,
+  `InkDecay(τ, fade τ, exp(-(τ - t_prev)/fade τ), floor_fade)` and `floor_fade` over
+  `τ - t_prev`. It runs the tracer and the remap of §5.2–§5.3 unchanged, over real snapshots;
+  `remap_visible` computes it, since only visible nodes are shaded. The result is shaded,
+  hashed, handed to the sink and discarded: it lives in the scratch buffer that the interval's
+  scheduled remap overwrites afterwards. An in-between frame before the pre-roll (`τ < t_on`)
+  shows the previous scheduled frame's fields as they are, which is bare paper.
+- **Shared moments.** The render walks the snapshots `1..S` of an interval in time order. A
+  snapshot on the grid of several films (`j·S/F` for several `F`) is one moment of all of them:
+  it is remapped, shaded and hashed once, and handed to the sink once, with its position in
+  every film that shows it (`EmberFrame::slow_indices`). A side remap depends only on its
+  snapshot, so sharing changes no bit: each film is the film that factor alone would give on the
+  same lattice. With 4 and 10 the moment half-way through every interval (`S/2`) belongs to
+  both films, so an interval has 11 in-between moments, not 12.
 - **Independence.** A side remap never feeds the scheduled chain: the scheduled remap of the
   interval starts from the same fields and runs through the whole window, whether or not side
   remaps ran before it. The still and the normal film are therefore the same with and without
-  the slow film, and side remaps add nothing to `EmberStats`. A non-finite origin in a side
+  the slow films, and side remaps add nothing to `EmberStats`. A non-finite origin in a side
   remap, or a non-finite shaded pixel, fails the render like any other (`NonFinite`).
-- **Why it is smooth.** Every frame of either film, scheduled or in-between, is exactly one
+- **Why it is smooth.** Every frame of every film, scheduled or in-between, is exactly one
   remap away from a scheduled frame's fields, through the same fine steps of the same window.
   The in-between frames therefore carry no more resampling of the ink than the scheduled ones
   (chaining the remaps at the slow cadence would resample the ink `F` times as often and
   soften the still and the normal film), and the scheduled frames are neither sharper nor
   softer than their neighbours, so nothing pulses at every `F`-th frame. Contacts are decided
   on the same snapshot steps in every frame.
-- **Start and length.** The slow film skips the bare paper of the pre-roll. With `k_on` the
+- **Start and length.** A slow film skips the bare paper of the pre-roll. With `k_on` the
   first scheduled frame at or after `t_on = pre_roll` (the last frame if there is none), it
   starts at scheduled frame `first = max(k_on - 1 - SLOW_FILM_LEAD_FRAMES, 0)`:
   `SLOW_FILM_LEAD_FRAMES` = 6 scheduled frames before the frame interval in which the bodies
-  start inking, which is one second of bare paper at factor 10 and 60 fps. From there it shows
-  every scheduled frame and the `F - 1` frames between each two of them:
-  `(count - 1 - first)·F + 1` frames, with `count` the schedule's length (`SlowFilm::plan`).
-  At the default 1,000,000 steps and factor 10 that is at most 18,011 frames, 300 s at 60 fps,
-  less ten frames per skipped scheduled frame. `first` is recorded as
-  `derived.slow_first_frame`. Slow frame `i·F` is scheduled frame `first + i` byte for byte,
-  and the last slow frame is the still.
-- **Digest.** `outputs.slow_frames_rgb48le_sha256` hashes the slow film's frames in order,
-  scheduled and in-between alike, and `outputs.slow_frames_emitted` is their count (§8.4).
-- **Cost.** A side remap traces through `j·S/F` snapshot intervals, so the side remaps of a
-  frame interval trace through `S·(F - 1)/2` intervals together (4.5·`S` at factor 10), on the
-  visible nodes, next to the `S` of the scheduled remap on every node. Shading, hashing and the
-  sink run for `F` frames per interval instead of one. The fluid's work does not depend on the
-  mode. In every mode, rounding `S₀` up to a multiple of `F` gives the solver more times to
-  land on and the scheduled remap more, shorter steps than `ember-v2` took.
-- **Tests.** `pipeline.rs`: `the_snapshot_lattice_is_a_multiple_of_the_slow_factor` and
-  `the_slow_film_starts_a_little_before_the_ink`. `ink.rs`:
-  `the_visible_remap_matches_the_full_one_on_visible_nodes`. `tests/ember_determinism.rs`: the
-  slow film has its planned length, starts on bare paper, holds every scheduled frame from
-  `first` on at every `F`-th index and ends on the still; the still and the normal film have
-  the golden digests with the slow film, without it and in still-only mode; and
-  `the_slow_film_moves_evenly_between_scheduled_frames` checks that the film opens with its
-  lead of bare paper and that, once the ink is on the sheet, the picture changes from every
-  slow frame to the next by about the same amount, across the scheduled frames too: no
-  repeated frame, no jump, and no flicker back (two frames apart, it has changed more than in
-  either step between them).
+  start inking, which is 0.4 s of bare paper at factor 4 and one second at factor 10, at
+  60 fps. `first` does not depend on the factor, so every slow film starts at the same
+  scheduled frame. From there a film shows every scheduled frame and the `F - 1` frames between
+  each two of them: `(count - 1 - first)·F + 1` frames, with `count` the schedule's length
+  (`SlowFilm::plan`, read through `EmberPlan::slow_films`). At the default 1,000,000 steps that
+  is at most 7,205 frames (120 s at 60 fps) for the medium film and 18,011 (300 s) for the slow
+  film, less `F` frames per skipped scheduled frame. `first` is recorded as
+  `outputs.slow_films[*].first_frame`. Frame `i·F` of a film is scheduled frame `first + i`
+  byte for byte, and its last frame is the still.
+- **Digests.** `outputs.slow_films[*].frames_rgb48le_sha256` hashes each film's frames in
+  order, scheduled and in-between alike, and `frames_emitted` is their count (§8.4). A shared
+  moment is hashed into every film that shows it.
+- **Cost.** A side remap at snapshot `s` traces through `s` snapshot intervals, so the side
+  remaps of a film of factor `F` trace through `S·(F - 1)/2` intervals of a frame interval
+  together: 4.5·`S` at factor 10 and 1.5·`S` at factor 4. A shared moment is traced once, so
+  the two films trace through 5.5·`S` together (the moment at `S/2` counts once; 4.5·`S` with
+  `ember-v3`'s single film), on the visible nodes, next to the `S` of the scheduled remap on
+  every node. Once the films have started, shading and the sink run for 12 frames per interval
+  instead of one (11 in-between moments and the scheduled frame), and each film's encoder takes
+  `F` frames per interval. The fluid's work does not depend on the mode. In every mode, rounding
+  `S₀` up to a multiple of `L` gives the solver more times to land on and the scheduled remap
+  more, shorter steps: with `L` = 20 every non-empty interval has at least 20 snapshot
+  intervals, where `ember-v3`'s lattice of 10 gave at least 10, so `ember-v4` costs more fluid
+  and ink work even without its slow films.
+- **Tests.** `pipeline.rs`: `the_snapshot_lattice_is_a_multiple_of_every_slow_factor` (the
+  rounding, the lattice as the factors' least common multiple, and the rejection of unordered,
+  repeated or zero factors and of a lattice above 240) and
+  `a_slow_film_starts_a_little_before_the_ink`. `ink.rs`:
+  `the_visible_remap_matches_the_full_one_on_visible_nodes`. `tests/ember_determinism.rs`
+  renders two slow films, 2 and 4 times slower: each has its planned length, starts on bare
+  paper, holds every scheduled frame from `first` on at every `F`-th index and ends on the
+  still; both start at the same frame, and the 2x film's frames are every other frame of the 4x
+  film; the still and the normal film have the golden digests with the slow films, without them
+  and in still-only mode; and `the_slow_films_move_evenly_between_scheduled_frames` checks that
+  each film opens with its lead of bare paper and that, once the ink is on the sheet, the
+  picture changes from every frame of the film to the next by about the same amount, across the
+  scheduled frames too: no repeated frame, no jump, and no flicker back (two frames apart, it
+  has changed more than in either step between them).
 
 ### 8.4 The certificate (`certificate.rs`, `metadata/ember.json`)
 
-Layout (`schema_version` 4, `CERTIFICATE_SCHEMA_VERSION`), in file order. Version 1 was only
+Layout (`schema_version` 5, `CERTIFICATE_SCHEMA_VERSION`), in file order. Version 1 was only
 written by test renders; version 2, published with `ember-v1`, added
 `stats.frames_with_cinnabar` and `stats.peak_frame_cinnabar_fraction` and required the nullable
 keys to be present. Version 3 was the layout of `ember-v2`: the cinnabar statistics and the
 look's vermilion settings (`fresh_tau`, `hold`, `ember_tau`, `cinnabar_strength`,
 `carbon_keep`, `meeting_threshold`) went; it added the `tidal` configuration, the film-time
 look settings (`fade_fraction`, `hold_fraction`) and `derived.hold_time`, `derived.fade_time`
-and `derived.tidal_reference`. Version 4 is the layout of `ember-v3`: it adds `inputs.view`,
+and `derived.tidal_reference`. Version 4 was the layout of `ember-v3`: it added `inputs.view`,
 `inputs.frames.slow_factor`, `derived.slow_first_frame`,
 `outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`, and the
-principal-plane projection (`config.projection`, `derived.projection`) is gone. A reader
-rejects any other version, so an `ember-v1` or `ember-v2` certificate reads as
+principal-plane projection (`config.projection`, `derived.projection`) went. Version 5 is the
+layout of `ember-v4`: `inputs.frames.slow_factors` replaces `inputs.frames.slow_factor`, and
+`outputs.slow_films`, one record per slow film, replaces `derived.slow_first_frame`,
+`outputs.slow_frames_rgb48le_sha256` and `outputs.slow_frames_emitted`. A reader rejects any
+other version, so a certificate of an older look (`ember-v1` to `ember-v3`) reads as
 `UnsupportedSchema`.
 
 | Field | Contents |
 |-------|----------|
-| `schema_version`, `edition`, `algorithm`, `contract` | Layout version (4), `"ember"`, `ALGORITHM_VERSION` (`ember-v3`), and the certified statement. |
-| `inputs` | `seed` (hex), `steps`, `dt`, `gravitational_constant`, `integrator`, `bodies` (initial masses, positions and velocities as decimals and as `0x`-prefixed 16-digit `f64` bit patterns), `view` (the main edition's view, below), `width`, `height`, `paper_seed_sha256`, `frames` (`count`, `first_step`, `last_step`, `frame_rate`, `sha256`, `slow_factor`). |
+| `schema_version`, `edition`, `algorithm`, `contract` | Layout version (5), `"ember"`, `ALGORITHM_VERSION` (`ember-v4`), and the certified statement. |
+| `inputs` | `seed` (hex), `steps`, `dt`, `gravitational_constant`, `integrator`, `bodies` (initial masses, positions and velocities as decimals and as `0x`-prefixed 16-digit `f64` bit patterns), `view` (the main edition's view, below), `width`, `height`, `paper_seed_sha256`, `frames` (`count`, `first_step`, `last_step`, `frame_rate`, `sha256`, `slow_factors`: the slow factors, strictly increasing, `[4, 10]` in the product). |
 | `config` | The full `EmberConfig` (Appendix A): `fluid`, `contact`, `tidal`, `look`, `paper`, `raster`. |
-| `derived` | `duration`, `valve_time`, `hold_time`, `fade_time`, `tidal_reference`, `fluid_grid` `[nx, ny]`, `fluid_dx`, `ink_grid` `[cols, rows]`, `slow_first_frame` (the scheduled frame at which the slow film starts, §8.3). |
-| `outputs` | `frames_rgb48le_sha256` (`null` for still-only renders), `frames_emitted`, `slow_frames_rgb48le_sha256` (`null` unless the slow film was rendered), `slow_frames_emitted`, `still_rgb48le_sha256`, `encoding`. |
+| `derived` | `duration`, `valve_time`, `hold_time`, `fade_time`, `tidal_reference`, `fluid_grid` `[nx, ny]`, `fluid_dx`, `ink_grid` `[cols, rows]`. |
+| `outputs` | `frames_rgb48le_sha256` (`null` for still-only renders), `frames_emitted`, `slow_films` (below), `still_rgb48le_sha256`, `encoding`. |
 | `stats` | `EmberStats` (§8.2): `fluid_steps`, `min_dt`, `max_dt`, `max_flow_speed`, `snapshots`, `contact_events`, `still_ink_fraction`, `still_gamut_mapped_pixels`. |
 | `build` | Informational: `crate_version` (`CARGO_PKG_VERSION`, 1.1.0 for the release that ships the ember edition), `target_arch`, `target_os`, `threads`. |
 | `timings_seconds` | Informational: `fluid`, `ink`, `shade`, `sink`, `total`. |
@@ -1171,6 +1241,12 @@ written as its `f64` bit pattern, a `0x`-prefixed 16-digit string like those of 
 no decimal copy: the view is read back bit for bit, and a decimal number in the place of a bit
 pattern is rejected like an unknown key.
 
+**The slow films** (`outputs.slow_films`) are one record per slow film, in the order of
+`inputs.frames.slow_factors`, written in every mode: `factor`; `first_frame`, the scheduled
+frame at which the film starts (§8.3); `frames_emitted`, its frame count (0 unless it was
+rendered); and `frames_rgb48le_sha256` (`null` unless it was rendered; required, like the
+normal film's).
+
 Digests are lowercase hex SHA-256: `inputs.frames.sha256 = schedule_sha256(steps)` hashes the
 knot indices as little-endian `u64`s in schedule order; `inputs.paper_seed_sha256 =
 paper_seed_sha256(seed bytes ++ "\0cosmic-ember/kozo-sheet/v1")`; the outputs hash the pixel
@@ -1180,11 +1256,11 @@ between two renders of the same inputs.
 **Pixel streams.** The digested pixels are `rgb48le`: 16-bit sRGB samples, R, G, B per pixel,
 row-major from the top-left pixel, little-endian (written explicitly, independent of the host's
 byte order). `outputs.frames_rgb48le_sha256` covers the scheduled frames concatenated in
-schedule order; `outputs.slow_frames_rgb48le_sha256` covers the slow film's frames concatenated
-in film order, the scheduled frames from `derived.slow_first_frame` on and the in-between
-frames (§8.3); `outputs.still_rgb48le_sha256` covers the still alone. The PNG, WebP and MP4
-files are encodings of these pixels; their bytes depend on encoder versions and are outside the
-contract (the PNG decodes back to the still's `rgb48le`).
+schedule order; each `outputs.slow_films[*].frames_rgb48le_sha256` covers one slow film's
+frames concatenated in film order, the scheduled frames from its `first_frame` on and the
+in-between frames (§8.3); `outputs.still_rgb48le_sha256` covers the still alone. The PNG, WebP
+and MP4 files are encodings of these pixels; their bytes depend on encoder versions and are
+outside the contract (the PNG decodes back to the still's `rgb48le`).
 
 **Writing.** `EmberCertificate::new(context, summary)` assembles it; `write_json` writes
 pretty-printed JSON with a final newline, flushes and syncs the file, and returns every I/O
@@ -1195,10 +1271,13 @@ rejects another `schema_version` (`UnsupportedSchema`) or `edition` (`WrongEditi
 unknown fields at every level, malformed bit patterns (`Json`, naming the field and its
 position), and outputs that disagree about the frames (`InconsistentOutputs`). For the normal
 film that is frames emitted without a frames digest, or a frames digest over another number of
-frames than `inputs.frames.count`. The slow film follows the same rule against its own length,
-`(count - 1 - slow_first_frame)·slow_factor + 1`, and a slow digest without a frames digest is
-rejected too: the slow film is only rendered together with the normal one. The nullable fields
-(`outputs.frames_rgb48le_sha256`, `outputs.slow_frames_rgb48le_sha256`,
+frames than `inputs.frames.count`. `outputs.slow_films` must hold one record per factor of
+`inputs.frames.slow_factors`, in its order: none missing, none extra, none swapped. Each slow
+film follows the normal film's rule against its own length,
+`(count - 1 - first_frame)·factor + 1`; a `first_frame` outside the schedule is rejected, and so
+is a slow digest without a frames digest: the slow films are only rendered together with the
+normal one (`SlowFilmRecord::inconsistency`, called by `check_frames`). The nullable fields
+(`outputs.frames_rgb48le_sha256`, `outputs.slow_films[*].frames_rgb48le_sha256`,
 `config.look.floor_tau`) must be present, as `null` or a value: a certificate without the
 frames digest is rejected, not read as still-only. The crate enables `serde_json`'s
 `float_roundtrip`, so every decimal reads back exactly and a written certificate reads back
@@ -1211,7 +1290,7 @@ is not exact.
 `CERTIFICATE_SCHEMA_VERSION` whenever the layout changes; each keeps its version history in its
 doc comment. The sync loop re-renders the published editions of an older algorithm (§8.5).
 
-**What is certified.** The three digests are a pure function of `inputs` and `config`: the
+**What is certified.** The digests are a pure function of `inputs` and `config`: the
 recorded bodies and the recorded view, not the seed. Mapping a seed to an orbit runs the main
 generator's orbit search, whose scores use platform floating point (`rustfft` with runtime SIMD
 dispatch, the platform libm); on an exact near-tie a different machine could in principle select
@@ -1223,7 +1302,9 @@ from them (§8.6).
 
 - **Frame schedule**: `app::ember_frame_schedule(steps)` = `render::main_video_checkpoints(steps)`
   (every 555th step and the final one at the default 1,000,000 steps: 1,802 frames), at
-  `DEFAULT_VIDEO_FPS` = 60. The slow factor is `app::EMBER_SLOW_FACTOR` = 10.
+  `DEFAULT_VIDEO_FPS` = 60. The slow films are `app::EMBER_SLOW_FILMS`: factor 4, the medium
+  film, and factor 10, the slow film, each with its path and manifest role. Every ember render
+  asks for both (`app::EMBER_SLOW_FACTORS` = `[4, 10]`), so its snapshot lattice is 20 (§5.1).
 - **Orbit**: `sim::get_positions(bodies, steps)` re-simulates the selected initial conditions raw
   (warm-up of `steps`, then `steps` recorded knots) with `DEFAULT_DT` and `sim::G`;
   `EmberRequest::dt` is `DEFAULT_DT`. `app::ember_masses(bodies)` passes the three initial masses
@@ -1249,30 +1330,33 @@ from them (§8.6).
   | `images/web/ember_full.webp` | `ember_web_full` |
   | `images/web/ember_preview.webp` | `ember_web_preview` |
   | `videos/web/ember.mp4` | `ember_web` |
+  | `videos/web/ember_medium.mp4` | `ember_medium_web` |
   | `videos/web/ember_slow.mp4` | `ember_slow_web` |
   | `videos/hq/ember.mp4` | `ember_hq` |
   | `metadata/ember.json` | none (the certificate has no manifest entry) |
 
   An `--image-only` package has no ember video and no video role. There is no archival copy of
-  the slow film: its frames are certified, so one can be encoded from a re-render.
-- **Encoding**: both films stream straight into their encoders from one render
+  the slow films: their frames are certified, so one can be encoded from a re-render.
+- **Encoding**: every film streams straight into its encoders from one render
   (`app::encode_ember_videos`, on `render::create_video_groups_from_frames`), with an explicit
   BT.709 conversion and sRGB tags (`render/video.rs`). The call takes one group of encoders per
-  film and hands the frame sink one `GroupWriter` per group; a frame with an `index` is written
-  to the normal film's group and a frame with a `slow_index` to the slow film's:
+  film, the normal film's first and then one per slow film in the order of `EMBER_SLOW_FILMS`
+  (which is that of `EmberFrame::slow_indices`), and hands the frame sink one `GroupWriter` per
+  group; a frame with an `index` is written to the normal film's group, and a frame whose
+  `slow_indices` entry for a slow film is set to that film's group:
   - normal film, web: `web_compatible_srgb` H.264 with `crf = app::EMBER_WEB_CRF` (22),
     overriding that constructor's default CRF 18 (`app::ember_video_options`);
   - normal film, archival: `high_quality_srgb` HEVC 4:2:2 10-bit, or `software_fast_srgb` under
     `--fast-encode`;
-  - slow film, web: the same options as the normal film's web encode.
+  - medium film and slow film, web: the same options as the normal film's web encode.
 
-  The encoders of both groups succeed or fail together: if the render fails, or a write to any
+  The encoders of all three groups succeed or fail together: if the render fails, or a write to any
   encoder fails, every encoder is killed and no video is finalised; the edition then fails as a
   whole (below). Every encoder is software (`libx264`, `libx265`) on every platform: nothing in
   the generator uses a GPU or a hardware encoder. The main edition's `--fast-encode`
   (`fast_encode`) is `libx264` too; the macOS VideoToolbox encoder it used before `ember-v2` is
   removed.
-- **`--ember-algorithm`** prints `ALGORITHM_VERSION` (`ember-v3`) on its own line and exits 0
+- **`--ember-algorithm`** prints `ALGORITHM_VERSION` (`ember-v4`) on its own line and exits 0
   without rendering or writing anything; given with any other argument it is a parse error
   (status 2). `run.py` probes it before planning and compares it with the `algorithm` of every
   live certificate, to find the published editions of an older algorithm, which the ember
@@ -1292,34 +1376,40 @@ from them (§8.6).
 ### 8.6 Verification (`examples/ember_render.rs`)
 
 `cargo run --release --example ember_render -- verify <package>/metadata/ember.json` reads the
-certificate with the typed reader (which rejects an `ember-v1` or `ember-v2` certificate by its
-schema version) and, before the re-render (about as long as the original render), fails with a
-message naming each field that this build cannot reproduce: `outputs` that disagree about the
-frames of either film (§8.4, *Reading*), `algorithm` (≠ `ALGORITHM_VERSION`),
-`inputs.integrator`, `inputs.dt` and `inputs.gravitational_constant` (compared bit for bit with
-`DEFAULT_DT` and `sim::G`), `inputs.paper_seed_sha256` (against the build's paper-seed
-derivation), `inputs.frames.sha256` (against the build's schedule), and `config` (it must
-round-trip: `serde_json::to_value(&config)` equals the recorded JSON). It then
+certificate with the typed reader (which rejects a certificate of an older look, `ember-v1` to
+`ember-v3`, by its schema version) and, before the re-render (about as long as the original
+render), fails with a message naming each field that this build cannot reproduce: `outputs`
+that disagree about the frames of any film (§8.4, *Reading*), `algorithm`
+(≠ `ALGORITHM_VERSION`), `inputs.integrator`, `inputs.dt` and `inputs.gravitational_constant`
+(compared bit for bit with `DEFAULT_DT` and `sim::G`), `inputs.paper_seed_sha256` (against the
+build's paper-seed derivation), `inputs.frames.sha256` (against the build's schedule), and
+`config` (it must round-trip: `serde_json::to_value(&config)` equals the recorded JSON). It then
 re-renders from the recorded bodies, their masses included (`app::ember_masses`), through the
-recorded view (`inputs.view`) and with the recorded slow factor (`inputs.frames.slow_factor`):
-both are inputs like the bodies, so the tool follows the certificate, not the build's defaults.
-The mode follows the digests: `VideoAndSlow` when both film digests are recorded, `Video` with
-the frames digest alone, `StillOnly` with neither. It compares the three digests, printing
-`MATCH`, `MISMATCH` or `(not recorded)` for `still`, `frames` and `slow`, and then what else
-the certificate says of the render, which is as deterministic as the pixels: the frame counts
-(`outputs`), `derived` and `stats`, each `MATCH` or `MISMATCH` with the first field that
-differs (exit 0 when everything matches, 1 on a mismatch, 2 on an error).
+recorded view (`inputs.view`) and with the recorded slow factors
+(`inputs.frames.slow_factors`): both are inputs like the bodies, so the tool follows the
+certificate, not the build's defaults. The mode follows the digests: `VideoAndSlow` when the
+frames digest and a slow film's digest are recorded, `Video` with the frames digest alone,
+`StillOnly` with neither. It compares the digests, printing `MATCH`, `MISMATCH` or
+`(not recorded)` for `still`, `frames` and each slow film, named by its factor (`4x`, `10x`),
+and then what else the certificate says of the render, which is as deterministic as the pixels:
+the frame counts and the slow films' records (`outputs`: `frames_emitted` and `slow_films`),
+`derived` and `stats`, each `MATCH` or `MISMATCH` with the first field that differs (exit 0
+when everything matches, 1 on a mismatch, 2 on an error).
 
 The `render` subcommand renders any orbit for look development into `--out`: the still
-(`ember.png`), a `summary.json` with the view, the digests and the statistics, and on request
-every Nth scheduled frame as a PNG (`--frame-every`), the normal film (`--video`, `ember.mp4`)
-and the slow film (`--slow-video`, `ember_slow.mp4`). `--config` takes a partial configuration
-override (for example `--config '{"tidal": {"max_aspect": 2.0}}'`), and `--slow-factor` another
-slow factor (default `app::EMBER_SLOW_FACTOR`; it sets the snapshot lattice, so it changes the
-still as well). `--bodies` is either an ember certificate, whose bodies, seed and view are used,
-or a file with `bodies_f64_bits`. A certificate's view fits only the orbit it was recorded for:
-the same `--steps` and an output of the same aspect ratio. With `--frontal`, and for a
-`bodies_f64_bits` file, the orbit is drawn as it is, through `app::ember_frontal_view` (§3.5).
+(`ember.png`), a `summary.json` with the view, the digests, the slow films and the statistics,
+and on request every Nth scheduled frame as a PNG (`--frame-every`), the normal film (`--video`,
+`ember.mp4`) and each slow film (`--slow-videos`, `ember_<factor>x.mp4`: `ember_4x.mp4` and
+`ember_10x.mp4` by default). `--config` takes a partial configuration override (for example
+`--config '{"tidal": {"max_aspect": 2.0}}'`), and `--slow-factors` other slow factors,
+comma-separated and strictly increasing (default `4,10`, `app::EMBER_SLOW_FACTORS`; their least
+common multiple sets the snapshot lattice, so they can change the still as well). `--bodies` is
+either an ember certificate or a file with `bodies_f64_bits`. Only the orbit is read from a
+certificate, so one of any layout will do: its bodies, its seed and, from layout 4 on, its view.
+A published `ember-v3` edition can therefore be rendered again in the current look. A
+certificate's view fits only the orbit it was recorded for: the same `--steps` and an output of
+the same aspect ratio. With `--frontal`, for a `bodies_f64_bits` file and for a certificate
+without a view, the orbit is drawn as it is, through `app::ember_frontal_view` (§3.5).
 
 The full-scale checks so far were made with `ember-v2`. The package of seed `0x46205528`
 rendered on an Apple M4 Max carried the still and frame-stream digests of a standalone render
@@ -1330,7 +1420,8 @@ edition to the M4 Max's still and frame-stream digests bit for bit, in 78 minute
 render and the unit goldens (§0.2) were bit-identical on aarch64 macOS, x86_64 Linux and
 `x86-64-v3`. For `ember-v3`, the golden renders (§0.2), slow film included, are bit-identical on
 the same platforms, and the production host re-rendered token `0x70f70932` from its certificate
-to the package's still, film and slow-film digests.
+to the package's still, film and slow-film digests. `ember-v4` has not been checked at full scale
+yet.
 
 ---
 
