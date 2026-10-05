@@ -153,9 +153,9 @@ lacks:
 
 A mint that arrives while a backfill package is rendering waits for it: at most
 `--max-backfill` packages, each a full render (hours on the production host; see
-[Runtime](#runtime)), plus the timer's 5-minute delay. The per-seed timeout is 10 hours
+[Runtime](#runtime)), plus the timer's 5-minute delay. The per-seed timeout is 16 hours
 (`--timeout`). A run starts a seed only while that seed's timeout and an hour for its upload
-still fit inside the sync unit's 24-hour limit, and leaves the rest to the next run (`Run budget
+still fit inside the sync unit's 36-hour limit, and leaves the rest to the next run (`Run budget
 reached; N seeds wait for the next run`), so a burst of mints spans several runs.
 
 **Stale editions.** The certificate's `algorithm` names the look that rendered an edition, and

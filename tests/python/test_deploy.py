@@ -2077,7 +2077,7 @@ class SwitchTests(DeployTestCase):
             ),
             (  # a setting systemd refuses for a oneshot service
                 sync_template,
-                ("\nTimeoutStartSec=86400\n", "\nTimeoutStartSec=86400\nRestart=always\n"),
+                ("\nTimeoutStartSec=129600\n", "\nTimeoutStartSec=129600\nRestart=always\n"),
                 f"systemd does not load {deploy.SYNC_SERVICE} after daemon-reload",
             ),
             (  # loads, but systemd-analyze verify finds the missing command
