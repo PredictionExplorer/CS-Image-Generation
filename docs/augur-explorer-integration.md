@@ -50,6 +50,7 @@ to existing packages, and renders it again after a change of the ember look
     web/main.mp4
     web/spectral_sweep.mp4
     web/ember.mp4               (ember edition, H.264)
+    web/ember_medium.mp4        (ember edition: the medium film, H.264)
     web/ember_slow.mp4          (ember edition: the slow film, H.264)
     hq/main.mp4, spectral_sweep.mp4
     hq/ember.mp4                (ember edition, archival HEVC)
@@ -175,7 +176,7 @@ Unchanged fields plus `sha256` (lowercase hex, SHA-256) on every single-file
 entry. Use it to build `image_details` / `animation_details` (Section 5.3) —
 do not hash files on the Go side.
 
-Packages with the ember edition append six more entries, still under
+Packages with the ember edition append seven more entries, still under
 `schema_version` 2 because they are additive:
 
 | Role | Path |
@@ -184,13 +185,15 @@ Packages with the ember edition append six more entries, still under
 | `ember_web_full` | `images/web/ember_full.webp` |
 | `ember_web_preview` | `images/web/ember_preview.webp` |
 | `ember_web` | `videos/web/ember.mp4` |
+| `ember_medium_web` | `videos/web/ember_medium.mp4` |
 | `ember_slow_web` | `videos/web/ember_slow.mp4` |
 | `ember_hq` | `videos/hq/ember.mp4` |
 
-`ember_slow_web` is the slow film, the ember video ten times slower. It is
-new with the look `ember-v3` (Section 2.2): an edition of an older look has
-the other five entries only, and the `properties.media` keys of Section 5.3
-do not expose the slow film.
+`ember_medium_web` and `ember_slow_web` are the slow films, the ember video
+four and ten times slower. `ember_slow_web` is new with the look `ember-v3`
+and `ember_medium_web` with `ember-v4` (Section 2.2): an `ember-v3` edition
+has the other six entries, an edition of an older look the five without
+either, and the `properties.media` keys of Section 5.3 expose neither film.
 
 Each ember entry also carries `"color_space": "srgb"`. Match entries by `path` or
 `role` rather than by array position. The ember edition's certificate,
@@ -212,8 +215,8 @@ step 1). (`--backfill-mode full` replaces the whole package, trait file
 included; Section 5.4 then applies.)
 
 **The roles can also disappear, and come back.** When a deploy changes the
-ember look (the certificate's `algorithm`, for example `ember-v2` →
-`ember-v3`; Section 2.2), the first sync run withdraws every published
+ember look (the certificate's `algorithm`, for example `ember-v3` →
+`ember-v4`; Section 2.2), the first sync run withdraws every published
 edition of the older look. For each package it deletes `metadata/ember.json`,
 rewrites `assets.json` without its `ember_*` entries (every other entry and
 field, `generated_at` included, is kept as it was), and deletes the
@@ -226,8 +229,8 @@ copy has none, and must not treat either change as an incident. The operator
 can instead keep the older editions online (`COSMICSIG_KEEP_STALE_EMBER=yes`):
 nothing is withdrawn then, and the backfill replaces each edition in place
 when its turn comes, so its `ember_*` entries change (new `bytes` and
-`sha256`, and with `ember-v3` one more entry, `ember_slow_web`) without
-disappearing in between. The replacement is staged beside the live files
+`sha256`, and a new look may add entries: `ember-v3` added `ember_slow_web`,
+`ember-v4` `ember_medium_web`) without disappearing in between. The replacement is staged beside the live files
 and swapped in by one command, so the old entries and files stay valid
 until that moment. See
 [deployment.md](deployment.md#when-a-deploy-changes-the-ember-look).
@@ -236,10 +239,11 @@ Video `duration_seconds` is the encoded frame count over `frame_rate`. The
 ember videos are frame-locked to `main.mp4`, so `main_web`, `main_hq`,
 `ember_web` and `ember_hq` carry the same value (1,802 frames at 60 fps, about
 30.03 s, at the default 1,000,000 steps). Packages generated before this was
-fixed list the nominal 30.0 s for `main.mp4`. `ember_slow_web` carries the
-slow film's own duration: ten frames per frame of `ember.mp4` from the frame
-it starts at, so at most 18,011 frames (about 300 s), less ten for every
-frame of `ember.mp4` that it skips before the ink first appears.
+fixed list the nominal 30.0 s for `main.mp4`. `ember_medium_web` and
+`ember_slow_web` carry their films' own durations: four and ten frames per
+frame of `ember.mp4` from the frame they start at, so at most 7,205 frames
+(about 120 s) and 18,011 frames (about 300 s), less four or ten for every
+frame of `ember.mp4` that they skip before the ink first appears.
 
 ### 2.2 `ember.json` (the certificate)
 
@@ -247,14 +251,20 @@ The metadata server only links the certificate (`ember_certificate`,
 Section 5.3); it need not parse it. Anyone who does should know:
 
 - **Gate on `schema_version`.** The reader in this repository accepts exactly
-  one layout per build and rejects any other. The current layout is `4`,
-  written with the look `ember-v3`. `ember-v2` editions have layout `3` and
-  the retired `ember-v1` editions layout `2` (layout `1` was only ever
-  written by test renders).
-- **`algorithm` names the look** (`ember-v1`, `ember-v2`, `ember-v3`). It is
-  the only field that tells two looks apart: `build.crate_version` is `1.1.0`
-  for all three, and `pipeline_version` in `nft_traits.json` says nothing
-  about the edition.
+  one layout per build and rejects any other. The current layout is `5`,
+  written with the look `ember-v4`. `ember-v3` editions have layout `4`,
+  `ember-v2` editions layout `3` and the retired `ember-v1` editions layout
+  `2` (layout `1` was only ever written by test renders).
+- **`algorithm` names the look** (`ember-v1` to `ember-v4`). It is the only
+  field that tells two looks apart: `build.crate_version` is `1.1.0` for all
+  four, and `pipeline_version` in `nft_traits.json` says nothing about the
+  edition.
+- **Layout 5 changes.** `inputs.frames.slow_factors`, the list of slow
+  factors (`[4, 10]`), replaces `inputs.frames.slow_factor`, and
+  `outputs.slow_films`, one record per slow film (`factor`, `first_frame`,
+  `frames_emitted`, `frames_rgb48le_sha256`), replaces
+  `derived.slow_first_frame`, `outputs.slow_frames_rgb48le_sha256` and
+  `outputs.slow_frames_emitted`.
 - **Layout 4 changes.** `inputs.view` is new: the main edition's view of the
   orbit, which the ember bodies follow, with every number as an exact
   `0x…` bit pattern. So are `inputs.frames.slow_factor`,
@@ -538,12 +548,13 @@ depends on it.
    existing package as incomplete and regenerated and re-uploaded all 48;
    every existing token now has its trait file. A `404` on a trait URL now
    means a new mint the generator has not reached yet. That usually lasts
-   a little over three hours: the sync timer starts a run within 5 minutes,
-   a package with the `ember-v3` look takes about 3 hours to render on the
-   generation host, and its trait file is uploaded after its media. It lasts
-   longer when several tokens are minted together, because packages are
-   generated one at a time, and up to one more package render (about 3
-   hours) when the mint arrives while a backfill package is rendering.
+   4 to 6 hours: the sync timer starts a run within 5 minutes, a package
+   with the `ember-v3` look took 3 to 5½ hours to render on the generation
+   host (an estimated 4 to 7½ hours with `ember-v4`), and its trait file is
+   uploaded after its media. It lasts longer when several tokens are minted
+   together, because packages are generated one at a time, and up to one
+   more package render when the mint arrives while a backfill package is
+   rendering.
 
    Art is pixel-identical, and this was verified empirically rather than
    assumed: re-rendering an existing seed with the new binary reproduced
@@ -558,8 +569,8 @@ depends on it.
    the ember backfill started adding it to the 48 existing tokens at one
    package per sync run. In its default `ember` mode it uploads, for each
    token, only the ember files (six with `ember-v1` and `ember-v2`, seven
-   with `ember-v3`) and a merged `assets.json`. The main
-   art, `generation.json` and `nft_traits.json` are untouched, so
+   with `ember-v3`, eight with `ember-v4`) and a merged `assets.json`. The
+   main art, `generation.json` and `nft_traits.json` are untouched, so
    `pipeline_version` stays `1.0.0`.
 
    The artist then retired that look for `ember-v2`, deployed on
@@ -571,14 +582,26 @@ depends on it.
    0.55 GB more on the asset host with the edition than without it (548 MB
    for seed `0x46205528`, 375 MB of it the archival HEVC video).
 
-   `ember-v3` (**pending deployment**) follows the main edition's view and
-   adds the slow film, one more file and role (`ember_slow_web`). Every
-   `ember-v2` edition is rendered again, one package per sync run: by
-   default each is withdrawn first, as before, or the operator keeps them
-   online and each is replaced in place (Section 2.1). Tokens the earlier
+   `ember-v3`, deployed on 2026-10-03, follows the main edition's view and
+   adds the slow film, one more file and role (`ember_slow_web`). The
+   operator kept the `ember-v2` editions online
+   (`COSMICSIG_KEEP_STALE_EMBER=yes`), so the backfill replaces each in
+   place, one package per sync run (Section 2.1), and tokens the earlier
    backfills had not reached get the `ember-v3` edition directly. A
-   package takes about 3 hours, so the pass over 48 tokens takes about 6
-   days; the ember files hold 0.4 to 0.6 GB per token.
+   package took 3 to 5½ hours, about 4 on average, so a pass over 48 tokens
+   about 8 days; the ember files held 0.45 to 1.8 GB per token, about 1 GB
+   typically.
+
+   `ember-v4` (**pending deployment**) adds the medium film, the ember video
+   four times slower: one more file and role (`ember_medium_web`). Every
+   edition of an older look is rendered again, one package per sync run: by
+   default each is withdrawn first, or the operator keeps them online and
+   each is replaced in place (Section 2.1). A package takes an estimated 1
+   to 2 hours more than with `ember-v3` (its finer snapshot lattice makes
+   the ink work about 1.7 times as large, and it renders the medium film
+   too), so a pass over 48 tokens takes about 11 to 12 days. The medium film
+   is about half the slow film's size, so an edition holds about 0.55 to
+   2.3 GB, about 1.3 GB typically.
 
    The Go side's ember item
    ([`augur-explorer-required-changes.md` §7](augur-explorer-required-changes.md#7-ember-edition-generator-110))
@@ -600,8 +623,9 @@ depends on it.
    metadata refresh. Existing holders wake up to rich traits on unchanged
    art. Repeat it once the ember backfill has finished and the Go side
    serves the `ember_*` keys, whichever comes later, since the served
-   `properties.media` gains them, and again once the `ember-v2` pass has
-   rendered every token again, since the linked files changed.
+   `properties.media` gains them, and again once the pass of each new look
+   (`ember-v2`, `ember-v3`, `ember-v4`) has rendered every token again,
+   since the linked files changed.
 
 ---
 

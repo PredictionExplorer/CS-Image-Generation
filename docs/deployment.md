@@ -268,8 +268,8 @@ and considers only check runs named `CI passed`, created by the GitHub Actions a
 ## When a deploy changes the ember look
 
 Every package's `metadata/ember.json` records the ember algorithm that rendered it
-(`"algorithm": "ember-v2"`), and the generator reports its own:
-`three_body_problem --ember-algorithm` prints, for example, `ember-v3`. A change that alters the
+(`"algorithm": "ember-v3"`), and the generator reports its own:
+`three_body_problem --ember-algorithm` prints, for example, `ember-v4`. A change that alters the
 ember edition's rendered bits bumps that id. The sync run the agent starts right after deploying
 such a change takes every edition of the older look off the asset host, and the ember backfill
 renders them again in the new one. Nothing needs doing by hand after the merge; this section
@@ -304,8 +304,8 @@ so settle these on the generator host first, in the checkout's `.env`:
    with the [orbit and view check](#the-orbit-and-view-check) below.
 
 The journal shows one line per package,
-`WITHDRAWN  seed=0x…  its ember-v2 ember edition is off the asset host`, and one summary,
-`Withdrew N stale ember editions (ember-v2 -> ember-v3): the ember backfill renders them again`.
+`WITHDRAWN  seed=0x…  its ember-v3 ember edition is off the asset host`, and one summary,
+`Withdrew N stale ember editions (ember-v3 -> ember-v4): the ember backfill renders them again`.
 Every later run finds nothing stale: a re-rendered package's certificate records the new id.
 
 **Tokens have no ember edition until they are re-rendered.** This is intended. The artist
@@ -314,27 +314,35 @@ backfill works through the collection. A withdrawn package is a valid package wi
 edition (its manifest lists no `ember_*` role), exactly like one uploaded before the edition
 existed, which consumers already handle; each re-render adds the new edition back.
 
-**What a re-rendered package holds.** An `ember-v3` edition is seven files: the still
-(`images/source/ember.png`), its two WebP derivatives, the film (`videos/web/ember.mp4`), the
-slow film (`videos/web/ember_slow.mp4`, the same film ten times slower), the archival film
-(`videos/hq/ember.mp4`) and the certificate (`metadata/ember.json`, layout 4). The manifest
-lists the six media under the roles `ember_source_master`, `ember_web_full`,
-`ember_web_preview`, `ember_web`, `ember_slow_web` and `ember_hq`. An `ember-v2` edition had
-six files and five roles: everything but the slow film. A package is complete only with all
-seven, so an `ember-v2` package also reads as *missing only the ember edition*, whatever its
-certificate says.
+**What a re-rendered package holds.** An `ember-v4` edition is eight files, uploaded in this
+order: the still (`images/source/ember.png`), its two WebP derivatives, the film
+(`videos/web/ember.mp4`), the medium film (`videos/web/ember_medium.mp4`, the same film four
+times slower, up to 2 minutes), the slow film (`videos/web/ember_slow.mp4`, ten times slower, up
+to 5 minutes; both start a little before the ink first appears, so a short orbit's films are up
+to about a fifth shorter), the archival film (`videos/hq/ember.mp4`), then the merged manifest, and the
+certificate (`metadata/ember.json`, layout 5) last. The manifest lists the seven media under the
+roles `ember_source_master`, `ember_web_full`, `ember_web_preview`, `ember_web`,
+`ember_medium_web`, `ember_slow_web` and `ember_hq`. An `ember-v3` edition had seven files and
+six roles: everything but the medium film; an `ember-v2` edition had six and five: no slow film
+either. A package is complete only with all eight, so an `ember-v3` or `ember-v2` package also
+reads as *missing only the ember edition*, whatever its certificate says.
 
 **How long it takes, and how much room it needs.** Every listed token is rendered again once,
 one per run by default: a full package render, then its upload and the timer's 5-minute pause.
-An `ember-v3` package takes about 3 hours on this host (its ember stage alone 2 h 06 min
-for one token on the otherwise idle host), so a pass over 48 tokens takes about 6 days. Its
-ember files hold 0.4 to 0.6 GB per token, the slow film 176 to 294 MB of it (three tokens
-measured on 2026-10-02).
+An `ember-v3` package took 3 to 5½ hours on this host, about 4 hours on average, so a pass
+over 48 tokens took about 8 days. Its ember files held 0.45 to 1.8 GB per token, about 1 GB
+typically, the slow film 207 to 926 MB of it (the first 11 editions). An `ember-v4` package takes
+an estimated 1 to 2 hours more (its ember stage about 1.5 times as long: the finer snapshot
+lattice makes the ink work about 1.7 times as large), so a pass over 48 tokens takes about 11 to
+12 days, and it also uploads the medium film, about half the slow film's size: about 0.55 to
+2.3 GB per token, about 1.3 GB typically ([docs/ember-edition.md](ember-edition.md#runtime) has
+the measurements).
 
 - Time: check it against the first `OK  seed=0x…  (total …)  ember edition uploaded` line in the
   journal: the orbit, and so the cost, differs from token to token.
 - Size: read each package's sizes from its `UPLOAD … (N MB, timeout Ns)` lines, and check that
-  the asset host has room for every token (48 × 0.6 GB is about 29 GB) *before* the pass is far
+  the asset host has room for every token (48 × 1.3 GB is about 60 GB, and the busiest orbits
+  take up to 2.3 GB each) *before* the pass is far
   along. An edition is staged beside the live files before it is swapped in, so the host also
   needs room for one whole new edition on top of what is online. A full disk fails the transfer
   that hits it: `UPLOAD FAILED`, nothing of the live package is changed, the staged files are
@@ -358,7 +366,7 @@ second per MB if that is longer.
 upload still fit inside the sync unit's 36-hour limit, and otherwise logs `Run budget reached;
 N seeds wait for the next run`, ends normally (exit `0` unless something else failed) and
 leaves the rest to the next run, which plans afresh 5 minutes later and also picks up the
-tokens minted meanwhile. At about 3 hours a package, about seven packages fit in one run, so the
+tokens minted meanwhile. At about 5½ hours a package, four packages fit in one run, so the
 several tokens a round's end mints at once span two runs; systemd's 36-hour limit is a safety
 net that is never expected to fire. A run's first seed whose render overruns twice (16 and 2
 hours) still leaves room for the next seed to start in the same run.
@@ -391,8 +399,8 @@ never starts one.
   certificates cannot be read at all (SSH fails), nothing is withdrawn or replaced that run: an
   ERROR, the run exits `1`, and the next run tries again.
 - While the looks of the live editions are unknown (either case above), no backfill seed that
-  holds an ember edition is planned, in either mode: an `ember-v2` package, which lacks the slow
-  film, would otherwise be replaced for that alone, and by default the old look must not be
+  holds an ember edition is planned, in either mode: an `ember-v3` package, which lacks the
+  medium film, would otherwise be replaced for that alone, and by default the old look must not be
   replaced before it is withdrawn. A WARNING names those seeds.
 - Only an older id is stale. After a rollback to a generator with an older id, the newer live
   editions are kept (one WARNING per run: `… are newer than this generator's …`) and new mints
@@ -461,17 +469,17 @@ deployed: the sync run the agent starts right after the switch otherwise withdra
 edition at once.
 
 With the switch no run withdraws anything. Each run still reads the certificates, logs
-`Kept N stale ember editions online (ember-v2 -> ember-v3): the ember backfill replaces each in
+`Kept N stale ember editions online (ember-v3 -> ember-v4): the ember backfill replaces each in
 place`, and plans those packages as ember backfill seeds, `--max-backfill` per run as usual.
 When a package's turn comes, its re-render passes the [check](#the-orbit-and-view-check) above
 and replaces the old edition **in place**, staged and then swapped (every ember-mode backfill
 uploads this way, whether or not an edition is live):
 
-1. every file of the new edition (the six media, the merged manifest, the certificate) is
+1. every file of the new edition (the seven media, the merged manifest, the certificate) is
    uploaded as `<name>.part` beside its destination. Nothing live changes meanwhile;
 2. once all have landed, one SSH call swaps the edition in: it deletes the old certificate (and
-   any ember file the old manifest listed that the new edition does not have; `ember-v2` has
-   none), renames each medium into place, then the manifest, then the certificate, last.
+   any ember file the old manifest listed that the new edition does not have; `ember-v3` and
+   `ember-v2` have none), renames each medium into place, then the manifest, then the certificate, last.
 
 - The price of no gap is that both looks are online until the pass is over.
 - A transfer that fails (a lost connection, a full asset host) changes nothing: the old edition
