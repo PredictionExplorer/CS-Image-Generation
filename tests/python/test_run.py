@@ -2841,7 +2841,7 @@ class MainTests(SyncTestCase):
         real_generate = run.generate
 
         def generate(exec_cmd: list[str], seed: str, timeout: int) -> run.Outcome:
-            clock[0] += 7 * 3600  # every render takes seven hours
+            clock[0] += 10 * 3600  # every render takes ten hours
             return real_generate(exec_cmd, seed, timeout)
 
         with (
@@ -2850,8 +2850,8 @@ class MainTests(SyncTestCase):
             self.assertLogs(run.log, level="INFO") as logs,
         ):
             self.assertEqual(self.main([SEED_A, SEED_B, SEED_C, SEED_D]), 0)
-        # After 14 hours, a third render's 10-hour --timeout and its hour for the upload would
-        # end past the 24-hour ceiling: the run stops cleanly, and the rest waits.
+        # After 20 hours, a third render's 16-hour --timeout and its hour for the upload would
+        # end past the 36-hour ceiling: the run stops cleanly, and the rest waits.
         self.assertIn("Run budget reached; 2 seeds wait for the next run", "\n".join(logs.output))
         self.assertEqual(self.generated(), [SEED_A, SEED_B])
         self.assertEqual(
@@ -2903,7 +2903,7 @@ class MainTests(SyncTestCase):
         seeds = [SEED_A, SEED_B, SEED_C]
         status, text = self.main_on_a_clock(seeds, overrun=[SEED_A])
         self.assertEqual(status, 1)
-        # Its two overruns took 12 hours: the next mint still started in the same run.
+        # Its two overruns took 18 hours: the next mint still started in the same run.
         self.assertEqual(self.calls("generate"), [[SEED_A], [SEED_A, "no-ember"], [SEED_B]])
         self.assertIn(f"TIMED OUT  seed=0x{SEED_A}", text)
         self.assertIn("Run budget reached; 1 seeds wait for the next run", text)
@@ -2918,9 +2918,9 @@ class MainTests(SyncTestCase):
         self.assertEqual(self.ledger(), run.BackfillLedger(urgent_overruns={SEED_A: 2}))
 
     def test_the_run_budget_reaches_the_render_without_the_ember_edition(self) -> None:
-        # The first new mint takes 12 hours; the second one's render then hangs until 22 hours
+        # The first new mint takes 18 hours; the second one's render then hangs until 34 hours
         # into the run, when a 2-hour render without the ember edition no longer fits.
-        status, text = self.main_on_a_clock([SEED_B, SEED_A], hours={SEED_B: 12}, overrun=[SEED_A])
+        status, text = self.main_on_a_clock([SEED_B, SEED_A], hours={SEED_B: 18}, overrun=[SEED_A])
         self.assertEqual(status, 1)
         self.assertIn(
             f"0x{SEED_A}: its render ran past --timeout, and the run budget has no room", text

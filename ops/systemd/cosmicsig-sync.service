@@ -31,20 +31,20 @@ Environment=PYTHONUNBUFFERED=1
 
 ExecStart=@PYTHON@ @REPO@/run.py
 
-# 24-hour ceiling for one run. A Type=oneshot service is "starting" until run.py exits, so
+# 36-hour ceiling for one run. A Type=oneshot service is "starting" until run.py exits, so
 # TimeoutStartSec is the setting that bounds it (RuntimeMaxSec has no effect on oneshot units).
 # At the limit systemd stops the run as described below. A run is normally much shorter: every
 # new mint, then at most --max-backfill ember backfill packages, each a full package render, which
 # takes hours (the ember edition, with its slow film, is the most expensive part; see
 # docs/deployment.md). run.py keeps every run inside this ceiling itself: it starts a seed only
-# while that seed's per-seed --timeout (10 hours by default) and an hour for its upload still fit
+# while that seed's per-seed --timeout (16 hours by default) and an hour for its upload still fit
 # before it (RUN_CEILING and UPLOAD_MARGIN in run.py; tests/python/test_run.py keeps RUN_CEILING
 # equal to this value and the --timeout at most half of it), and leaves the rest of its queue to
 # the next run, which starts 5 minutes later. So a burst of new mints, such as the tokens a
 # round's end mints at once, spans several runs, and this ceiling is a safety net that is never
 # expected to fire. If it does, systemd stops the run mid-render, every package finished before
 # is already uploaded, and the next run renders the rest.
-TimeoutStartSec=86400
+TimeoutStartSec=129600
 
 # On stop (or at the ceiling) systemd sends SIGTERM to the whole control group: run.py, the
 # generator and its encoders, or scp. The seed in flight is lost (a run that is shutting down

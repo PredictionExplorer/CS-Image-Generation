@@ -342,25 +342,25 @@ measured on 2026-10-02).
   render, until there is room).
 
 At the default `--max-backfill` of 1, a new mint waits for at most one backfill package (the
-rest of the run in progress). The per-seed timeout is 10 hours (`run.py --timeout`), well below
-the sync unit's 24-hour limit; it only has to catch a render that hangs. A backfill render that
+rest of the run in progress). The per-seed timeout is 16 hours (`run.py --timeout`), well below
+the sync unit's 36-hour limit; it only has to catch a render that hangs. A backfill render that
 runs past it counts as a failed ember attempt, so an orbit that always overruns is given up at
 the retry cap; an urgent seed's is rendered again without the ember edition (a core package
 takes about 50 minutes; that render's own timeout is 2 hours), so its token gets its main art and
 its ember edition joins the backfill. A new mint whose renders overrun both times uploads
 nothing; its overrun is counted (`urgent_overruns` in `backfill_failures.json`), and new mints
 go in order of their overruns, fewest first, so one whose renders keep hanging goes behind the
-others. `--timeout` is at most 21 hours (75,600 seconds), so that a seed, its render without the
+others. `--timeout` is at most 33 hours (118,800 seconds), so that a seed, its render without the
 ember edition and its upload always fit in a run. An scp transfer may take 15 minutes, or one
 second per MB if that is longer.
 
 **The run budget.** A run starts a seed only while that seed's `--timeout` and an hour for its
-upload still fit inside the sync unit's 24-hour limit, and otherwise logs `Run budget reached;
+upload still fit inside the sync unit's 36-hour limit, and otherwise logs `Run budget reached;
 N seeds wait for the next run`, ends normally (exit `0` unless something else failed) and
 leaves the rest to the next run, which plans afresh 5 minutes later and also picks up the
-tokens minted meanwhile. At about 3 hours a package, about five packages fit in one run, so the
-several tokens a round's end mints at once span two runs; systemd's 24-hour limit is a safety
-net that is never expected to fire. A run's first seed whose render overruns twice (10 and 2
+tokens minted meanwhile. At about 3 hours a package, about seven packages fit in one run, so the
+several tokens a round's end mints at once span two runs; systemd's 36-hour limit is a safety
+net that is never expected to fire. A run's first seed whose render overruns twice (16 and 2
 hours) still leaves room for the next seed to start in the same run.
 
 **Watching progress.**

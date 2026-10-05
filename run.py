@@ -112,17 +112,17 @@ from _utils import GENERATOR_CANDIDATES, fmt_duration
 # runs ten times slower and so has up to ten times the frames. Its time on the production host is
 # re-measured after every deploy that changes the look (the `OK  seed=... (total ...)` log
 # lines); no figure is quoted here. The timeout only has to catch a render that hangs, so it
-# leaves ample headroom, but it must stay well below the service's 24-hour TimeoutStartSec
+# leaves ample headroom, but it must stay well below the service's 36-hour TimeoutStartSec
 # (RUN_CEILING): a render that hangs is then stopped by run.py, not by systemd (a stopped run counts
 # no failure, so the same seed would come first again, every run). A backfill seed whose render
 # overruns counts one failed ember attempt, so an orbit that always overruns is given up after
 # --max-backfill-attempts renders; an urgent seed is rendered again without the ember edition
 # (CORE_ONLY_TIMEOUT), so the token gets its main art and the edition joins the backfill.
-DEFAULT_TIMEOUT = 10 * 3600  # 10 hours
+DEFAULT_TIMEOUT = 16 * 3600  # 16 hours
 # The timeout of that render without the ember edition, or --timeout if that is shorter. A core
 # package takes about 50 minutes on the production host, so this too only catches a hang, and it is
 # small enough that after a run's first seed overran twice (DEFAULT_TIMEOUT, then this), the next
-# seed can still start in the same run: 10 + 2 hours leave an hour of the run budget's 13 for the
+# seed can still start in the same run: 16 + 2 hours leave an hour of the run budget's 19 for the
 # uploads and checks in between (a test keeps that slack).
 CORE_ONLY_TIMEOUT = 2 * 3600  # 2 hours
 # The longest a whole run may take: the sync unit's TimeoutStartSec
@@ -130,7 +130,7 @@ CORE_ONLY_TIMEOUT = 2 * 3600  # 2 hours
 # mid-render. A run starts a seed only while that seed's --timeout and UPLOAD_MARGIN still fit
 # before the ceiling, and leaves the rest of its queue to the next run (the run budget), so the
 # ceiling is a safety net that is never expected to fire.
-RUN_CEILING = 24 * 3600  # 24 hours
+RUN_CEILING = 36 * 3600  # 36 hours
 # The room a run keeps after a render's timeout for its upload and the end of the run.
 UPLOAD_MARGIN = 3600  # 1 hour
 # The longest --timeout accepted: a run must be able to start a seed with it and still have room,
