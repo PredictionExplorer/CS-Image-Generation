@@ -89,7 +89,7 @@ repos:
   # Python: ruff (lint + format) and strict mypy, configured in pyproject.toml.
   # -------------------------------------------------------------------------------------------
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: b831c3dc5d27d9da294ae4e915773b99aa24a7c5  # frozen: v0.15.10
+    rev: 2eeb5678de71a00c0902cbda7105d328432f72cb  # frozen: v0.16.8
     hooks:
       # --fix applies safe autofixes locally; like any fixer it still fails the hook, so CI never
       # passes on a fix it made itself (the diff is printed instead). Lint runs before format,
@@ -99,7 +99,7 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 0f369d245750787ce34997d464ed9605391a5283  # frozen: v1.20.1
+    rev: 7ff8d35ae36a7d2b968f2f90b4c723e292e594ee  # frozen: v2.3.1
     hooks:
       # `args: []` drops the mirror's default flags (--ignore-missing-imports would hide a
       # misspelled import), and pass_filenames: false makes mypy check the `files` list in
@@ -204,7 +204,7 @@ repos:
   # needed); _typos.toml allows the few intentional ones.
   # -------------------------------------------------------------------------------------------
   - repo: https://github.com/crate-ci/typos
-    rev: 4141ff14cb566df76c473c786332c186a4fd71d1  # frozen: v1.50.3
+    rev: b859c0df7f391deba73030f79b957e62b4d81dc6  # frozen: varcon-core-v5.0.7
     hooks:
       # No --write-changes: a correction can be wrong (it would rename an identifier or a
       # published metadata key), so a human applies it.
